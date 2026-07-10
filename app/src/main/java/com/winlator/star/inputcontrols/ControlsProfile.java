@@ -271,6 +271,14 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
                     if (elementJSONObject.has("range")) element.setRange(ControlElement.Range.valueOf(elementJSONObject.getString("range")));
                     if (elementJSONObject.has("orientation")) element.setOrientation((byte)elementJSONObject.getInt("orientation"));
 
+                    // Load new fields for extended types (backward compatible)
+                    if (elementJSONObject.has("areaWidth")) element.setAreaWidth(elementJSONObject.getInt("areaWidth"));
+                    if (elementJSONObject.has("areaHeight")) element.setAreaHeight(elementJSONObject.getInt("areaHeight"));
+                    if (elementJSONObject.has("stickRadius")) element.setStickRadius(elementJSONObject.getInt("stickRadius"));
+                    if (elementJSONObject.has("mouseSensitivity")) element.setMouseSensitivity((float)elementJSONObject.getDouble("mouseSensitivity"));
+                    if (elementJSONObject.has("gridRows")) element.setGridRows(elementJSONObject.getInt("gridRows"));
+                    if (elementJSONObject.has("gridCols")) element.setGridCols(elementJSONObject.getInt("gridCols"));
+
                     boolean hasGamepadBinding = true;
                     JSONArray bindingsJSONArray = elementJSONObject.getJSONArray("bindings");
                     for (int j = 0; j < bindingsJSONArray.length(); j++) {

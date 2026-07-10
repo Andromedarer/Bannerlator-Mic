@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/menu_set_background"
+        android:title="Set Background Image" />
+    <item
+        android:id="@+id/menu_bg_opacity"
+        android:title="Background Opacity" />
+</menu>

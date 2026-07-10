@@ -34,7 +34,7 @@ public class ControlElement {
     public static final byte TRACKPAD_ACCELERATION_THRESHOLD = 4;
     public static final short BUTTON_MIN_TIME_TO_KEEP_PRESSED = 300;
     public enum Type {
-        BUTTON, D_PAD, RANGE_BUTTON, STICK, TRACKPAD;
+        BUTTON, D_PAD, RANGE_BUTTON, STICK, TRACKPAD, DYNAMIC_STICK, MOUSE_AREA, BUTTON_GRID;
 
         public static String[] names() {
             Type[] types = values();
@@ -91,6 +91,16 @@ public class ControlElement {
     private CubicBezierInterpolator interpolator;
     private Object touchTime;
 
+    // --- New fields for DYNAMIC_STICK, MOUSE_AREA, BUTTON_GRID ---
+    private int areaWidth;            // detection area width (snapping units)
+    private int areaHeight;           // detection area height (snapping units)
+    private int stickRadius;          // visual stick radius (for DYNAMIC_STICK)
+    private boolean stickVisible;     // current visibility (for DYNAMIC_STICK)
+    private float mouseSensitivity;   // cursor speed multiplier (for MOUSE_AREA), default 1.0
+    private int gridRows;             // rows in button grid (for BUTTON_GRID)
+    private int gridCols;             // columns in button grid (for BUTTON_GRID)
+    private PointF mouseAreaLastPos;  // last touch position in MOUSE_AREA
+
     public ControlElement(InputControlsView inputControlsView) {
         this.inputControlsView = inputControlsView;
     }
@@ -98,8 +108,16 @@ public class ControlElement {
     private void reset() {
         setBinding(Binding.NONE);
         scroller = null;
+        areaWidth = 0;
+        areaHeight = 0;
+        stickRadius = 0;
+        stickVisible = false;
+        mouseSensitivity = 1.0f;
+        gridRows = 0;
+        gridCols = 0;
+        mouseAreaLastPos = null;
 
-        if (type == Type.STICK) {
+        if (type == Type.STICK || type == Type.DYNAMIC_STICK) {
             bindings[0] = Binding.KEY_W;
             bindings[1] = Binding.KEY_D;
             bindings[2] = Binding.KEY_S;
@@ -119,6 +137,28 @@ public class ControlElement {
         }
         else if (type == Type.RANGE_BUTTON) {
             scroller = new RangeScroller(inputControlsView, this);
+        }
+        else if (type == Type.DYNAMIC_STICK) {
+            areaWidth = 600;
+            areaHeight = 600;
+            stickRadius = 120;
+            stickVisible = false;
+        }
+        else if (type == Type.MOUSE_AREA) {
+            areaWidth = 800;
+            areaHeight = 400;
+            mouseSensitivity = 1.0f;
+        }
+        else if (type == Type.BUTTON_GRID) {
+            gridRows = 2;
+            gridCols = 8;
+            setBindingCount(gridRows * gridCols);
+            // Default: map to keyboard keys A-P for 8x2
+            Binding[] allBindings = Binding.values();
+            int startIdx = Binding.KEY_A.ordinal();
+            for (int i = 0; i < bindings.length && (startIdx + i) < allBindings.length; i++) {
+                bindings[i] = allBindings[startIdx + i];
+            }
         }
 
         text = "";
@@ -172,6 +212,22 @@ public class ControlElement {
         this.orientation = orientation;
         boundingBoxNeedsUpdate = true;
     }
+
+    // --- New getters/setters ---
+    public int getAreaWidth() { return areaWidth; }
+    public void setAreaWidth(int areaWidth) { this.areaWidth = areaWidth; boundingBoxNeedsUpdate = true; }
+    public int getAreaHeight() { return areaHeight; }
+    public void setAreaHeight(int areaHeight) { this.areaHeight = areaHeight; boundingBoxNeedsUpdate = true; }
+    public int getStickRadius() { return stickRadius; }
+    public void setStickRadius(int stickRadius) { this.stickRadius = stickRadius; }
+    public boolean isStickVisible() { return stickVisible; }
+    public void setStickVisible(boolean visible) { this.stickVisible = visible; inputControlsView.invalidate(); }
+    public float getMouseSensitivity() { return mouseSensitivity; }
+    public void setMouseSensitivity(float s) { this.mouseSensitivity = s; }
+    public int getGridRows() { return gridRows; }
+    public void setGridRows(int gridRows) { this.gridRows = gridRows; boundingBoxNeedsUpdate = true; }
+    public int getGridCols() { return gridCols; }
+    public void setGridCols(int gridCols) { this.gridCols = gridCols; boundingBoxNeedsUpdate = true; }
 
     public boolean isToggleSwitch() {
         return toggleSwitch;
@@ -288,6 +344,23 @@ public class ControlElement {
             case STICK: {
                 halfWidth = snappingSize * 6;
                 halfHeight = snappingSize * 6;
+                break;
+            }
+            case DYNAMIC_STICK: {
+                halfWidth = (areaWidth > 0 ? areaWidth : 600) / 2;
+                halfHeight = (areaHeight > 0 ? areaHeight : 600) / 2;
+                break;
+            }
+            case MOUSE_AREA: {
+                halfWidth = (areaWidth > 0 ? areaWidth : 800) / 2;
+                halfHeight = (areaHeight > 0 ? areaHeight : 400) / 2;
+                break;
+            }
+            case BUTTON_GRID: {
+                int cols = gridCols > 0 ? gridCols : 8;
+                int rows = gridRows > 0 ? gridRows : 2;
+                halfWidth = snappingSize * 3 * cols;
+                halfHeight = snappingSize * 2 * rows;
                 break;
             }
             case RANGE_BUTTON: {
@@ -699,6 +772,117 @@ public class ControlElement {
                 canvas.drawRoundRect(boundingBox.left + offset, boundingBox.top + offset, boundingBox.right - offset, boundingBox.bottom - offset, radius, radius, paint);
                 break;
             }
+            case DYNAMIC_STICK: {
+                int cx = boundingBox.centerX();
+                int cy = boundingBox.centerY();
+                int oldColor = paint.getColor();
+                float areaHalfW = boundingBox.width() * 0.5f;
+                float areaHalfH = boundingBox.height() * 0.5f;
+
+                // Draw detection area (semi-transparent)
+                paint.setStyle(Paint.Style.FILL);
+                paint.setColor(Color.argb((int)(overlayAlpha * 0.3f), 100, 100, 255));
+                canvas.drawRoundRect(cx - areaHalfW, cy - areaHalfH, cx + areaHalfW, cy + areaHalfH, 16, 16, paint);
+
+                // Draw area border
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setColor(inputControlsView.getAccentColor());
+                paint.setStrokeWidth(strokeWidth * 0.5f);
+                canvas.drawRoundRect(cx - areaHalfW, cy - areaHalfH, cx + areaHalfW, cy + areaHalfH, 16, 16, paint);
+
+                if (stickVisible && currentPosition != null) {
+                    float sRadius = stickRadius > 0 ? stickRadius : 120;
+                    float sx = currentPosition.x;
+                    float sy = currentPosition.y;
+
+                    // Outer circle
+                    paint.setStyle(Paint.Style.FILL);
+                    paint.setColor(blackFill);
+                    canvas.drawCircle(sx, sy, sRadius, paint);
+                    paint.setStyle(Paint.Style.STROKE);
+                    paint.setColor(inputControlsView.getAccentColor());
+                    paint.setStrokeWidth(strokeWidth);
+                    canvas.drawCircle(sx, sy, sRadius, paint);
+
+                    // Inner thumb
+                    float thumbRadius = sRadius * 0.55f;
+                    paint.setStyle(Paint.Style.FILL);
+                    paint.setColor(inputControlsView.getAccentColor());
+                    canvas.drawCircle(sx, sy, thumbRadius, paint);
+                }
+                paint.setColor(oldColor);
+                break;
+            }
+            case MOUSE_AREA: {
+                int cx = boundingBox.centerX();
+                int cy = boundingBox.centerY();
+                int oldColor = paint.getColor();
+                float mw = boundingBox.width() * 0.5f;
+                float mh = boundingBox.height() * 0.5f;
+
+                // Draw mouse area (semi-transparent green tint)
+                paint.setStyle(Paint.Style.FILL);
+                paint.setColor(Color.argb((int)(overlayAlpha * 0.25f), 0, 200, 100));
+                canvas.drawRoundRect(cx - mw, cy - mh, cx + mw, cy + mh, 12, 12, paint);
+
+                // Border
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setColor(inputControlsView.getAccentColor());
+                paint.setStrokeWidth(strokeWidth * 0.5f);
+                canvas.drawRoundRect(cx - mw, cy - mh, cx + mw, cy + mh, 12, 12, paint);
+
+                // Mouse icon hint (simple crosshair at center)
+                float chSize = snappingSize * 1.5f;
+                paint.setStrokeWidth(strokeWidth);
+                canvas.drawLine(cx - chSize, cy, cx + chSize, cy, paint);
+                canvas.drawLine(cx, cy - chSize, cx, cy + chSize, paint);
+
+                paint.setColor(oldColor);
+                break;
+            }
+            case BUTTON_GRID: {
+                int cols = gridCols > 0 ? gridCols : 8;
+                int rows = gridRows > 0 ? gridRows : 2;
+                float cellW = (float)boundingBox.width() / cols;
+                float cellH = (float)boundingBox.height() / rows;
+                int oldColor = paint.getColor();
+
+                for (int r = 0; r < rows; r++) {
+                    for (int c = 0; c < cols; c++) {
+                        int cellIdx = r * cols + c;
+                        float left = boundingBox.left + c * cellW;
+                        float top = boundingBox.top + r * cellH;
+                        float right = left + cellW;
+                        float bottom = top + cellH;
+                        boolean pressed = cellIdx < states.length && states[cellIdx];
+
+                        // Cell fill
+                        paint.setStyle(Paint.Style.FILL);
+                        paint.setColor(pressed ? inputControlsView.getAccentColor() : blackFill);
+                        canvas.drawRoundRect(left + 2, top + 2, right - 2, bottom - 2, 6, 6, paint);
+
+                        // Cell border
+                        paint.setStyle(Paint.Style.STROKE);
+                        paint.setColor(inputControlsView.getAccentColor());
+                        paint.setStrokeWidth(strokeWidth * 0.3f);
+                        canvas.drawRoundRect(left + 2, top + 2, right - 2, bottom - 2, 6, 6, paint);
+
+                        // Cell label
+                        if (cellIdx < bindings.length) {
+                            String label = bindings[cellIdx].toString().replace("KEY_", "").replace("_", " ");
+                            if (label.length() > 4) label = label.substring(0, 3);
+                            paint.setStyle(Paint.Style.FILL);
+                            paint.setColor(primaryColor);
+                            paint.setTextSize(Math.min(cellH * 0.4f, snappingSize * 1.2f * scale));
+                            paint.setTextAlign(Paint.Align.CENTER);
+                            canvas.drawText(label, (left + right) * 0.5f,
+                                (top + bottom) * 0.5f - ((paint.descent() + paint.ascent()) * 0.5f), paint);
+                        }
+                    }
+                }
+                paint.setColor(oldColor);
+                break;
+            }
         }
     }
 
@@ -951,30 +1135,108 @@ public class ControlElement {
                         }
                         startX += elementSize;
                     }
-                } else {
-                    float lineLeft = boundingBox.left + strokeWidth * 0.5f;
-                    float lineRight = boundingBox.right - strokeWidth * 0.5f;
-                    float startY = boundingBox.top - (scrollOffset % elementSize);
-
-                    for (byte i = rangeIndex[0]; i < rangeIndex[1]; i++) {
-                        paint.setStyle(Paint.Style.STROKE);
-                        paint.setColor(strokeColor);
-                        if (startY > boundingBox.top && startY < boundingBox.bottom)
-                            canvas.drawLine(lineLeft, startY, lineRight, startY, paint);
-                        String text = getRangeTextForIndex(range, i);
-                        if (startY < boundingBox.bottom && startY + elementSize > boundingBox.top) {
-                            paint.setStyle(Paint.Style.FILL);
-                            paint.setColor(textColor);
-                            paint.setTextSize(Math.min(getTextSizeForWidth(paint, text, boundingBox.width() - strokeWidth * 2), minTextSize));
-                            paint.setTextAlign(Paint.Align.CENTER);
-                            canvas.drawText(text, boundingBox.centerX(), startY + elementSize * 0.5f - ((paint.descent() + paint.ascent()) * 0.5f), paint);
-                        }
-                        startY += elementSize;
-                    }
                 }
                 canvas.restore();
                 break;
             }
+            case DYNAMIC_STICK: {
+                int cx = boundingBox.centerX();
+                int cy = boundingBox.centerY();
+                int ringFillAlpha = (int)(fillAlpha * 0.4f);
+                int ringFill = Color.argb(ringFillAlpha, 0, 0, 0);
+
+                float areaHalfW = boundingBox.width() * 0.5f;
+                float areaHalfH = boundingBox.height() * 0.5f;
+                float areaRadius = 16f;
+
+                // Detection area
+                paint.setStyle(Paint.Style.FILL);
+                paint.setColor(Color.argb((int)(fillAlpha * 0.15f), 100, 100, 255));
+                canvas.drawRoundRect(cx - areaHalfW, cy - areaHalfH, cx + areaHalfW, cy + areaHalfH, areaRadius, areaRadius, paint);
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setColor(strokeColor);
+                paint.setStrokeWidth(strokeWidth * 0.5f);
+                canvas.drawRoundRect(cx - areaHalfW, cy - areaHalfH, cx + areaHalfW, cy + areaHalfH, areaRadius, areaRadius, paint);
+                paint.setStrokeWidth(strokeWidth);
+
+                if (stickVisible && currentPosition != null) {
+                    float sRadius = stickRadius > 0 ? stickRadius : 120;
+                    float sx = currentPosition.x;
+                    float sy = currentPosition.y;
+
+                    paint.setStyle(Paint.Style.FILL);
+                    paint.setColor(ringFill);
+                    canvas.drawCircle(sx, sy, sRadius, paint);
+                    paint.setStyle(Paint.Style.STROKE);
+                    paint.setColor(strokeColor);
+                    canvas.drawCircle(sx, sy, sRadius - strokeWidth * 0.5f, paint);
+
+                    float thumbRadius = sRadius * 0.55f;
+                    paint.setStyle(Paint.Style.FILL);
+                    paint.setColor(hasAccent ? accent : Color.rgb(0x1C, 0x85, 0xFE));
+                    canvas.drawCircle(sx, sy, thumbRadius, paint);
+                }
+                break;
+            }
+            case MOUSE_AREA: {
+                int cx = boundingBox.centerX();
+                int cy = boundingBox.centerY();
+                float mw = boundingBox.width() * 0.5f;
+                float mh = boundingBox.height() * 0.5f;
+
+                paint.setStyle(Paint.Style.FILL);
+                paint.setColor(Color.argb((int)(fillAlpha * 0.12f), 0, 200, 100));
+                canvas.drawRoundRect(cx - mw, cy - mh, cx + mw, cy + mh, 12, 12, paint);
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setColor(strokeColor);
+                paint.setStrokeWidth(strokeWidth * 0.5f);
+                canvas.drawRoundRect(cx - mw, cy - mh, cx + mw, cy + mh, 12, 12, paint);
+                paint.setStrokeWidth(strokeWidth);
+
+                // Crosshair
+                float chSize = snappingSize * 1.5f;
+                canvas.drawLine(cx - chSize, cy, cx + chSize, cy, paint);
+                canvas.drawLine(cx, cy - chSize, cx, cy + chSize, paint);
+                break;
+            }
+            case BUTTON_GRID: {
+                int cols = gridCols > 0 ? gridCols : 8;
+                int rows = gridRows > 0 ? gridRows : 2;
+                float cellW = (float)boundingBox.width() / cols;
+                float cellH = (float)boundingBox.height() / rows;
+
+                for (int r = 0; r < rows; r++) {
+                    for (int c = 0; c < cols; c++) {
+                        int cellIdx = r * cols + c;
+                        float left = boundingBox.left + c * cellW;
+                        float top = boundingBox.top + r * cellH;
+                        float right = left + cellW;
+                        float bottom = top + cellH;
+                        boolean pressed = cellIdx < states.length && states[cellIdx];
+
+                        Rect cellRect = new Rect((int)left + 2, (int)top + 2, (int)right - 2, (int)bottom - 2);
+                        drawGameHubShape(canvas, paint, cellRect, pressed ? pressedFillColor : fillColor, true);
+                        paint.setStyle(Paint.Style.STROKE);
+                        paint.setColor(strokeColor);
+                        paint.setStrokeWidth(strokeWidth * 0.3f);
+                        canvas.drawRoundRect(left + 2, top + 2, right - 2, bottom - 2, 6, 6, paint);
+                        paint.setStrokeWidth(strokeWidth);
+
+                        if (cellIdx < bindings.length) {
+                            String label = bindings[cellIdx].toString().replace("KEY_", "").replace("_", " ");
+                            if (label.length() > 4) label = label.substring(0, 3);
+                            paint.setStyle(Paint.Style.FILL);
+                            paint.setColor(textColor);
+                            paint.setTextSize(Math.min(cellH * 0.4f, snappingSize * 1.2f * scale));
+                            paint.setTextAlign(Paint.Align.CENTER);
+                            canvas.drawText(label, (left + right) * 0.5f,
+                                (top + bottom) * 0.5f - ((paint.descent() + paint.ascent()) * 0.5f), paint);
+                        }
+                    }
+                }
+                break;
+            }
+
             default:
                 drawOriginalLegacy(canvas);
                 break;
@@ -1107,6 +1369,20 @@ public class ControlElement {
                 elementJSONObject.put("range", range.name());
                 if (orientation != 0) elementJSONObject.put("orientation", orientation);
             }
+            if (type == Type.DYNAMIC_STICK) {
+                elementJSONObject.put("areaWidth", areaWidth);
+                elementJSONObject.put("areaHeight", areaHeight);
+                elementJSONObject.put("stickRadius", stickRadius);
+            }
+            if (type == Type.MOUSE_AREA) {
+                elementJSONObject.put("areaWidth", areaWidth);
+                elementJSONObject.put("areaHeight", areaHeight);
+                elementJSONObject.put("mouseSensitivity", Float.valueOf(mouseSensitivity));
+            }
+            if (type == Type.BUTTON_GRID) {
+                elementJSONObject.put("gridRows", gridRows);
+                elementJSONObject.put("gridCols", gridCols);
+            }
             return elementJSONObject;
         }
         catch (JSONException e) {
@@ -1140,6 +1416,33 @@ public class ControlElement {
                 scroller.handleTouchDown(x, y);
                 return true;
             }
+            else if (type == Type.DYNAMIC_STICK) {
+                // Stick appears at touch point within the detection area
+                if (currentPosition == null) currentPosition = new PointF();
+                currentPosition.set(x, y);
+                stickVisible = true;
+                // Set stick visual center at touch position
+                // Bindings are W/A/S/D style directional
+                states[0] = false; states[1] = false; states[2] = false; states[3] = false;
+                inputControlsView.invalidate();
+                return true;
+            }
+            else if (type == Type.MOUSE_AREA) {
+                // Start mouse tracking from this position
+                if (mouseAreaLastPos == null) mouseAreaLastPos = new PointF();
+                mouseAreaLastPos.set(x, y);
+                return true;
+            }
+            else if (type == Type.BUTTON_GRID) {
+                // Determine which grid cell was touched
+                int cellIndex = getGridCellIndex(x, y);
+                if (cellIndex >= 0 && cellIndex < bindings.length) {
+                    states[cellIndex] = true;
+                    inputControlsView.handleInputEvent(getBindingAt(cellIndex), true);
+                    inputControlsView.invalidate();
+                }
+                return true;
+            }
             else {
                 if (type == Type.TRACKPAD) {
                     if (currentPosition == null) currentPosition = new PointF();
@@ -1151,8 +1454,20 @@ public class ControlElement {
         else return false;
     }
 
+    /** Calculate grid cell index from touch coordinates */
+    private int getGridCellIndex(float x, float y) {
+        if (gridRows <= 0 || gridCols <= 0) return -1;
+        Rect box = getBoundingBox();
+        float cellW = (float)box.width() / gridCols;
+        float cellH = (float)box.height() / gridRows;
+        int col = (int)((x - box.left) / cellW);
+        int row = (int)((y - box.top) / cellH);
+        if (col < 0 || col >= gridCols || row < 0 || row >= gridRows) return -1;
+        return row * gridCols + col;
+    }
+
     public boolean handleTouchMove(int pointerId, float x, float y) {
-        if (pointerId == currentPointerId && (type == Type.D_PAD || type == Type.STICK || type == Type.TRACKPAD)) {
+        if (pointerId == currentPointerId && (type == Type.D_PAD || type == Type.STICK || type == Type.TRACKPAD || type == Type.DYNAMIC_STICK || type == Type.MOUSE_AREA || type == Type.BUTTON_GRID)) {
             float deltaX, deltaY;
             Rect boundingBox = getBoundingBox();
             float radius = boundingBox.width() * 0.5f;
@@ -1180,6 +1495,85 @@ public class ControlElement {
 
                 deltaX = Mathf.clamp(offsetX / radius, -1, 1);
                 deltaY = Mathf.clamp(offsetY / radius, -1, 1);
+            }
+
+            if (type == Type.DYNAMIC_STICK) {
+                // Calculate delta from initial touch position (currentPosition)
+                if (currentPosition == null) currentPosition = new PointF();
+                float stickCx = currentPosition.x;
+                float stickCy = currentPosition.y;
+                float sRadius = stickRadius > 0 ? stickRadius : 120;
+                float dx = x - stickCx;
+                float dy = y - stickCy;
+                float dist = (float)Math.sqrt(dx * dx + dy * dy);
+                if (dist > sRadius) {
+                    dx = dx / dist * sRadius;
+                    dy = dy / dist * sRadius;
+                    dist = sRadius;
+                }
+                float normX = dist > 0 ? dx / sRadius : 0;
+                float normY = dist > 0 ? dy / sRadius : 0;
+
+                Binding firstBinding = getBindingAt(0);
+                if (firstBinding.isGamepad()) {
+                    float magnitude = (float)Math.sqrt(normX * normX + normY * normY);
+                    float finalX = 0, finalY = 0;
+                    if (magnitude > STICK_DEAD_ZONE) {
+                        float scale = Math.min(1.0f, (magnitude - STICK_DEAD_ZONE) * STICK_SENSITIVITY);
+                        finalX = (normX / magnitude) * scale;
+                        finalY = (normY / magnitude) * scale;
+                    }
+                    inputControlsView.handleStickInput(firstBinding, finalX, finalY);
+                    for (byte i = 0; i < 4; i++) this.states[i] = true;
+                } else {
+                    final boolean[] st = {normY <= -STICK_DEAD_ZONE, normX >= STICK_DEAD_ZONE,
+                                          normY >= STICK_DEAD_ZONE, normX <= -STICK_DEAD_ZONE};
+                    for (byte i = 0; i < 4; i++) {
+                        float value = i == 1 || i == 3 ? normX : normY;
+                        Binding binding = getBindingAt(i);
+                        boolean state = binding.isMouseMove() ? (st[i] || st[(i+2)%4]) : st[i];
+                        inputControlsView.handleInputEvent(binding, state, value);
+                        this.states[i] = state;
+                    }
+                }
+                inputControlsView.invalidate();
+                return true;
+            }
+
+            if (type == Type.MOUSE_AREA) {
+                if (mouseAreaLastPos == null) mouseAreaLastPos = new PointF();
+                float rawDx = (x - mouseAreaLastPos.x) * mouseSensitivity;
+                float rawDy = (y - mouseAreaLastPos.y) * mouseSensitivity;
+                mouseAreaLastPos.set(x, y);
+                XServer xServer = inputControlsView.getXServer();
+                if (xServer != null) {
+                    if (xServer.isRelativeMouseMovement())
+                        xServer.getWinHandler().mouseEvent(MouseEventFlags.MOVE, (int)rawDx, (int)rawDy, 0);
+                    else
+                        xServer.injectPointerMoveDelta((int)rawDx, (int)rawDy);
+                }
+                return true;
+            }
+
+            if (type == Type.BUTTON_GRID) {
+                int newCell = getGridCellIndex(x, y);
+                // Find which cell was previously pressed
+                int oldCell = -1;
+                for (int i = 0; i < states.length; i++) {
+                    if (states[i]) { oldCell = i; break; }
+                }
+                if (newCell != oldCell && newCell >= 0 && newCell < bindings.length) {
+                    // Release old cell
+                    if (oldCell >= 0 && oldCell < bindings.length) {
+                        states[oldCell] = false;
+                        inputControlsView.handleInputEvent(getBindingAt(oldCell), false);
+                    }
+                    // Press new cell
+                    states[newCell] = true;
+                    inputControlsView.handleInputEvent(getBindingAt(newCell), true);
+                }
+                inputControlsView.invalidate();
+                return true;
             }
 
             if (type == Type.STICK) {
@@ -1330,7 +1724,7 @@ public class ControlElement {
                     selected = !selected;
                 }
             }
-            else if (type == Type.RANGE_BUTTON || type == Type.D_PAD || type == Type.STICK || type == Type.TRACKPAD) {
+            else if (type == Type.RANGE_BUTTON || type == Type.D_PAD || type == Type.STICK || type == Type.TRACKPAD || type == Type.DYNAMIC_STICK || type == Type.MOUSE_AREA || type == Type.BUTTON_GRID) {
                 for (byte i = 0; i < states.length; i++) {
                     if (states[i]) inputControlsView.handleInputEvent(getBindingAt(i), false);
                     states[i] = false;
@@ -1339,7 +1733,14 @@ public class ControlElement {
                 if (type == Type.RANGE_BUTTON) {
                     scroller.handleTouchUp();
                 }
-                else if (type == Type.STICK) {
+                else if (type == Type.STICK || type == Type.DYNAMIC_STICK) {
+                    if (type == Type.DYNAMIC_STICK) stickVisible = false;
+                    inputControlsView.invalidate();
+                }
+                else if (type == Type.MOUSE_AREA) {
+                    mouseAreaLastPos = null;
+                }
+                else if (type == Type.BUTTON_GRID) {
                     inputControlsView.invalidate();
                 }
 

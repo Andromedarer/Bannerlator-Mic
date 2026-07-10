@@ -56,6 +56,10 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
     private ActivityResultLauncher<Intent> iconPickerInAppLauncher;
     private LinearLayout currentLLCustomIconList; // To refresh UI after picking
 
+    // Background image picker
+    private ActivityResultLauncher<String> bgImagePickerLauncher;
+    private ActivityResultLauncher<Intent> bgImagePickerInAppLauncher;
+
     @Override
     public void onCreate(Bundle bundle) {
         super.onCreate(bundle);
@@ -88,6 +92,80 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
                 if (path != null) addCustomIconFromUri(Uri.fromFile(new java.io.File(path)));
             }
         });
+
+        // Background image pickers
+        bgImagePickerLauncher = registerForActivityResult(new ActivityResultContracts.GetContent(), uri -> {
+            if (uri != null) setBackgroundImageFromUri(uri);
+        });
+        bgImagePickerInAppLauncher = registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
+            if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                String path = result.getData().getStringExtra(FilePickerActivity.EXTRA_SELECTED_FILE);
+                if (path != null) setBackgroundImageFromUri(Uri.fromFile(new java.io.File(path)));
+            }
+        });
+    }
+
+    private void setBackgroundImageFromUri(Uri uri) {
+        try {
+            InputStream is = getContentResolver().openInputStream(uri);
+            if (is != null) {
+                Bitmap bitmap = BitmapFactory.decodeStream(is);
+                is.close();
+                if (bitmap != null) {
+                    inputControlsView.setBackgroundImage(bitmap);
+                    AppUtils.showToast(this, "Background image set");
+                }
+            }
+        } catch (IOException e) {
+            AppUtils.showToast(this, "Failed to load image");
+        }
+    }
+
+    private void showAddElementTypeDialog() {
+        final String[] typeNames = new String[ControlElement.Type.values().length];
+        for (int i = 0; i < typeNames.length; i++) {
+            typeNames[i] = ControlElement.Type.values()[i].name().replace("_", " ");
+        }
+        new android.app.AlertDialog.Builder(this)
+            .setTitle("Select Control Type")
+            .setItems(typeNames, (d, which) -> {
+                ControlElement.Type type = ControlElement.Type.values()[which];
+                if (inputControlsView.addElement(type)) {
+                    // For BUTTON_GRID, immediately open settings to configure grid
+                    if (type == ControlElement.Type.BUTTON_GRID) {
+                        ControlElement el = inputControlsView.getSelectedElement();
+                        if (el != null) showControlElementSettings(findViewById(R.id.BTElementSettings));
+                    }
+                } else {
+                    AppUtils.showToast(this, R.string.no_profile_selected);
+                }
+            })
+            .show();
+    }
+
+    private void showBackgroundImageDialog() {
+        new android.app.AlertDialog.Builder(this)
+            .setTitle("Set Background Image")
+            .setItems(new CharSequence[]{"Pick from files", "Clear background"}, (d, which) -> {
+                if (which == 0) {
+                    new android.app.AlertDialog.Builder(this)
+                        .setItems(new CharSequence[]{"Browse files", "Pick via system…"}, (d2, which2) -> {
+                            if (which2 == 0) {
+                                Intent intent = new Intent(this, FilePickerActivity.class);
+                                intent.putExtra(FilePickerActivity.EXTRA_EXTENSIONS, new String[]{"png", "jpg", "jpeg", "webp", "bmp"});
+                                intent.putExtra(FilePickerActivity.EXTRA_PICKER_TITLE, "Select background image");
+                                bgImagePickerInAppLauncher.launch(intent);
+                            } else {
+                                bgImagePickerLauncher.launch("image/*");
+                            }
+                        })
+                        .show();
+                } else {
+                    inputControlsView.setBackgroundImage(null);
+                    AppUtils.showToast(this, "Background cleared");
+                }
+            })
+            .show();
     }
 
     // Shared: add a custom icon from any Uri (file:// from the in-app picker, content:// from SAF).
@@ -118,7 +196,7 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
     public void onClick(View v) {
         switch (v.getId()) {
             case R.id.BTAddElement:
-                if (!inputControlsView.addElement()) AppUtils.showToast(this, R.string.no_profile_selected);
+                showAddElementTypeDialog();
                 break;
             case R.id.BTRemoveElement:
                 if (!inputControlsView.removeElement()) AppUtils.showToast(this, R.string.no_control_element_selected);
@@ -129,6 +207,56 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
                 else AppUtils.showToast(this, R.string.no_control_element_selected);
                 break;
         }
+    }
+
+    @Override
+    public boolean onCreateOptionsMenu(android.view.Menu menu) {
+        getMenuInflater().inflate(R.menu.controls_editor_menu, menu);
+        return true;
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(android.view.MenuItem item) {
+        if (item.getItemId() == R.id.menu_set_background) {
+            showBackgroundImageDialog();
+            return true;
+        }
+        else if (item.getItemId() == R.id.menu_bg_opacity) {
+            showBackgroundOpacityDialog();
+            return true;
+        }
+        return super.onOptionsItemSelected(item);
+    }
+
+    private void showBackgroundOpacityDialog() {
+        final LinearLayout ll = new LinearLayout(this);
+        ll.setOrientation(LinearLayout.VERTICAL);
+        ll.setPadding(60, 30, 60, 0);
+
+        final SeekBar seekBar = new SeekBar(this);
+        seekBar.setMax(100);
+        seekBar.setProgress((int)(inputControlsView.getBackgroundOpacity() * 100));
+        ll.addView(seekBar);
+
+        final TextView tv = new TextView(this);
+        tv.setText("Opacity: " + (int)(inputControlsView.getBackgroundOpacity() * 100) + "%");
+        ll.addView(tv);
+
+        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
+                float op = progress / 100f;
+                inputControlsView.setBackgroundOpacity(op);
+                tv.setText("Opacity: " + progress + "%");
+            }
+            public void onStartTrackingTouch(SeekBar sb) {}
+            public void onStopTrackingTouch(SeekBar sb) {}
+        });
+
+        new android.app.AlertDialog.Builder(this)
+            .setTitle("Background Opacity")
+            .setView(ll)
+            .setPositiveButton("OK", null)
+            .show();
     }
 
     private void showControlElementSettings(View anchorView) {

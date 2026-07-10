@@ -75,6 +75,10 @@ public class InputControlsView extends View {
     private final PointF mouseMoveOffset = new PointF();
     private boolean showTouchscreenControls = true;
 
+    // Background image for editor reference
+    private Bitmap backgroundImage;
+    private float backgroundOpacity = 0.3f;
+
     private Handler timeoutHandler; 
     private Runnable hideControlsRunnable; 
 
@@ -185,6 +189,7 @@ public class InputControlsView extends View {
         readyToDraw = true;
 
         if (editMode) {
+            drawBackgroundImage(canvas);
             drawGrid(canvas);
             drawCursor(canvas);
         }
@@ -275,9 +280,44 @@ public class InputControlsView extends View {
         paint.setAntiAlias(true);
     }
 
+    private void drawBackgroundImage(Canvas canvas) {
+        if (backgroundImage != null && !backgroundImage.isRecycled()) {
+            paint.setAlpha((int)(backgroundOpacity * 255));
+            canvas.drawBitmap(backgroundImage, null,
+                new Rect(0, 0, getWidth(), getHeight()), paint);
+            paint.setAlpha(255);
+        }
+    }
+
+    public void setBackgroundImage(Bitmap bitmap) {
+        if (backgroundImage != null && !backgroundImage.isRecycled()) {
+            backgroundImage.recycle();
+        }
+        this.backgroundImage = bitmap;
+        invalidate();
+    }
+
+    public Bitmap getBackgroundImage() {
+        return backgroundImage;
+    }
+
+    public void setBackgroundOpacity(float opacity) {
+        this.backgroundOpacity = Math.max(0, Math.min(1, opacity));
+        invalidate();
+    }
+
+    public float getBackgroundOpacity() {
+        return backgroundOpacity;
+    }
+
     public synchronized boolean addElement() {
+        return addElement(ControlElement.Type.BUTTON);
+    }
+
+    public synchronized boolean addElement(ControlElement.Type type) {
         if (editMode && profile != null) {
             ControlElement element = new ControlElement(this);
+            element.setType(type);
             element.setX(cursor.x);
             element.setY(cursor.y);
             profile.addElement(element);
