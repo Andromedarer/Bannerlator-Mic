@@ -430,6 +430,21 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
             });
         }
 
+        // Grid cell shape spinner
+        Spinner sGridCellShape = view.findViewById(R.id.SGridCellShape);
+        if (sGridCellShape != null) {
+            sGridCellShape.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, ControlElement.Shape.names()));
+            sGridCellShape.setSelection(element.getGridCellShape().ordinal(), false);
+            sGridCellShape.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+                @Override public void onItemSelected(AdapterView<?> parent, View v, int position, long id) {
+                    element.setGridCellShape(ControlElement.Shape.values()[position]);
+                    profile.save();
+                    inputControlsView.invalidate();
+                }
+                @Override public void onNothingSelected(AdapterView<?> parent) {}
+            });
+        }
+
         final TextView tvScale = view.findViewById(R.id.TVScale);
         SeekBar sbScale = view.findViewById(R.id.SBScale);
         if (sbScale != null) {
@@ -688,7 +703,117 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
             @Override public void onNothingSelected(AdapterView<?> parent) {}
         });
         update.run();
+
+        // Long-press on binding view to set key combo
+        view.setOnLongClickListener(v -> {
+            showComboEditorDialog(element, index);
+            return true;
+        });
+
         container.addView(view);
+    }
+
+    /** Show dialog to configure a multi-key combo for a binding slot */
+    private void showComboEditorDialog(final ControlElement element, final int index) {
+        // Get modifier keys (CTRL, SHIFT, ALT) and main key options
+        final Binding[] modifierOptions = {
+            Binding.KEY_CTRL_L, Binding.KEY_SHIFT_L, Binding.KEY_ALT_L
+        };
+        final String[] modifierLabels = {"CTRL", "SHIFT", "ALT"};
+        final boolean[] selectedModifiers = new boolean[3];
+
+        // Pre-fill from existing combo
+        Binding[] existingCombo = element.getCombo(index);
+        if (existingCombo != null) {
+            for (Binding b : existingCombo) {
+                for (int i = 0; i < modifierOptions.length; i++) {
+                    if (b == modifierOptions[i]) selectedModifiers[i] = true;
+                }
+            }
+        }
+
+        LinearLayout ll = new LinearLayout(this);
+        ll.setOrientation(LinearLayout.VERTICAL);
+        ll.setPadding(40, 20, 40, 0);
+
+        // Checkboxes for modifiers
+        for (int i = 0; i < modifierOptions.length; i++) {
+            CheckBox cb = new CheckBox(this);
+            cb.setText(modifierLabels[i]);
+            cb.setChecked(selectedModifiers[i]);
+            final int idx = i;
+            cb.setOnCheckedChangeListener((btn, checked) -> selectedModifiers[idx] = checked);
+            ll.addView(cb);
+        }
+
+        // Spinner for main key
+        final Spinner mainKeySpinner = new Spinner(this);
+        String[] allKeyLabels = Binding.keyboardBindingLabels();
+        AccentArrayAdapter<String> keyAdapter = new AccentArrayAdapter<>(this, R.layout.binding_spinner_item, allKeyLabels);
+        keyAdapter.setDropDownViewResource(R.layout.binding_spinner_dropdown_item);
+        mainKeySpinner.setAdapter(keyAdapter);
+
+        // Set current main key
+        Binding currentMain = element.getBindingAt(index);
+        if (existingCombo != null) {
+            for (Binding b : existingCombo) {
+                if (b.isKeyboard() && b != Binding.KEY_CTRL_L && b != Binding.KEY_SHIFT_L && b != Binding.KEY_ALT_L) {
+                    currentMain = b;
+                    break;
+                }
+            }
+        }
+        AppUtils.setSpinnerSelectionFromValue(mainKeySpinner, currentMain.toString());
+
+        TextView tvLabel = new TextView(this);
+        tvLabel.setText("Main key:");
+        tvLabel.setTextColor(0xFFAAAAAA);
+        tvLabel.setPadding(0, 20, 0, 8);
+        ll.addView(tvLabel);
+        ll.addView(mainKeySpinner);
+
+        new android.app.AlertDialog.Builder(this)
+            .setTitle("Key Combo — " + getBindingLabel(element, index))
+            .setView(ll)
+            .setPositiveButton("Save", (d, which) -> {
+                // Build combo array
+                java.util.List<Binding> comboList = new java.util.ArrayList<>();
+                for (int i = 0; i < modifierOptions.length; i++) {
+                    if (selectedModifiers[i]) comboList.add(modifierOptions[i]);
+                }
+                // Add main key
+                String selKey = mainKeySpinner.getSelectedItem().toString();
+                Binding mainBinding = Binding.fromString("KEY_" + selKey.replace(" ", "_").toUpperCase());
+                if (mainBinding != null && mainBinding != Binding.NONE) {
+                    comboList.add(mainBinding);
+                }
+                if (comboList.size() > 1) {
+                    element.setCombo(index, comboList.toArray(new Binding[0]));
+                    // Also set the primary binding to the main key for display
+                    element.setBindingAt(index, mainBinding != null ? mainBinding : element.getBindingAt(index));
+                } else {
+                    element.setCombo(index, null); // clear combo
+                }
+                profile.save();
+                inputControlsView.invalidate();
+            })
+            .setNegativeButton("Clear Combo", (d, which) -> {
+                element.setCombo(index, null);
+                profile.save();
+                inputControlsView.invalidate();
+            })
+            .setNeutralButton("Cancel", null)
+            .show();
+    }
+
+    private String getBindingLabel(ControlElement element, int index) {
+        if (element.getType() == ControlElement.Type.BUTTON_GRID) {
+            int cols = element.getGridCols() > 0 ? element.getGridCols() : 8;
+            int r = index / cols + 1;
+            int c = index % cols + 1;
+            return "R" + r + "C" + c;
+        }
+        return "Binding " + (index + 1);
     }
 
     @Override

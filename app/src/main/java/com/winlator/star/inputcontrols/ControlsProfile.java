@@ -278,6 +278,7 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
                     if (elementJSONObject.has("mouseSensitivity")) element.setMouseSensitivity((float)elementJSONObject.getDouble("mouseSensitivity"));
                     if (elementJSONObject.has("gridRows")) element.setGridRows(elementJSONObject.getInt("gridRows"));
                     if (elementJSONObject.has("gridCols")) element.setGridCols(elementJSONObject.getInt("gridCols"));
+                    if (elementJSONObject.has("gridCellShape")) element.setGridCellShape(ControlElement.Shape.valueOf(elementJSONObject.getString("gridCellShape")));
 
                     boolean hasGamepadBinding = true;
                     JSONArray bindingsJSONArray = elementJSONObject.getJSONArray("bindings");
@@ -285,6 +286,23 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
                         Binding binding = Binding.fromString(bindingsJSONArray.getString(j));
                         element.setBindingAt(j, binding);
                         if (!binding.isGamepad()) hasGamepadBinding = false;
+                    }
+
+                    // Load combos if present
+                    if (elementJSONObject.has("combos")) {
+                        JSONArray combosArr = elementJSONObject.getJSONArray("combos");
+                        for (int j = 0; j < combosArr.length(); j++) {
+                            JSONArray entry = combosArr.getJSONArray(j);
+                            int idx = entry.getInt(0);
+                            JSONArray keys = entry.getJSONArray(1);
+                            if (keys.length() > 0) {
+                                Binding[] combo = new Binding[keys.length()];
+                                for (int k = 0; k < keys.length(); k++) {
+                                    combo[k] = Binding.fromString(keys.getString(k));
+                                }
+                                element.setCombo(idx, combo);
+                            }
+                        }
                     }
 
                     if (!virtualGamepad && hasGamepadBinding) virtualGamepad = true;
