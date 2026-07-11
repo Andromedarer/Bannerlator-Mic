@@ -269,11 +269,20 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
             View cbToggle = view.findViewById(R.id.CBToggleSwitch);
             View llCustom = view.findViewById(R.id.LLCustomTextIcon);
             View llRange = view.findViewById(R.id.LLRangeOptions);
+            View llDynamicStick = view.findViewById(R.id.LLDynamicStickSettings);
+            View llMouseArea = view.findViewById(R.id.LLMouseAreaSettings);
+            View llButtonGrid = view.findViewById(R.id.LLButtonGridSettings);
+            View llBindings = view.findViewById(R.id.LLBindings);
 
             if (llShape != null) llShape.setVisibility(type == ControlElement.Type.BUTTON ? View.VISIBLE : View.GONE);
             if (cbToggle != null) cbToggle.setVisibility(type == ControlElement.Type.BUTTON ? View.VISIBLE : View.GONE);
             if (llCustom != null) llCustom.setVisibility(type == ControlElement.Type.BUTTON ? View.VISIBLE : View.GONE);
             if (llRange != null) llRange.setVisibility(type == ControlElement.Type.RANGE_BUTTON ? View.VISIBLE : View.GONE);
+            if (llDynamicStick != null) llDynamicStick.setVisibility(type == ControlElement.Type.DYNAMIC_STICK ? View.VISIBLE : View.GONE);
+            if (llMouseArea != null) llMouseArea.setVisibility(type == ControlElement.Type.MOUSE_AREA ? View.VISIBLE : View.GONE);
+            if (llButtonGrid != null) llButtonGrid.setVisibility(type == ControlElement.Type.BUTTON_GRID ? View.VISIBLE : View.GONE);
+            // Hide bindings section for MOUSE_AREA (it controls mouse directly, no key mappings)
+            if (llBindings != null) llBindings.setVisibility(type == ControlElement.Type.MOUSE_AREA ? View.GONE : View.VISIBLE);
 
             loadBindingSpinners(element, view);
         };
@@ -299,6 +308,125 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
                 element.setBindingCount(value);
                 profile.save();
                 inputControlsView.invalidate();
+            });
+        }
+
+        // --- Dynamic Stick sliders ---
+        SeekBar sbAreaWidthStick = view.findViewById(R.id.SBAreaWidthStick);
+        TextView tvAreaWidthStick = view.findViewById(R.id.TVAreaWidthStick);
+        if (sbAreaWidthStick != null) {
+            sbAreaWidthStick.setProgress(element.getAreaWidth());
+            if (tvAreaWidthStick != null) tvAreaWidthStick.setText(element.getAreaWidth() + "px");
+            sbAreaWidthStick.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(SeekBar sb, int val, boolean fromUser) {
+                    if (tvAreaWidthStick != null) tvAreaWidthStick.setText(val + "px");
+                    if (fromUser) { element.setAreaWidth(val); profile.save(); inputControlsView.invalidate(); }
+                }
+                @Override public void onStartTrackingTouch(SeekBar sb) {}
+                @Override public void onStopTrackingTouch(SeekBar sb) {}
+            });
+        }
+
+        SeekBar sbAreaHeightStick = view.findViewById(R.id.SBAreaHeightStick);
+        TextView tvAreaHeightStick = view.findViewById(R.id.TVAreaHeightStick);
+        if (sbAreaHeightStick != null) {
+            sbAreaHeightStick.setProgress(element.getAreaHeight());
+            if (tvAreaHeightStick != null) tvAreaHeightStick.setText(element.getAreaHeight() + "px");
+            sbAreaHeightStick.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(SeekBar sb, int val, boolean fromUser) {
+                    if (tvAreaHeightStick != null) tvAreaHeightStick.setText(val + "px");
+                    if (fromUser) { element.setAreaHeight(val); profile.save(); inputControlsView.invalidate(); }
+                }
+                @Override public void onStartTrackingTouch(SeekBar sb) {}
+                @Override public void onStopTrackingTouch(SeekBar sb) {}
+            });
+        }
+
+        SeekBar sbStickRadius = view.findViewById(R.id.SBStickRadius);
+        TextView tvStickRadius = view.findViewById(R.id.TVStickRadius);
+        if (sbStickRadius != null) {
+            sbStickRadius.setProgress(element.getStickRadius());
+            if (tvStickRadius != null) tvStickRadius.setText(element.getStickRadius() + "px");
+            sbStickRadius.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(SeekBar sb, int val, boolean fromUser) {
+                    if (tvStickRadius != null) tvStickRadius.setText(val + "px");
+                    if (fromUser) { element.setStickRadius(val); profile.save(); inputControlsView.invalidate(); }
+                }
+                @Override public void onStartTrackingTouch(SeekBar sb) {}
+                @Override public void onStopTrackingTouch(SeekBar sb) {}
+            });
+        }
+
+        // --- Mouse Area sliders ---
+        SeekBar sbAreaWidthMouse = view.findViewById(R.id.SBAreaWidthMouse);
+        TextView tvAreaWidthMouse = view.findViewById(R.id.TVAreaWidthMouse);
+        if (sbAreaWidthMouse != null) {
+            sbAreaWidthMouse.setProgress(element.getAreaWidth());
+            if (tvAreaWidthMouse != null) tvAreaWidthMouse.setText(element.getAreaWidth() + "px");
+            sbAreaWidthMouse.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(SeekBar sb, int val, boolean fromUser) {
+                    if (tvAreaWidthMouse != null) tvAreaWidthMouse.setText(val + "px");
+                    if (fromUser) { element.setAreaWidth(val); profile.save(); inputControlsView.invalidate(); }
+                }
+                @Override public void onStartTrackingTouch(SeekBar sb) {}
+                @Override public void onStopTrackingTouch(SeekBar sb) {}
+            });
+        }
+
+        SeekBar sbAreaHeightMouse = view.findViewById(R.id.SBAreaHeightMouse);
+        TextView tvAreaHeightMouse = view.findViewById(R.id.TVAreaHeightMouse);
+        if (sbAreaHeightMouse != null) {
+            sbAreaHeightMouse.setProgress(element.getAreaHeight());
+            if (tvAreaHeightMouse != null) tvAreaHeightMouse.setText(element.getAreaHeight() + "px");
+            sbAreaHeightMouse.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(SeekBar sb, int val, boolean fromUser) {
+                    if (tvAreaHeightMouse != null) tvAreaHeightMouse.setText(val + "px");
+                    if (fromUser) { element.setAreaHeight(val); profile.save(); inputControlsView.invalidate(); }
+                }
+                @Override public void onStartTrackingTouch(SeekBar sb) {}
+                @Override public void onStopTrackingTouch(SeekBar sb) {}
+            });
+        }
+
+        SeekBar sbMouseSensitivity = view.findViewById(R.id.SBMouseSensitivity);
+        TextView tvMouseSensitivity = view.findViewById(R.id.TVMouseSensitivity);
+        if (sbMouseSensitivity != null) {
+            int sensVal = Math.round(element.getMouseSensitivity() * 10);
+            sbMouseSensitivity.setProgress(sensVal);
+            if (tvMouseSensitivity != null) tvMouseSensitivity.setText(String.format("%.1fx", element.getMouseSensitivity()));
+            sbMouseSensitivity.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(SeekBar sb, int val, boolean fromUser) {
+                    float sens = val / 10.0f;
+                    if (tvMouseSensitivity != null) tvMouseSensitivity.setText(String.format("%.1fx", sens));
+                    if (fromUser) { element.setMouseSensitivity(sens); profile.save(); }
+                }
+                @Override public void onStartTrackingTouch(SeekBar sb) {}
+                @Override public void onStopTrackingTouch(SeekBar sb) {}
+            });
+        }
+
+        // --- Button Grid pickers ---
+        NumberPicker npGridRows = view.findViewById(R.id.NPGridRows);
+        if (npGridRows != null) {
+            npGridRows.setValue(element.getGridRows() > 0 ? element.getGridRows() : 2);
+            npGridRows.setOnValueChangeListener((picker, val) -> {
+                element.setGridRows(val);
+                element.setBindingCount(val * element.getGridCols());
+                profile.save();
+                inputControlsView.invalidate();
+                loadBindingSpinners(element, view);
+            });
+        }
+
+        NumberPicker npGridCols = view.findViewById(R.id.NPGridCols);
+        if (npGridCols != null) {
+            npGridCols.setValue(element.getGridCols() > 0 ? element.getGridCols() : 8);
+            npGridCols.setOnValueChangeListener((picker, val) -> {
+                element.setGridCols(val);
+                element.setBindingCount(element.getGridRows() * val);
+                profile.save();
+                inputControlsView.invalidate();
+                loadBindingSpinners(element, view);
             });
         }
 
@@ -475,17 +603,38 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
         container.removeAllViews();
         ControlElement.Type type = element.getType();
         if (type == ControlElement.Type.BUTTON) loadBindingSpinner(element, container, 0, R.string.binding);
-        else if (type == ControlElement.Type.D_PAD || type == ControlElement.Type.STICK || type == ControlElement.Type.TRACKPAD) {
+        else if (type == ControlElement.Type.D_PAD || type == ControlElement.Type.STICK || type == ControlElement.Type.TRACKPAD || type == ControlElement.Type.DYNAMIC_STICK) {
             loadBindingSpinner(element, container, 0, R.string.binding_up);
             loadBindingSpinner(element, container, 1, R.string.binding_right);
             loadBindingSpinner(element, container, 2, R.string.binding_down);
             loadBindingSpinner(element, container, 3, R.string.binding_left);
         }
+        else if (type == ControlElement.Type.BUTTON_GRID) {
+            int rows = element.getGridRows() > 0 ? element.getGridRows() : 2;
+            int cols = element.getGridCols() > 0 ? element.getGridCols() : 8;
+            int total = rows * cols;
+            for (int i = 0; i < total; i++) {
+                int r = i / cols + 1;
+                int c = i % cols + 1;
+                String label = "R" + r + "C" + c;
+                loadBindingSpinner(element, container, i, label);
+            }
+        }
+    }
+
+    private void loadBindingSpinner(final ControlElement element, LinearLayout container, final int index, String title) {
+        View bindingView = LayoutInflater.from(this).inflate(R.layout.binding_field, container, false);
+        ((TextView)bindingView.findViewById(R.id.TVTitle)).setText(title);
+        wireBindingSpinner(element, bindingView, container, index);
     }
 
     private void loadBindingSpinner(final ControlElement element, LinearLayout container, final int index, int titleResId) {
-        View view = LayoutInflater.from(this).inflate(R.layout.binding_field, container, false);
-        ((TextView)view.findViewById(R.id.TVTitle)).setText(titleResId);
+        View bindingView = LayoutInflater.from(this).inflate(R.layout.binding_field, container, false);
+        ((TextView)bindingView.findViewById(R.id.TVTitle)).setText(titleResId);
+        wireBindingSpinner(element, bindingView, container, index);
+    }
+
+    private void wireBindingSpinner(final ControlElement element, View view, LinearLayout container, final int index) {
         final Spinner sBindingType = view.findViewById(R.id.SBindingType);
         final Spinner sBinding = view.findViewById(R.id.SBinding);
 

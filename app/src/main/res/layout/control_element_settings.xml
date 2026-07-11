@@ -117,6 +117,222 @@
                 app:maxValue="8" />
         </LinearLayout>
 
+        <!-- Dynamic Stick Settings -->
+        <LinearLayout
+            android:id="@+id/LLDynamicStickSettings"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/detection_area"
+                android:textStyle="bold"
+                android:layout_marginTop="8dp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/area_width"/>
+
+                <TextView
+                    android:id="@+id/TVAreaWidthStick"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+
+            <SeekBar
+                android:id="@+id/SBAreaWidthStick"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:min="200"
+                android:max="2000" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/area_height"/>
+
+                <TextView
+                    android:id="@+id/TVAreaHeightStick"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+
+            <SeekBar
+                android:id="@+id/SBAreaHeightStick"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:min="200"
+                android:max="2000" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/stick_radius"/>
+
+                <TextView
+                    android:id="@+id/TVStickRadius"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+
+            <SeekBar
+                android:id="@+id/SBStickRadius"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:min="60"
+                android:max="400" />
+        </LinearLayout>
+
+        <!-- Mouse Area Settings -->
+        <LinearLayout
+            android:id="@+id/LLMouseAreaSettings"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/detection_area"
+                android:textStyle="bold"
+                android:layout_marginTop="8dp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/area_width"/>
+
+                <TextView
+                    android:id="@+id/TVAreaWidthMouse"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+
+            <SeekBar
+                android:id="@+id/SBAreaWidthMouse"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:min="200"
+                android:max="2000" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/area_height"/>
+
+                <TextView
+                    android:id="@+id/TVAreaHeightMouse"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+
+            <SeekBar
+                android:id="@+id/SBAreaHeightMouse"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:min="200"
+                android:max="2000" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/mouse_sensitivity"/>
+
+                <TextView
+                    android:id="@+id/TVMouseSensitivity"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+
+            <SeekBar
+                android:id="@+id/SBMouseSensitivity"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:min="1"
+                android:max="50" />
+        </LinearLayout>
+
+        <!-- Button Grid Settings -->
+        <LinearLayout
+            android:id="@+id/LLButtonGridSettings"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Button Grid"
+                android:textStyle="bold"
+                android:layout_marginTop="8dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/grid_rows" />
+
+            <com.winlator.star.widget.NumberPicker
+                android:id="@+id/NPGridRows"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:minValue="1"
+                app:maxValue="8" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/grid_cols" />
+
+            <com.winlator.star.widget.NumberPicker
+                android:id="@+id/NPGridCols"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:minValue="1"
+                app:maxValue="16" />
+        </LinearLayout>
+
         <LinearLayout
             android:id="@+id/LLBindings"
             android:layout_width="match_parent"

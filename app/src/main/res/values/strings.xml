@@ -34,6 +34,13 @@
     <string name="binding_right">Binding Right</string>
     <string name="binding_down">Binding Down</string>
     <string name="binding_left">Binding Left</string>
+    <string name="detection_area">Detection Area</string>
+    <string name="area_width">Area Width</string>
+    <string name="area_height">Area Height</string>
+    <string name="stick_radius">Stick Radius</string>
+    <string name="mouse_sensitivity">Mouse Sensitivity</string>
+    <string name="grid_rows">Rows</string>
+    <string name="grid_cols">Columns</string>
     <string name="overlay_opacity">Overlay Opacity</string>
     <string name="controls_follow_app_theme">Follow app theme</string>
     <string name="controls_accent_color">Controls accent color</string>
