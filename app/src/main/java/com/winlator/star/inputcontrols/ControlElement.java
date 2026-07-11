@@ -96,6 +96,11 @@ public class ControlElement {
     private int areaHeight;           // detection area height (snapping units)
     private int stickRadius;          // visual stick radius (for DYNAMIC_STICK)
     private boolean stickVisible;     // current visibility (for DYNAMIC_STICK)
+    private float visualStickX;       // smoothed visual stick center X (for animation)
+    private float visualStickY;       // smoothed visual stick center Y (for animation)
+    private PointF stickTarget;       // target position for stick animation (touch point)
+    private float lastFingerX;        // latest finger X (for thumb position in draw)
+    private float lastFingerY;        // latest finger Y (for thumb position in draw)
     private float mouseSensitivity;   // cursor speed multiplier (for MOUSE_AREA), default 1.0
     private int gridRows;             // rows in button grid (for BUTTON_GRID)
     private int gridCols;             // columns in button grid (for BUTTON_GRID)
@@ -112,6 +117,9 @@ public class ControlElement {
         areaHeight = 0;
         stickRadius = 0;
         stickVisible = false;
+        visualStickX = 0;
+        visualStickY = 0;
+        stickTarget = null;
         mouseSensitivity = 1.0f;
         gridRows = 0;
         gridCols = 0;
@@ -1149,21 +1157,33 @@ public class ControlElement {
                 float areaHalfH = boundingBox.height() * 0.5f;
                 float areaRadius = 16f;
 
-                // Detection area
-                paint.setStyle(Paint.Style.FILL);
-                paint.setColor(Color.argb((int)(fillAlpha * 0.15f), 100, 100, 255));
-                canvas.drawRoundRect(cx - areaHalfW, cy - areaHalfH, cx + areaHalfW, cy + areaHalfH, areaRadius, areaRadius, paint);
-                paint.setStyle(Paint.Style.STROKE);
-                paint.setColor(strokeColor);
-                paint.setStrokeWidth(strokeWidth * 0.5f);
-                canvas.drawRoundRect(cx - areaHalfW, cy - areaHalfH, cx + areaHalfW, cy + areaHalfH, areaRadius, areaRadius, paint);
-                paint.setStrokeWidth(strokeWidth);
+                // Detection area only visible in edit mode
+                if (inputControlsView.isEditMode()) {
+                    paint.setStyle(Paint.Style.FILL);
+                    paint.setColor(Color.argb((int)(fillAlpha * 0.15f), 100, 100, 255));
+                    canvas.drawRoundRect(cx - areaHalfW, cy - areaHalfH, cx + areaHalfW, cy + areaHalfH, areaRadius, areaRadius, paint);
+                    paint.setStyle(Paint.Style.STROKE);
+                    paint.setColor(strokeColor);
+                    paint.setStrokeWidth(strokeWidth * 0.5f);
+                    canvas.drawRoundRect(cx - areaHalfW, cy - areaHalfH, cx + areaHalfW, cy + areaHalfH, areaRadius, areaRadius, paint);
+                    paint.setStrokeWidth(strokeWidth);
+                }
+
+                // Smooth interpolation for stick position animation
+                final float LERP = 0.3f;
+                if (currentPosition != null && stickVisible) {
+                    float tx = currentPosition.x;
+                    float ty = currentPosition.y;
+                    visualStickX += (tx - visualStickX) * LERP;
+                    visualStickY += (ty - visualStickY) * LERP;
+                }
 
                 if (stickVisible && currentPosition != null) {
                     float sRadius = stickRadius > 0 ? stickRadius : 120;
-                    float sx = currentPosition.x;
-                    float sy = currentPosition.y;
+                    float sx = visualStickX;
+                    float sy = visualStickY;
 
+                    // Outer ring
                     paint.setStyle(Paint.Style.FILL);
                     paint.setColor(ringFill);
                     canvas.drawCircle(sx, sy, sRadius, paint);
@@ -1171,10 +1191,26 @@ public class ControlElement {
                     paint.setColor(strokeColor);
                     canvas.drawCircle(sx, sy, sRadius - strokeWidth * 0.5f, paint);
 
+                    // Inner thumb (follows finger offset from stick center, with animation)
                     float thumbRadius = sRadius * 0.55f;
+                    // Use stored finger position for smooth thumb tracking
+                    float fingerDx = lastFingerX - sx;
+                    float fingerDy = lastFingerY - sy;
+                    float fingerDist = (float)Math.sqrt(fingerDx * fingerDx + fingerDy * fingerDy);
+                    // Clamp thumb within stick
+                    float maxThumbDist = sRadius - thumbRadius;
+                    float thumbX, thumbY;
+                    if (fingerDist > maxThumbDist) {
+                        float scale = maxThumbDist / fingerDist;
+                        thumbX = sx + fingerDx * scale;
+                        thumbY = sy + fingerDy * scale;
+                    } else {
+                        thumbX = lastFingerX;
+                        thumbY = lastFingerY;
+                    }
                     paint.setStyle(Paint.Style.FILL);
                     paint.setColor(hasAccent ? accent : Color.rgb(0x1C, 0x85, 0xFE));
-                    canvas.drawCircle(sx, sy, thumbRadius, paint);
+                    canvas.drawCircle(thumbX, thumbY, thumbRadius, paint);
                 }
                 break;
             }
@@ -1421,7 +1457,14 @@ public class ControlElement {
                 if (currentPosition == null) currentPosition = new PointF();
                 currentPosition.set(x, y);
                 stickVisible = true;
-                // Set stick visual center at touch position
+                // Initialize animation target to touch position
+                if (stickTarget == null) stickTarget = new PointF();
+                stickTarget.set(x, y);
+                // Jump visual position to target on initial touch (no interpolation for first frame)
+                visualStickX = x;
+                visualStickY = y;
+                lastFingerX = x;
+                lastFingerY = y;
                 // Bindings are W/A/S/D style directional
                 states[0] = false; states[1] = false; states[2] = false; states[3] = false;
                 inputControlsView.invalidate();
@@ -1498,6 +1541,9 @@ public class ControlElement {
             }
 
             if (type == Type.DYNAMIC_STICK) {
+                // Store finger position for thumb animation
+                lastFingerX = x;
+                lastFingerY = y;
                 // Calculate delta from initial touch position (currentPosition)
                 if (currentPosition == null) currentPosition = new PointF();
                 float stickCx = currentPosition.x;
@@ -1734,7 +1780,14 @@ public class ControlElement {
                     scroller.handleTouchUp();
                 }
                 else if (type == Type.STICK || type == Type.DYNAMIC_STICK) {
-                    if (type == Type.DYNAMIC_STICK) stickVisible = false;
+                    if (type == Type.DYNAMIC_STICK) {
+                        stickVisible = false;
+                        stickTarget = null;
+                        visualStickX = 0;
+                        visualStickY = 0;
+                        lastFingerX = 0;
+                        lastFingerY = 0;
+                    }
                     inputControlsView.invalidate();
                 }
                 else if (type == Type.MOUSE_AREA) {
