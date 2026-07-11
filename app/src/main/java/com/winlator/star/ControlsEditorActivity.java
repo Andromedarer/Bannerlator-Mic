@@ -433,7 +433,9 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
         // Grid cell shape spinner
         Spinner sGridCellShape = view.findViewById(R.id.SGridCellShape);
         if (sGridCellShape != null) {
-            sGridCellShape.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, ControlElement.Shape.names()));
+            AccentArrayAdapter<String> shapeAdapter = new AccentArrayAdapter<>(this, R.layout.binding_spinner_item, ControlElement.Shape.names());
+            shapeAdapter.setDropDownViewResource(R.layout.binding_spinner_dropdown_item);
+            sGridCellShape.setAdapter(shapeAdapter);
             sGridCellShape.setSelection(element.getGridCellShape().ordinal(), false);
             sGridCellShape.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
                 @Override public void onItemSelected(AdapterView<?> parent, View v, int position, long id) {
@@ -442,6 +444,35 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
                     inputControlsView.invalidate();
                 }
                 @Override public void onNothingSelected(AdapterView<?> parent) {}
+            });
+        }
+
+        // --- Quick Fill buttons for grid ---
+        LinearLayout llQuickFill = view.findViewById(R.id.LLQuickFill);
+        if (llQuickFill != null) {
+            llQuickFill.removeAllViews();
+            final View settingsView = view; // capture for lambda
+            addQuickFillButton(llQuickFill, "Fill: QWERTY", () -> {
+                fillGridQWERTY(element);
+                loadBindingSpinners(element, settingsView);
+            });
+            addQuickFillButton(llQuickFill, "Fill: F1–F12", () -> {
+                fillGridFKeys(element);
+                loadBindingSpinners(element, settingsView);
+            });
+            addQuickFillButton(llQuickFill, "Fill: NumPad", () -> {
+                fillGridNumPad(element);
+                loadBindingSpinners(element, settingsView);
+            });
+            addQuickFillButton(llQuickFill, "Clear", () -> {
+                int total = element.getGridRows() * element.getGridCols();
+                for (int i = 0; i < total; i++) {
+                    element.setBindingAt(i, Binding.NONE);
+                    element.setCombo(i, null);
+                }
+                profile.save();
+                inputControlsView.invalidate();
+                loadBindingSpinners(element, settingsView);
             });
         }
 
@@ -814,6 +845,70 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
             return "R" + r + "C" + c;
         }
         return "Binding " + (index + 1);
+    }
+
+    /** Add a small quick-fill button to a linear layout */
+    private void addQuickFillButton(LinearLayout parent, String label, Runnable action) {
+        android.widget.Button btn = new android.widget.Button(this);
+        btn.setText(label);
+        btn.setTextSize(11);
+        btn.setAllCaps(false);
+        btn.setPadding(12, 4, 12, 4);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(0, 0, 8, 0);
+        btn.setLayoutParams(lp);
+        btn.setOnClickListener(v -> action.run());
+        parent.addView(btn);
+    }
+
+    /** Fill grid with QWERTY row: A S D F ... (wraps) */
+    private void fillGridQWERTY(ControlElement element) {
+        Binding[] keys = {
+            Binding.KEY_Q, Binding.KEY_W, Binding.KEY_E, Binding.KEY_R, Binding.KEY_T, Binding.KEY_Y, Binding.KEY_U, Binding.KEY_I, Binding.KEY_O, Binding.KEY_P,
+            Binding.KEY_A, Binding.KEY_S, Binding.KEY_D, Binding.KEY_F, Binding.KEY_G, Binding.KEY_H, Binding.KEY_J, Binding.KEY_K, Binding.KEY_L,
+            Binding.KEY_Z, Binding.KEY_X, Binding.KEY_C, Binding.KEY_V, Binding.KEY_B, Binding.KEY_N, Binding.KEY_M
+        };
+        int total = element.getGridRows() * element.getGridCols();
+        for (int i = 0; i < total; i++) {
+            element.setBindingAt(i, i < keys.length ? keys[i] : Binding.NONE);
+            element.setCombo(i, null);
+        }
+        profile.save();
+        inputControlsView.invalidate();
+    }
+
+    /** Fill grid with F1-F12 keys */
+    private void fillGridFKeys(ControlElement element) {
+        Binding[] keys = {
+            Binding.KEY_F1, Binding.KEY_F2, Binding.KEY_F3, Binding.KEY_F4,
+            Binding.KEY_F5, Binding.KEY_F6, Binding.KEY_F7, Binding.KEY_F8,
+            Binding.KEY_F9, Binding.KEY_F10, Binding.KEY_F11, Binding.KEY_F12
+        };
+        int total = element.getGridRows() * element.getGridCols();
+        for (int i = 0; i < total; i++) {
+            element.setBindingAt(i, i < keys.length ? keys[i] : Binding.NONE);
+            element.setCombo(i, null);
+        }
+        profile.save();
+        inputControlsView.invalidate();
+    }
+
+    /** Fill grid with NumPad layout: 7 8 9 / 4 5 6 * / 1 2 3 - / 0 . + Enter */
+    private void fillGridNumPad(ControlElement element) {
+        Binding[] keys = {
+            Binding.KEY_KP_7, Binding.KEY_KP_8, Binding.KEY_KP_9, Binding.KEY_KP_ADD,
+            Binding.KEY_KP_4, Binding.KEY_KP_5, Binding.KEY_KP_6, Binding.KEY_MINUS,
+            Binding.KEY_KP_1, Binding.KEY_KP_2, Binding.KEY_KP_3, Binding.KEY_ENTER,
+            Binding.KEY_KP_0, Binding.KEY_PERIOD, Binding.KEY_BKSP, Binding.KEY_ESC
+        };
+        int total = element.getGridRows() * element.getGridCols();
+        for (int i = 0; i < total; i++) {
+            element.setBindingAt(i, i < keys.length ? keys[i] : Binding.NONE);
+            element.setCombo(i, null);
+        }
+        profile.save();
+        inputControlsView.invalidate();
     }
 
     @Override
