@@ -19,11 +19,11 @@ import android.widget.FrameLayout;
 import android.widget.GridLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.PopupWindow;
 import android.widget.RadioGroup;
 import android.widget.SeekBar;
 import android.widget.Spinner;
 import android.widget.TextView;
+import android.graphics.Rect;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
@@ -126,18 +126,21 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
     }
 
     private void setBackgroundImageFromUri(Uri uri) {
-        try {
-            InputStream is = getContentResolver().openInputStream(uri);
-            if (is != null) {
-                Bitmap bitmap = BitmapFactory.decodeStream(is);
-                is.close();
-                if (bitmap != null) {
-                    inputControlsView.setBackgroundImage(bitmap);
-                    AppUtils.showToast(this, "Background image set");
-                }
+        try (InputStream is = getContentResolver().openInputStream(uri)) {
+            if (is == null) {
+                AppUtils.showToast(this, R.string.unable_to_load_image);
+                return;
+            }
+
+            Bitmap bitmap = BitmapFactory.decodeStream(is);
+            if (bitmap != null) {
+                inputControlsView.setBackgroundImage(bitmap);
+                AppUtils.showToast(this, R.string.background_image_set);
+            } else {
+                AppUtils.showToast(this, R.string.unable_to_load_image);
             }
         } catch (IOException e) {
-            AppUtils.showToast(this, "Failed to load image");
+            AppUtils.showToast(this, R.string.unable_to_load_image);
         }
     }
 
@@ -146,6 +149,7 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
     }
 
     private void showAddElementPicker() {
+        dismissActiveControlTypeDialog();
         View pickerView = LayoutInflater.from(this).inflate(R.layout.control_type_picker, null, false);
         GridLayout grid = pickerView.findViewById(R.id.GLControlTypePicker);
         if (grid == null) return;
@@ -231,8 +235,8 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
         cell.setOnClickListener(v -> {
             if (inputControlsView.addElement(type)) {
                 ControlElement selectedElement = inputControlsView.getSelectedElement();
+                dismissActiveControlTypeDialog();
                 if (selectedElement != null) showControlElementSettings(findViewById(R.id.BTElementSettings));
-                if (activeControlTypeDialog != null) activeControlTypeDialog.dismiss();
             } else {
                 AppUtils.showToast(this, R.string.no_profile_selected);
             }
@@ -243,29 +247,29 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
 
     private String getControlTypeLabel(ControlElement.Type type) {
         switch (type) {
-            case BUTTON: return "Button";
-            case D_PAD: return "D-Pad";
-            case RANGE_BUTTON: return "Range Button";
-            case STICK: return "Stick";
-            case TRACKPAD: return "Trackpad";
-            case DYNAMIC_STICK: return "Dynamic Stick";
-            case MOUSE_AREA: return "Mouse Area";
-            case BUTTON_GRID: return "Button Grid";
+            case BUTTON: return getString(R.string.control_type_button);
+            case D_PAD: return getString(R.string.control_type_d_pad);
+            case RANGE_BUTTON: return getString(R.string.control_type_range_button);
+            case STICK: return getString(R.string.control_type_stick);
+            case TRACKPAD: return getString(R.string.control_type_trackpad);
+            case DYNAMIC_STICK: return getString(R.string.control_type_dynamic_stick);
+            case MOUSE_AREA: return getString(R.string.control_type_mouse_area);
+            case BUTTON_GRID: return getString(R.string.control_type_button_grid);
             default: return type.name().replace('_', ' ');
         }
     }
 
     private void showBackgroundImageDialog() {
         new android.app.AlertDialog.Builder(this)
-            .setTitle("Set Background Image")
-            .setItems(new CharSequence[]{"Pick from files", "Clear background"}, (d, which) -> {
+            .setTitle(R.string.set_background_image)
+            .setItems(new CharSequence[]{getString(R.string.pick_from_files), getString(R.string.clear_background)}, (d, which) -> {
                 if (which == 0) {
                     new android.app.AlertDialog.Builder(this)
-                        .setItems(new CharSequence[]{"Browse files", "Pick via system…"}, (d2, which2) -> {
+                        .setItems(new CharSequence[]{getString(R.string.browse_files), getString(R.string.pick_via_system)}, (d2, which2) -> {
                             if (which2 == 0) {
                                 Intent intent = new Intent(this, FilePickerActivity.class);
                                 intent.putExtra(FilePickerActivity.EXTRA_EXTENSIONS, new String[]{"png", "jpg", "jpeg", "webp", "bmp"});
-                                intent.putExtra(FilePickerActivity.EXTRA_PICKER_TITLE, "Select background image");
+                                intent.putExtra(FilePickerActivity.EXTRA_PICKER_TITLE, getString(R.string.select_background_image));
                                 bgImagePickerInAppLauncher.launch(intent);
                             } else {
                                 bgImagePickerLauncher.launch("image/*");
@@ -274,7 +278,7 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
                         .show();
                 } else {
                     inputControlsView.setBackgroundImage(null);
-                    AppUtils.showToast(this, "Background cleared");
+                    AppUtils.showToast(this, R.string.background_cleared);
                 }
             })
             .show();
@@ -282,26 +286,34 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
 
     // Shared: add a custom icon from any Uri (file:// from the in-app picker, content:// from SAF).
     private void addCustomIconFromUri(Uri uri) {
-        if (currentLLCustomIconList != null) {
-            customIconManager.addCustomIcon(uri);
-            loadCustomIcons(currentLLCustomIconList, inputControlsView.getSelectedElement().getIconId());
-        }
+        ControlElement selectedElement = inputControlsView.getSelectedElement();
+        if (currentLLCustomIconList == null || selectedElement == null) return;
+
+        customIconManager.addCustomIcon(uri);
+        loadCustomIcons(currentLLCustomIconList, selectedElement.getIconId());
     }
 
     // Two-option chooser: built-in picker first, then system SAF.
     private void promptPickCustomIcon() {
         new android.app.AlertDialog.Builder(this)
-            .setItems(new CharSequence[]{"Browse files", "Pick via system…"}, (d, which) -> {
+            .setItems(new CharSequence[]{getString(R.string.browse_files), getString(R.string.pick_via_system)}, (d, which) -> {
                 if (which == 0) {
                     Intent intent = new Intent(this, FilePickerActivity.class);
                     intent.putExtra(FilePickerActivity.EXTRA_EXTENSIONS, new String[]{"png", "jpg", "jpeg", "webp", "bmp", "gif"});
-                    intent.putExtra(FilePickerActivity.EXTRA_PICKER_TITLE, "Select icon image");
+                    intent.putExtra(FilePickerActivity.EXTRA_PICKER_TITLE, getString(R.string.select_icon_image));
                     iconPickerInAppLauncher.launch(intent);
                 } else {
                     iconPickerLauncher.launch("image/*");
                 }
             })
             .show();
+    }
+
+    private void dismissActiveControlTypeDialog() {
+        if (activeControlTypeDialog != null) {
+            activeControlTypeDialog.dismiss();
+            activeControlTypeDialog = null;
+        }
     }
 
     @Override
@@ -343,7 +355,7 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
     private void showBackgroundOpacityDialog() {
         final LinearLayout ll = new LinearLayout(this);
         ll.setOrientation(LinearLayout.VERTICAL);
-        ll.setPadding(60, 30, 60, 0);
+        ll.setPadding((int) UnitUtils.dpToPx(24), (int) UnitUtils.dpToPx(16), (int) UnitUtils.dpToPx(24), 0);
 
         final SeekBar seekBar = new SeekBar(this);
         seekBar.setMax(100);
@@ -351,28 +363,29 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
         ll.addView(seekBar);
 
         final TextView tv = new TextView(this);
-        tv.setText("Opacity: " + (int)(inputControlsView.getBackgroundOpacity() * 100) + "%");
+        tv.setText(getString(R.string.opacity_percent, (int)(inputControlsView.getBackgroundOpacity() * 100)));
         ll.addView(tv);
 
         seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
                 float op = progress / 100f;
                 inputControlsView.setBackgroundOpacity(op);
-                tv.setText("Opacity: " + progress + "%");
+                tv.setText(getString(R.string.opacity_percent, progress));
             }
             public void onStartTrackingTouch(SeekBar sb) {}
             public void onStopTrackingTouch(SeekBar sb) {}
         });
 
         new android.app.AlertDialog.Builder(this)
-            .setTitle("Background Opacity")
+            .setTitle(R.string.background_opacity)
             .setView(ll)
-            .setPositiveButton("OK", null)
+            .setPositiveButton(R.string.ok, null)
             .show();
     }
 
     private void showControlElementSettings(View anchorView) {
         final ControlElement element = inputControlsView.getSelectedElement();
+        if (element == null || sidebarContent == null || sidebarScrollView == null || sidebarOverlay == null) return;
         if (sidebarOpen) saveSidebarState();
         View view = LayoutInflater.from(this).inflate(R.layout.control_element_settings, sidebarContent, false);
 
@@ -579,7 +592,7 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
                 }
             }
             List<String> keyLabels = new ArrayList<>();
-            keyLabels.add("None");
+            keyLabels.add(getString(R.string.none));
             for (Binding b : holdKeyBindings) keyLabels.add(b.toString());
             AccentArrayAdapter<String> holdKeyAdapter = new AccentArrayAdapter<>(this, R.layout.binding_spinner_item, keyLabels);
             holdKeyAdapter.setDropDownViewResource(R.layout.binding_spinner_dropdown_item);
@@ -607,19 +620,19 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
         if (llQuickFill != null) {
             llQuickFill.removeAllViews();
             final View settingsView = view; // capture for lambda
-            addQuickFillButton(llQuickFill, "Fill: QWERTY", () -> {
+            addQuickFillButton(llQuickFill, R.string.fill_qwerty, () -> {
                 fillGridQWERTY(element);
                 loadBindingSpinners(element, settingsView);
             });
-            addQuickFillButton(llQuickFill, "Fill: F1–F12", () -> {
+            addQuickFillButton(llQuickFill, R.string.fill_function_keys, () -> {
                 fillGridFKeys(element);
                 loadBindingSpinners(element, settingsView);
             });
-            addQuickFillButton(llQuickFill, "Fill: NumPad", () -> {
+            addQuickFillButton(llQuickFill, R.string.fill_numpad, () -> {
                 fillGridNumPad(element);
                 loadBindingSpinners(element, settingsView);
             });
-            addQuickFillButton(llQuickFill, "Clear", () -> {
+            addQuickFillButton(llQuickFill, R.string.clear, () -> {
                 prepareGridForFill(element);
                 int total = getGridCellCountForEditor(element);
                 for (int i = 0; i < total; i++) {
@@ -685,15 +698,18 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
 
         final float sidebarWidthPx = UnitUtils.dpToPx(300);
         final float screenWidth = getResources().getDisplayMetrics().widthPixels;
-        final float centerX = element.getX() + (element.getScale() * 60f) / 2f;
+        Rect elementBounds = element.getBoundingBox();
+        final float centerX = elementBounds != null && !elementBounds.isEmpty() ? elementBounds.centerX() : element.getX();
         sidebarOnRight = centerX <= screenWidth / 2f;
 
         boolean animateIn = !sidebarOpen || sidebarScrollView == null || sidebarScrollView.getVisibility() != View.VISIBLE;
 
         if (sidebarScrollView != null) {
-            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) sidebarScrollView.getLayoutParams();
-            lp.gravity = sidebarOnRight ? (Gravity.END | Gravity.TOP) : (Gravity.START | Gravity.TOP);
-            sidebarScrollView.setLayoutParams(lp);
+            if (sidebarScrollView.getLayoutParams() instanceof FrameLayout.LayoutParams) {
+                FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) sidebarScrollView.getLayoutParams();
+                lp.gravity = sidebarOnRight ? (Gravity.END | Gravity.TOP) : (Gravity.START | Gravity.TOP);
+                sidebarScrollView.setLayoutParams(lp);
+            }
             sidebarScrollView.animate().cancel();
             sidebarScrollView.setVisibility(View.VISIBLE);
             sidebarScrollView.setAlpha(1f);
@@ -789,7 +805,13 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
         List<Byte> iconIds = new ArrayList<>();
         try {
             String[] filenames = getAssets().list("inputcontrols/icons/");
-            for (String file : filenames) iconIds.add(Byte.parseByte(FileUtils.getBasename(file)));
+            if (filenames != null) {
+                for (String file : filenames) {
+                    try {
+                        iconIds.add(Byte.parseByte(FileUtils.getBasename(file)));
+                    } catch (NumberFormatException ignored) {}
+                }
+            }
         } catch (Exception e) {}
         Collections.sort(iconIds);
         addIconViewsToParent(parent, iconIds, selectedId, false);
@@ -824,14 +846,17 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
             }
 
             imageView.setOnClickListener(v -> {
-                // Deselect others in BOTH lists
-                View root = (View) parent.getParent().getParent().getParent();
-                clearSelection((LinearLayout) root.findViewById(R.id.LLIconList));
-                clearSelection((LinearLayout) root.findViewById(R.id.LLCustomIconList));
+                clearIconSelections();
                 v.setSelected(true);
             });
             parent.addView(imageView);
         }
+    }
+
+    private void clearIconSelections() {
+        if (sidebarSettingsView == null) return;
+        clearSelection(sidebarSettingsView.findViewById(R.id.LLIconList));
+        clearSelection(sidebarSettingsView.findViewById(R.id.LLCustomIconList));
     }
 
     private void clearSelection(LinearLayout layout) {
@@ -908,7 +933,7 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
             for (int i = 0; i < total; i++) {
                 int r = i / cols + 1;
                 int c = i % cols + 1;
-                String label = "R" + r + "C" + c;
+                String label = getString(R.string.binding_grid_cell_label, r, c);
                 loadBindingSpinner(element, container, i, label);
             }
         }
@@ -998,7 +1023,9 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
         final Binding[] modifierOptions = {
             Binding.KEY_CTRL_L, Binding.KEY_SHIFT_L, Binding.KEY_ALT_L
         };
-        final String[] modifierLabels = {"CTRL", "SHIFT", "ALT"};
+        final String[] modifierLabels = {
+            getString(R.string.ctrl), getString(R.string.shift), getString(R.string.alt)
+        };
         final boolean[] selectedModifiers = new boolean[3];
 
         // Pre-fill from existing combo
@@ -1047,16 +1074,16 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
         mainKeySpinner.setSelection(getBindingPosition(mainKeyValues, currentMain), false);
 
         TextView tvLabel = new TextView(this);
-        tvLabel.setText("Main key:");
+        tvLabel.setText(R.string.main_key);
         tvLabel.setTextColor(0xFFAAAAAA);
         tvLabel.setPadding(0, 20, 0, 8);
         ll.addView(tvLabel);
         ll.addView(mainKeySpinner);
 
         new android.app.AlertDialog.Builder(this)
-            .setTitle("Key Combo — " + getBindingLabel(element, index))
+            .setTitle(getString(R.string.key_combo_title, getBindingLabel(element, index)))
             .setView(ll)
-            .setPositiveButton("Save", (d, which) -> {
+            .setPositiveButton(R.string.save, (d, which) -> {
                 // Build combo array
                 List<Binding> comboList = new ArrayList<>();
                 for (int i = 0; i < modifierOptions.length; i++) {
@@ -1080,12 +1107,12 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
                 profile.save();
                 inputControlsView.invalidate();
             })
-            .setNegativeButton("Clear Combo", (d, which) -> {
+            .setNegativeButton(R.string.clear_combo, (d, which) -> {
                 element.setCombo(index, null);
                 profile.save();
                 inputControlsView.invalidate();
             })
-            .setNeutralButton("Cancel", null)
+            .setNeutralButton(R.string.cancel, null)
             .show();
     }
 
@@ -1094,9 +1121,9 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
             int cols = getGridColsForEditor(element);
             int r = index / cols + 1;
             int c = index % cols + 1;
-            return "R" + r + "C" + c;
+            return getString(R.string.binding_grid_cell_label, r, c);
         }
-        return "Binding " + (index + 1);
+        return getString(R.string.binding_slot_label, index + 1);
     }
 
     private int getBindingPosition(Binding[] values, Binding binding) {
@@ -1130,9 +1157,9 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
     }
 
     /** Add a small quick-fill button to a linear layout */
-    private void addQuickFillButton(LinearLayout parent, String label, Runnable action) {
+    private void addQuickFillButton(LinearLayout parent, int labelResId, Runnable action) {
         android.widget.Button btn = new android.widget.Button(this);
-        btn.setText(label);
+        btn.setText(labelResId);
         btn.setTextSize(11);
         btn.setAllCaps(false);
         btn.setPadding(12, 4, 12, 4);
@@ -1204,5 +1231,11 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
         }
         super.onBackPressed();
         overridePendingTransition(R.anim.slide_in_down, R.anim.slide_out_up);
+    }
+
+    @Override
+    protected void onDestroy() {
+        dismissActiveControlTypeDialog();
+        super.onDestroy();
     }
 }
