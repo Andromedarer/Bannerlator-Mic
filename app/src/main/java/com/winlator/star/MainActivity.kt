@@ -434,7 +434,10 @@ private fun AppShell(
                     avatarUrl = account?.displayAvatarUrl,
                     onNavClick = {
                         if (editInputControls) {
-                            navController.popBackStack()
+                            (context as? MainActivity)?.let { activity ->
+                                activity.setResult(android.app.Activity.RESULT_OK)
+                                activity.finish()
+                            }
                         } else {
                             scope.launch {
                                 if (drawerState.isOpen) drawerState.close() else drawerState.open()

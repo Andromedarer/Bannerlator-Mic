@@ -446,11 +446,26 @@ public class InputControlsView extends View {
     }
 
     public synchronized void setProfile(ControlsProfile profile) {
+        releaseActiveControls();
         if (profile != null) {
             this.profile = profile;
+            if (!profile.isElementsLoaded() && getWidth() > 0 && getHeight() > 0 && snappingSize > 0) profile.loadElements(this);
             deselectAllElements();
         }
         else this.profile = null;
+    }
+
+    public synchronized void releaseActiveControls() {
+        if (profile != null && profile.isElementsLoaded()) {
+            for (ControlElement element : profile.getElements()) {
+                element.releaseActiveInputs();
+            }
+        }
+        mouseMoveOffset.set(0, 0);
+        if (mouseMoveTimer != null) {
+            mouseMoveTimer.cancel();
+            mouseMoveTimer = null;
+        }
     }
 
     public boolean isShowTouchscreenControls() {

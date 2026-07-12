@@ -68,7 +68,7 @@ fun AppNavGraph(
         }
 
         composable(Screen.InputControls.route) {
-            InputControlsScreen()
+            InputControlsScreen(selectedProfileId = selectedInputProfileId)
         }
 
         composable(Screen.AdrenoTools.route) {

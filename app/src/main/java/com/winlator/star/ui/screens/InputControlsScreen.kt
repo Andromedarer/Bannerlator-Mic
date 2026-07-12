@@ -75,7 +75,7 @@ import org.json.JSONObject
 import java.util.concurrent.atomic.AtomicInteger
 
 @Composable
-fun InputControlsScreen() {
+fun InputControlsScreen(selectedProfileId: Int = 0) {
     val context = LocalContext.current
     val activity = context as? MainActivity
     val manager = remember { InputControlsManager(context) }
@@ -94,6 +94,9 @@ fun InputControlsScreen() {
 
     fun refreshProfiles() {
         profiles = manager.getProfiles()
+        if (currentProfile == null && selectedProfileId > 0) {
+            currentProfile = profiles.firstOrNull { it.id == selectedProfileId }
+        }
         val idx = if (currentProfile != null) {
             val i = profiles.indexOf(currentProfile)
             if (i >= 0) i + 1 else 0

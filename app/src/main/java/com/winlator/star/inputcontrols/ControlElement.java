@@ -1831,6 +1831,43 @@ public class ControlElement {
         }
     }
 
+    public void releaseActiveInputs() {
+        if (states != null) {
+            for (int i = 0; i < states.length; i++) {
+                if (states[i]) {
+                    releaseBindingSlot(i);
+                    states[i] = false;
+                }
+            }
+        }
+        if (type == Type.BUTTON && selected) {
+            releaseBindingSlot(0);
+            releaseBindingSlot(1);
+            selected = false;
+        }
+
+        if ((type == Type.TRACKPAD || type == Type.MOUSE_AREA || type == Type.STICK || type == Type.DYNAMIC_STICK) && getHoldKey() != Binding.NONE) {
+            inputControlsView.handleInputEvent(getHoldKey(), false);
+        }
+        if (type == Type.RANGE_BUTTON && scroller != null) {
+            scroller.handleTouchUp();
+        }
+        if (type == Type.DYNAMIC_STICK) {
+            stickVisible = false;
+            stickTarget = null;
+            visualStickX = 0;
+            visualStickY = 0;
+            lastFingerX = 0;
+            lastFingerY = 0;
+        }
+
+        currentPointerId = -1;
+        currentPosition = null;
+        mouseAreaLastPos = null;
+        touchTime = null;
+        inputControlsView.invalidate();
+    }
+
     public boolean handleTouchMove(int pointerId, float x, float y) {
         if (pointerId == currentPointerId && (type == Type.D_PAD || type == Type.STICK || type == Type.TRACKPAD || type == Type.DYNAMIC_STICK || type == Type.MOUSE_AREA || type == Type.BUTTON_GRID)) {
             float deltaX, deltaY;

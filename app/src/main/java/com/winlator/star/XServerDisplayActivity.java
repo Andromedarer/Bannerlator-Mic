@@ -2674,7 +2674,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
             editor.apply();
             if (timeout) startTouchscreenTimeout();
             else touchpadView.setOnTouchListener(null);
-            if (profileIndex > 0) showInputControls(inputControlsManager.getProfiles().get(profileIndex - 1));
+            ArrayList<ControlsProfile> currentProfiles = inputControlsManager.getProfiles(true);
+            if (profileIndex > 0 && profileIndex - 1 < currentProfiles.size()) showInputControls(currentProfiles.get(profileIndex - 1));
             else hideInputControls();
             // The active profile may have changed — re-seed the accent toggle/picker so the Controls
             // tab reflects the newly-selected profile's saved accent.
@@ -2910,7 +2911,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
             editor.apply();
             if (timeout) startTouchscreenTimeout();
             else touchpadView.setOnTouchListener(null);
-            if (profileIndex > 0) showInputControls(inputControlsManager.getProfiles().get(profileIndex - 1));
+            ArrayList<ControlsProfile> currentProfiles = inputControlsManager.getProfiles(true);
+            if (profileIndex > 0 && profileIndex - 1 < currentProfiles.size()) showInputControls(currentProfiles.get(profileIndex - 1));
             else hideInputControls();
             // The active profile may have changed — re-seed the accent toggle/picker so the Controls
             // tab reflects the newly-selected profile's saved accent.
