@@ -15,8 +15,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.selectable
@@ -81,6 +84,7 @@ fun ControlsEditorSettingsPane(
     profile: ControlsProfile,
     onInvalidate: () -> Unit,
     customIconManager: CustomIconManager,
+    customIconReloadKey: Int,
     activity: ControlsEditorActivity,
 ) {
     val typeOptions = remember { ControlElement.Type.names().toList() }
@@ -100,7 +104,7 @@ fun ControlsEditorSettingsPane(
     }
 
     val builtInIcons = remember(activity) { loadBuiltInIcons(activity) }
-    val customIcons = remember(activity) { loadCustomIcons(customIconManager) }
+    val customIcons = remember(activity, customIconReloadKey) { loadCustomIcons(customIconManager) }
 
     var typeIndex by remember { mutableIntStateOf(element.getType().ordinal) }
     var shapeIndex by remember { mutableIntStateOf(element.getShape().ordinal) }
@@ -609,19 +613,25 @@ fun SettingSpinner(
                 onDismissRequest = { expanded = false },
                 modifier = Modifier.background(EditorSurface, EditorShape),
             ) {
-                options.forEachIndexed { index, option ->
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                text = option,
-                                color = if (index == selectedIndex) EditorAccent else EditorText,
-                            )
-                        },
-                        onClick = {
-                            expanded = false
-                            onSelected(index)
-                        },
-                    )
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 320.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    options.forEachIndexed { index, option ->
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = option,
+                                    color = if (index == selectedIndex) EditorAccent else EditorText,
+                                )
+                            },
+                            onClick = {
+                                expanded = false
+                                onSelected(index)
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -746,6 +756,7 @@ internal fun IconPicker(
         items(icons, key = { it.id }) { icon ->
             val selected = icon.id == selectedId
             val border = if (selected) BorderStroke(2.dp, EditorAccent) else BorderStroke(1.dp, Color.White.copy(alpha = 0.12f))
+            val imageBitmap = remember(icon.bitmap) { icon.bitmap?.asImageBitmap() }
             Surface(
                 shape = EditorShape,
                 color = if (selected) EditorSurface else Color.Transparent,
@@ -755,10 +766,9 @@ internal fun IconPicker(
                     .clickable { onSelected(icon.id) },
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    val bitmap = icon.bitmap
-                    if (bitmap != null) {
+                    if (imageBitmap != null) {
                         androidx.compose.foundation.Image(
-                            bitmap = bitmap.asImageBitmap(),
+                            bitmap = imageBitmap,
                             contentDescription = "Icon ${icon.id}",
                             modifier = Modifier.size(32.dp),
                         )
@@ -823,7 +833,7 @@ fun ComboEditor(
 
         AlertDialog(
             onDismissRequest = { openIndex = -1 },
-            title = { Text(text = stringResource(R.string.key_combo_title, comboLabelFor(element, index)), color = EditorText) },
+            title = { Text(text = stringResource(R.string.key_combo_title, comboLabelFor(element, index).replace("%", "%%")), color = EditorText) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {

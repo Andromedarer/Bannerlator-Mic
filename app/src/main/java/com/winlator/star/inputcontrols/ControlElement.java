@@ -203,16 +203,35 @@ public class ControlElement {
     }
 
     public void setBindingCount(int bindingCount) {
-        resetBindingArrays(bindingCount);
+        resizeBindingArrays(bindingCount, true);
     }
 
     private void resetBindingArrays(int bindingCount) {
-        int safeBindingCount = Math.max(0, bindingCount);
-        bindings = new Binding[safeBindingCount];
-        Arrays.fill(bindings, Binding.NONE);
-        states = new boolean[safeBindingCount];
-        comboBindings = null;
-        cellPressTimes = null;
+        resizeBindingArrays(bindingCount, false);
+    }
+
+    private void resizeBindingArrays(int bindingCount, boolean preserveExisting) {
+        int safeBindingCount = Math.max(1, bindingCount);
+        if (preserveExisting && bindings != null) {
+            Binding[] oldBindings = bindings;
+            boolean[] oldStates = states;
+            Binding[][] oldComboBindings = comboBindings;
+            long[] oldCellPressTimes = cellPressTimes;
+
+            bindings = Arrays.copyOf(oldBindings, safeBindingCount);
+            if (oldBindings.length < safeBindingCount) {
+                Arrays.fill(bindings, oldBindings.length, safeBindingCount, Binding.NONE);
+            }
+            states = oldStates != null ? Arrays.copyOf(oldStates, safeBindingCount) : new boolean[safeBindingCount];
+            comboBindings = oldComboBindings != null ? Arrays.copyOf(oldComboBindings, safeBindingCount) : null;
+            cellPressTimes = oldCellPressTimes != null ? Arrays.copyOf(oldCellPressTimes, safeBindingCount) : null;
+        } else {
+            bindings = new Binding[safeBindingCount];
+            Arrays.fill(bindings, Binding.NONE);
+            states = new boolean[safeBindingCount];
+            comboBindings = null;
+            cellPressTimes = null;
+        }
         boundingBoxNeedsUpdate = true;
     }
 
@@ -277,9 +296,9 @@ public class ControlElement {
     public float getMouseSensitivity() { return mouseSensitivity; }
     public void setMouseSensitivity(float s) { this.mouseSensitivity = Math.max(0.1f, s); }
     public int getGridRows() { return gridRows; }
-    public void setGridRows(int gridRows) { this.gridRows = Math.max(0, gridRows); boundingBoxNeedsUpdate = true; }
+    public void setGridRows(int gridRows) { this.gridRows = Math.max(1, gridRows); boundingBoxNeedsUpdate = true; }
     public int getGridCols() { return gridCols; }
-    public void setGridCols(int gridCols) { this.gridCols = Math.max(0, gridCols); boundingBoxNeedsUpdate = true; }
+    public void setGridCols(int gridCols) { this.gridCols = Math.max(1, gridCols); boundingBoxNeedsUpdate = true; }
     public Shape getGridCellShape() { return gridCellShape != null ? gridCellShape : Shape.ROUND_RECT; }
     public void setGridCellShape(Shape s) { this.gridCellShape = s != null ? s : Shape.ROUND_RECT; }
     public Binding[] getCombo(int index) { return (comboBindings != null && index >= 0 && index < comboBindings.length) ? comboBindings[index] : null; }

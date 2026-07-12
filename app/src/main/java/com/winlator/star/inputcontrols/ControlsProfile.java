@@ -297,6 +297,7 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
                         int rows = element.getGridRows() > 0 ? element.getGridRows() : 2;
                         int cols = element.getGridCols() > 0 ? element.getGridCols() : 8;
                         element.setBindingCount(rows * cols);
+                        element.setBinding(Binding.NONE);
                     }
 
                     boolean hasLoadedBinding = false;

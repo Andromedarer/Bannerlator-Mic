@@ -60,8 +60,10 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
     private View sidebarOverlay;
     private View sidebarScrollView;
     private LinearLayout sidebarContent;
+    private ComposeView sidebarComposeView;
     private boolean sidebarOpen = false;
     private boolean sidebarOnRight = false;
+    private int sidebarSettingsReloadKey = 0;
     private android.app.AlertDialog activeControlTypeDialog;
 
     @Override
@@ -173,6 +175,7 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
             Bitmap bitmap = BitmapFactory.decodeStream(is);
             if (bitmap != null) {
                 inputControlsView.setBackgroundImage(bitmap);
+                refreshSidebarSettings();
                 AppUtils.showToast(this, R.string.background_image_set);
             } else {
                 AppUtils.showToast(this, R.string.unable_to_load_image);
@@ -328,6 +331,7 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
         if (selectedElement == null) return;
 
         customIconManager.addCustomIcon(uri);
+        refreshSidebarSettings();
     }
 
     // Two-option chooser: built-in picker first, then system SAF.
@@ -354,7 +358,11 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
     }
 
     private void removeElement() {
-        if (!inputControlsView.removeElement()) AppUtils.showToast(this, R.string.no_control_element_selected);
+        if (inputControlsView.removeElement()) {
+            closeSidebar();
+        } else {
+            AppUtils.showToast(this, R.string.no_control_element_selected);
+        }
     }
 
     @Override
@@ -429,31 +437,8 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
         if (element == null || sidebarContent == null || sidebarScrollView == null || sidebarOverlay == null) return;
         if (sidebarOpen) saveSidebarState();
 
-        ComposeView composeView = new ComposeView(this);
-        composeView.setContent(new Function2<Composer, Integer, Unit>() {
-            @Override
-            public Unit invoke(Composer composer, Integer changed) {
-                ControlsEditorSettingsPaneKt.ControlsEditorSettingsPane(
-                    element,
-                    profile,
-                    new Function0<Unit>() {
-                        @Override
-                        public Unit invoke() {
-                            inputControlsView.invalidate();
-                            return Unit.INSTANCE;
-                        }
-                    },
-                    customIconManager,
-                    ControlsEditorActivity.this,
-                    composer,
-                    0
-                );
-                return Unit.INSTANCE;
-            }
-        });
-
-        sidebarContent.removeAllViews();
-        sidebarContent.addView(composeView);
+        sidebarComposeView = ensureSidebarComposeView();
+        bindSidebarSettings(element);
 
         final float sidebarWidthPx = UnitUtils.dpToPx(300);
         final float screenWidth = getResources().getDisplayMetrics().widthPixels;
@@ -498,6 +483,51 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
         sidebarOpen = true;
     }
 
+    private ComposeView ensureSidebarComposeView() {
+        if (sidebarComposeView == null) {
+            sidebarComposeView = new ComposeView(this);
+        }
+        if (sidebarComposeView.getParent() == null && sidebarContent != null) {
+            sidebarContent.addView(sidebarComposeView);
+        }
+        return sidebarComposeView;
+    }
+
+    private void bindSidebarSettings(final ControlElement element) {
+        if (sidebarComposeView == null) return;
+        final int reloadKey = sidebarSettingsReloadKey;
+        sidebarComposeView.setContent(new Function2<Composer, Integer, Unit>() {
+            @Override
+            public Unit invoke(Composer composer, Integer changed) {
+                ControlsEditorSettingsPaneKt.ControlsEditorSettingsPane(
+                    element,
+                    profile,
+                    new Function0<Unit>() {
+                        @Override
+                        public Unit invoke() {
+                            inputControlsView.invalidate();
+                            return Unit.INSTANCE;
+                        }
+                    },
+                    customIconManager,
+                    reloadKey,
+                    ControlsEditorActivity.this,
+                    composer,
+                    0
+                );
+                return Unit.INSTANCE;
+            }
+        });
+    }
+
+    private void refreshSidebarSettings() {
+        if (sidebarScrollView == null || sidebarScrollView.getVisibility() != View.VISIBLE) return;
+        ControlElement selectedElement = inputControlsView.getSelectedElement();
+        if (selectedElement == null) return;
+        sidebarSettingsReloadKey++;
+        ensureSidebarComposeView();
+        bindSidebarSettings(selectedElement);
+    }
     private void saveSidebarState() {
         profile.save();
     }
@@ -537,11 +567,11 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
 
 
     private int getGridRowsForEditor(ControlElement element) {
-        return element.getGridRows() > 0 ? element.getGridRows() : DEFAULT_GRID_ROWS;
+        return Math.max(1, element.getGridRows());
     }
 
     private int getGridColsForEditor(ControlElement element) {
-        return element.getGridCols() > 0 ? element.getGridCols() : DEFAULT_GRID_COLS;
+        return Math.max(1, element.getGridCols());
     }
 
     private int getGridCellCountForEditor(ControlElement element) {
@@ -554,6 +584,7 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
     }
 
     void clearGridCell(ControlElement element, int index) {
+        if (index < 0 || index >= element.getBindingCount()) return;
         element.setBindingAt(index, Binding.NONE);
         element.setCombo(index, null);
     }
@@ -573,6 +604,7 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
         }
         profile.save();
         inputControlsView.invalidate();
+        refreshSidebarSettings();
     }
 
     /** Fill grid with F1-F12 keys */
@@ -590,6 +622,7 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
         }
         profile.save();
         inputControlsView.invalidate();
+        refreshSidebarSettings();
     }
 
     /** Fill grid with NumPad layout: 7 8 9 / 4 5 6 * / 1 2 3 - / 0 . + Enter */
@@ -608,6 +641,7 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
         }
         profile.save();
         inputControlsView.invalidate();
+        refreshSidebarSettings();
     }
 
     @Override
