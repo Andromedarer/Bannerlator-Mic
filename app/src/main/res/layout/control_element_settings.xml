@@ -16,7 +16,7 @@
             android:text="@string/type" />
 
         <Spinner
-            style="@style/ComboBox"
+            style="@style/ComboBox.Dark"
             android:id="@+id/SType"
             android:layout_width="match_parent"
             android:spinnerMode="dialog" />
@@ -33,7 +33,7 @@
                 android:text="@string/shape" />
 
             <Spinner
-                style="@style/ComboBox"
+                style="@style/ComboBox.Dark"
                 android:id="@+id/SShape"
                 android:layout_width="match_parent"
                 android:spinnerMode="dialog" />
@@ -75,7 +75,7 @@
                 android:text="@string/range" />
 
             <Spinner
-                style="@style/ComboBox"
+                style="@style/ComboBox.Dark"
                 android:id="@+id/SRange"
                 android:layout_width="match_parent"
                 android:spinnerMode="dialog" />
@@ -361,7 +361,7 @@
                 android:layout_marginTop="8dp" />
 
             <Spinner
-                style="@style/ComboBox"
+                style="@style/ComboBox.Dark"
                 android:id="@+id/SGridCellShape"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -402,7 +402,7 @@
                 android:text="@string/binding_up" />
 
             <Spinner
-                style="@style/ComboBox"
+                style="@style/ComboBox.Dark"
                 android:id="@+id/SBindingUp"
                 android:layout_width="match_parent"
                 android:spinnerMode="dialog" />
@@ -413,7 +413,7 @@
                 android:text="@string/binding_right" />
 
             <Spinner
-                style="@style/ComboBox"
+                style="@style/ComboBox.Dark"
                 android:id="@+id/SBindingRight"
                 android:layout_width="match_parent"
                 android:spinnerMode="dialog" />
@@ -424,7 +424,7 @@
                 android:text="@string/binding_down" />
 
             <Spinner
-                style="@style/ComboBox"
+                style="@style/ComboBox.Dark"
                 android:id="@+id/SBindingDown"
                 android:layout_width="match_parent"
                 android:spinnerMode="dialog" />
@@ -435,7 +435,7 @@
                 android:text="@string/binding_left" />
 
             <Spinner
-                style="@style/ComboBox"
+                style="@style/ComboBox.Dark"
                 android:id="@+id/SBindingLeft"
                 android:layout_width="match_parent"
                 android:spinnerMode="dialog" />
@@ -459,7 +459,7 @@
                 android:text="@string/custom_text" />
 
             <EditText
-                style="@style/EditText"
+                style="@style/EditText.Dark"
                 android:id="@+id/ETCustomText"
                 android:maxLength="8"
                 android:layout_width="match_parent"

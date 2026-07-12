@@ -9,6 +9,7 @@ import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.Gravity;
+import android.view.ContextThemeWrapper;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.animation.DecelerateInterpolator;
@@ -444,7 +445,7 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
         final ControlElement element = inputControlsView.getSelectedElement();
         if (element == null || sidebarContent == null || sidebarScrollView == null || sidebarOverlay == null) return;
         if (sidebarOpen) saveSidebarState();
-        View view = LayoutInflater.from(this).inflate(R.layout.control_element_settings, sidebarContent, false);
+        View view = LayoutInflater.from(new ContextThemeWrapper(this, R.style.AppTheme_Dark)).inflate(R.layout.control_element_settings, sidebarContent, false);
 
         final Runnable updateLayout = () -> {
             ControlElement.Type type = element.getType();
