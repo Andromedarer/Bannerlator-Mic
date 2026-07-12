@@ -1,5 +1,6 @@
 package com.winlator.star.communityconfigs
 
+import com.winlator.star.winhandler.WinHandler
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -41,7 +42,7 @@ object ConfigExporter {
         "screenSize", "renderer", "renderScale", "sfCompatMode", "fullscreenMode", "frameGenEngine",
         "fpsLimiterEnabled", "sharpnessEffect", "sharpnessLevel", "sharpnessDenoise", "reshadeLoadout",
         "reshadeMode", "reshadeParams", "reshadeEffect", "emulator", "box64Version", "box64Preset",
-        "fexcorePreset", "cpuList", "startupSelection", "exclusiveXInput", "disableXinput",
+        "fexcorePreset", "cpuList", "startupSelection", "inputType", "exclusiveXInput", "disableXinput",
         "simTouchScreen", "numControllers", "controlsProfile", "wincomponents", "midiSoundFont",
         "lc_all", "autoCloseOnExit",
     )
@@ -104,9 +105,13 @@ object ConfigExporter {
         effective["audioDriver"].nonBlank()?.let {
             settings.put("pc_ls_AUDIO_DRIVER", if (it == "pulseaudio") "1" else "0")
         }
-        // inputType "1"/"0" → xinput-enabled boolean.
+        // inputType is a BITMASK (FLAG_INPUT_TYPE_XINPUT = 0x04, FLAG_INPUT_TYPE_DINPUT = 0x08), NOT a
+        // 1/0 flag — an XInput-on shortcut reads "4", never "1". Export the boolean from the XInput bit.
+        // (The raw inputType is also carried in bl_ext below, so DInput/combined states round-trip exactly
+        // on our configs; this boolean is the BannerHub-compatible fallback.)
         effective["inputType"].nonBlank()?.let {
-            settings.put("pc_ls_update_enable_xinput", it == "1")
+            val v = it.toIntOrNull() ?: WinHandler.DEFAULT_INPUT_TYPE.toInt()
+            settings.put("pc_ls_update_enable_xinput", (v and WinHandler.FLAG_INPUT_TYPE_XINPUT.toInt()) != 0)
         }
         effective["envVars"].nonBlank()?.let { settings.put("pc_ls_environment_variable", it) }
         effective["execArgs"].nonBlank()?.let { settings.put("pc_ls_boot_option", it) }
