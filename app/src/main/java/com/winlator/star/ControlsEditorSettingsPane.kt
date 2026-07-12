@@ -11,25 +11,19 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenuItem
@@ -38,8 +32,6 @@ import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
@@ -56,7 +48,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
@@ -167,6 +158,20 @@ fun ControlsEditorSettingsPane(
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = { activity.closeSidebar() }) {
+                Icon(
+                    imageVector = Icons.Filled.Close,
+                    contentDescription = stringResource(android.R.string.cancel),
+                    tint = EditorText,
+                )
+            }
+        }
+
         SettingsSection(title = stringResource(R.string.type), visible = true) {
             SettingSpinner(
                 label = stringResource(R.string.type),
@@ -441,7 +446,6 @@ fun ControlsEditorSettingsPane(
                         profile = profile,
                         onInvalidate = onInvalidate,
                         activity = activity,
-                        selectedIconId = selectedIconId,
                     )
 
                     val total = gridRows * gridCols
@@ -771,10 +775,9 @@ fun ComboEditor(
     profile: ControlsProfile,
     onInvalidate: () -> Unit,
     activity: ControlsEditorActivity,
-    selectedIconId: Int,
     modifier: Modifier = Modifier,
 ) {
-    var openIndex by remember { mutableIntStateOf(-1) }
+    var openIndex by remember(element) { mutableIntStateOf(-1) }
     val total = element.getGridRows().coerceAtLeast(1) * element.getGridCols().coerceAtLeast(1)
 
     SettingsSection(title = "Combo Bindings", visible = true) {

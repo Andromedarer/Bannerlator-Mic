@@ -9,20 +9,14 @@ import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.Gravity;
-import android.view.ContextThemeWrapper;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.animation.DecelerateInterpolator;
-import android.widget.AdapterView;
-import android.widget.CheckBox;
-import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.GridLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.RadioGroup;
 import android.widget.SeekBar;
-import android.widget.Spinner;
 import android.widget.TextView;
 import android.graphics.Rect;
 
@@ -38,19 +32,12 @@ import com.winlator.star.inputcontrols.ControlElement;
 import com.winlator.star.inputcontrols.ControlsProfile;
 import com.winlator.star.inputcontrols.InputControlsManager;
 import com.winlator.star.inputcontrols.CustomIconManager;
-import com.winlator.star.math.Mathf;
 import com.winlator.star.core.AppUtils;
-import com.winlator.star.core.FileUtils;
 import com.winlator.star.core.UnitUtils;
-import com.winlator.star.widget.AccentArrayAdapter;
 import com.winlator.star.widget.InputControlsView;
-import com.winlator.star.widget.NumberPicker;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
 
 import kotlin.Unit;
 import kotlin.jvm.functions.Function0;
@@ -65,7 +52,6 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
     private CustomIconManager customIconManager;
     private ActivityResultLauncher<String> iconPickerLauncher;
     private ActivityResultLauncher<Intent> iconPickerInAppLauncher;
-    private LinearLayout currentLLCustomIconList; // To refresh UI after picking
 
     // Background image picker
     private ActivityResultLauncher<String> bgImagePickerLauncher;
@@ -74,8 +60,6 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
     private View sidebarOverlay;
     private View sidebarScrollView;
     private LinearLayout sidebarContent;
-    private View sidebarSettingsView;
-    private ControlElement sidebarEditingElement;
     private boolean sidebarOpen = false;
     private boolean sidebarOnRight = false;
     private android.app.AlertDialog activeControlTypeDialog;
@@ -341,10 +325,9 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
     // Shared: add a custom icon from any Uri (file:// from the in-app picker, content:// from SAF).
     private void addCustomIconFromUri(Uri uri) {
         ControlElement selectedElement = inputControlsView.getSelectedElement();
-        if (currentLLCustomIconList == null || selectedElement == null) return;
+        if (selectedElement == null) return;
 
         customIconManager.addCustomIcon(uri);
-        loadCustomIcons(currentLLCustomIconList, selectedElement.getIconId());
     }
 
     // Two-option chooser: built-in picker first, then system SAF.
@@ -471,8 +454,6 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
 
         sidebarContent.removeAllViews();
         sidebarContent.addView(composeView);
-        sidebarSettingsView = composeView;
-        sidebarEditingElement = element;
 
         final float sidebarWidthPx = UnitUtils.dpToPx(300);
         final float screenWidth = getResources().getDisplayMetrics().widthPixels;
@@ -521,7 +502,7 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
         profile.save();
     }
 
-    private void closeSidebar() {
+    public void closeSidebar() {
         if (sidebarScrollView == null || sidebarOverlay == null) return;
         if (sidebarScrollView.getVisibility() != View.VISIBLE) return;
 
@@ -548,355 +529,12 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
                     sidebarOverlay.setVisibility(View.GONE);
                     sidebarScrollView.setAlpha(1f);
                     sidebarOverlay.setAlpha(1f);
-                    sidebarSettingsView = null;
-                    sidebarEditingElement = null;
                     sidebarScrollView.animate().setListener(null);
                 }
             })
             .start();
     }
 
-    private short getSelectedIdFromList(LinearLayout parent) {
-        for (int i = 0; i < parent.getChildCount(); i++) {
-            View child = parent.getChildAt(i);
-            if (child.isSelected()) return (short)child.getTag();
-        }
-        return 0;
-    }
-
-    private void loadIcons(final LinearLayout parent, int selectedId) {
-        parent.removeAllViews();
-        List<Byte> iconIds = new ArrayList<>();
-        try {
-            String[] filenames = getAssets().list("inputcontrols/icons/");
-            if (filenames != null) {
-                for (String file : filenames) {
-                    try {
-                        iconIds.add(Byte.parseByte(FileUtils.getBasename(file)));
-                    } catch (NumberFormatException ignored) {}
-                }
-            }
-        } catch (Exception e) {}
-        Collections.sort(iconIds);
-        addIconViewsToParent(parent, iconIds, selectedId, false);
-    }
-
-    private void loadCustomIcons(final LinearLayout parent, int selectedId) {
-        parent.removeAllViews();
-        List<Short> iconIds = customIconManager.getCustomIconIds();
-        addIconViewsToParent(parent, iconIds, selectedId, true);
-    }
-
-    private void addIconViewsToParent(LinearLayout parent, List<? extends Number> ids, int selectedId, boolean isCustom) {
-        int size = (int)UnitUtils.dpToPx(40);
-        int margin = (int)UnitUtils.dpToPx(2);
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(size, size);
-        params.setMargins(margin, 0, margin, 0);
-
-        for (Number idObj : ids) {
-            final short id = idObj.shortValue();
-            ImageView imageView = new ImageView(this);
-            imageView.setLayoutParams(params);
-            imageView.setPadding(4, 4, 4, 4);
-            imageView.setBackgroundResource(R.drawable.icon_background);
-            imageView.setTag(id);
-            imageView.setSelected(id == selectedId);
-
-            if (isCustom) imageView.setImageBitmap(customIconManager.loadIcon(id));
-            else {
-                try (InputStream is = getAssets().open("inputcontrols/icons/" + id + ".png")) {
-                    imageView.setImageBitmap(BitmapFactory.decodeStream(is));
-                } catch (IOException e) {}
-            }
-
-            imageView.setOnClickListener(v -> {
-                clearIconSelections();
-                v.setSelected(true);
-            });
-            parent.addView(imageView);
-        }
-    }
-
-    private void clearIconSelections() {
-        if (sidebarSettingsView == null) return;
-        clearSelection(sidebarSettingsView.findViewById(R.id.LLIconList));
-        clearSelection(sidebarSettingsView.findViewById(R.id.LLCustomIconList));
-    }
-
-    private void clearSelection(LinearLayout layout) {
-        if (layout == null) return;
-        for (int i = 0; i < layout.getChildCount(); i++) layout.getChildAt(i).setSelected(false);
-    }
-
-    // --- REMAINDER OF YOUR SPINNER/BINDING LOGIC ---
-    private void loadTypeSpinner(final ControlElement element, Spinner spinner, Runnable callback) {
-        if (spinner == null) return;
-        AccentArrayAdapter<String> adapter = new AccentArrayAdapter<>(this, R.layout.binding_spinner_item, ControlElement.Type.names());
-        adapter.setDropDownViewResource(R.layout.binding_spinner_dropdown_item);
-        spinner.setAdapter(adapter);
-        spinner.setSelection(element.getType().ordinal(), false);
-        spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                element.setType(ControlElement.Type.values()[position]);
-                profile.save();
-                callback.run();
-                inputControlsView.invalidate();
-            }
-            @Override public void onNothingSelected(AdapterView<?> parent) {}
-        });
-    }
-
-    private void loadShapeSpinner(final ControlElement element, Spinner spinner) {
-        if (spinner == null) return;
-        AccentArrayAdapter<String> adapter = new AccentArrayAdapter<>(this, R.layout.binding_spinner_item, ControlElement.Shape.names());
-        adapter.setDropDownViewResource(R.layout.binding_spinner_dropdown_item);
-        spinner.setAdapter(adapter);
-        spinner.setSelection(element.getShape().ordinal(), false);
-        spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                element.setShape(ControlElement.Shape.values()[position]);
-                profile.save();
-                inputControlsView.invalidate();
-            }
-            @Override public void onNothingSelected(AdapterView<?> parent) {}
-        });
-    }
-
-    private void loadRangeSpinner(final ControlElement element, Spinner spinner) {
-        if (spinner == null) return;
-        AccentArrayAdapter<String> adapter = new AccentArrayAdapter<>(this, R.layout.binding_spinner_item, ControlElement.Range.names());
-        adapter.setDropDownViewResource(R.layout.binding_spinner_dropdown_item);
-        spinner.setAdapter(adapter);
-        spinner.setSelection(element.getRange().ordinal(), false);
-        spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                element.setRange(ControlElement.Range.values()[position]);
-                profile.save();
-                inputControlsView.invalidate();
-            }
-            @Override public void onNothingSelected(AdapterView<?> parent) {}
-        });
-    }
-
-    private void loadBindingSpinners(ControlElement element, View view) {
-        LinearLayout container = view.findViewById(R.id.LLBindings);
-        if (container == null) return;
-        container.removeAllViews();
-        ControlElement.Type type = element.getType();
-        if (type == ControlElement.Type.BUTTON) loadBindingSpinner(element, container, 0, R.string.binding);
-        else if (type == ControlElement.Type.D_PAD || type == ControlElement.Type.STICK || type == ControlElement.Type.TRACKPAD || type == ControlElement.Type.DYNAMIC_STICK) {
-            loadBindingSpinner(element, container, 0, R.string.binding_up);
-            loadBindingSpinner(element, container, 1, R.string.binding_right);
-            loadBindingSpinner(element, container, 2, R.string.binding_down);
-            loadBindingSpinner(element, container, 3, R.string.binding_left);
-        }
-        else if (type == ControlElement.Type.BUTTON_GRID) {
-            int rows = getGridRowsForEditor(element);
-            int cols = getGridColsForEditor(element);
-            int total = rows * cols;
-            for (int i = 0; i < total; i++) {
-                int r = i / cols + 1;
-                int c = i % cols + 1;
-                String label = getString(R.string.binding_grid_cell_label, r, c);
-                loadBindingSpinner(element, container, i, label);
-            }
-        }
-    }
-
-    private void loadBindingSpinner(final ControlElement element, LinearLayout container, final int index, String title) {
-        View bindingView = LayoutInflater.from(this).inflate(R.layout.binding_field, container, false);
-        ((TextView)bindingView.findViewById(R.id.TVTitle)).setText(title);
-        wireBindingSpinner(element, bindingView, container, index);
-    }
-
-    private void loadBindingSpinner(final ControlElement element, LinearLayout container, final int index, int titleResId) {
-        View bindingView = LayoutInflater.from(this).inflate(R.layout.binding_field, container, false);
-        ((TextView)bindingView.findViewById(R.id.TVTitle)).setText(titleResId);
-        wireBindingSpinner(element, bindingView, container, index);
-    }
-
-    private void wireBindingSpinner(final ControlElement element, View view, LinearLayout container, final int index) {
-        final Spinner sBindingType = view.findViewById(R.id.SBindingType);
-        final Spinner sBinding = view.findViewById(R.id.SBinding);
-
-        // Set the binding-type adapter in code (was android:entries in XML) so it uses
-        // our blue-text item layouts and stays readable on a black background.
-        // AccentArrayAdapter routes binding_spinner_item's colorPrimary text to the
-        // runtime theme accent (was static #0055FF baked at inflation).
-        AccentArrayAdapter<CharSequence> typeAdapter = new AccentArrayAdapter<>(
-                this, R.layout.binding_spinner_item, getResources().getTextArray(R.array.binding_type_entries));
-        typeAdapter.setDropDownViewResource(R.layout.binding_spinner_dropdown_item);
-        sBindingType.setAdapter(typeAdapter);
-
-        Runnable update = () -> {
-            String[] bindingEntries = null;
-            switch (sBindingType.getSelectedItemPosition()) {
-                case 0: bindingEntries = Binding.keyboardBindingLabels(); break;
-                case 1: bindingEntries = Binding.mouseBindingLabels(); break;
-                case 2: bindingEntries = Binding.gamepadBindingLabels(); break;
-            }
-            AccentArrayAdapter<String> bindingAdapter =
-                    new AccentArrayAdapter<>(this, R.layout.binding_spinner_item, bindingEntries);
-            bindingAdapter.setDropDownViewResource(R.layout.binding_spinner_dropdown_item);
-            sBinding.setAdapter(bindingAdapter);
-            AppUtils.setSpinnerSelectionFromValue(sBinding, element.getBindingAt(index).toString());
-        };
-
-        sBindingType.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) { update.run(); }
-            @Override public void onNothingSelected(AdapterView<?> parent) {}
-        });
-
-        Binding selectedBinding = element.getBindingAt(index);
-        if (selectedBinding.isKeyboard()) sBindingType.setSelection(0, false);
-        else if (selectedBinding.isMouse()) sBindingType.setSelection(1, false);
-        else if (selectedBinding.isGamepad()) sBindingType.setSelection(2, false);
-
-        sBinding.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                Binding binding = Binding.NONE;
-                switch (sBindingType.getSelectedItemPosition()) {
-                    case 0: binding = Binding.keyboardBindingValues()[position]; break;
-                    case 1: binding = Binding.mouseBindingValues()[position]; break;
-                    case 2: binding = Binding.gamepadBindingValues()[position]; break;
-                }
-                if (binding != element.getBindingAt(index)) {
-                    element.setBindingAt(index, binding);
-                    profile.save();
-                    inputControlsView.invalidate();
-                }
-            }
-            @Override public void onNothingSelected(AdapterView<?> parent) {}
-        });
-        update.run();
-
-        if (element.getType() == ControlElement.Type.BUTTON_GRID) {
-            // Long-press on grid binding rows to set a key combo.
-            view.setOnLongClickListener(v -> {
-                showComboEditorDialog(element, index);
-                return true;
-            });
-        }
-
-        container.addView(view);
-    }
-
-    /** Show dialog to configure a multi-key combo for a binding slot */
-    private void showComboEditorDialog(final ControlElement element, final int index) {
-        // Get modifier keys (CTRL, SHIFT, ALT) and main key options
-        final Binding[] modifierOptions = {
-            Binding.KEY_CTRL_L, Binding.KEY_SHIFT_L, Binding.KEY_ALT_L
-        };
-        final String[] modifierLabels = {
-            getString(R.string.ctrl), getString(R.string.shift), getString(R.string.alt)
-        };
-        final boolean[] selectedModifiers = new boolean[3];
-
-        // Pre-fill from existing combo
-        Binding[] existingCombo = element.getCombo(index);
-        if (existingCombo != null) {
-            for (Binding b : existingCombo) {
-                for (int i = 0; i < modifierOptions.length; i++) {
-                    if (b == modifierOptions[i]) selectedModifiers[i] = true;
-                }
-            }
-        }
-
-        LinearLayout ll = new LinearLayout(this);
-        ll.setOrientation(LinearLayout.VERTICAL);
-        ll.setPadding(40, 20, 40, 0);
-
-        // Checkboxes for modifiers
-        for (int i = 0; i < modifierOptions.length; i++) {
-            CheckBox cb = new CheckBox(this);
-            cb.setText(modifierLabels[i]);
-            cb.setChecked(selectedModifiers[i]);
-            final int idx = i;
-            cb.setOnCheckedChangeListener((btn, checked) -> selectedModifiers[idx] = checked);
-            ll.addView(cb);
-        }
-
-        // Spinner for main key
-        final Spinner mainKeySpinner = new Spinner(this);
-        final Binding[] mainKeyValues = Binding.keyboardBindingValues();
-        String[] allKeyLabels = new String[mainKeyValues.length];
-        for (int i = 0; i < mainKeyValues.length; i++) allKeyLabels[i] = mainKeyValues[i].toString();
-        AccentArrayAdapter<String> keyAdapter = new AccentArrayAdapter<>(this, R.layout.binding_spinner_item, allKeyLabels);
-        keyAdapter.setDropDownViewResource(R.layout.binding_spinner_dropdown_item);
-        mainKeySpinner.setAdapter(keyAdapter);
-
-        // Set current main key
-        Binding currentMain = element.getBindingAt(index);
-        if (existingCombo != null) {
-            for (Binding b : existingCombo) {
-                if (b.isKeyboard() && b != Binding.KEY_CTRL_L && b != Binding.KEY_SHIFT_L && b != Binding.KEY_ALT_L) {
-                    currentMain = b;
-                    break;
-                }
-            }
-        }
-        mainKeySpinner.setSelection(getBindingPosition(mainKeyValues, currentMain), false);
-
-        TextView tvLabel = new TextView(this);
-        tvLabel.setText(R.string.main_key);
-        tvLabel.setTextColor(0xFFAAAAAA);
-        tvLabel.setPadding(0, 20, 0, 8);
-        ll.addView(tvLabel);
-        ll.addView(mainKeySpinner);
-
-        new android.app.AlertDialog.Builder(this)
-            .setTitle(getString(R.string.key_combo_title, getBindingLabel(element, index)))
-            .setView(ll)
-            .setPositiveButton(R.string.save, (d, which) -> {
-                // Build combo array
-                List<Binding> comboList = new ArrayList<>();
-                for (int i = 0; i < modifierOptions.length; i++) {
-                    if (selectedModifiers[i]) comboList.add(modifierOptions[i]);
-                }
-                // Add main key
-                int mainKeyPosition = mainKeySpinner.getSelectedItemPosition();
-                Binding mainBinding = mainKeyPosition >= 0 && mainKeyPosition < mainKeyValues.length
-                    ? mainKeyValues[mainKeyPosition]
-                    : Binding.NONE;
-                if (mainBinding != Binding.NONE) comboList.add(mainBinding);
-
-                if (mainBinding != Binding.NONE && comboList.size() > 1) {
-                    element.setCombo(index, comboList.toArray(new Binding[0]));
-                    // Also set the primary binding to the main key for display
-                    element.setBindingAt(index, mainBinding);
-                } else {
-                    element.setCombo(index, null); // clear combo
-                    if (mainBinding != Binding.NONE) element.setBindingAt(index, mainBinding);
-                }
-                profile.save();
-                inputControlsView.invalidate();
-            })
-            .setNegativeButton(R.string.clear_combo, (d, which) -> {
-                element.setCombo(index, null);
-                profile.save();
-                inputControlsView.invalidate();
-            })
-            .setNeutralButton(R.string.cancel, null)
-            .show();
-    }
-
-    private String getBindingLabel(ControlElement element, int index) {
-        if (element.getType() == ControlElement.Type.BUTTON_GRID) {
-            int cols = getGridColsForEditor(element);
-            int r = index / cols + 1;
-            int c = index % cols + 1;
-            return getString(R.string.binding_grid_cell_label, r, c);
-        }
-        return getString(R.string.binding_slot_label, index + 1);
-    }
-
-    private int getBindingPosition(Binding[] values, Binding binding) {
-        if (binding == null) binding = Binding.NONE;
-        for (int i = 0; i < values.length; i++) {
-            if (values[i] == binding) return i;
-        }
-        return 0;
-    }
 
     private int getGridRowsForEditor(ControlElement element) {
         return element.getGridRows() > 0 ? element.getGridRows() : DEFAULT_GRID_ROWS;
@@ -918,21 +556,6 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
     void clearGridCell(ControlElement element, int index) {
         element.setBindingAt(index, Binding.NONE);
         element.setCombo(index, null);
-    }
-
-    /** Add a small quick-fill button to a linear layout */
-    private void addQuickFillButton(LinearLayout parent, int labelResId, Runnable action) {
-        android.widget.Button btn = new android.widget.Button(this);
-        btn.setText(labelResId);
-        btn.setTextSize(11);
-        btn.setAllCaps(false);
-        btn.setPadding(12, 4, 12, 4);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.setMargins(0, 0, 8, 0);
-        btn.setLayoutParams(lp);
-        btn.setOnClickListener(v -> action.run());
-        parent.addView(btn);
     }
 
     /** Fill grid with QWERTY row: A S D F ... (wraps) */
