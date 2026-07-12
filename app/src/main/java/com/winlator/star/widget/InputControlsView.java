@@ -212,8 +212,9 @@ public class InputControlsView extends View {
         readyToDraw = true;
 
         if (editMode) {
-            // Fill background before drawing image so the image sits on top
-            canvas.drawColor(Color.BLACK);
+            canvas.drawColor(backgroundImage != null && !backgroundImage.isRecycled()
+                ? Color.argb(56, 0, 0, 0)
+                : Color.BLACK);
             drawBackgroundImage(canvas);
             drawGrid(canvas);
             drawCursor(canvas);
@@ -271,11 +272,13 @@ public class InputControlsView extends View {
     }
 
     private void drawGrid(Canvas canvas) {
-        paint.setStyle(Paint.Style.FILL);
+        paint.setStyle(Paint.Style.STROKE);
         paint.setStrokeWidth(snappingSize * 0.0625f);
 
         paint.setAntiAlias(false);
-        paint.setColor(0xff303030);
+        paint.setColor(backgroundImage != null && !backgroundImage.isRecycled()
+            ? Color.argb(72, 255, 255, 255)
+            : Color.argb(110, 96, 96, 96));
 
         int width = getMaxWidth();
         int height = getMaxHeight();
@@ -287,7 +290,9 @@ public class InputControlsView extends View {
 
         float cx = Mathf.roundTo(width * 0.5f, snappingSize);
         float cy = Mathf.roundTo(height * 0.5f, snappingSize);
-        paint.setColor(0xff424242);
+        paint.setColor(backgroundImage != null && !backgroundImage.isRecycled()
+            ? Color.argb(112, 79, 195, 247)
+            : Color.argb(150, 66, 66, 66));
 
         for (int i = 0; i < width; i += snappingSize * 2) {
             canvas.drawLine(cx, i, cx, i + snappingSize, paint);

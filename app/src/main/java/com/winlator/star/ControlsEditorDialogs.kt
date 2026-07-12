@@ -16,11 +16,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -71,29 +73,31 @@ fun ControlsEditorDialogHost(
     backgroundOpacity: Float,
     actions: ControlsEditorDialogActions,
 ) {
-    when (dialogMode) {
-        DIALOG_ADD_ELEMENT -> AddElementDialog(onDismiss = actions::onDismiss, onAddElement = actions::onAddElement)
-        DIALOG_BACKGROUND_IMAGE -> BackgroundImageDialog(
-            onDismiss = actions::onDismiss,
-            onPickBackgroundFile = actions::onPickBackgroundFile,
-            onPickBackgroundSystem = actions::onPickBackgroundSystem,
-            onClearBackground = actions::onClearBackground,
-        )
-        DIALOG_BACKGROUND_OPACITY -> BackgroundOpacityDialog(
-            backgroundOpacity = backgroundOpacity,
-            onDismiss = actions::onDismiss,
-            onBackgroundOpacityChange = actions::onBackgroundOpacityChange,
-        )
-        DIALOG_GROUP_VISIBILITY -> GroupVisibilityDialog(
-            profile = profile,
-            onDismiss = actions::onDismiss,
-            onGroupVisibilityChange = actions::onGroupVisibilityChange,
-        )
-        DIALOG_CUSTOM_ICON_SOURCE -> CustomIconSourceDialog(
-            onDismiss = actions::onDismiss,
-            onPickIconFile = actions::onPickIconFile,
-            onPickIconSystem = actions::onPickIconSystem,
-        )
+    MaterialTheme(colorScheme = controlsEditorDialogColorScheme()) {
+        when (dialogMode) {
+            DIALOG_ADD_ELEMENT -> AddElementDialog(onDismiss = actions::onDismiss, onAddElement = actions::onAddElement)
+            DIALOG_BACKGROUND_IMAGE -> BackgroundImageDialog(
+                onDismiss = actions::onDismiss,
+                onPickBackgroundFile = actions::onPickBackgroundFile,
+                onPickBackgroundSystem = actions::onPickBackgroundSystem,
+                onClearBackground = actions::onClearBackground,
+            )
+            DIALOG_BACKGROUND_OPACITY -> BackgroundOpacityDialog(
+                backgroundOpacity = backgroundOpacity,
+                onDismiss = actions::onDismiss,
+                onBackgroundOpacityChange = actions::onBackgroundOpacityChange,
+            )
+            DIALOG_GROUP_VISIBILITY -> GroupVisibilityDialog(
+                profile = profile,
+                onDismiss = actions::onDismiss,
+                onGroupVisibilityChange = actions::onGroupVisibilityChange,
+            )
+            DIALOG_CUSTOM_ICON_SOURCE -> CustomIconSourceDialog(
+                onDismiss = actions::onDismiss,
+                onPickIconFile = actions::onPickIconFile,
+                onPickIconSystem = actions::onPickIconSystem,
+            )
+        }
     }
 }
 
@@ -373,6 +377,19 @@ private fun DialogActionButton(text: String, onClick: () -> Unit) {
         Text(text = text, color = DialogAccent)
     }
 }
+
+@Composable
+private fun controlsEditorDialogColorScheme() = darkColorScheme(
+    primary = DialogAccent,
+    onPrimary = Color.Black,
+    background = DialogBackground,
+    onBackground = DialogText,
+    surface = DialogBackground,
+    onSurface = DialogText,
+    surfaceVariant = DialogSurface,
+    onSurfaceVariant = DialogSubText,
+    outline = Color.White.copy(alpha = 0.24f),
+)
 
 private data class ControlTypeItem(
     val type: ControlElement.Type,

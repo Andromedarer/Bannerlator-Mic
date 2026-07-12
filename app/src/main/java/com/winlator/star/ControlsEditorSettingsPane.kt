@@ -28,8 +28,10 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
@@ -93,7 +95,7 @@ fun ControlsEditorSettingsPane(
     val typeOptions = remember { ControlElement.Type.names().toList() }
     val shapeOptions = remember { ControlElement.Shape.names().toList() }
     val rangeOptions = remember { ControlElement.Range.names().toList() }
-    val bindingOptions = remember { Binding.values().map { it.toString() } }
+    val bindingOptions = remember { Binding.values().toList() }
     val holdKeyOptions = remember {
         buildList {
             add(activity.getString(R.string.none))
@@ -174,13 +176,14 @@ fun ControlsEditorSettingsPane(
         syncFromElement()
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(EditorBackground)
-            .padding(EditorPadding),
-        verticalArrangement = Arrangement.spacedBy(EditorSpacing),
-    ) {
+    MaterialTheme(colorScheme = controlsEditorColorScheme()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(EditorBackground)
+                .padding(EditorPadding),
+            verticalArrangement = Arrangement.spacedBy(EditorSpacing),
+        ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End,
@@ -686,7 +689,8 @@ fun ControlsEditorSettingsPane(
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(24.dp))
+        }
     }
 }
 
@@ -1083,20 +1087,21 @@ fun SettingsSection(
 private fun BindingSpinnerRow(
     label: String,
     value: Binding,
-    options: List<String>,
+    options: List<Binding>,
     onValueChanged: (Binding) -> Unit,
     comboSummary: String? = null,
 ) {
-    val selectedIndex = options.indexOf(value.toString()).coerceAtLeast(0)
+    val selectedIndex = options.indexOf(value).coerceAtLeast(0)
+    val optionLabels = remember(options) { options.map { it.toString() } }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         if (comboSummary != null && comboSummary.isNotEmpty()) {
             Text(text = comboSummary, color = EditorSubText)
         }
         SettingSpinner(
             label = label,
-            options = options,
+            options = optionLabels,
             selectedIndex = selectedIndex,
-            onSelected = { index -> onValueChanged(Binding.fromString(options.getOrNull(index))) },
+            onSelected = { index -> onValueChanged(options.getOrNull(index) ?: Binding.NONE) },
         )
     }
 }
@@ -1158,6 +1163,19 @@ private fun loadCustomIcons(customIconManager: CustomIconManager): List<PickerIc
         PickerIcon(id = id.toInt(), bitmap = bitmap)
     }
 }
+
+@Composable
+private fun controlsEditorColorScheme() = darkColorScheme(
+    primary = EditorAccent,
+    onPrimary = Color.Black,
+    background = EditorBackground,
+    onBackground = EditorText,
+    surface = EditorBackground,
+    onSurface = EditorText,
+    surfaceVariant = EditorSurface,
+    onSurfaceVariant = EditorSubText,
+    outline = Color.White.copy(alpha = 0.24f),
+)
 
 @Composable
 private fun outlinedTextFieldColors() = OutlinedTextFieldDefaults.colors(
