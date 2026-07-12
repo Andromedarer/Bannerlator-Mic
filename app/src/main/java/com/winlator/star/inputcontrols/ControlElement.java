@@ -33,6 +33,9 @@ public class ControlElement {
     public static final float TRACKPAD_MAX_SPEED = 20.0f;
     public static final byte TRACKPAD_ACCELERATION_THRESHOLD = 4;
     public static final short BUTTON_MIN_TIME_TO_KEEP_PRESSED = 300;
+    private static final int DEFAULT_GRID_ROWS = 2;
+    private static final int DEFAULT_GRID_COLS = 8;
+    private static final long GRID_FLASH_DURATION_MS = 150;
     public enum Type {
         BUTTON, D_PAD, RANGE_BUTTON, STICK, TRACKPAD, DYNAMIC_STICK, MOUSE_AREA, BUTTON_GRID;
 
@@ -114,7 +117,8 @@ public class ControlElement {
     }
 
     private void reset() {
-        setBinding(Binding.NONE);
+        int bindingCount = type == Type.BUTTON_GRID ? DEFAULT_GRID_ROWS * DEFAULT_GRID_COLS : 4;
+        resetBindingArrays(bindingCount);
         scroller = null;
         areaWidth = 0;
         areaHeight = 0;
@@ -123,13 +127,16 @@ public class ControlElement {
         visualStickX = 0;
         visualStickY = 0;
         stickTarget = null;
+        lastFingerX = 0;
+        lastFingerY = 0;
         mouseSensitivity = 1.0f;
         gridRows = 0;
         gridCols = 0;
         gridCellShape = Shape.ROUND_RECT;
         mouseAreaLastPos = null;
-        comboBindings = null;
-        cellPressTimes = null;
+        currentPointerId = -1;
+        currentPosition = null;
+        touchTime = null;
 
         if (type == Type.STICK || type == Type.DYNAMIC_STICK) {
             bindings[0] = Binding.KEY_W;
@@ -152,7 +159,7 @@ public class ControlElement {
         else if (type == Type.RANGE_BUTTON) {
             scroller = new RangeScroller(inputControlsView, this);
         }
-        else if (type == Type.DYNAMIC_STICK) {
+        if (type == Type.DYNAMIC_STICK) {
             areaWidth = 600;
             areaHeight = 600;
             stickRadius = 120;
@@ -164,9 +171,8 @@ public class ControlElement {
             mouseSensitivity = 1.0f;
         }
         else if (type == Type.BUTTON_GRID) {
-            gridRows = 2;
-            gridCols = 8;
-            setBindingCount(gridRows * gridCols);
+            gridRows = DEFAULT_GRID_ROWS;
+            gridCols = DEFAULT_GRID_COLS;
             // Default: map to keyboard keys A-P for 8x2
             Binding[] allBindings = Binding.values();
             int startIdx = Binding.KEY_A.ordinal();
@@ -195,10 +201,40 @@ public class ControlElement {
     }
 
     public void setBindingCount(int bindingCount) {
-        bindings = new Binding[bindingCount];
-        setBinding(Binding.NONE);
-        states = new boolean[bindingCount];
+        resetBindingArrays(bindingCount);
+    }
+
+    private void resetBindingArrays(int bindingCount) {
+        int safeBindingCount = Math.max(0, bindingCount);
+        bindings = new Binding[safeBindingCount];
+        Arrays.fill(bindings, Binding.NONE);
+        states = new boolean[safeBindingCount];
+        comboBindings = null;
+        cellPressTimes = null;
         boundingBoxNeedsUpdate = true;
+    }
+
+    private void ensureBindingCapacity(int bindingCount) {
+        if (bindingCount <= bindings.length) return;
+        int oldLength = bindings.length;
+        bindings = Arrays.copyOf(bindings, bindingCount);
+        Arrays.fill(bindings, oldLength, bindings.length, Binding.NONE);
+        states = Arrays.copyOf(states, bindingCount);
+        if (comboBindings != null) comboBindings = Arrays.copyOf(comboBindings, bindingCount);
+        if (cellPressTimes != null) cellPressTimes = Arrays.copyOf(cellPressTimes, bindingCount);
+        boundingBoxNeedsUpdate = true;
+    }
+
+    private boolean isValidBindingIndex(int index) {
+        return index >= 0 && index < bindings.length;
+    }
+
+    private int getEffectiveGridRows() {
+        return gridRows > 0 ? gridRows : DEFAULT_GRID_ROWS;
+    }
+
+    private int getEffectiveGridCols() {
+        return gridCols > 0 ? gridCols : DEFAULT_GRID_COLS;
     }
 
     public Shape getShape() {
@@ -229,31 +265,48 @@ public class ControlElement {
 
     // --- New getters/setters ---
     public int getAreaWidth() { return areaWidth; }
-    public void setAreaWidth(int areaWidth) { this.areaWidth = areaWidth; boundingBoxNeedsUpdate = true; }
+    public void setAreaWidth(int areaWidth) { this.areaWidth = Math.max(0, areaWidth); boundingBoxNeedsUpdate = true; }
     public int getAreaHeight() { return areaHeight; }
-    public void setAreaHeight(int areaHeight) { this.areaHeight = areaHeight; boundingBoxNeedsUpdate = true; }
+    public void setAreaHeight(int areaHeight) { this.areaHeight = Math.max(0, areaHeight); boundingBoxNeedsUpdate = true; }
     public int getStickRadius() { return stickRadius; }
-    public void setStickRadius(int stickRadius) { this.stickRadius = stickRadius; }
+    public void setStickRadius(int stickRadius) { this.stickRadius = Math.max(0, stickRadius); }
     public boolean isStickVisible() { return stickVisible; }
     public void setStickVisible(boolean visible) { this.stickVisible = visible; inputControlsView.invalidate(); }
     public float getMouseSensitivity() { return mouseSensitivity; }
-    public void setMouseSensitivity(float s) { this.mouseSensitivity = s; }
+    public void setMouseSensitivity(float s) { this.mouseSensitivity = Math.max(0.1f, s); }
     public int getGridRows() { return gridRows; }
-    public void setGridRows(int gridRows) { this.gridRows = gridRows; boundingBoxNeedsUpdate = true; }
+    public void setGridRows(int gridRows) { this.gridRows = Math.max(0, gridRows); boundingBoxNeedsUpdate = true; }
     public int getGridCols() { return gridCols; }
-    public void setGridCols(int gridCols) { this.gridCols = gridCols; boundingBoxNeedsUpdate = true; }
+    public void setGridCols(int gridCols) { this.gridCols = Math.max(0, gridCols); boundingBoxNeedsUpdate = true; }
     public Shape getGridCellShape() { return gridCellShape != null ? gridCellShape : Shape.ROUND_RECT; }
-    public void setGridCellShape(Shape s) { this.gridCellShape = s; }
-    public Binding[] getCombo(int index) { return (comboBindings != null && index < comboBindings.length) ? comboBindings[index] : null; }
+    public void setGridCellShape(Shape s) { this.gridCellShape = s != null ? s : Shape.ROUND_RECT; }
+    public Binding[] getCombo(int index) { return (comboBindings != null && index >= 0 && index < comboBindings.length) ? comboBindings[index] : null; }
     public void setCombo(int index, Binding[] combo) {
+        if (!isValidBindingIndex(index)) return;
+        if (combo == null || combo.length == 0) {
+            if (comboBindings != null && index < comboBindings.length) comboBindings[index] = null;
+            return;
+        }
         if (comboBindings == null) comboBindings = new Binding[bindings.length][];
-        if (index < comboBindings.length) comboBindings[index] = combo;
+        else if (comboBindings.length != bindings.length) comboBindings = Arrays.copyOf(comboBindings, bindings.length);
+        comboBindings[index] = sanitizeCombo(combo);
     }
     public boolean hasCombo(int index) { return getCombo(index) != null && getCombo(index).length > 0; }
     public long[] getCellPressTimes() { return cellPressTimes; }
     public void setCellPressTime(int index, long time) {
+        if (!isValidBindingIndex(index)) return;
         if (cellPressTimes == null) cellPressTimes = new long[bindings.length];
-        if (index < cellPressTimes.length) cellPressTimes[index] = time;
+        else if (cellPressTimes.length != bindings.length) cellPressTimes = Arrays.copyOf(cellPressTimes, bindings.length);
+        cellPressTimes[index] = time;
+    }
+
+    private Binding[] sanitizeCombo(Binding[] combo) {
+        Binding[] sanitized = new Binding[combo.length];
+        int count = 0;
+        for (Binding binding : combo) {
+            if (binding != null && binding != Binding.NONE) sanitized[count++] = binding;
+        }
+        return count == combo.length ? sanitized : Arrays.copyOf(sanitized, count);
     }
 
     public boolean isToggleSwitch() {
@@ -265,18 +318,13 @@ public class ControlElement {
     }
 
     public Binding getBindingAt(int index) {
-        return index < bindings.length ? bindings[index] : Binding.NONE;
+        return isValidBindingIndex(index) ? bindings[index] : Binding.NONE;
     }
 
     public void setBindingAt(int index, Binding binding) {
-        if (index >= bindings.length) {
-            int oldLength = bindings.length;
-            bindings = Arrays.copyOf(bindings, index+1);
-            Arrays.fill(bindings, oldLength-1, bindings.length, Binding.NONE);
-            states = new boolean[bindings.length];
-            boundingBoxNeedsUpdate = true;
-        }
-        bindings[index] = binding;
+        if (index < 0) return;
+        ensureBindingCapacity(index + 1);
+        bindings[index] = binding != null ? binding : Binding.NONE;
     }
 
     public void setBinding(Binding binding) {
@@ -384,8 +432,8 @@ public class ControlElement {
                 break;
             }
             case BUTTON_GRID: {
-                int cols = gridCols > 0 ? gridCols : 8;
-                int rows = gridRows > 0 ? gridRows : 2;
+                int cols = getEffectiveGridCols();
+                int rows = getEffectiveGridRows();
                 halfWidth = snappingSize * 3 * cols;
                 halfHeight = snappingSize * 2 * rows;
                 break;
@@ -868,14 +916,13 @@ public class ControlElement {
                 break;
             }
             case BUTTON_GRID: {
-                int cols = gridCols > 0 ? gridCols : 8;
-                int rows = gridRows > 0 ? gridRows : 2;
+                int cols = getEffectiveGridCols();
+                int rows = getEffectiveGridRows();
                 float cellW = (float)boundingBox.width() / cols;
                 float cellH = (float)boundingBox.height() / rows;
                 int oldColor = paint.getColor();
                 Shape cellShape = getGridCellShape(); // use configured cell shape
                 long now = System.currentTimeMillis();
-                final long FLASH_DURATION = 150; // ms for press flash animation
 
                 for (int r = 0; r < rows; r++) {
                     for (int c = 0; c < cols; c++) {
@@ -893,17 +940,7 @@ public class ControlElement {
                         if (pressed) {
                             cellFillColor = inputControlsView.getAccentColor();
                         }
-                        // Flash effect: bright pulse on recent press
-                        if (cellPressTimes != null && cellIdx < cellPressTimes.length && cellPressTimes[cellIdx] > 0) {
-                            long elapsed = now - cellPressTimes[cellIdx];
-                            if (elapsed < FLASH_DURATION) {
-                                float flashAlpha = 1.0f - (float)elapsed / FLASH_DURATION;
-                                int flashColor = Color.argb((int)(255 * flashAlpha), 255, 255, 255);
-                                cellFillColor = pressed ? blendColors(cellFillColor, flashColor) : flashColor;
-                            } else {
-                                cellPressTimes[cellIdx] = 0; // reset expired
-                            }
-                        }
+                        cellFillColor = applyGridPressFlash(cellIdx, cellFillColor, pressed, now);
 
                         // Cell fill with shape
                         paint.setStyle(Paint.Style.FILL);
@@ -919,22 +956,7 @@ public class ControlElement {
 
                         // Cell label
                         if (cellIdx < bindings.length) {
-                            String label;
-                            if (hasCombo(cellIdx)) {
-                                // Show combo as "C+A" style
-                                Binding[] combo = getCombo(cellIdx);
-                                StringBuilder sb = new StringBuilder();
-                                for (int k = 0; k < Math.min(combo.length, 3); k++) {
-                                    if (k > 0) sb.append("+");
-                                    String s = combo[k].toString().replace("KEY_", "").replace("_L", "").replace("_R", "");
-                                    if (s.length() > 3) s = s.substring(0, 2);
-                                    sb.append(s);
-                                }
-                                label = sb.toString();
-                            } else {
-                                label = bindings[cellIdx].toString().replace("KEY_", "").replace("_", " ");
-                            }
-                            if (label.length() > 6) label = label.substring(0, 5);
+                            String label = getGridCellLabel(cellIdx, 6);
                             paint.setStyle(Paint.Style.FILL);
                             paint.setColor(primaryColor);
                             paint.setTextSize(Math.min(cellH * 0.35f, snappingSize * 1.0f * scale));
@@ -1292,10 +1314,12 @@ public class ControlElement {
                 break;
             }
             case BUTTON_GRID: {
-                int cols = gridCols > 0 ? gridCols : 8;
-                int rows = gridRows > 0 ? gridRows : 2;
+                int cols = getEffectiveGridCols();
+                int rows = getEffectiveGridRows();
                 float cellW = (float)boundingBox.width() / cols;
                 float cellH = (float)boundingBox.height() / rows;
+                Shape cellShape = getGridCellShape();
+                long now = System.currentTimeMillis();
 
                 for (int r = 0; r < rows; r++) {
                     for (int c = 0; c < cols; c++) {
@@ -1307,16 +1331,16 @@ public class ControlElement {
                         boolean pressed = cellIdx < states.length && states[cellIdx];
 
                         Rect cellRect = new Rect((int)left + 2, (int)top + 2, (int)right - 2, (int)bottom - 2);
-                        drawGameHubShape(canvas, paint, cellRect, pressed ? pressedFillColor : fillColor, true);
+                        int cellFillColor = applyGridPressFlash(cellIdx, pressed ? pressedFillColor : fillColor, pressed, now);
+                        drawGameHubShape(canvas, paint, cellRect, cellFillColor, true, cellShape);
                         paint.setStyle(Paint.Style.STROKE);
                         paint.setColor(strokeColor);
                         paint.setStrokeWidth(strokeWidth * 0.3f);
-                        canvas.drawRoundRect(left + 2, top + 2, right - 2, bottom - 2, 6, 6, paint);
+                        drawGameHubShape(canvas, paint, cellRect, 0, false, cellShape);
                         paint.setStrokeWidth(strokeWidth);
 
                         if (cellIdx < bindings.length) {
-                            String label = bindings[cellIdx].toString().replace("KEY_", "").replace("_", " ");
-                            if (label.length() > 4) label = label.substring(0, 3);
+                            String label = getGridCellLabel(cellIdx, 4);
                             paint.setStyle(Paint.Style.FILL);
                             paint.setColor(textColor);
                             paint.setTextSize(Math.min(cellH * 0.4f, snappingSize * 1.2f * scale));
@@ -1345,9 +1369,10 @@ public class ControlElement {
             paint.setColor(color);
         }
         int snappingSize = inputControlsView.getSnappingSize();
-        switch (overrideShape) {
+        Shape renderShape = overrideShape != null ? overrideShape : Shape.ROUND_RECT;
+        switch (renderShape) {
             case CIRCLE:
-                canvas.drawCircle(bb.centerX(), bb.centerY(), bb.width() * 0.5f, paint);
+                canvas.drawCircle(bb.centerX(), bb.centerY(), Math.min(bb.width(), bb.height()) * 0.5f, paint);
                 break;
             case RECT:
                 canvas.drawRect(bb, paint);
@@ -1359,7 +1384,10 @@ public class ControlElement {
             }
             case SQUARE: {
                 float r = snappingSize * 0.85f * scale;
-                canvas.drawRoundRect(bb.left, bb.top, bb.right, bb.bottom, r, r, paint);
+                float size = Math.min(bb.width(), bb.height());
+                float left = bb.centerX() - size * 0.5f;
+                float top = bb.centerY() - size * 0.5f;
+                canvas.drawRoundRect(left, top, left + size, top + size, r, r, paint);
                 break;
             }
         }
@@ -1368,14 +1396,10 @@ public class ControlElement {
     /** Draw a grid cell using the configured shape (fill or stroke based on paint style) */
     private void drawShapeForCell(Canvas canvas, Paint paint, Rect bb, Shape cellShape) {
         int snappingSize = inputControlsView.getSnappingSize();
-        switch (cellShape) {
+        Shape renderShape = cellShape != null ? cellShape : Shape.ROUND_RECT;
+        switch (renderShape) {
             case CIRCLE:
-                if (paint.getStyle() == Paint.Style.FILL)
-                    canvas.drawCircle(bb.centerX(), bb.centerY(), Math.min(bb.width(), bb.height()) * 0.45f, paint);
-                else {
-                    paint.setStyle(Paint.Style.STROKE);
-                    canvas.drawCircle(bb.centerX(), bb.centerY(), Math.min(bb.width(), bb.height()) * 0.45f, paint);
-                }
+                canvas.drawCircle(bb.centerX(), bb.centerY(), Math.min(bb.width(), bb.height()) * 0.45f, paint);
                 break;
             case RECT:
                 canvas.drawRect(bb, paint);
@@ -1387,10 +1411,63 @@ public class ControlElement {
             }
             case SQUARE: {
                 float r = snappingSize * 0.5f * scale;
-                canvas.drawRoundRect(bb.left, bb.top, bb.right, bb.bottom, r, r, paint);
+                float size = Math.min(bb.width(), bb.height());
+                float left = bb.centerX() - size * 0.5f;
+                float top = bb.centerY() - size * 0.5f;
+                canvas.drawRoundRect(left, top, left + size, top + size, r, r, paint);
                 break;
             }
         }
+    }
+
+    private int applyGridPressFlash(int cellIndex, int fillColor, boolean pressed, long now) {
+        if (cellPressTimes == null || cellIndex < 0 || cellIndex >= cellPressTimes.length || cellPressTimes[cellIndex] <= 0) {
+            return fillColor;
+        }
+
+        long elapsed = now - cellPressTimes[cellIndex];
+        if (elapsed >= 0 && elapsed < GRID_FLASH_DURATION_MS) {
+            float flashAlpha = 1.0f - (float)elapsed / GRID_FLASH_DURATION_MS;
+            int flashColor = Color.argb((int)(255 * flashAlpha), 255, 255, 255);
+            inputControlsView.invalidate();
+            return pressed ? blendColors(fillColor, flashColor) : flashColor;
+        }
+
+        cellPressTimes[cellIndex] = 0;
+        return fillColor;
+    }
+
+    private String getGridCellLabel(int cellIndex, int maxLength) {
+        if (!isValidBindingIndex(cellIndex)) return "";
+
+        Binding[] combo = getCombo(cellIndex);
+        String label;
+        if (combo != null && combo.length > 0) {
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < combo.length && i < 3; i++) {
+                String bindingLabel = getComboBindingLabel(combo[i]);
+                if (bindingLabel.isEmpty()) continue;
+                if (sb.length() > 0) sb.append("+");
+                sb.append(bindingLabel);
+            }
+            label = sb.toString();
+        }
+        else {
+            label = bindings[cellIndex].toString().replace("NUMPAD ", "NP");
+        }
+
+        if (maxLength > 0 && label.length() > maxLength) return label.substring(0, maxLength);
+        return label;
+    }
+
+    private String getComboBindingLabel(Binding binding) {
+        if (binding == null || binding == Binding.NONE) return "";
+        if (binding == Binding.KEY_CTRL_L || binding == Binding.KEY_CTRL_R) return "C";
+        if (binding == Binding.KEY_SHIFT_L || binding == Binding.KEY_SHIFT_R) return "S";
+        if (binding == Binding.KEY_ALT_L || binding == Binding.KEY_ALT_R) return "A";
+
+        String label = binding.toString().replace("NUMPAD ", "NP").replace(" ", "");
+        return label.length() > 3 ? label.substring(0, 3) : label;
     }
 
     /** Blend two ARGB colors with 50% mix (used for press flash) */
@@ -1512,8 +1589,8 @@ public class ControlElement {
                 elementJSONObject.put("mouseSensitivity", Float.valueOf(mouseSensitivity));
             }
             if (type == Type.BUTTON_GRID) {
-                elementJSONObject.put("gridRows", gridRows);
-                elementJSONObject.put("gridCols", gridCols);
+                elementJSONObject.put("gridRows", getEffectiveGridRows());
+                elementJSONObject.put("gridCols", getEffectiveGridCols());
                 if (gridCellShape != null && gridCellShape != Shape.ROUND_RECT) {
                     elementJSONObject.put("gridCellShape", gridCellShape.name());
                 }
@@ -1521,13 +1598,16 @@ public class ControlElement {
             // Serialize combos if any
             if (comboBindings != null) {
                 JSONArray combosArr = new JSONArray();
-                for (int i = 0; i < bindings.length; i++) {
+                int comboCount = Math.min(bindings.length, comboBindings.length);
+                for (int i = 0; i < comboCount; i++) {
+                    Binding[] combo = comboBindings[i];
+                    if (combo == null || combo.length == 0) continue;
+
                     JSONArray entry = new JSONArray();
                     entry.put(i); // index
                     JSONArray keys = new JSONArray();
-                    if (comboBindings[i] != null) {
-                        for (Binding b : comboBindings[i]) keys.put(b.name());
-                    }
+                    for (Binding b : combo) if (b != null && b != Binding.NONE) keys.put(b.name());
+                    if (keys.length() == 0) continue;
                     entry.put(keys);
                     combosArr.put(entry);
                 }
@@ -1593,18 +1673,11 @@ public class ControlElement {
             else if (type == Type.BUTTON_GRID) {
                 // Determine which grid cell was touched
                 int cellIndex = getGridCellIndex(x, y);
-                if (cellIndex >= 0 && cellIndex < bindings.length) {
+                if (isValidBindingIndex(cellIndex)) {
                     states[cellIndex] = true;
                     // Record press time for flash animation
                     setCellPressTime(cellIndex, System.currentTimeMillis());
-                    // Send combo or single binding
-                    if (hasCombo(cellIndex)) {
-                        for (Binding b : getCombo(cellIndex)) {
-                            inputControlsView.handleInputEvent(b, true);
-                        }
-                    } else {
-                        inputControlsView.handleInputEvent(getBindingAt(cellIndex), true);
-                    }
+                    pressBindingsForCell(cellIndex);
                     inputControlsView.invalidate();
                 }
                 return true;
@@ -1622,18 +1695,21 @@ public class ControlElement {
 
     /** Calculate grid cell index from touch coordinates */
     private int getGridCellIndex(float x, float y) {
-        if (gridRows <= 0 || gridCols <= 0) return -1;
+        int rows = getEffectiveGridRows();
+        int cols = getEffectiveGridCols();
         Rect box = getBoundingBox();
-        float cellW = (float)box.width() / gridCols;
-        float cellH = (float)box.height() / gridRows;
+        if (box.width() <= 0 || box.height() <= 0) return -1;
+        float cellW = (float)box.width() / cols;
+        float cellH = (float)box.height() / rows;
         int col = (int)((x - box.left) / cellW);
         int row = (int)((y - box.top) / cellH);
-        if (col < 0 || col >= gridCols || row < 0 || row >= gridRows) return -1;
-        return row * gridCols + col;
+        if (col < 0 || col >= cols || row < 0 || row >= rows) return -1;
+        return row * cols + col;
     }
 
     /** Press all keys in a cell's combo (or single binding) */
     private void pressBindingsForCell(int cellIndex) {
+        if (!isValidBindingIndex(cellIndex)) return;
         if (hasCombo(cellIndex)) {
             for (Binding b : getCombo(cellIndex)) {
                 inputControlsView.handleInputEvent(b, true);
@@ -1645,6 +1721,7 @@ public class ControlElement {
 
     /** Release all keys in a cell's combo (or single binding) */
     private void releaseBindingsForCell(int cellIndex) {
+        if (!isValidBindingIndex(cellIndex)) return;
         if (hasCombo(cellIndex)) {
             for (Binding b : getCombo(cellIndex)) {
                 inputControlsView.handleInputEvent(b, false);
@@ -1753,16 +1830,18 @@ public class ControlElement {
                 for (int i = 0; i < states.length; i++) {
                     if (states[i]) { oldCell = i; break; }
                 }
-                if (newCell != oldCell && newCell >= 0 && newCell < bindings.length) {
+                if (newCell != oldCell) {
                     // Release old cell
-                    if (oldCell >= 0 && oldCell < bindings.length) {
+                    if (isValidBindingIndex(oldCell)) {
                         states[oldCell] = false;
                         releaseBindingsForCell(oldCell);
                     }
                     // Press new cell
-                    states[newCell] = true;
-                    setCellPressTime(newCell, System.currentTimeMillis());
-                    pressBindingsForCell(newCell);
+                    if (isValidBindingIndex(newCell)) {
+                        states[newCell] = true;
+                        setCellPressTime(newCell, System.currentTimeMillis());
+                        pressBindingsForCell(newCell);
+                    }
                 }
                 inputControlsView.invalidate();
                 return true;
@@ -1917,16 +1996,10 @@ public class ControlElement {
                 }
             }
             else if (type == Type.RANGE_BUTTON || type == Type.D_PAD || type == Type.STICK || type == Type.TRACKPAD || type == Type.DYNAMIC_STICK || type == Type.MOUSE_AREA || type == Type.BUTTON_GRID) {
-                for (byte i = 0; i < states.length; i++) {
+                for (int i = 0; i < states.length; i++) {
                     if (states[i]) {
-                        // Release combo or single binding
-                        if (hasCombo(i)) {
-                            for (Binding b : getCombo(i)) {
-                                inputControlsView.handleInputEvent(b, false);
-                            }
-                        } else {
-                            inputControlsView.handleInputEvent(getBindingAt(i), false);
-                        }
+                        if (type == Type.BUTTON_GRID) releaseBindingsForCell(i);
+                        else inputControlsView.handleInputEvent(getBindingAt(i), false);
                     }
                     states[i] = false;
                 }

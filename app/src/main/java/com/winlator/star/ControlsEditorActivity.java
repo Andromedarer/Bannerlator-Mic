@@ -5,11 +5,9 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Bundle;
-import android.content.SharedPreferences;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.AdapterView;
-import android.widget.ArrayAdapter;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -24,10 +22,8 @@ import android.widget.TextView;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.preference.PreferenceManager;
 
 import com.winlator.star.R;
-import com.winlator.star.contentdialog.ContentDialog;
 import com.winlator.star.inputcontrols.Binding;
 import com.winlator.star.inputcontrols.ControlElement;
 import com.winlator.star.inputcontrols.ControlsProfile;
@@ -44,11 +40,13 @@ import com.winlator.star.widget.NumberPicker;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
 public class ControlsEditorActivity extends AppCompatActivity implements View.OnClickListener {
+    private static final int DEFAULT_GRID_ROWS = 2;
+    private static final int DEFAULT_GRID_COLS = 8;
+
     private InputControlsView inputControlsView;
     private ControlsProfile profile;
     private CustomIconManager customIconManager;
@@ -408,10 +406,11 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
         // --- Button Grid pickers ---
         NumberPicker npGridRows = view.findViewById(R.id.NPGridRows);
         if (npGridRows != null) {
-            npGridRows.setValue(element.getGridRows() > 0 ? element.getGridRows() : 2);
+            npGridRows.setValue(getGridRowsForEditor(element));
             npGridRows.setOnValueChangeListener((picker, val) -> {
+                int cols = getGridColsForEditor(element);
                 element.setGridRows(val);
-                element.setBindingCount(val * element.getGridCols());
+                element.setBindingCount(val * cols);
                 profile.save();
                 inputControlsView.invalidate();
                 loadBindingSpinners(element, view);
@@ -420,10 +419,11 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
 
         NumberPicker npGridCols = view.findViewById(R.id.NPGridCols);
         if (npGridCols != null) {
-            npGridCols.setValue(element.getGridCols() > 0 ? element.getGridCols() : 8);
+            npGridCols.setValue(getGridColsForEditor(element));
             npGridCols.setOnValueChangeListener((picker, val) -> {
+                int rows = getGridRowsForEditor(element);
                 element.setGridCols(val);
-                element.setBindingCount(element.getGridRows() * val);
+                element.setBindingCount(rows * val);
                 profile.save();
                 inputControlsView.invalidate();
                 loadBindingSpinners(element, view);
@@ -465,10 +465,10 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
                 loadBindingSpinners(element, settingsView);
             });
             addQuickFillButton(llQuickFill, "Clear", () -> {
-                int total = element.getGridRows() * element.getGridCols();
+                prepareGridForFill(element);
+                int total = getGridCellCountForEditor(element);
                 for (int i = 0; i < total; i++) {
-                    element.setBindingAt(i, Binding.NONE);
-                    element.setCombo(i, null);
+                    clearGridCell(element, i);
                 }
                 profile.save();
                 inputControlsView.invalidate();
@@ -602,7 +602,9 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
     // --- REMAINDER OF YOUR SPINNER/BINDING LOGIC ---
     private void loadTypeSpinner(final ControlElement element, Spinner spinner, Runnable callback) {
         if (spinner == null) return;
-        spinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, ControlElement.Type.names()));
+        AccentArrayAdapter<String> adapter = new AccentArrayAdapter<>(this, R.layout.binding_spinner_item, ControlElement.Type.names());
+        adapter.setDropDownViewResource(R.layout.binding_spinner_dropdown_item);
+        spinner.setAdapter(adapter);
         spinner.setSelection(element.getType().ordinal(), false);
         spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
@@ -617,7 +619,9 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
 
     private void loadShapeSpinner(final ControlElement element, Spinner spinner) {
         if (spinner == null) return;
-        spinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, ControlElement.Shape.names()));
+        AccentArrayAdapter<String> adapter = new AccentArrayAdapter<>(this, R.layout.binding_spinner_item, ControlElement.Shape.names());
+        adapter.setDropDownViewResource(R.layout.binding_spinner_dropdown_item);
+        spinner.setAdapter(adapter);
         spinner.setSelection(element.getShape().ordinal(), false);
         spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
@@ -631,7 +635,9 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
 
     private void loadRangeSpinner(final ControlElement element, Spinner spinner) {
         if (spinner == null) return;
-        spinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, ControlElement.Range.names()));
+        AccentArrayAdapter<String> adapter = new AccentArrayAdapter<>(this, R.layout.binding_spinner_item, ControlElement.Range.names());
+        adapter.setDropDownViewResource(R.layout.binding_spinner_dropdown_item);
+        spinner.setAdapter(adapter);
         spinner.setSelection(element.getRange().ordinal(), false);
         spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
@@ -656,8 +662,8 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
             loadBindingSpinner(element, container, 3, R.string.binding_left);
         }
         else if (type == ControlElement.Type.BUTTON_GRID) {
-            int rows = element.getGridRows() > 0 ? element.getGridRows() : 2;
-            int cols = element.getGridCols() > 0 ? element.getGridCols() : 8;
+            int rows = getGridRowsForEditor(element);
+            int cols = getGridColsForEditor(element);
             int total = rows * cols;
             for (int i = 0; i < total; i++) {
                 int r = i / cols + 1;
@@ -735,11 +741,13 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
         });
         update.run();
 
-        // Long-press on binding view to set key combo
-        view.setOnLongClickListener(v -> {
-            showComboEditorDialog(element, index);
-            return true;
-        });
+        if (element.getType() == ControlElement.Type.BUTTON_GRID) {
+            // Long-press on grid binding rows to set a key combo.
+            view.setOnLongClickListener(v -> {
+                showComboEditorDialog(element, index);
+                return true;
+            });
+        }
 
         container.addView(view);
     }
@@ -779,7 +787,9 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
 
         // Spinner for main key
         final Spinner mainKeySpinner = new Spinner(this);
-        String[] allKeyLabels = Binding.keyboardBindingLabels();
+        final Binding[] mainKeyValues = Binding.keyboardBindingValues();
+        String[] allKeyLabels = new String[mainKeyValues.length];
+        for (int i = 0; i < mainKeyValues.length; i++) allKeyLabels[i] = mainKeyValues[i].toString();
         AccentArrayAdapter<String> keyAdapter = new AccentArrayAdapter<>(this, R.layout.binding_spinner_item, allKeyLabels);
         keyAdapter.setDropDownViewResource(R.layout.binding_spinner_dropdown_item);
         mainKeySpinner.setAdapter(keyAdapter);
@@ -794,7 +804,7 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
                 }
             }
         }
-        AppUtils.setSpinnerSelectionFromValue(mainKeySpinner, currentMain.toString());
+        mainKeySpinner.setSelection(getBindingPosition(mainKeyValues, currentMain), false);
 
         TextView tvLabel = new TextView(this);
         tvLabel.setText("Main key:");
@@ -808,22 +818,24 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
             .setView(ll)
             .setPositiveButton("Save", (d, which) -> {
                 // Build combo array
-                java.util.List<Binding> comboList = new java.util.ArrayList<>();
+                List<Binding> comboList = new ArrayList<>();
                 for (int i = 0; i < modifierOptions.length; i++) {
                     if (selectedModifiers[i]) comboList.add(modifierOptions[i]);
                 }
                 // Add main key
-                String selKey = mainKeySpinner.getSelectedItem().toString();
-                Binding mainBinding = Binding.fromString("KEY_" + selKey.replace(" ", "_").toUpperCase());
-                if (mainBinding != null && mainBinding != Binding.NONE) {
-                    comboList.add(mainBinding);
-                }
-                if (comboList.size() > 1) {
+                int mainKeyPosition = mainKeySpinner.getSelectedItemPosition();
+                Binding mainBinding = mainKeyPosition >= 0 && mainKeyPosition < mainKeyValues.length
+                    ? mainKeyValues[mainKeyPosition]
+                    : Binding.NONE;
+                if (mainBinding != Binding.NONE) comboList.add(mainBinding);
+
+                if (mainBinding != Binding.NONE && comboList.size() > 1) {
                     element.setCombo(index, comboList.toArray(new Binding[0]));
                     // Also set the primary binding to the main key for display
-                    element.setBindingAt(index, mainBinding != null ? mainBinding : element.getBindingAt(index));
+                    element.setBindingAt(index, mainBinding);
                 } else {
                     element.setCombo(index, null); // clear combo
+                    if (mainBinding != Binding.NONE) element.setBindingAt(index, mainBinding);
                 }
                 profile.save();
                 inputControlsView.invalidate();
@@ -839,12 +851,42 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
 
     private String getBindingLabel(ControlElement element, int index) {
         if (element.getType() == ControlElement.Type.BUTTON_GRID) {
-            int cols = element.getGridCols() > 0 ? element.getGridCols() : 8;
+            int cols = getGridColsForEditor(element);
             int r = index / cols + 1;
             int c = index % cols + 1;
             return "R" + r + "C" + c;
         }
         return "Binding " + (index + 1);
+    }
+
+    private int getBindingPosition(Binding[] values, Binding binding) {
+        if (binding == null) binding = Binding.NONE;
+        for (int i = 0; i < values.length; i++) {
+            if (values[i] == binding) return i;
+        }
+        return 0;
+    }
+
+    private int getGridRowsForEditor(ControlElement element) {
+        return element.getGridRows() > 0 ? element.getGridRows() : DEFAULT_GRID_ROWS;
+    }
+
+    private int getGridColsForEditor(ControlElement element) {
+        return element.getGridCols() > 0 ? element.getGridCols() : DEFAULT_GRID_COLS;
+    }
+
+    private int getGridCellCountForEditor(ControlElement element) {
+        return getGridRowsForEditor(element) * getGridColsForEditor(element);
+    }
+
+    private void prepareGridForFill(ControlElement element) {
+        int total = getGridCellCountForEditor(element);
+        if (element.getBindingCount() != total) element.setBindingCount(total);
+    }
+
+    private void clearGridCell(ControlElement element, int index) {
+        element.setBindingAt(index, Binding.NONE);
+        element.setCombo(index, null);
     }
 
     /** Add a small quick-fill button to a linear layout */
@@ -869,7 +911,8 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
             Binding.KEY_A, Binding.KEY_S, Binding.KEY_D, Binding.KEY_F, Binding.KEY_G, Binding.KEY_H, Binding.KEY_J, Binding.KEY_K, Binding.KEY_L,
             Binding.KEY_Z, Binding.KEY_X, Binding.KEY_C, Binding.KEY_V, Binding.KEY_B, Binding.KEY_N, Binding.KEY_M
         };
-        int total = element.getGridRows() * element.getGridCols();
+        prepareGridForFill(element);
+        int total = getGridCellCountForEditor(element);
         for (int i = 0; i < total; i++) {
             element.setBindingAt(i, i < keys.length ? keys[i] : Binding.NONE);
             element.setCombo(i, null);
@@ -885,7 +928,8 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
             Binding.KEY_F5, Binding.KEY_F6, Binding.KEY_F7, Binding.KEY_F8,
             Binding.KEY_F9, Binding.KEY_F10, Binding.KEY_F11, Binding.KEY_F12
         };
-        int total = element.getGridRows() * element.getGridCols();
+        prepareGridForFill(element);
+        int total = getGridCellCountForEditor(element);
         for (int i = 0; i < total; i++) {
             element.setBindingAt(i, i < keys.length ? keys[i] : Binding.NONE);
             element.setCombo(i, null);
@@ -902,7 +946,8 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
             Binding.KEY_KP_1, Binding.KEY_KP_2, Binding.KEY_KP_3, Binding.KEY_ENTER,
             Binding.KEY_KP_0, Binding.KEY_PERIOD, Binding.KEY_BKSP, Binding.KEY_ESC
         };
-        int total = element.getGridRows() * element.getGridCols();
+        prepareGridForFill(element);
+        int total = getGridCellCountForEditor(element);
         for (int i = 0; i < total; i++) {
             element.setBindingAt(i, i < keys.length ? keys[i] : Binding.NONE);
             element.setCombo(i, null);

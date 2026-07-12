@@ -278,34 +278,61 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
                     if (elementJSONObject.has("mouseSensitivity")) element.setMouseSensitivity((float)elementJSONObject.getDouble("mouseSensitivity"));
                     if (elementJSONObject.has("gridRows")) element.setGridRows(elementJSONObject.getInt("gridRows"));
                     if (elementJSONObject.has("gridCols")) element.setGridCols(elementJSONObject.getInt("gridCols"));
-                    if (elementJSONObject.has("gridCellShape")) element.setGridCellShape(ControlElement.Shape.valueOf(elementJSONObject.getString("gridCellShape")));
+                    if (elementJSONObject.has("gridCellShape")) {
+                        try {
+                            element.setGridCellShape(ControlElement.Shape.valueOf(elementJSONObject.getString("gridCellShape")));
+                        }
+                        catch (IllegalArgumentException e) {
+                            element.setGridCellShape(ControlElement.Shape.ROUND_RECT);
+                        }
+                    }
+                    if (element.getType() == ControlElement.Type.BUTTON_GRID) {
+                        int rows = element.getGridRows() > 0 ? element.getGridRows() : 2;
+                        int cols = element.getGridCols() > 0 ? element.getGridCols() : 8;
+                        element.setBindingCount(rows * cols);
+                    }
 
+                    boolean hasLoadedBinding = false;
                     boolean hasGamepadBinding = true;
                     JSONArray bindingsJSONArray = elementJSONObject.getJSONArray("bindings");
-                    for (int j = 0; j < bindingsJSONArray.length(); j++) {
-                        Binding binding = Binding.fromString(bindingsJSONArray.getString(j));
+                    int bindingLimit = element.getType() == ControlElement.Type.BUTTON_GRID
+                        ? Math.min(bindingsJSONArray.length(), element.getBindingCount())
+                        : bindingsJSONArray.length();
+                    for (int j = 0; j < bindingLimit; j++) {
+                        Binding binding = Binding.fromString(bindingsJSONArray.optString(j, null));
+                        hasLoadedBinding = true;
                         element.setBindingAt(j, binding);
                         if (!binding.isGamepad()) hasGamepadBinding = false;
                     }
 
                     // Load combos if present
-                    if (elementJSONObject.has("combos")) {
-                        JSONArray combosArr = elementJSONObject.getJSONArray("combos");
+                    JSONArray combosArr = elementJSONObject.optJSONArray("combos");
+                    if (combosArr != null) {
                         for (int j = 0; j < combosArr.length(); j++) {
-                            JSONArray entry = combosArr.getJSONArray(j);
-                            int idx = entry.getInt(0);
-                            JSONArray keys = entry.getJSONArray(1);
-                            if (keys.length() > 0) {
-                                Binding[] combo = new Binding[keys.length()];
+                            try {
+                                JSONArray entry = combosArr.getJSONArray(j);
+                                if (entry.length() < 2) continue;
+
+                                int idx = entry.getInt(0);
+                                if (idx < 0 || idx >= element.getBindingCount()) continue;
+
+                                JSONArray keys = entry.optJSONArray(1);
+                                if (keys == null || keys.length() == 0) continue;
+
+                                ArrayList<Binding> combo = new ArrayList<>();
                                 for (int k = 0; k < keys.length(); k++) {
-                                    combo[k] = Binding.fromString(keys.getString(k));
+                                    Binding binding = Binding.fromString(keys.optString(k, null));
+                                    if (binding != Binding.NONE) combo.add(binding);
                                 }
-                                element.setCombo(idx, combo);
+                                if (!combo.isEmpty()) element.setCombo(idx, combo.toArray(new Binding[0]));
+                            }
+                            catch (JSONException | IllegalArgumentException e) {
+                                e.printStackTrace();
                             }
                         }
                     }
 
-                    if (!virtualGamepad && hasGamepadBinding) virtualGamepad = true;
+                    if (!virtualGamepad && hasLoadedBinding && hasGamepadBinding) virtualGamepad = true;
                     elements.add(element);
                 }
                 catch (JSONException | IllegalArgumentException e) {
