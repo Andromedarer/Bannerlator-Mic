@@ -28,6 +28,8 @@ import android.graphics.Rect;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.compose.runtime.Composer;
+import androidx.compose.ui.platform.ComposeView;
 
 import com.winlator.star.R;
 import com.winlator.star.inputcontrols.Binding;
@@ -48,6 +50,10 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+
+import kotlin.Unit;
+import kotlin.jvm.functions.Function0;
+import kotlin.jvm.functions.Function2;
 
 public class ControlsEditorActivity extends AppCompatActivity implements View.OnClickListener {
     private static final int DEFAULT_GRID_ROWS = 2;
@@ -85,8 +91,52 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
         inputControlsView.setOverlayOpacity(0.6f);
 
         profile = InputControlsManager.loadProfile(this, ControlsProfile.getProfileFile(this, getIntent().getIntExtra("profile_id", 0)));
-        ((TextView)findViewById(R.id.TVProfileName)).setText(profile.getName());
         inputControlsView.setProfile(profile);
+
+        ComposeView composeToolbar = findViewById(R.id.ComposeToolbar);
+        if (composeToolbar != null) {
+            composeToolbar.setContent(new Function2<Composer, Integer, Unit>() {
+                @Override
+                public Unit invoke(Composer composer, Integer changed) {
+                    ControlsEditorToolbarKt.ControlsEditorToolbar(
+                        profile.getName(),
+                        new Function0<Unit>() {
+                            @Override
+                            public Unit invoke() {
+                                showAddElementTypeDialog();
+                                return Unit.INSTANCE;
+                            }
+                        },
+                        new Function0<Unit>() {
+                            @Override
+                            public Unit invoke() {
+                                removeElement();
+                                return Unit.INSTANCE;
+                            }
+                        },
+                        new Function0<Unit>() {
+                            @Override
+                            public Unit invoke() {
+                                ControlElement selectedElement = inputControlsView.getSelectedElement();
+                                if (selectedElement != null) showControlElementSettings(findViewById(R.id.BTElementSettings));
+                                else AppUtils.showToast(ControlsEditorActivity.this, R.string.no_control_element_selected);
+                                return Unit.INSTANCE;
+                            }
+                        },
+                        new Function0<Unit>() {
+                            @Override
+                            public Unit invoke() {
+                                showBackgroundImageDialog();
+                                return Unit.INSTANCE;
+                            }
+                        },
+                        composer,
+                        0
+                    );
+                    return Unit.INSTANCE;
+                }
+            });
+        }
 
         FrameLayout container = findViewById(R.id.FLContainer);
         container.addView(inputControlsView, 0);
@@ -98,9 +148,12 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
             sidebarOverlay.setOnClickListener(v -> closeSidebar());
         }
 
-        container.findViewById(R.id.BTAddElement).setOnClickListener(this);
-        container.findViewById(R.id.BTRemoveElement).setOnClickListener(this);
-        container.findViewById(R.id.BTElementSettings).setOnClickListener(this);
+        View btAddElement = container.findViewById(R.id.BTAddElement);
+        if (btAddElement != null) btAddElement.setOnClickListener(this);
+        View btRemoveElement = container.findViewById(R.id.BTRemoveElement);
+        if (btRemoveElement != null) btRemoveElement.setOnClickListener(this);
+        View btElementSettings = container.findViewById(R.id.BTElementSettings);
+        if (btElementSettings != null) btElementSettings.setOnClickListener(this);
 
         // Custom-icon pickers: the built-in file picker (primary) and the system SAF picker (secondary).
         iconPickerLauncher = registerForActivityResult(new ActivityResultContracts.GetContent(), uri -> {
@@ -316,6 +369,10 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
         }
     }
 
+    private void removeElement() {
+        if (!inputControlsView.removeElement()) AppUtils.showToast(this, R.string.no_control_element_selected);
+    }
+
     @Override
     public void onClick(View v) {
         switch (v.getId()) {
@@ -323,7 +380,7 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
                 showAddElementTypeDialog();
                 break;
             case R.id.BTRemoveElement:
-                if (!inputControlsView.removeElement()) AppUtils.showToast(this, R.string.no_control_element_selected);
+                removeElement();
                 break;
             case R.id.BTElementSettings:
                 ControlElement selectedElement = inputControlsView.getSelectedElement();

@@ -5,56 +5,30 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-    <LinearLayout
+    <androidx.compose.ui.platform.ComposeView
+        android:id="@+id/ComposeToolbar"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
         android:layout_gravity="center_horizontal"
-        android:layout_marginTop="8dp"
-        android:background="@drawable/input_controls_toolbar"
-        android:gravity="center_vertical"
-        android:padding="4dp">
+        android:layout_marginTop="8dp" />
 
-        <LinearLayout
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:paddingLeft="8dp"
-            android:paddingRight="8dp">
+    <View
+        android:id="@+id/BTAddElement"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:visibility="gone" />
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textStyle="bold"
-                android:textSize="14sp"
-                android:textColor="#ffffff"
-                android:text="@string/profile" />
+    <View
+        android:id="@+id/BTRemoveElement"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:visibility="gone" />
 
-            <TextView
-                android:id="@+id/TVProfileName"
-                android:layout_width="wrap_content"
-                android:textColor="@color/colorAccent"
-                android:textSize="14sp"
-                android:layout_height="wrap_content" />
-        </LinearLayout>
-
-        <View style="@style/VerticalLine" />
-
-        <ImageButton
-            android:id="@+id/BTAddElement"
-            style="@style/ToolButton"
-            android:src="@drawable/icon_add"  />
-
-        <ImageButton
-            android:id="@+id/BTRemoveElement"
-            style="@style/ToolButton"
-            android:src="@drawable/icon_remove"  />
-
-        <ImageButton
-            android:id="@+id/BTElementSettings"
-            style="@style/ToolButton"
-            android:src="@drawable/icon_settings"  />
-    </LinearLayout>
+    <View
+        android:id="@+id/BTElementSettings"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:visibility="gone" />
 
     <View
         android:id="@+id/VSidebarOverlay"
