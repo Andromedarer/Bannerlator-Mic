@@ -495,7 +495,9 @@ public class InputControlsView extends View {
 
     private synchronized ControlElement intersectElement(float x, float y) {
         if (profile != null) {
-            for (ControlElement element : profile.getElements()) {
+            List<ControlElement> elements = profile.getElements();
+            for (int i = elements.size() - 1; i >= 0; i--) {
+                ControlElement element = elements.get(i);
                 if (isElementHiddenByGroup(element)) continue;
                 if (element.containsPoint(x, y)) return element;
             }
@@ -505,6 +507,49 @@ public class InputControlsView extends View {
 
     private boolean isElementHiddenByGroup(ControlElement element) {
         return element != null && element.isInGroup() && profile != null && !profile.isGroupVisible(element.getGroupId());
+    }
+
+    private int[] clampDragDelta(List<ControlElement> elements, int dx, int dy) {
+        if (elements == null || elements.isEmpty()) return new int[]{0, 0};
+
+        int minDx = Integer.MIN_VALUE;
+        int maxDx = Integer.MAX_VALUE;
+        int minDy = Integer.MIN_VALUE;
+        int maxDy = Integer.MAX_VALUE;
+        int maxWidth = Math.max(0, getMaxWidth());
+        int maxHeight = Math.max(0, getMaxHeight());
+
+        for (ControlElement element : elements) {
+            if (element == null) continue;
+            Rect box = element.getBoundingBox();
+            minDx = Math.max(minDx, -box.left);
+            maxDx = Math.min(maxDx, maxWidth - box.right);
+            minDy = Math.max(minDy, -box.top);
+            maxDy = Math.min(maxDy, maxHeight - box.bottom);
+        }
+
+        if (minDx > maxDx) {
+            minDx = 0;
+            maxDx = 0;
+        }
+        if (minDy > maxDy) {
+            minDy = 0;
+            maxDy = 0;
+        }
+
+        return new int[]{
+            Math.max(minDx, Math.min(maxDx, dx)),
+            Math.max(minDy, Math.min(maxDy, dy))
+        };
+    }
+
+    private void setCursorClamped(float x, float y) {
+        int snappedX = (int)Mathf.roundTo(x, snappingSize);
+        int snappedY = (int)Mathf.roundTo(y, snappingSize);
+        cursor.set(
+            Math.max(0, Math.min(getMaxWidth(), snappedX)),
+            Math.max(0, Math.min(getMaxHeight(), snappedY))
+        );
     }
 
     public Paint getPaint() {
@@ -694,15 +739,18 @@ public class InputControlsView extends View {
                         if (selectedElement.isInGroup() && profile != null) {
                             List<ControlElement> groupElements = profile.getGroupElements(selectedElement.getGroupId());
                             if (groupElements != null && !groupElements.isEmpty()) {
+                                int[] clampedDelta = clampDragDelta(groupElements, dx, dy);
                                 for (ControlElement element : groupElements) {
-                                    element.setPosition(element.getX() + dx, element.getY() + dy);
+                                    element.setPosition(element.getX() + clampedDelta[0], element.getY() + clampedDelta[1]);
                                 }
                             } else {
-                                selectedElement.setPosition(newX, newY);
+                                int[] clampedDelta = clampDragDelta(java.util.Collections.singletonList(selectedElement), dx, dy);
+                                selectedElement.setPosition(selectedElement.getX() + clampedDelta[0], selectedElement.getY() + clampedDelta[1]);
                             }
                         }
                         else {
-                            selectedElement.setPosition(newX, newY);
+                            int[] clampedDelta = clampDragDelta(java.util.Collections.singletonList(selectedElement), dx, dy);
+                            selectedElement.setPosition(selectedElement.getX() + clampedDelta[0], selectedElement.getY() + clampedDelta[1]);
                         }
                         invalidate();
                     }
@@ -717,7 +765,7 @@ public class InputControlsView extends View {
                         break;
                     }
                     if (selectedElement != null && profile != null) profile.save();
-                    if (moveCursor) cursor.set((int)Mathf.roundTo(event.getX(), snappingSize), (int)Mathf.roundTo(event.getY(), snappingSize));
+                    if (moveCursor) setCursorClamped(event.getX(), event.getY());
                     invalidate();
                     break;
                 }
@@ -725,7 +773,7 @@ public class InputControlsView extends View {
                     cancelEditorLongPress();
                     editorLongPressTriggered = false;
                     if (selectedElement != null && profile != null) profile.save();
-                    if (moveCursor) cursor.set((int)Mathf.roundTo(event.getX(), snappingSize), (int)Mathf.roundTo(event.getY(), snappingSize));
+                    if (moveCursor) setCursorClamped(event.getX(), event.getY());
                     invalidate();
                     break;
                 }

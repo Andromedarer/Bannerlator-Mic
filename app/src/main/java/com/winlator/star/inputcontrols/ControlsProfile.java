@@ -170,9 +170,12 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
         JSONArray groupsJSONArray = profileJSONObject.optJSONArray("groups");
         if (groupsJSONArray != null) {
             for (int i = 0; i < groupsJSONArray.length(); i++) {
-                JSONObject groupJSONObject = groupsJSONArray.getJSONObject(i);
+                JSONObject groupJSONObject = groupsJSONArray.optJSONObject(i);
+                if (groupJSONObject == null) continue;
                 String name = groupJSONObject.optString("name", null);
-                if (name == null || name.isEmpty()) continue;
+                if (name == null) continue;
+                name = name.trim();
+                if (name.isEmpty()) continue;
                 boolean visible = groupJSONObject.optBoolean("visible", true);
                 groups.put(name, new GroupInfo(name, visible));
             }
@@ -200,7 +203,9 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
     }
 
     public GroupInfo getGroup(String name) {
-        if (name == null || name.isEmpty()) return null;
+        if (name == null) return null;
+        name = name.trim();
+        if (name.isEmpty()) return null;
         ensureGroupsLoaded();
         return groups.get(name);
     }
@@ -224,7 +229,9 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
     }
 
     public void removeGroup(String name) {
-        if (name == null || name.isEmpty()) return;
+        if (name == null) return;
+        name = name.trim();
+        if (name.isEmpty()) return;
         ensureGroupsLoaded();
         if (groups.remove(name) == null) return;
         for (ControlElement element : elements) {
@@ -243,7 +250,9 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
     }
 
     public List<ControlElement> getGroupElements(String groupId) {
-        if (groupId == null || groupId.isEmpty()) return new ArrayList<>();
+        if (groupId == null) return new ArrayList<>();
+        groupId = groupId.trim();
+        if (groupId.isEmpty()) return new ArrayList<>();
         ArrayList<ControlElement> groupElements = new ArrayList<>();
         for (ControlElement element : elements) {
             if (groupId.equals(element.getGroupId())) groupElements.add(element);
@@ -445,15 +454,16 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
                     boolean hasLoadedBinding = false;
                     boolean hasGamepadBinding = true;
                     JSONArray bindingsJSONArray = elementJSONObject.optJSONArray("bindings");
-                    if (bindingsJSONArray == null) continue;
-                    int bindingLimit = element.getType() == ControlElement.Type.BUTTON_GRID
-                        ? Math.min(bindingsJSONArray.length(), element.getBindingCount())
-                        : bindingsJSONArray.length();
-                    for (int j = 0; j < bindingLimit; j++) {
-                        Binding binding = Binding.fromString(bindingsJSONArray.optString(j, null));
-                        hasLoadedBinding = true;
-                        element.setBindingAt(j, binding);
-                        if (!binding.isGamepad()) hasGamepadBinding = false;
+                    if (bindingsJSONArray != null) {
+                        int bindingLimit = element.getType() == ControlElement.Type.BUTTON_GRID
+                            ? Math.min(bindingsJSONArray.length(), element.getBindingCount())
+                            : bindingsJSONArray.length();
+                        for (int j = 0; j < bindingLimit; j++) {
+                            Binding binding = Binding.fromString(bindingsJSONArray.optString(j, null));
+                            hasLoadedBinding = true;
+                            element.setBindingAt(j, binding);
+                            if (!binding.isGamepad()) hasGamepadBinding = false;
+                        }
                     }
 
                     // Load combos if present

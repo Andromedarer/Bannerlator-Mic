@@ -19,12 +19,9 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -499,6 +496,7 @@ fun ControlsEditorSettingsPane(
                             options = bindingOptions,
                             onValueChanged = { binding ->
                                 element.setBindingAt(index, binding)
+                                element.setCombo(index, null)
                                 saveAndInvalidate()
                             },
                             comboSummary = comboSummaryFor(element, index),
@@ -761,7 +759,9 @@ fun SettingSpinner(
             DropdownMenu(
                 expanded = expanded,
                 onDismissRequest = { expanded = false },
-                modifier = Modifier.background(EditorSurface, EditorShape),
+                modifier = Modifier
+                    .heightIn(max = 280.dp)
+                    .background(EditorSurface, EditorShape),
             ) {
                 options.forEachIndexed { index, option ->
                     DropdownMenuItem(
@@ -849,7 +849,9 @@ fun NumberPickerRow(
                 onValueChange = { input ->
                     val filtered = input.filter { it.isDigit() }
                     if (filtered.isEmpty()) return@OutlinedTextField
-                    onValueChange(filtered.toInt().coerceIn(minValue, maxValue))
+                    filtered.toIntOrNull()?.let { parsed ->
+                        onValueChange(parsed.coerceIn(minValue, maxValue))
+                    }
                 },
                 modifier = Modifier.weight(1f),
                 singleLine = true,
@@ -874,15 +876,18 @@ fun QuickFillBar(
     onClear: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(
+    Column(
         modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(EditorSpacing),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalArrangement = Arrangement.spacedBy(EditorSpacing),
     ) {
-        FillChip(text = stringResource(R.string.fill_qwerty), onClick = onQwerty)
-        FillChip(text = stringResource(R.string.fill_function_keys), onClick = onFunctionKeys)
-        FillChip(text = stringResource(R.string.fill_numpad), onClick = onNumPad)
-        FillChip(text = stringResource(R.string.clear), onClick = onClear)
+        Row(horizontalArrangement = Arrangement.spacedBy(EditorSpacing)) {
+            FillChip(text = stringResource(R.string.fill_qwerty), onClick = onQwerty, modifier = Modifier.weight(1f))
+            FillChip(text = stringResource(R.string.fill_function_keys), onClick = onFunctionKeys, modifier = Modifier.weight(1f))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(EditorSpacing)) {
+            FillChip(text = stringResource(R.string.fill_numpad), onClick = onNumPad, modifier = Modifier.weight(1f))
+            FillChip(text = stringResource(R.string.clear), onClick = onClear, modifier = Modifier.weight(1f))
+        }
     }
 }
 
@@ -913,7 +918,7 @@ internal fun IconPicker(
                     if (imageBitmap != null) {
                         androidx.compose.foundation.Image(
                             bitmap = imageBitmap,
-                            contentDescription = "Icon ${icon.id}",
+                            contentDescription = stringResource(R.string.icon_content_description, icon.id),
                             modifier = Modifier.size(32.dp),
                         )
                     }
@@ -934,9 +939,9 @@ fun ComboEditor(
     var openIndex by remember(element) { mutableStateOf(-1) }
     val total = element.getGridRows().coerceAtLeast(1) * element.getGridCols().coerceAtLeast(1)
 
-    SettingsSection(title = "Combo Bindings", visible = true, modifier = modifier) {
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(EditorSpacing)) {
-            items(total) { index ->
+    SettingsSection(title = stringResource(R.string.combo_bindings), visible = true, modifier = modifier) {
+        Column(verticalArrangement = Arrangement.spacedBy(EditorSpacing)) {
+            for (index in 0 until total) {
                 val cols = element.getGridCols().coerceAtLeast(1)
                 val row = index / cols + 1
                 val col = index % cols + 1
@@ -1028,8 +1033,18 @@ fun ComboEditor(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { openIndex = -1 }) {
-                    Text(text = stringResource(android.R.string.cancel), color = EditorTextValue)
+                Row {
+                    TextButton(onClick = {
+                        element.setCombo(index, null)
+                        profile.save()
+                        onInvalidate()
+                        openIndex = -1
+                    }) {
+                        Text(text = stringResource(R.string.clear_combo), color = EditorAccent)
+                    }
+                    TextButton(onClick = { openIndex = -1 }) {
+                        Text(text = stringResource(android.R.string.cancel), color = EditorTextValue)
+                    }
                 }
             },
         )
@@ -1087,9 +1102,10 @@ private fun BindingSpinnerRow(
 }
 
 @Composable
-private fun FillChip(text: String, onClick: () -> Unit) {
+private fun FillChip(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     TextButton(
         onClick = onClick,
+        modifier = modifier,
         shape = SmallShape,
         colors = ButtonDefaults.textButtonColors(
             contentColor = EditorAccent,

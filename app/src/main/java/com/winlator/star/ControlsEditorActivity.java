@@ -5,23 +5,14 @@ import android.animation.AnimatorListenerAdapter;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.graphics.Color;
-import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.Gravity;
-import android.view.LayoutInflater;
 import android.view.View;
 import android.view.MotionEvent;
 import android.view.animation.DecelerateInterpolator;
 import android.widget.FrameLayout;
-import android.widget.GridLayout;
-import android.widget.ImageButton;
-import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
-import android.widget.SeekBar;
-import android.widget.TextView;
 import android.graphics.Rect;
 
 import androidx.activity.result.ActivityResultLauncher;
@@ -42,15 +33,13 @@ import com.winlator.star.widget.InputControlsView;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.List;
 
 import kotlin.Unit;
 import kotlin.jvm.functions.Function0;
 import kotlin.jvm.functions.Function2;
 
 public class ControlsEditorActivity extends AppCompatActivity implements View.OnClickListener {
-    private static final int DEFAULT_GRID_ROWS = 2;
-    private static final int DEFAULT_GRID_COLS = 8;
-
     private InputControlsView inputControlsView;
     private ControlsProfile profile;
     private CustomIconManager customIconManager;
@@ -65,11 +54,11 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
     private View sidebarScrollView;
     private LinearLayout sidebarContent;
     private ComposeView sidebarComposeView;
+    private ComposeView dialogComposeView;
+    private String activeDialogMode;
     private boolean sidebarOpen = false;
     private boolean sidebarOnRight = false;
     private int sidebarSettingsReloadKey = 0;
-    private android.app.AlertDialog activeControlTypeDialog;
-    private android.app.AlertDialog activeGroupListDialog;
 
     @Override
     public void onCreate(Bundle bundle) {
@@ -136,6 +125,8 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
                 }
             });
         }
+        dialogComposeView = findViewById(R.id.ComposeDialogHost);
+        renderDialogHost();
 
         FrameLayout container = findViewById(R.id.FLContainer);
         container.addView(inputControlsView, 0);
@@ -214,213 +205,26 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
     }
 
     private void showAddElementPicker() {
-        dismissActiveControlTypeDialog();
-        View pickerView = LayoutInflater.from(this).inflate(R.layout.control_type_picker, null, false);
-        GridLayout grid = pickerView.findViewById(R.id.GLControlTypePicker);
-        if (grid == null) return;
-
-        final ControlElement.Type[] types = {
-            ControlElement.Type.BUTTON,
-            ControlElement.Type.D_PAD,
-            ControlElement.Type.RANGE_BUTTON,
-            ControlElement.Type.STICK,
-            ControlElement.Type.TRACKPAD,
-            ControlElement.Type.DYNAMIC_STICK,
-            ControlElement.Type.MOUSE_AREA,
-            ControlElement.Type.BUTTON_GRID
-        };
-        final int[] icons = {
-            R.drawable.icon_keyboard,
-            R.drawable.icon_gamepad,
-            R.drawable.icon_screen_effect,
-            R.drawable.icon_gamepad,
-            R.drawable.icon_mouse,
-            R.drawable.icon_gamepad,
-            R.drawable.icon_mouse,
-            R.drawable.icon_palette
-        };
-
-        grid.removeAllViews();
-        for (int i = 0; i < types.length; i++) {
-            final ControlElement.Type type = types[i];
-            grid.addView(createControlTypePickerItem(grid, type, icons[i]));
-        }
-
-        activeControlTypeDialog = new android.app.AlertDialog.Builder(this)
-            .setTitle(R.string.select_control_type)
-            .setView(pickerView)
-            .setNegativeButton(android.R.string.cancel, null)
-            .create();
-        activeControlTypeDialog.show();
-    }
-
-    private View createControlTypePickerItem(GridLayout parent, ControlElement.Type type, int iconResId) {
-        int cellMargin = (int) UnitUtils.dpToPx(6);
-        int cellPadding = (int) UnitUtils.dpToPx(12);
-        int iconSize = (int) UnitUtils.dpToPx(36);
-
-        LinearLayout cell = new LinearLayout(this);
-        GridLayout.LayoutParams params = new GridLayout.LayoutParams();
-        params.width = 0;
-        params.height = FrameLayout.LayoutParams.WRAP_CONTENT;
-        params.columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f);
-        params.setMargins(cellMargin, cellMargin, cellMargin, cellMargin);
-        cell.setLayoutParams(params);
-        cell.setOrientation(LinearLayout.VERTICAL);
-        cell.setGravity(Gravity.CENTER);
-        cell.setPadding(cellPadding, cellPadding, cellPadding, cellPadding);
-        cell.setClickable(true);
-        cell.setFocusable(true);
-
-        GradientDrawable background = new GradientDrawable();
-        background.setColor(0xFF1F2937);
-        background.setCornerRadius(UnitUtils.dpToPx(12));
-        background.setStroke((int) UnitUtils.dpToPx(1), 0xFF334155);
-        cell.setBackground(background);
-
-        ImageView icon = new ImageView(this);
-        LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(iconSize, iconSize);
-        icon.setLayoutParams(iconLp);
-        icon.setImageResource(iconResId);
-        if (type == ControlElement.Type.DYNAMIC_STICK) {
-            icon.setColorFilter(0xFF8B5CF6, android.graphics.PorterDuff.Mode.SRC_IN);
-        }
-        cell.addView(icon);
-
-        TextView label = new TextView(this);
-        LinearLayout.LayoutParams labelLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        labelLp.topMargin = (int) UnitUtils.dpToPx(8);
-        label.setLayoutParams(labelLp);
-        label.setText(getControlTypeLabel(type));
-        label.setTextColor(0xFFFFFFFF);
-        label.setTextSize(13f);
-        label.setGravity(Gravity.CENTER);
-        cell.addView(label);
-
-        cell.setOnClickListener(v -> {
-            if (inputControlsView.addElement(type)) {
-                ControlElement selectedElement = inputControlsView.getSelectedElement();
-                dismissActiveControlTypeDialog();
-                if (selectedElement != null) showControlElementSettings(findViewById(R.id.BTElementSettings));
-            } else {
-                AppUtils.showToast(this, R.string.no_profile_selected);
-            }
-        });
-
-        return cell;
-    }
-
-    private String getControlTypeLabel(ControlElement.Type type) {
-        switch (type) {
-            case BUTTON: return getString(R.string.control_type_button);
-            case D_PAD: return getString(R.string.control_type_d_pad);
-            case RANGE_BUTTON: return getString(R.string.control_type_range_button);
-            case STICK: return getString(R.string.control_type_stick);
-            case TRACKPAD: return getString(R.string.control_type_trackpad);
-            case DYNAMIC_STICK: return getString(R.string.control_type_dynamic_stick);
-            case MOUSE_AREA: return getString(R.string.control_type_mouse_area);
-            case BUTTON_GRID: return getString(R.string.control_type_button_grid);
-            default: return type.name().replace('_', ' ');
-        }
+        showComposeDialog(ControlsEditorDialogsKt.DIALOG_ADD_ELEMENT);
     }
 
     private void showBackgroundImageDialog() {
-        new android.app.AlertDialog.Builder(this)
-            .setTitle(R.string.set_background_image)
-            .setItems(new CharSequence[]{getString(R.string.pick_from_files), getString(R.string.clear_background)}, (d, which) -> {
-                if (which == 0) {
-                    new android.app.AlertDialog.Builder(this)
-                        .setItems(new CharSequence[]{getString(R.string.browse_files), getString(R.string.pick_via_system)}, (d2, which2) -> {
-                            if (which2 == 0) {
-                                Intent intent = new Intent(this, FilePickerActivity.class);
-                                intent.putExtra(FilePickerActivity.EXTRA_EXTENSIONS, new String[]{"png", "jpg", "jpeg", "webp", "bmp"});
-                                intent.putExtra(FilePickerActivity.EXTRA_PICKER_TITLE, getString(R.string.select_background_image));
-                                bgImagePickerInAppLauncher.launch(intent);
-                            } else {
-                                bgImagePickerLauncher.launch("image/*");
-                            }
-                        })
-                        .show();
-                } else {
-                    inputControlsView.setBackgroundImage(null);
-                    AppUtils.showToast(this, R.string.background_cleared);
-                }
-            })
-            .show();
+        showComposeDialog(ControlsEditorDialogsKt.DIALOG_BACKGROUND_IMAGE);
     }
 
     private void toggleGroupListDialog() {
-        if (activeGroupListDialog != null && activeGroupListDialog.isShowing()) {
-            activeGroupListDialog.dismiss();
-            activeGroupListDialog = null;
-        }
-        else {
-            showGroupListDialog();
-        }
+        if (ControlsEditorDialogsKt.DIALOG_GROUP_VISIBILITY.equals(activeDialogMode)) closeComposeDialog();
+        else showComposeDialog(ControlsEditorDialogsKt.DIALOG_GROUP_VISIBILITY);
     }
 
-    private void showGroupListDialog() {
-        if (profile == null) return;
-        if (activeGroupListDialog != null) {
-            activeGroupListDialog.dismiss();
-            activeGroupListDialog = null;
+    private void addElement(ControlElement.Type type) {
+        if (inputControlsView.addElement(type)) {
+            ControlElement selectedElement = inputControlsView.getSelectedElement();
+            closeComposeDialog();
+            if (selectedElement != null) showControlElementSettings(findViewById(R.id.BTElementSettings));
+        } else {
+            AppUtils.showToast(this, R.string.no_profile_selected);
         }
-
-        ScrollView scrollView = new ScrollView(this);
-        LinearLayout container = new LinearLayout(this);
-        container.setOrientation(LinearLayout.VERTICAL);
-        container.setPadding((int) UnitUtils.dpToPx(16), (int) UnitUtils.dpToPx(12), (int) UnitUtils.dpToPx(16), (int) UnitUtils.dpToPx(12));
-        container.setBackgroundColor(0xFF1A1A2E);
-        scrollView.addView(container);
-
-        if (profile.getGroups().isEmpty()) {
-            TextView emptyView = new TextView(this);
-            emptyView.setText(getString(R.string.no_groups));
-            emptyView.setTextColor(Color.WHITE);
-            container.addView(emptyView);
-        }
-        else {
-            for (ControlsProfile.GroupInfo group : profile.getGroups().values()) {
-                LinearLayout row = new LinearLayout(this);
-                row.setOrientation(LinearLayout.HORIZONTAL);
-                row.setGravity(Gravity.CENTER_VERTICAL);
-                row.setPadding(0, (int) UnitUtils.dpToPx(8), 0, (int) UnitUtils.dpToPx(8));
-
-                TextView nameView = new TextView(this);
-                nameView.setText(group.getName());
-                nameView.setTextColor(Color.WHITE);
-                LinearLayout.LayoutParams nameLp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-                row.addView(nameView, nameLp);
-
-                TextView countView = new TextView(this);
-                countView.setText(getString(R.string.group_element_count, profile.getGroupElementCount(group.getName())));
-                countView.setTextColor(Color.WHITE);
-                countView.setPadding(0, 0, (int) UnitUtils.dpToPx(12), 0);
-                row.addView(countView);
-
-                ImageButton visibilityButton = new ImageButton(this);
-                visibilityButton.setBackgroundColor(Color.TRANSPARENT);
-                visibilityButton.setImageResource(group.isVisible() ? R.drawable.icon_eye : R.drawable.icon_eye_off);
-                visibilityButton.setContentDescription(getString(R.string.group_visibility));
-                visibilityButton.setOnClickListener(v -> {
-                    profile.setGroupVisible(group.getName(), !group.isVisible());
-                    profile.save();
-                    inputControlsView.invalidate();
-                    refreshSidebarSettings();
-                    showGroupListDialog();
-                });
-                row.addView(visibilityButton, new LinearLayout.LayoutParams((int) UnitUtils.dpToPx(40), (int) UnitUtils.dpToPx(40)));
-
-                container.addView(row);
-            }
-        }
-
-        activeGroupListDialog = new android.app.AlertDialog.Builder(this)
-            .setTitle(R.string.group_visibility)
-            .setView(scrollView)
-            .setPositiveButton(R.string.ok, (dialog, which) -> dialog.dismiss())
-            .show();
-        activeGroupListDialog.setOnDismissListener(dialog -> activeGroupListDialog = null);
     }
 
     // Shared: add a custom icon from any Uri (file:// from the in-app picker, content:// from SAF).
@@ -428,31 +232,131 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
         ControlElement selectedElement = inputControlsView.getSelectedElement();
         if (selectedElement == null) return;
 
-        customIconManager.addCustomIcon(uri);
+        short iconId = customIconManager.addCustomIcon(uri);
+        if (iconId >= 0) {
+            selectedElement.setIconId(iconId);
+            profile.save();
+            inputControlsView.invalidate();
+        } else {
+            AppUtils.showToast(this, R.string.unable_to_load_image);
+        }
         refreshSidebarSettings();
     }
 
     // Two-option chooser: built-in picker first, then system SAF.
     public void promptPickCustomIcon() {
-        new android.app.AlertDialog.Builder(this)
-            .setItems(new CharSequence[]{getString(R.string.browse_files), getString(R.string.pick_via_system)}, (d, which) -> {
-                if (which == 0) {
-                    Intent intent = new Intent(this, FilePickerActivity.class);
-                    intent.putExtra(FilePickerActivity.EXTRA_EXTENSIONS, new String[]{"png", "jpg", "jpeg", "webp", "bmp", "gif"});
-                    intent.putExtra(FilePickerActivity.EXTRA_PICKER_TITLE, getString(R.string.select_icon_image));
-                    iconPickerInAppLauncher.launch(intent);
-                } else {
-                    iconPickerLauncher.launch("image/*");
-                }
-            })
-            .show();
+        showComposeDialog(ControlsEditorDialogsKt.DIALOG_CUSTOM_ICON_SOURCE);
     }
 
-    private void dismissActiveControlTypeDialog() {
-        if (activeControlTypeDialog != null) {
-            activeControlTypeDialog.dismiss();
-            activeControlTypeDialog = null;
-        }
+    private void showComposeDialog(String dialogMode) {
+        activeDialogMode = dialogMode;
+        renderDialogHost();
+    }
+
+    private void closeComposeDialog() {
+        activeDialogMode = null;
+        renderDialogHost();
+    }
+
+    private void renderDialogHost() {
+        if (dialogComposeView == null) return;
+        dialogComposeView.setVisibility(activeDialogMode == null ? View.GONE : View.VISIBLE);
+        final String dialogMode = activeDialogMode;
+        final float backgroundOpacity = inputControlsView != null ? inputControlsView.getBackgroundOpacity() : 0f;
+
+        dialogComposeView.setContent(new Function2<Composer, Integer, Unit>() {
+            @Override
+            public Unit invoke(Composer composer, Integer changed) {
+                ControlsEditorDialogsKt.ControlsEditorDialogHost(
+                    dialogMode,
+                    profile,
+                    backgroundOpacity,
+                    new ControlsEditorDialogActions() {
+                        @Override
+                        public void onDismiss() {
+                            closeComposeDialog();
+                        }
+                        @Override
+                        public void onAddElement(ControlElement.Type type) {
+                            addElement(type);
+                        }
+                        @Override
+                        public void onPickBackgroundFile() {
+                            pickBackgroundFromFiles();
+                        }
+                        @Override
+                        public void onPickBackgroundSystem() {
+                            pickBackgroundViaSystem();
+                        }
+                        @Override
+                        public void onClearBackground() {
+                            clearBackgroundImage();
+                        }
+                        @Override
+                        public void onBackgroundOpacityChange(float opacity) {
+                            if (inputControlsView != null) inputControlsView.setBackgroundOpacity(opacity);
+                        }
+                        @Override
+                        public void onGroupVisibilityChange(String groupName, boolean visible) {
+                            setGroupVisibility(groupName, visible);
+                        }
+                        @Override
+                        public void onPickIconFile() {
+                            pickCustomIconFromFiles();
+                        }
+                        @Override
+                        public void onPickIconSystem() {
+                            pickCustomIconViaSystem();
+                        }
+                    },
+                    composer,
+                    0
+                );
+                return Unit.INSTANCE;
+            }
+        });
+    }
+
+    private void pickBackgroundFromFiles() {
+        closeComposeDialog();
+        Intent intent = new Intent(this, FilePickerActivity.class);
+        intent.putExtra(FilePickerActivity.EXTRA_EXTENSIONS, new String[]{"png", "jpg", "jpeg", "webp", "bmp"});
+        intent.putExtra(FilePickerActivity.EXTRA_PICKER_TITLE, getString(R.string.select_background_image));
+        bgImagePickerInAppLauncher.launch(intent);
+    }
+
+    private void pickBackgroundViaSystem() {
+        closeComposeDialog();
+        bgImagePickerLauncher.launch("image/*");
+    }
+
+    private void clearBackgroundImage() {
+        closeComposeDialog();
+        inputControlsView.setBackgroundImage(null);
+        refreshSidebarSettings();
+        AppUtils.showToast(this, R.string.background_cleared);
+    }
+
+    private void pickCustomIconFromFiles() {
+        closeComposeDialog();
+        Intent intent = new Intent(this, FilePickerActivity.class);
+        intent.putExtra(FilePickerActivity.EXTRA_EXTENSIONS, new String[]{"png", "jpg", "jpeg", "webp", "bmp", "gif"});
+        intent.putExtra(FilePickerActivity.EXTRA_PICKER_TITLE, getString(R.string.select_icon_image));
+        iconPickerInAppLauncher.launch(intent);
+    }
+
+    private void pickCustomIconViaSystem() {
+        closeComposeDialog();
+        iconPickerLauncher.launch("image/*");
+    }
+
+    private void setGroupVisibility(String groupName, boolean visible) {
+        if (profile == null || groupName == null) return;
+        profile.setGroupVisible(groupName, visible);
+        profile.save();
+        inputControlsView.invalidate();
+        refreshSidebarSettings();
+        renderDialogHost();
     }
 
     private void removeElement() {
@@ -500,34 +404,7 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
     }
 
     private void showBackgroundOpacityDialog() {
-        final LinearLayout ll = new LinearLayout(this);
-        ll.setOrientation(LinearLayout.VERTICAL);
-        ll.setPadding((int) UnitUtils.dpToPx(24), (int) UnitUtils.dpToPx(16), (int) UnitUtils.dpToPx(24), 0);
-
-        final SeekBar seekBar = new SeekBar(this);
-        seekBar.setMax(100);
-        seekBar.setProgress((int)(inputControlsView.getBackgroundOpacity() * 100));
-        ll.addView(seekBar);
-
-        final TextView tv = new TextView(this);
-        tv.setText(getString(R.string.opacity_percent, (int)(inputControlsView.getBackgroundOpacity() * 100)));
-        ll.addView(tv);
-
-        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
-                float op = progress / 100f;
-                inputControlsView.setBackgroundOpacity(op);
-                tv.setText(getString(R.string.opacity_percent, progress));
-            }
-            public void onStartTrackingTouch(SeekBar sb) {}
-            public void onStopTrackingTouch(SeekBar sb) {}
-        });
-
-        new android.app.AlertDialog.Builder(this)
-            .setTitle(R.string.background_opacity)
-            .setView(ll)
-            .setPositiveButton(R.string.ok, null)
-            .show();
+        showComposeDialog(ControlsEditorDialogsKt.DIALOG_BACKGROUND_OPACITY);
     }
 
     private void showControlElementSettings(View anchorView) {
@@ -631,7 +508,7 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
         bindSidebarSettings(selectedElement);
     }
     private void saveSidebarState() {
-        profile.save();
+        if (profile != null) profile.save();
     }
 
     /** Find a control element at the given raw screen coordinates (for overlay passthrough). */
@@ -642,10 +519,17 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
         inputControlsView.getLocationOnScreen(loc);
         float localX = rawX - loc[0];
         float localY = rawY - loc[1];
-        for (ControlElement element : profile.getElements()) {
+        List<ControlElement> elements = profile.getElements();
+        for (int i = elements.size() - 1; i >= 0; i--) {
+            ControlElement element = elements.get(i);
+            if (!isElementVisible(element)) continue;
             if (element.containsPoint(localX, localY)) return element;
         }
         return null;
+    }
+
+    private boolean isElementVisible(ControlElement element) {
+        return element != null && (!element.isInGroup() || profile == null || profile.isGroupVisible(element.getGroupId()));
     }
 
     public void closeSidebar() {
@@ -762,6 +646,10 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
 
     @Override
     public void onBackPressed() {
+        if (activeDialogMode != null) {
+            closeComposeDialog();
+            return;
+        }
         if (sidebarScrollView != null && sidebarScrollView.getVisibility() == View.VISIBLE) {
             closeSidebar();
             return;
@@ -772,11 +660,7 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
 
     @Override
     protected void onDestroy() {
-        dismissActiveControlTypeDialog();
-        if (activeGroupListDialog != null) {
-            activeGroupListDialog.dismiss();
-            activeGroupListDialog = null;
-        }
+        activeDialogMode = null;
         super.onDestroy();
     }
 }

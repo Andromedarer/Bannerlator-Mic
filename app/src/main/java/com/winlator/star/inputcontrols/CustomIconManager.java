@@ -25,15 +25,20 @@ public class CustomIconManager {
         if (!customIconsDir.exists()) customIconsDir.mkdirs();
     }
 
-    public void addCustomIcon(Uri uri) {
+    public short addCustomIcon(Uri uri) {
         short nextId = getNextAvailableId();
-        try (InputStream is = context.getContentResolver().openInputStream(uri);
-             FileOutputStream fos = new FileOutputStream(new File(customIconsDir, nextId + ".png"))) {
+        try (InputStream is = context.getContentResolver().openInputStream(uri)) {
+            if (is == null) return -1;
             Bitmap bitmap = BitmapFactory.decodeStream(is);
-            bitmap.compress(Bitmap.CompressFormat.PNG, 100, fos);
+            if (bitmap == null) return -1;
+            try (FileOutputStream fos = new FileOutputStream(new File(customIconsDir, nextId + ".png"))) {
+                if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, fos)) return -1;
+            }
+            return nextId;
         } catch (IOException e) {
             e.printStackTrace();
         }
+        return -1;
     }
 
     private short getNextAvailableId() {

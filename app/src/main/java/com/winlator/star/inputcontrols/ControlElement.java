@@ -34,6 +34,15 @@ public class ControlElement {
     public static final short BUTTON_MIN_TIME_TO_KEEP_PRESSED = 300;
     private static final int DEFAULT_GRID_ROWS = 2;
     private static final int DEFAULT_GRID_COLS = 8;
+    private static final int MIN_AREA_SIZE = 200;
+    private static final int MAX_AREA_SIZE = 2000;
+    private static final int MIN_STICK_RADIUS = 60;
+    private static final int MAX_STICK_RADIUS = 400;
+    private static final int MAX_GRID_ROWS = 8;
+    private static final int MAX_GRID_COLS = 16;
+    private static final int MAX_BINDING_COUNT = MAX_GRID_ROWS * MAX_GRID_COLS;
+    private static final float MIN_SCALE = 0.5f;
+    private static final float MAX_SCALE = 1.5f;
     private static final long GRID_FLASH_DURATION_MS = 150;
     public enum Type {
         BUTTON, D_PAD, RANGE_BUTTON, STICK, TRACKPAD, DYNAMIC_STICK, MOUSE_AREA, BUTTON_GRID;
@@ -212,7 +221,7 @@ public class ControlElement {
     }
 
     private void resizeBindingArrays(int bindingCount, boolean preserveExisting) {
-        int safeBindingCount = Math.max(1, bindingCount);
+        int safeBindingCount = Math.min(MAX_BINDING_COUNT, Math.max(1, bindingCount));
         if (preserveExisting && bindings != null) {
             Binding[] oldBindings = bindings;
             boolean[] oldStates = states;
@@ -237,13 +246,14 @@ public class ControlElement {
     }
 
     private void ensureBindingCapacity(int bindingCount) {
-        if (bindingCount <= bindings.length) return;
+        int safeBindingCount = Math.min(MAX_BINDING_COUNT, Math.max(1, bindingCount));
+        if (safeBindingCount <= bindings.length) return;
         int oldLength = bindings.length;
-        bindings = Arrays.copyOf(bindings, bindingCount);
+        bindings = Arrays.copyOf(bindings, safeBindingCount);
         Arrays.fill(bindings, oldLength, bindings.length, Binding.NONE);
-        states = Arrays.copyOf(states, bindingCount);
-        if (comboBindings != null) comboBindings = Arrays.copyOf(comboBindings, bindingCount);
-        if (cellPressTimes != null) cellPressTimes = Arrays.copyOf(cellPressTimes, bindingCount);
+        states = Arrays.copyOf(states, safeBindingCount);
+        if (comboBindings != null) comboBindings = Arrays.copyOf(comboBindings, safeBindingCount);
+        if (cellPressTimes != null) cellPressTimes = Arrays.copyOf(cellPressTimes, safeBindingCount);
         boundingBoxNeedsUpdate = true;
     }
 
@@ -257,6 +267,10 @@ public class ControlElement {
 
     private int getEffectiveGridCols() {
         return gridCols > 0 ? gridCols : DEFAULT_GRID_COLS;
+    }
+
+    private static int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
     }
 
     public Shape getShape() {
@@ -287,19 +301,19 @@ public class ControlElement {
 
     // --- New getters/setters ---
     public int getAreaWidth() { return areaWidth; }
-    public void setAreaWidth(int areaWidth) { this.areaWidth = Math.max(0, areaWidth); boundingBoxNeedsUpdate = true; }
+    public void setAreaWidth(int areaWidth) { this.areaWidth = clamp(areaWidth, MIN_AREA_SIZE, MAX_AREA_SIZE); boundingBoxNeedsUpdate = true; }
     public int getAreaHeight() { return areaHeight; }
-    public void setAreaHeight(int areaHeight) { this.areaHeight = Math.max(0, areaHeight); boundingBoxNeedsUpdate = true; }
+    public void setAreaHeight(int areaHeight) { this.areaHeight = clamp(areaHeight, MIN_AREA_SIZE, MAX_AREA_SIZE); boundingBoxNeedsUpdate = true; }
     public int getStickRadius() { return stickRadius; }
-    public void setStickRadius(int stickRadius) { this.stickRadius = Math.max(0, stickRadius); }
+    public void setStickRadius(int stickRadius) { this.stickRadius = clamp(stickRadius, MIN_STICK_RADIUS, MAX_STICK_RADIUS); }
     public boolean isStickVisible() { return stickVisible; }
     public void setStickVisible(boolean visible) { this.stickVisible = visible; inputControlsView.invalidate(); }
     public float getMouseSensitivity() { return mouseSensitivity; }
-    public void setMouseSensitivity(float s) { this.mouseSensitivity = Math.max(0.1f, s); }
+    public void setMouseSensitivity(float s) { this.mouseSensitivity = Math.max(0.1f, Math.min(5.0f, s)); }
     public int getGridRows() { return gridRows; }
-    public void setGridRows(int gridRows) { this.gridRows = Math.max(1, gridRows); boundingBoxNeedsUpdate = true; }
+    public void setGridRows(int gridRows) { this.gridRows = clamp(gridRows, 1, MAX_GRID_ROWS); boundingBoxNeedsUpdate = true; }
     public int getGridCols() { return gridCols; }
-    public void setGridCols(int gridCols) { this.gridCols = Math.max(1, gridCols); boundingBoxNeedsUpdate = true; }
+    public void setGridCols(int gridCols) { this.gridCols = clamp(gridCols, 1, MAX_GRID_COLS); boundingBoxNeedsUpdate = true; }
     public Shape getGridCellShape() { return gridCellShape != null ? gridCellShape : Shape.ROUND_RECT; }
     public void setGridCellShape(Shape s) { this.gridCellShape = s != null ? s : Shape.ROUND_RECT; }
     public Binding[] getCombo(int index) { return (comboBindings != null && index >= 0 && index < comboBindings.length) ? comboBindings[index] : null; }
@@ -327,7 +341,10 @@ public class ControlElement {
     public float getDeadZone() { return deadZone; }
     public void setDeadZone(float dz) { this.deadZone = Math.max(0f, Math.min(0.5f, dz)); }
     public String getGroupId() { return groupId; }
-    public void setGroupId(String id) { this.groupId = (id == null || id.isEmpty()) ? null : id; }
+    public void setGroupId(String id) {
+        String trimmedId = id != null ? id.trim() : null;
+        this.groupId = (trimmedId == null || trimmedId.isEmpty()) ? null : trimmedId;
+    }
     public boolean isInGroup() { return groupId != null && inputControlsView.getProfile() != null && inputControlsView.getProfile().getGroup(groupId) != null; }
     public float getVisualStickX() { return visualStickX; }
     public void setVisualStickX(float visualStickX) { this.visualStickX = visualStickX; }
@@ -367,7 +384,7 @@ public class ControlElement {
     }
 
     public void setBindingAt(int index, Binding binding) {
-        if (index < 0) return;
+        if (index < 0 || index >= MAX_BINDING_COUNT) return;
         ensureBindingCapacity(index + 1);
         bindings[index] = binding != null ? binding : Binding.NONE;
     }
@@ -381,7 +398,7 @@ public class ControlElement {
     }
 
     public void setScale(float scale) {
-        this.scale = scale;
+        this.scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale));
         boundingBoxNeedsUpdate = true;
     }
 
@@ -1644,7 +1661,7 @@ public class ControlElement {
             elementJSONObject.put("y", (float)y / inputControlsView.getMaxHeight());
             elementJSONObject.put("toggleSwitch", toggleSwitch);
             elementJSONObject.put("text", text);
-            elementJSONObject.put("iconId", iconId);
+            elementJSONObject.put("iconId", iconId & 0xFF);
 
             if (type == Type.RANGE_BUTTON && range != null) {
                 elementJSONObject.put("range", range.name());
@@ -1953,7 +1970,7 @@ public class ControlElement {
                         float normalizedY = deltaY / magnitude;
 
                         // Scale magnitude by sensitivity, respecting deadzone
-                        float scaledMagnitude = Math.max(0, magnitude - 0.01f) * STICK_SENSITIVITY;
+                        float scaledMagnitude = Math.max(0, magnitude - deadZone) * STICK_SENSITIVITY;
                         scaledMagnitude = Math.min(scaledMagnitude, 1.0f);
 
                         finalX = normalizedX * scaledMagnitude;
