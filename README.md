@@ -16,12 +16,16 @@
   <a href="https://github.com/The412Banner/Bannerlator/releases/latest">
     <img src="https://img.shields.io/badge/⬇%20Download-Latest%20Release-ff2d9b?style=for-the-badge&logo=android&logoColor=white" alt="Download Latest Release">
   </a>
+  <a href="https://the412banner.github.io/bannerlator-game-configs/">
+    <img src="https://img.shields.io/badge/🌐%20Community%20Configs-Browse%20the%20Library-8b5cf6?style=for-the-badge" alt="Community Config Library">
+  </a>
 </p>
 
 <p align="center">
   <a href="#-contents">Contents</a> •
   <a href="#-ask-me-anything">Ask AI</a> •
   <a href="https://github.com/The412Banner/Bannerlator/releases/latest">Download</a> •
+  <a href="https://the412banner.github.io/bannerlator-game-configs/">Config Library</a> •
   <a href="https://discord.gg/n8S4G2WZQ4">Discord</a> •
   <a href="https://t.me/The412BannerGaming">Telegram</a> •
   <a href="#️-building">Builds</a> •
