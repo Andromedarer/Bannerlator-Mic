@@ -18,21 +18,23 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -45,7 +47,6 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -64,13 +65,16 @@ import com.winlator.star.inputcontrols.ControlsProfile
 import com.winlator.star.inputcontrols.CustomIconManager
 import kotlin.math.roundToInt
 
+private val EditorMaxSliderWidth = 300.dp
+private val EditorPadding = 12.dp
+private val EditorSpacing = 8.dp
 private val EditorBackground = Color(0xFF1A1A2E)
-private val EditorSurface = Color(0xFF23233B)
-private val EditorAccent = Color(0xFF0055FF)
+private val EditorSurface = Color(0xFF2A2A3E)
+private val EditorAccent = Color(0xFF4FC3F7)
 private val EditorText = Color.White
-private val EditorTextDim = Color.White.copy(alpha = 0.7f)
+private val EditorSubText = Color.White.copy(alpha = 0.7f)
 private val EditorTextValue = Color.White.copy(alpha = 0.9f)
-private val EditorShape = RoundedCornerShape(12.dp)
+private val EditorShape = RoundedCornerShape(EditorPadding)
 private val SmallShape = RoundedCornerShape(10.dp)
 
 internal data class PickerIcon(
@@ -106,25 +110,25 @@ fun ControlsEditorSettingsPane(
     val builtInIcons = remember(activity) { loadBuiltInIcons(activity) }
     val customIcons = remember(activity, customIconReloadKey) { loadCustomIcons(customIconManager) }
 
-    var typeIndex by remember { mutableIntStateOf(element.getType().ordinal) }
-    var shapeIndex by remember { mutableIntStateOf(element.getShape().ordinal) }
-    var rangeIndex by remember { mutableIntStateOf(element.getRange().ordinal) }
-    var orientationIndex by remember { mutableIntStateOf(element.getOrientation().toInt().coerceIn(0, 1)) }
-    var scaleValue by remember { mutableIntStateOf((element.getScale() * 100f).roundToInt().coerceIn(50, 150)) }
-    var detectionWidth by remember { mutableIntStateOf(element.getAreaWidth().coerceAtLeast(200)) }
-    var detectionHeight by remember { mutableIntStateOf(element.getAreaHeight().coerceAtLeast(200)) }
-    var stickRadius by remember { mutableIntStateOf(element.getStickRadius().coerceAtLeast(60)) }
-    var mouseAreaWidth by remember { mutableIntStateOf(element.getAreaWidth().coerceAtLeast(200)) }
-    var mouseAreaHeight by remember { mutableIntStateOf(element.getAreaHeight().coerceAtLeast(200)) }
-    var mouseSensitivity by remember { mutableIntStateOf((element.getMouseSensitivity() * 10f).roundToInt().coerceIn(1, 50)) }
-    var gridRows by remember { mutableIntStateOf(element.getGridRows().coerceAtLeast(1)) }
-    var gridCols by remember { mutableIntStateOf(element.getGridCols().coerceAtLeast(1)) }
-    var gridCellShapeIndex by remember { mutableIntStateOf(element.getGridCellShape().ordinal) }
-    var holdKeyIndex by remember { mutableIntStateOf(holdKeyOptions.indexOf(element.getHoldKey().toString()).coerceAtLeast(0)) }
+    var typeIndex by remember { mutableStateOf(element.getType().ordinal) }
+    var shapeIndex by remember { mutableStateOf(element.getShape().ordinal) }
+    var rangeIndex by remember { mutableStateOf(element.getRange().ordinal) }
+    var orientationIndex by remember { mutableStateOf(element.getOrientation().toInt().coerceIn(0, 1)) }
+    var scaleValue by remember { mutableStateOf((element.getScale() * 100f).roundToInt().coerceIn(50, 150)) }
+    var detectionWidth by remember { mutableStateOf(element.getAreaWidth().coerceAtLeast(200)) }
+    var detectionHeight by remember { mutableStateOf(element.getAreaHeight().coerceAtLeast(200)) }
+    var stickRadius by remember { mutableStateOf(element.getStickRadius().coerceAtLeast(60)) }
+    var mouseAreaWidth by remember { mutableStateOf(element.getAreaWidth().coerceAtLeast(200)) }
+    var mouseAreaHeight by remember { mutableStateOf(element.getAreaHeight().coerceAtLeast(200)) }
+    var mouseSensitivity by remember { mutableStateOf((element.getMouseSensitivity() * 10f).roundToInt().coerceIn(1, 50)) }
+    var gridRows by remember { mutableStateOf(element.getGridRows().coerceAtLeast(1)) }
+    var gridCols by remember { mutableStateOf(element.getGridCols().coerceAtLeast(1)) }
+    var gridCellShapeIndex by remember { mutableStateOf(element.getGridCellShape().ordinal) }
+    var holdKeyIndex by remember { mutableStateOf(holdKeyOptions.indexOf(element.getHoldKey().toString()).coerceAtLeast(0)) }
     var toggleSwitch by remember { mutableStateOf(element.isToggleSwitch()) }
     var customText by remember { mutableStateOf(element.getText()) }
-    var selectedIconId by remember { mutableIntStateOf(element.getIconId().toInt() and 0xFF) }
-    var bindingCount by remember { mutableIntStateOf(element.getBindingCount().coerceAtLeast(1)) }
+    var selectedIconId by remember { mutableStateOf(element.getIconId().toInt() and 0xFF) }
+    var bindingCount by remember { mutableStateOf(element.getBindingCount().coerceAtLeast(1)) }
 
     fun saveAndInvalidate() {
         profile.save()
@@ -159,8 +163,8 @@ fun ControlsEditorSettingsPane(
         modifier = Modifier
             .fillMaxWidth()
             .background(EditorBackground)
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(EditorPadding),
+        verticalArrangement = Arrangement.spacedBy(EditorSpacing),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -483,7 +487,7 @@ fun ControlsEditorSettingsPane(
         )
 
         SettingsSection(title = stringResource(R.string.custom_text), visible = selectedType == ControlElement.Type.BUTTON) {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(EditorSpacing)) {
                 OutlinedTextField(
                     value = customText,
                     onValueChange = { value ->
@@ -494,14 +498,14 @@ fun ControlsEditorSettingsPane(
                     },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
-                    label = { Text(stringResource(R.string.custom_text), color = EditorTextDim) },
-                    placeholder = { Text(stringResource(R.string.none), color = EditorTextDim) },
+                    label = { Text(stringResource(R.string.custom_text), color = EditorSubText) },
+                    placeholder = { Text(stringResource(R.string.none), color = EditorSubText) },
                     colors = outlinedTextFieldColors(),
                 )
 
                 Text(
                     text = stringResource(R.string.icon),
-                    color = EditorTextDim,
+                    color = EditorSubText,
                     fontWeight = FontWeight.Bold,
                 )
                 IconPicker(
@@ -516,10 +520,10 @@ fun ControlsEditorSettingsPane(
 
                 Text(
                     text = stringResource(R.string.custom_icons),
-                    color = EditorTextDim,
+                    color = EditorSubText,
                     fontWeight = FontWeight.Bold,
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(horizontalArrangement = Arrangement.spacedBy(EditorSpacing), verticalAlignment = Alignment.CenterVertically) {
                     TextButton(
                         onClick = { activity.promptPickCustomIcon() },
                         shape = SmallShape,
@@ -562,7 +566,7 @@ fun LabeledSlider(
             Text(
                 text = label,
                 modifier = Modifier.weight(1f),
-                color = EditorTextDim,
+                color = EditorSubText,
             )
             Text(
                 text = format(value),
@@ -572,6 +576,7 @@ fun LabeledSlider(
         }
 
         androidx.compose.material3.Slider(
+            modifier = Modifier.widthIn(max = EditorMaxSliderWidth),
             value = value.toFloat(),
             onValueChange = { onValueChange(it.roundToInt().coerceIn(rangeStart, rangeEnd)) },
             valueRange = rangeStart.toFloat()..rangeEnd.toFloat(),
@@ -592,7 +597,7 @@ fun SettingSpinner(
     val selectedText = options.getOrNull(selectedIndex).orEmpty()
 
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(text = label, color = EditorTextDim)
+        Text(text = label, color = EditorSubText)
         ExposedDropdownMenuBox(
             expanded = expanded,
             onExpandedChange = { expanded = !expanded },
@@ -613,25 +618,19 @@ fun SettingSpinner(
                 onDismissRequest = { expanded = false },
                 modifier = Modifier.background(EditorSurface, EditorShape),
             ) {
-                Column(
-                    modifier = Modifier
-                        .heightIn(max = 320.dp)
-                        .verticalScroll(rememberScrollState()),
-                ) {
-                    options.forEachIndexed { index, option ->
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    text = option,
-                                    color = if (index == selectedIndex) EditorAccent else EditorText,
-                                )
-                            },
-                            onClick = {
-                                expanded = false
-                                onSelected(index)
-                            },
-                        )
-                    }
+                options.forEachIndexed { index, option ->
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                text = option,
+                                color = if (index == selectedIndex) EditorAccent else EditorText,
+                            )
+                        },
+                        onClick = {
+                            expanded = false
+                            onSelected(index)
+                        },
+                    )
                 }
             }
         }
@@ -647,8 +646,8 @@ fun SettingRadioGroup(
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(text = label, color = EditorTextDim)
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(text = label, color = EditorSubText)
+        Row(horizontalArrangement = Arrangement.spacedBy(EditorSpacing), verticalAlignment = Alignment.CenterVertically) {
             options.forEachIndexed { index, option ->
                 Row(
                     modifier = Modifier.selectable(
@@ -682,7 +681,7 @@ fun SettingSwitch(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(text = label, color = EditorTextDim)
+            Text(text = label, color = EditorSubText)
             Switch(checked = checked, onCheckedChange = onCheckedChange)
         }
     }
@@ -698,8 +697,8 @@ fun NumberPickerRow(
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(text = label, color = EditorTextDim)
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(text = label, color = EditorSubText)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(EditorSpacing)) {
             OutlinedTextField(
                 value = value.toString(),
                 onValueChange = { input ->
@@ -732,7 +731,7 @@ fun QuickFillBar(
 ) {
     Row(
         modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(EditorSpacing),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         FillChip(text = stringResource(R.string.fill_qwerty), onClick = onQwerty)
@@ -751,7 +750,7 @@ internal fun IconPicker(
 ) {
     LazyRow(
         modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(EditorSpacing),
     ) {
         items(icons, key = { it.id }) { icon ->
             val selected = icon.id == selectedId
@@ -787,14 +786,15 @@ fun ComboEditor(
     activity: ControlsEditorActivity,
     modifier: Modifier = Modifier,
 ) {
-    var openIndex by remember(element) { mutableIntStateOf(-1) }
+    var openIndex by remember(element) { mutableStateOf(-1) }
     val total = element.getGridRows().coerceAtLeast(1) * element.getGridCols().coerceAtLeast(1)
 
-    SettingsSection(title = "Combo Bindings", visible = true) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            for (index in 0 until total) {
-                val row = index / element.getGridCols().coerceAtLeast(1) + 1
-                val col = index % element.getGridCols().coerceAtLeast(1) + 1
+    SettingsSection(title = "Combo Bindings", visible = true, modifier = modifier) {
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(EditorSpacing)) {
+            items(total) { index ->
+                val cols = element.getGridCols().coerceAtLeast(1)
+                val row = index / cols + 1
+                val col = index % cols + 1
                 val label = stringResource(R.string.binding_grid_cell_label, row, col)
                 val summary = comboSummaryFor(element, index)
                 Row(
@@ -803,7 +803,7 @@ fun ComboEditor(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(text = label, color = EditorTextDim)
+                        Text(text = label, color = EditorSubText)
                         Text(text = summary.ifEmpty { stringResource(R.string.none) }, color = EditorTextValue)
                     }
                     TextButton(onClick = { openIndex = index }, shape = SmallShape) {
@@ -817,7 +817,6 @@ fun ComboEditor(
     if (openIndex >= 0) {
         val index = openIndex
         val existingCombo = element.getCombo(index)
-        val modifierOptions = listOf(Binding.KEY_CTRL_L, Binding.KEY_SHIFT_L, Binding.KEY_ALT_L)
         var ctrlChecked by remember(index) { mutableStateOf(existingCombo?.contains(Binding.KEY_CTRL_L) == true) }
         var shiftChecked by remember(index) { mutableStateOf(existingCombo?.contains(Binding.KEY_SHIFT_L) == true) }
         var altChecked by remember(index) { mutableStateOf(existingCombo?.contains(Binding.KEY_ALT_L) == true) }
@@ -829,13 +828,16 @@ fun ComboEditor(
             } ?: element.getBindingAt(index)
             keyboardValues.indexOf(existingMain).coerceAtLeast(0)
         }
-        var mainIndex by remember(index) { mutableIntStateOf(currentMain) }
+        var mainIndex by remember(index) { mutableStateOf(currentMain) }
+        val comboTitle = remember(element, index, element.getType(), element.getGridCols()) {
+            comboLabelFor(element, index)
+        }
 
         AlertDialog(
             onDismissRequest = { openIndex = -1 },
-            title = { Text(text = stringResource(R.string.key_combo_title, comboLabelFor(element, index).replace("%", "%%")), color = EditorText) },
+            title = { Text(text = stringResource(R.string.key_combo_title, comboTitle.replace("%", "%%")), color = EditorText) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(EditorSpacing)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(checked = ctrlChecked, onCheckedChange = { ctrlChecked = it })
                         Text(text = stringResource(R.string.ctrl), color = EditorTextValue)
@@ -905,7 +907,7 @@ fun SettingsSection(
             modifier = modifier
                 .fillMaxWidth()
                 .padding(vertical = 4.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(EditorSpacing),
         ) {
             Text(
                 text = title,
@@ -925,16 +927,16 @@ private fun BindingSpinnerRow(
     onValueChanged: (Binding) -> Unit,
     comboSummary: String? = null,
 ) {
-    val selectedIndex = Binding.values().indexOf(value).coerceAtLeast(0)
+    val selectedIndex = options.indexOf(value.toString()).coerceAtLeast(0)
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         if (comboSummary != null && comboSummary.isNotEmpty()) {
-            Text(text = comboSummary, color = EditorTextDim)
+            Text(text = comboSummary, color = EditorSubText)
         }
         SettingSpinner(
             label = label,
             options = options,
             selectedIndex = selectedIndex,
-            onSelected = { onValueChanged(Binding.values()[it]) },
+            onSelected = { index -> onValueChanged(Binding.fromString(options.getOrNull(index))) },
         )
     }
 }
@@ -1003,8 +1005,8 @@ private fun outlinedTextFieldColors() = OutlinedTextFieldDefaults.colors(
     focusedBorderColor = EditorAccent,
     unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
     cursorColor = EditorAccent,
-    focusedLabelColor = EditorTextDim,
-    unfocusedLabelColor = EditorTextDim,
+    focusedLabelColor = EditorSubText,
+    unfocusedLabelColor = EditorSubText,
     focusedContainerColor = EditorBackground,
     unfocusedContainerColor = EditorBackground,
 )
