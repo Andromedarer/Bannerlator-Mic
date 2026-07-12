@@ -189,6 +189,8 @@ public class InputControlsView extends View {
         readyToDraw = true;
 
         if (editMode) {
+            // Fill background before drawing image so the image sits on top
+            canvas.drawColor(Color.BLACK);
             drawBackgroundImage(canvas);
             drawGrid(canvas);
             drawCursor(canvas);
@@ -242,8 +244,6 @@ public class InputControlsView extends View {
     private void drawGrid(Canvas canvas) {
         paint.setStyle(Paint.Style.FILL);
         paint.setStrokeWidth(snappingSize * 0.0625f);
-        paint.setColor(0xff000000);
-        canvas.drawColor(Color.BLACK);
 
         paint.setAntiAlias(false);
         paint.setColor(0xff303030);
