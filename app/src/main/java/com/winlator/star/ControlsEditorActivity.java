@@ -5,6 +5,7 @@ import android.animation.AnimatorListenerAdapter;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
@@ -14,8 +15,10 @@ import android.view.View;
 import android.view.animation.DecelerateInterpolator;
 import android.widget.FrameLayout;
 import android.widget.GridLayout;
+import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import android.graphics.Rect;
@@ -65,6 +68,7 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
     private boolean sidebarOnRight = false;
     private int sidebarSettingsReloadKey = 0;
     private android.app.AlertDialog activeControlTypeDialog;
+    private android.app.AlertDialog activeGroupListDialog;
 
     @Override
     public void onCreate(Bundle bundle) {
@@ -107,6 +111,13 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
                                 ControlElement selectedElement = inputControlsView.getSelectedElement();
                                 if (selectedElement != null) showControlElementSettings(findViewById(R.id.BTElementSettings));
                                 else AppUtils.showToast(ControlsEditorActivity.this, R.string.no_control_element_selected);
+                                return Unit.INSTANCE;
+                            }
+                        },
+                        new Function0<Unit>() {
+                            @Override
+                            public Unit invoke() {
+                                toggleGroupListDialog();
                                 return Unit.INSTANCE;
                             }
                         },
@@ -323,6 +334,80 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
                 }
             })
             .show();
+    }
+
+    private void toggleGroupListDialog() {
+        if (activeGroupListDialog != null && activeGroupListDialog.isShowing()) {
+            activeGroupListDialog.dismiss();
+            activeGroupListDialog = null;
+        }
+        else {
+            showGroupListDialog();
+        }
+    }
+
+    private void showGroupListDialog() {
+        if (profile == null) return;
+        if (activeGroupListDialog != null) {
+            activeGroupListDialog.dismiss();
+            activeGroupListDialog = null;
+        }
+
+        ScrollView scrollView = new ScrollView(this);
+        LinearLayout container = new LinearLayout(this);
+        container.setOrientation(LinearLayout.VERTICAL);
+        container.setPadding((int) UnitUtils.dpToPx(16), (int) UnitUtils.dpToPx(12), (int) UnitUtils.dpToPx(16), (int) UnitUtils.dpToPx(12));
+        container.setBackgroundColor(0xFF1A1A2E);
+        scrollView.addView(container);
+
+        if (profile.getGroups().isEmpty()) {
+            TextView emptyView = new TextView(this);
+            emptyView.setText(getString(R.string.no_groups));
+            emptyView.setTextColor(Color.WHITE);
+            container.addView(emptyView);
+        }
+        else {
+            for (ControlsProfile.GroupInfo group : profile.getGroups().values()) {
+                LinearLayout row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                row.setPadding(0, (int) UnitUtils.dpToPx(8), 0, (int) UnitUtils.dpToPx(8));
+
+                TextView nameView = new TextView(this);
+                nameView.setText(group.getName());
+                nameView.setTextColor(Color.WHITE);
+                LinearLayout.LayoutParams nameLp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+                row.addView(nameView, nameLp);
+
+                TextView countView = new TextView(this);
+                countView.setText(getString(R.string.group_element_count, profile.getGroupElementCount(group.getName())));
+                countView.setTextColor(Color.WHITE);
+                countView.setPadding(0, 0, (int) UnitUtils.dpToPx(12), 0);
+                row.addView(countView);
+
+                ImageButton visibilityButton = new ImageButton(this);
+                visibilityButton.setBackgroundColor(Color.TRANSPARENT);
+                visibilityButton.setImageResource(group.isVisible() ? R.drawable.icon_eye : R.drawable.icon_eye_off);
+                visibilityButton.setContentDescription(getString(R.string.group_visibility));
+                visibilityButton.setOnClickListener(v -> {
+                    profile.setGroupVisible(group.getName(), !group.isVisible());
+                    profile.save();
+                    inputControlsView.invalidate();
+                    refreshSidebarSettings();
+                    showGroupListDialog();
+                });
+                row.addView(visibilityButton, new LinearLayout.LayoutParams((int) UnitUtils.dpToPx(40), (int) UnitUtils.dpToPx(40)));
+
+                container.addView(row);
+            }
+        }
+
+        activeGroupListDialog = new android.app.AlertDialog.Builder(this)
+            .setTitle(R.string.group_visibility)
+            .setView(scrollView)
+            .setPositiveButton(R.string.ok, (dialog, which) -> dialog.dismiss())
+            .show();
+        activeGroupListDialog.setOnDismissListener(dialog -> activeGroupListDialog = null);
     }
 
     // Shared: add a custom icon from any Uri (file:// from the in-app picker, content:// from SAF).
@@ -657,6 +742,10 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
     @Override
     protected void onDestroy() {
         dismissActiveControlTypeDialog();
+        if (activeGroupListDialog != null) {
+            activeGroupListDialog.dismiss();
+            activeGroupListDialog = null;
+        }
         super.onDestroy();
     }
 }

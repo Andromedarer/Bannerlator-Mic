@@ -39,6 +39,7 @@ fun ControlsEditorToolbar(
     onAddClick: () -> Unit,
     onRemoveClick: () -> Unit,
     onSettingsClick: () -> Unit,
+    onGroupsClick: () -> Unit,
     onBackgroundClick: () -> Unit,
 ) {
     Surface(
@@ -76,6 +77,7 @@ fun ControlsEditorToolbar(
             ToolbarIconButton(iconRes = R.drawable.icon_add, contentDescription = stringResource(R.string.add), onClick = onAddClick)
             ToolbarIconButton(iconRes = R.drawable.icon_remove, contentDescription = stringResource(R.string.remove), onClick = onRemoveClick)
             ToolbarIconButton(iconRes = R.drawable.icon_settings, contentDescription = stringResource(R.string.settings), onClick = onSettingsClick)
+            ToolbarIconButton(iconRes = R.drawable.icon_group, contentDescription = stringResource(R.string.groups), onClick = onGroupsClick)
             ToolbarIconButton(iconRes = R.drawable.icon_background_image, contentDescription = stringResource(R.string.set_background_image), onClick = onBackgroundClick)
         }
     }

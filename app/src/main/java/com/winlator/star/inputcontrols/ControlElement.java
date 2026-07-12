@@ -113,6 +113,7 @@ public class ControlElement {
     private long[] cellPressTimes;     // per-cell press timestamps for flash animation
     private Binding holdKey;           // key held while touch is active (TRACKPAD/MOUSE_AREA/STICK/DYNAMIC_STICK), default NONE
     private float deadZone = 0.15f;
+    private String groupId = null;
 
     public ControlElement(InputControlsView inputControlsView) {
         this.inputControlsView = inputControlsView;
@@ -326,6 +327,9 @@ public class ControlElement {
     public void setHoldKey(Binding key) { this.holdKey = key != null ? key : Binding.NONE; }
     public float getDeadZone() { return deadZone; }
     public void setDeadZone(float dz) { this.deadZone = Math.max(0f, Math.min(0.5f, dz)); }
+    public String getGroupId() { return groupId; }
+    public void setGroupId(String id) { this.groupId = (id == null || id.isEmpty()) ? null : id; }
+    public boolean isInGroup() { return groupId != null && inputControlsView.getProfile() != null && inputControlsView.getProfile().getGroup(groupId) != null; }
     public float getVisualStickX() { return visualStickX; }
     public void setVisualStickX(float visualStickX) { this.visualStickX = visualStickX; }
     public float getVisualStickY() { return visualStickY; }
@@ -398,6 +402,11 @@ public class ControlElement {
     public void setY(int y) {
         this.y = (short)y;
         boundingBoxNeedsUpdate = true;
+    }
+
+    public void setPosition(int x, int y) {
+        setX(x);
+        setY(y);
     }
 
     public boolean isSelected() {
@@ -1643,6 +1652,7 @@ public class ControlElement {
                 if (orientation != 0) elementJSONObject.put("orientation", orientation);
             }
             elementJSONObject.put("deadZone", getDeadZone());
+            if (groupId != null) elementJSONObject.put("groupId", groupId);
             if (type == Type.DYNAMIC_STICK) {
                 elementJSONObject.put("areaWidth", areaWidth);
                 elementJSONObject.put("areaHeight", areaHeight);

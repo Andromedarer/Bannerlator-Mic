@@ -14,8 +14,10 @@ import org.json.JSONObject;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 public class ControlsProfile implements Comparable<ControlsProfile> {
     public final int id;
@@ -28,12 +30,40 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
     private int customAccentColor = 0xFF0055FF;
     private final ArrayList<ControlElement> elements = new ArrayList<>();
     private final ArrayList<ExternalController> controllers = new ArrayList<>();
+    private final Map<String, GroupInfo> groups = new LinkedHashMap<>();
     private final List<ControlElement> immutableElements = Collections.unmodifiableList(elements);
     private boolean elementsLoaded = false;
     private boolean controllersLoaded = false;
+    private boolean groupsLoaded = false;
     private boolean virtualGamepad = false;
     private final Context context;
     private GamepadState gamepadState;
+
+    public static class GroupInfo {
+        private final String name;
+        private boolean visible = true;
+
+        public GroupInfo(String name) {
+            this(name, true);
+        }
+
+        public GroupInfo(String name, boolean visible) {
+            this.name = name;
+            this.visible = visible;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public boolean isVisible() {
+            return visible;
+        }
+
+        public void setVisible(boolean visible) {
+            this.visible = visible;
+        }
+    }
 
     public ControlsProfile(Context context, int id) {
         this.context = context;
@@ -135,6 +165,96 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
         return elementsLoaded;
     }
 
+    private void loadGroupsFromJSONObject(JSONObject profileJSONObject) throws JSONException {
+        groups.clear();
+        JSONArray groupsJSONArray = profileJSONObject.optJSONArray("groups");
+        if (groupsJSONArray != null) {
+            for (int i = 0; i < groupsJSONArray.length(); i++) {
+                JSONObject groupJSONObject = groupsJSONArray.getJSONObject(i);
+                String name = groupJSONObject.optString("name", null);
+                if (name == null || name.isEmpty()) continue;
+                boolean visible = groupJSONObject.optBoolean("visible", true);
+                groups.put(name, new GroupInfo(name, visible));
+            }
+        }
+        groupsLoaded = true;
+    }
+
+    private void ensureGroupsLoaded() {
+        if (groupsLoaded) return;
+
+        File file = getProfileFile(context, id);
+        if (!file.isFile()) {
+            groupsLoaded = true;
+            return;
+        }
+
+        try {
+            JSONObject profileJSONObject = new JSONObject(FileUtils.readString(file));
+            loadGroupsFromJSONObject(profileJSONObject);
+        }
+        catch (JSONException e) {
+            groups.clear();
+            groupsLoaded = true;
+        }
+    }
+
+    public GroupInfo getGroup(String name) {
+        if (name == null || name.isEmpty()) return null;
+        ensureGroupsLoaded();
+        return groups.get(name);
+    }
+
+    public Map<String, GroupInfo> getGroups() {
+        ensureGroupsLoaded();
+        return groups;
+    }
+
+    public GroupInfo addGroup(String name) {
+        if (name == null) return null;
+        String trimmedName = name.trim();
+        if (trimmedName.isEmpty()) return null;
+        ensureGroupsLoaded();
+        GroupInfo group = groups.get(trimmedName);
+        if (group == null) {
+            group = new GroupInfo(trimmedName, true);
+            groups.put(trimmedName, group);
+        }
+        return group;
+    }
+
+    public void removeGroup(String name) {
+        if (name == null || name.isEmpty()) return;
+        ensureGroupsLoaded();
+        if (groups.remove(name) == null) return;
+        for (ControlElement element : elements) {
+            if (name.equals(element.getGroupId())) element.setGroupId(null);
+        }
+    }
+
+    public void setGroupVisible(String name, boolean visible) {
+        GroupInfo group = getGroup(name);
+        if (group != null) group.setVisible(visible);
+    }
+
+    public boolean isGroupVisible(String name) {
+        GroupInfo group = getGroup(name);
+        return group == null || group.isVisible();
+    }
+
+    public List<ControlElement> getGroupElements(String groupId) {
+        if (groupId == null || groupId.isEmpty()) return new ArrayList<>();
+        ArrayList<ControlElement> groupElements = new ArrayList<>();
+        for (ControlElement element : elements) {
+            if (groupId.equals(element.getGroupId())) groupElements.add(element);
+        }
+        return groupElements;
+    }
+
+    public int getGroupElementCount(String groupId) {
+        return getGroupElements(groupId).size();
+    }
+
     public void save() {
         File file = getProfileFile(context, id);
 
@@ -147,6 +267,22 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
             // so the streaming loader in InputControlsManager can read them without parsing elements.
             data.put("customAccentEnabled", customAccentEnabled);
             data.put("customAccentColor", customAccentColor);
+
+            JSONArray groupsJSONArray = new JSONArray();
+            if (!groupsLoaded && file.isFile()) {
+                JSONObject profileJSONObject = new JSONObject(FileUtils.readString(file));
+                JSONArray existingGroups = profileJSONObject.optJSONArray("groups");
+                if (existingGroups != null) groupsJSONArray = existingGroups;
+            }
+            else {
+                for (GroupInfo group : groups.values()) {
+                    JSONObject groupJSONObject = new JSONObject();
+                    groupJSONObject.put("name", group.getName());
+                    groupJSONObject.put("visible", group.isVisible());
+                    groupsJSONArray.put(groupJSONObject);
+                }
+            }
+            data.put("groups", groupsJSONArray);
 
             JSONArray elementsJSONArray = new JSONArray();
             if (!elementsLoaded && file.isFile()) {
@@ -256,6 +392,7 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
 
         try {
             JSONObject profileJSONObject = new JSONObject(FileUtils.readString(file));
+            loadGroupsFromJSONObject(profileJSONObject);
             JSONArray elementsJSONArray = profileJSONObject.optJSONArray("elements");
             if (elementsJSONArray == null) {
                 elementsLoaded = true;
@@ -280,6 +417,10 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
 
                     // Load new fields for extended types (backward compatible)
                     if (elementJSONObject.has("deadZone")) element.setDeadZone((float)elementJSONObject.getDouble("deadZone"));
+                    if (elementJSONObject.has("groupId")) {
+                        element.setGroupId(elementJSONObject.optString("groupId", null));
+                        if (element.getGroupId() != null && getGroup(element.getGroupId()) == null) addGroup(element.getGroupId());
+                    }
                     if (elementJSONObject.has("areaWidth")) element.setAreaWidth(elementJSONObject.getInt("areaWidth"));
                     if (elementJSONObject.has("areaHeight")) element.setAreaHeight(elementJSONObject.getInt("areaHeight"));
                     if (elementJSONObject.has("stickRadius")) element.setStickRadius(elementJSONObject.getInt("stickRadius"));

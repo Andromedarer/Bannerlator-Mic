@@ -130,8 +130,16 @@ fun ControlsEditorSettingsPane(
     var customText by remember { mutableStateOf(element.getText()) }
     var selectedIconId by remember { mutableStateOf(element.getIconId().toInt() and 0xFF) }
     var bindingCount by remember { mutableStateOf(element.getBindingCount().coerceAtLeast(1)) }
+    var groupId by remember { mutableStateOf(element.groupId ?: "") }
+    var showCreateGroupDialog by remember { mutableStateOf(false) }
+    var newGroupName by remember { mutableStateOf("") }
 
     fun saveAndInvalidate() {
+        val normalizedGroupId = groupId.trim()
+        if (normalizedGroupId.isNotBlank() && profile.getGroup(normalizedGroupId) == null) {
+            profile.addGroup(normalizedGroupId)
+        }
+        element.groupId = normalizedGroupId.ifBlank { null }
         element.deadZone = deadZonePct / 100f
         profile.save()
         onInvalidate()
@@ -158,6 +166,7 @@ fun ControlsEditorSettingsPane(
         customText = element.getText()
         selectedIconId = element.getIconId().toInt() and 0xFF
         bindingCount = element.getBindingCount().coerceAtLeast(1)
+        groupId = element.groupId ?: ""
     }
 
     val selectedType = ControlElement.Type.values()[typeIndex]
@@ -556,6 +565,85 @@ fun ControlsEditorSettingsPane(
                         selectedIconId = id
                         element.setIconId(id)
                         saveAndInvalidate()
+                    },
+                )
+            }
+        }
+
+        SettingsSection(title = stringResource(R.string.group_label), visible = true) {
+            val groupNames = profile.getGroups().keys.toList()
+            val noneLabel = stringResource(R.string.none)
+            val createLabel = stringResource(R.string.create_new_group)
+            val groupOptions = buildList {
+                add(noneLabel)
+                addAll(groupNames)
+                add(createLabel)
+            }
+            val selectedGroupIndex = when {
+                groupId.isBlank() -> 0
+                else -> (groupNames.indexOf(groupId) + 1).takeIf { it > 0 } ?: 0
+            }
+
+            SettingSpinner(
+                label = stringResource(R.string.group_label),
+                options = groupOptions,
+                selectedIndex = selectedGroupIndex,
+                onSelected = { index ->
+                    when (index) {
+                        0 -> {
+                            groupId = ""
+                            saveAndInvalidate()
+                        }
+                        groupOptions.lastIndex -> {
+                            showCreateGroupDialog = true
+                            newGroupName = groupId
+                        }
+                        else -> {
+                            groupId = groupOptions[index]
+                            saveAndInvalidate()
+                        }
+                    }
+                },
+            )
+
+            if (showCreateGroupDialog) {
+                AlertDialog(
+                    onDismissRequest = {
+                        showCreateGroupDialog = false
+                        newGroupName = ""
+                    },
+                    title = { Text(text = stringResource(R.string.create_new_group), color = EditorText) },
+                    text = {
+                        OutlinedTextField(
+                            value = newGroupName,
+                            onValueChange = { newGroupName = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            label = { Text(text = stringResource(R.string.group_name), color = EditorSubText) },
+                            colors = outlinedTextFieldColors(),
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            val trimmedName = newGroupName.trim()
+                            if (trimmedName.isNotEmpty()) {
+                                profile.addGroup(trimmedName)
+                                groupId = trimmedName
+                                showCreateGroupDialog = false
+                                newGroupName = ""
+                                saveAndInvalidate()
+                            }
+                        }) {
+                            Text(text = stringResource(R.string.create), color = EditorAccent)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = {
+                            showCreateGroupDialog = false
+                            newGroupName = ""
+                        }) {
+                            Text(text = stringResource(R.string.cancel), color = EditorAccent)
+                        }
                     },
                 )
             }

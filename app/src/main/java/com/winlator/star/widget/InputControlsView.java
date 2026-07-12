@@ -203,6 +203,7 @@ public class InputControlsView extends View {
         if (profile != null && showTouchscreenControls && !isFocusedOnStick()) {
             if (!profile.isElementsLoaded()) profile.loadElements(this);
             for (ControlElement element : profile.getElements()) {
+                if (isElementHiddenByGroup(element)) continue;
                 element.draw(canvas);
             }
         }
@@ -419,10 +420,15 @@ public class InputControlsView extends View {
     private synchronized ControlElement intersectElement(float x, float y) {
         if (profile != null) {
             for (ControlElement element : profile.getElements()) {
+                if (isElementHiddenByGroup(element)) continue;
                 if (element.containsPoint(x, y)) return element;
             }
         }
         return null;
+    }
+
+    private boolean isElementHiddenByGroup(ControlElement element) {
+        return element != null && element.isInGroup() && profile != null && !profile.isGroupVisible(element.getGroupId());
     }
 
     public Paint getPaint() {
@@ -592,8 +598,18 @@ public class InputControlsView extends View {
                 }
                 case MotionEvent.ACTION_MOVE: {
                     if (selectedElement != null) {
-                        selectedElement.setX((int)Mathf.roundTo(event.getX() - offsetX, snappingSize));
-                        selectedElement.setY((int)Mathf.roundTo(event.getY() - offsetY, snappingSize));
+                        int newX = (int)Mathf.roundTo(event.getX() - offsetX, snappingSize);
+                        int newY = (int)Mathf.roundTo(event.getY() - offsetY, snappingSize);
+                        int dx = newX - selectedElement.getX();
+                        int dy = newY - selectedElement.getY();
+                        if (selectedElement.isInGroup() && profile != null) {
+                            for (ControlElement element : profile.getGroupElements(selectedElement.getGroupId())) {
+                                element.setPosition(element.getX() + dx, element.getY() + dy);
+                            }
+                        }
+                        else {
+                            selectedElement.setPosition(newX, newY);
+                        }
                         invalidate();
                     }
                     break;
@@ -620,6 +636,7 @@ public class InputControlsView extends View {
                     float y = event.getY(actionIndex);
                     touchpadView.setPointerButtonLeftEnabled(true);
                     for (ControlElement element : profile.getElements()) {
+                        if (isElementHiddenByGroup(element)) continue;
                         if (element.handleTouchDown(pointerId, x, y)) {
                             handled = true;
                             if (hapticsEnabled) {
@@ -647,6 +664,7 @@ public class InputControlsView extends View {
                         int pid = event.getPointerId(i);
                         handled = false;
                         for (ControlElement element : profile.getElements()) {
+                            if (isElementHiddenByGroup(element)) continue;
                             if (element.handleTouchMove(pid, x, y)) handled = true;
                         }
                         if (!handled) touchpadView.onTouchEvent(event);
@@ -656,7 +674,10 @@ public class InputControlsView extends View {
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_POINTER_UP:
                 case MotionEvent.ACTION_CANCEL:
-                    for (ControlElement element : profile.getElements()) if (element.handleTouchUp(pointerId)) handled = true;
+                    for (ControlElement element : profile.getElements()) {
+                        if (isElementHiddenByGroup(element)) continue;
+                        if (element.handleTouchUp(pointerId)) handled = true;
+                    }
                     if (!handled) touchpadView.onTouchEvent(event);
                     break;
             }
