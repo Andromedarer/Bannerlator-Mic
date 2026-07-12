@@ -46,6 +46,7 @@ import com.winlator.star.xserver.XServer;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.List;
 import java.util.Timer;
 import java.util.TimerTask;
 
@@ -603,8 +604,13 @@ public class InputControlsView extends View {
                         int dx = newX - selectedElement.getX();
                         int dy = newY - selectedElement.getY();
                         if (selectedElement.isInGroup() && profile != null) {
-                            for (ControlElement element : profile.getGroupElements(selectedElement.getGroupId())) {
-                                element.setPosition(element.getX() + dx, element.getY() + dy);
+                            List<ControlElement> groupElements = profile.getGroupElements(selectedElement.getGroupId());
+                            if (groupElements != null && !groupElements.isEmpty()) {
+                                for (ControlElement element : groupElements) {
+                                    element.setPosition(element.getX() + dx, element.getY() + dy);
+                                }
+                            } else {
+                                selectedElement.setPosition(newX, newY);
                             }
                         }
                         else {

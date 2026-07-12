@@ -54,6 +54,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
@@ -268,7 +269,7 @@ fun ControlsEditorSettingsPane(
             },
         )
 
-        if (selectedType == ControlElement.Type.STICK || selectedType == ControlElement.Type.DYNAMIC_STICK) {
+        if (selectedType == ControlElement.Type.STICK || selectedType == ControlElement.Type.DYNAMIC_STICK || selectedType == ControlElement.Type.D_PAD) {
             LabeledSlider(
                 label = stringResource(R.string.dead_zone),
                 value = deadZonePct,
@@ -574,6 +575,7 @@ fun ControlsEditorSettingsPane(
             val groupNames = profile.getGroups().keys.toList()
             val noneLabel = stringResource(R.string.none)
             val createLabel = stringResource(R.string.create_new_group)
+            val assignedGroupId = groupId.trim()
             val groupOptions = buildList {
                 add(noneLabel)
                 addAll(groupNames)
@@ -606,6 +608,36 @@ fun ControlsEditorSettingsPane(
                 },
             )
 
+            if (assignedGroupId.isNotEmpty()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            painter = painterResource(
+                                if (profile.isGroupVisible(assignedGroupId)) R.drawable.icon_eye else R.drawable.icon_eye_off
+                            ),
+                            contentDescription = stringResource(R.string.group_visibility),
+                            tint = EditorTextValue,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Spacer(modifier = Modifier.size(8.dp))
+                        Text(text = stringResource(R.string.group_visibility), color = EditorSubText)
+                    }
+
+                    Switch(
+                        checked = profile.isGroupVisible(assignedGroupId),
+                        onCheckedChange = { checked ->
+                            profile.setGroupVisible(assignedGroupId, checked)
+                            profile.save()
+                            onInvalidate()
+                        },
+                    )
+                }
+            }
+
             if (showCreateGroupDialog) {
                 AlertDialog(
                     onDismissRequest = {
@@ -627,7 +659,9 @@ fun ControlsEditorSettingsPane(
                         TextButton(onClick = {
                             val trimmedName = newGroupName.trim()
                             if (trimmedName.isNotEmpty()) {
-                                profile.addGroup(trimmedName)
+                                if (profile.getGroup(trimmedName) == null) {
+                                    profile.addGroup(trimmedName)
+                                }
                                 groupId = trimmedName
                                 showCreateGroupDialog = false
                                 newGroupName = ""
