@@ -77,6 +77,11 @@
     <string name="opacity_percent">Opacity: %1$d%%</string>
     <string name="main_key">Main key:</string>
     <string name="key_combo_title">Key Combo — %1$s</string>
+    <string name="binding_setup_title">Binding — %1$s</string>
+    <string name="binding_text_value">Character or number</string>
+    <string name="binding_selector">Action selector</string>
+    <string name="set_binding">Set</string>
+    <string name="add_to_combo">Add to combo</string>
     <string name="clear_combo">Clear Combo</string>
     <string name="combo_bindings">Combo Bindings</string>
     <string name="binding_grid_cell_label">R%1$dC%2$d</string>
@@ -795,7 +800,6 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="save_backup_format_winlator_sub">Sibling Winlator / WinNative builds</string>
     <string name="save_backup_next">Next</string>
 </resources>
-
 
 
 

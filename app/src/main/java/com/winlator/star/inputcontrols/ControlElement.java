@@ -1732,8 +1732,8 @@ public class ControlElement {
                 inputControlsView.invalidate();
                 if (isKeepButtonPressedAfterMinTime()) touchTime = System.currentTimeMillis();
                 if (!toggleSwitch || !selected) {
-                    inputControlsView.handleInputEvent(getBindingAt(0), true);
-                    inputControlsView.handleInputEvent(getBindingAt(1), true);
+                    pressBindingSlot(0);
+                    pressBindingSlot(1);
                 }
                 return true;
             }
@@ -1776,7 +1776,7 @@ public class ControlElement {
                     states[cellIndex] = true;
                     // Record press time for flash animation
                     setCellPressTime(cellIndex, System.currentTimeMillis());
-                    pressBindingsForCell(cellIndex);
+                    pressBindingSlot(cellIndex);
                     inputControlsView.invalidate();
                 }
                 return true;
@@ -1810,27 +1810,24 @@ public class ControlElement {
         return row * cols + col;
     }
 
-    /** Press all keys in a cell's combo (or single binding) */
-    private void pressBindingsForCell(int cellIndex) {
-        if (!isValidBindingIndex(cellIndex)) return;
-        if (hasCombo(cellIndex)) {
-            for (Binding b : getCombo(cellIndex)) {
-                inputControlsView.handleInputEvent(b, true);
-            }
-        } else {
-            inputControlsView.handleInputEvent(getBindingAt(cellIndex), true);
-        }
+    /** Press all keys in a slot's combo (or single binding). */
+    private void pressBindingSlot(int index) {
+        handleBindingSlot(index, true, 0);
     }
 
-    /** Release all keys in a cell's combo (or single binding) */
-    private void releaseBindingsForCell(int cellIndex) {
-        if (!isValidBindingIndex(cellIndex)) return;
-        if (hasCombo(cellIndex)) {
-            for (Binding b : getCombo(cellIndex)) {
-                inputControlsView.handleInputEvent(b, false);
+    /** Release all keys in a slot's combo (or single binding). */
+    private void releaseBindingSlot(int index) {
+        handleBindingSlot(index, false, 0);
+    }
+
+    private void handleBindingSlot(int index, boolean state, float value) {
+        if (!isValidBindingIndex(index)) return;
+        if (hasCombo(index)) {
+            for (Binding b : getCombo(index)) {
+                inputControlsView.handleInputEvent(b, state);
             }
         } else {
-            inputControlsView.handleInputEvent(getBindingAt(cellIndex), false);
+            inputControlsView.handleInputEvent(getBindingAt(index), state, value);
         }
     }
 
@@ -1903,7 +1900,7 @@ public class ControlElement {
                         float value = i == 1 || i == 3 ? normX : normY;
                         Binding binding = getBindingAt(i);
                         boolean state = binding.isMouseMove() ? (st[i] || st[(i+2)%4]) : st[i];
-                        inputControlsView.handleInputEvent(binding, state, value);
+                        handleBindingSlot(i, state, value);
                         this.states[i] = state;
                     }
                 }
@@ -1937,13 +1934,13 @@ public class ControlElement {
                     // Release old cell
                     if (isValidBindingIndex(oldCell)) {
                         states[oldCell] = false;
-                        releaseBindingsForCell(oldCell);
+                        releaseBindingSlot(oldCell);
                     }
                     // Press new cell
                     if (isValidBindingIndex(newCell)) {
                         states[newCell] = true;
                         setCellPressTime(newCell, System.currentTimeMillis());
-                        pressBindingsForCell(newCell);
+                        pressBindingSlot(newCell);
                     }
                 }
                 inputControlsView.invalidate();
@@ -1991,7 +1988,7 @@ public class ControlElement {
                         float value = i == 1 || i == 3 ? deltaX : deltaY;
                         Binding binding = getBindingAt(i);
                         boolean state = binding.isMouseMove() ? (states[i] || states[(i+2)%4]) : states[i];
-                        inputControlsView.handleInputEvent(binding, state, value);
+                        handleBindingSlot(i, state, value);
                         this.states[i] = state;
                     }
                 }
@@ -2034,14 +2031,18 @@ public class ControlElement {
                         float value = (i == 1 || i == 3 ? deltaX : deltaY);
                         Binding binding = getBindingAt(i);
                         if (Math.abs(value) > TouchpadView.CURSOR_ACCELERATION_THRESHOLD) value *= TouchpadView.CURSOR_ACCELERATION;
-                        if (binding == Binding.MOUSE_MOVE_LEFT || binding == Binding.MOUSE_MOVE_RIGHT) {
+                        if (hasCombo(i)) {
+                            handleBindingSlot(i, states[i], value);
+                            this.states[i] = states[i];
+                        }
+                        else if (binding == Binding.MOUSE_MOVE_LEFT || binding == Binding.MOUSE_MOVE_RIGHT) {
                             cursorDx = Mathf.roundPoint(value);
                         }
                         else if (binding == Binding.MOUSE_MOVE_UP || binding == Binding.MOUSE_MOVE_DOWN) {
                             cursorDy = Mathf.roundPoint(value);
                         }
                         else {
-                            inputControlsView.handleInputEvent(binding, states[i], value);
+                            handleBindingSlot(i, states[i], value);
                             this.states[i] = states[i];
                         }
                     }
@@ -2062,7 +2063,7 @@ public class ControlElement {
                     float value = i == 1 || i == 3 ? deltaX : deltaY;
                     Binding binding = getBindingAt(i);
                     boolean state = binding.isMouseMove() ? (states[i] || states[(i+2)%4]) : states[i];
-                    inputControlsView.handleInputEvent(binding, state, value);
+                    handleBindingSlot(i, state, value);
                     this.states[i] = state;
                 }
             }
@@ -2084,14 +2085,14 @@ public class ControlElement {
                 if (isKeepButtonPressedAfterMinTime() && touchTime != null) {
                     selected = (System.currentTimeMillis() - (long)touchTime) > BUTTON_MIN_TIME_TO_KEEP_PRESSED;
                     if (!selected) {
-                        inputControlsView.handleInputEvent(getBindingAt(0), false);
-                        inputControlsView.handleInputEvent(getBindingAt(1), false);
+                        releaseBindingSlot(0);
+                        releaseBindingSlot(1);
                     }
                     touchTime = null;
                 }
                 else if (!toggleSwitch || selected) {
-                    inputControlsView.handleInputEvent(getBindingAt(0), false);
-                    inputControlsView.handleInputEvent(getBindingAt(1), false);
+                    releaseBindingSlot(0);
+                    releaseBindingSlot(1);
                 }
 
                 if (toggleSwitch) {
@@ -2101,8 +2102,7 @@ public class ControlElement {
             else if (type == Type.RANGE_BUTTON || type == Type.D_PAD || type == Type.STICK || type == Type.TRACKPAD || type == Type.DYNAMIC_STICK || type == Type.MOUSE_AREA || type == Type.BUTTON_GRID) {
                 for (int i = 0; i < states.length; i++) {
                     if (states[i]) {
-                        if (type == Type.BUTTON_GRID) releaseBindingsForCell(i);
-                        else inputControlsView.handleInputEvent(getBindingAt(i), false);
+                        releaseBindingSlot(i);
                     }
                     states[i] = false;
                 }

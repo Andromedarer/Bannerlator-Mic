@@ -24,10 +24,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -134,6 +135,8 @@ fun ControlsEditorSettingsPane(
     var groupId by remember { mutableStateOf(element.groupId ?: "") }
     var showCreateGroupDialog by remember { mutableStateOf(false) }
     var newGroupName by remember { mutableStateOf("") }
+    var bindingDialogIndex by remember(element) { mutableStateOf(-1) }
+    var bindingDialogTitle by remember(element) { mutableStateOf("") }
 
     fun saveAndInvalidate() {
         val normalizedGroupId = groupId.trim()
@@ -144,6 +147,19 @@ fun ControlsEditorSettingsPane(
         element.deadZone = deadZonePct / 100f
         profile.save()
         onInvalidate()
+    }
+
+    fun openBindingDialog(index: Int, title: String) {
+        bindingDialogIndex = index
+        bindingDialogTitle = title
+    }
+
+    fun saveBindingSlot(index: Int, binding: Binding, combo: List<Binding>) {
+        val cleanCombo = combo.filter { it != Binding.NONE }.distinct()
+        val mainBinding = if (binding != Binding.NONE) binding else cleanCombo.lastOrNull() ?: Binding.NONE
+        element.setBindingAt(index, mainBinding)
+        element.setCombo(index, if (cleanCombo.isEmpty()) null else cleanCombo.toTypedArray())
+        saveAndInvalidate()
     }
 
     fun syncFromElement() {
@@ -455,58 +471,58 @@ fun ControlsEditorSettingsPane(
         if (selectedType != ControlElement.Type.MOUSE_AREA) {
             SettingsSection(title = stringResource(R.string.bindings), visible = true) {
                 if (selectedType == ControlElement.Type.BUTTON) {
-                    BindingSpinnerRow(
-                        label = stringResource(R.string.binding),
+                    val label = stringResource(R.string.binding)
+                    BindingValueRow(
+                        label = label,
                         value = element.getBindingAt(0),
-                        options = bindingOptions,
-                        onValueChanged = { binding ->
-                            element.setBindingAt(0, binding)
-                            saveAndInvalidate()
-                        },
+                        combo = element.getCombo(0)?.toList().orEmpty(),
+                        onSet = { openBindingDialog(0, label) },
                     )
                 } else if (selectedType == ControlElement.Type.D_PAD || selectedType == ControlElement.Type.STICK || selectedType == ControlElement.Type.TRACKPAD || selectedType == ControlElement.Type.DYNAMIC_STICK) {
-                    BindingSpinnerRow(stringResource(R.string.binding_up), element.getBindingAt(0), bindingOptions, onValueChanged = { binding ->
-                        element.setBindingAt(0, binding)
-                        saveAndInvalidate()
-                    })
-                    BindingSpinnerRow(stringResource(R.string.binding_right), element.getBindingAt(1), bindingOptions, onValueChanged = { binding ->
-                        element.setBindingAt(1, binding)
-                        saveAndInvalidate()
-                    })
-                    BindingSpinnerRow(stringResource(R.string.binding_down), element.getBindingAt(2), bindingOptions, onValueChanged = { binding ->
-                        element.setBindingAt(2, binding)
-                        saveAndInvalidate()
-                    })
-                    BindingSpinnerRow(stringResource(R.string.binding_left), element.getBindingAt(3), bindingOptions, onValueChanged = { binding ->
-                        element.setBindingAt(3, binding)
-                        saveAndInvalidate()
-                    })
-                } else if (selectedType == ControlElement.Type.BUTTON_GRID) {
-                    ComboEditor(
-                        element = element,
-                        profile = profile,
-                        onInvalidate = onInvalidate,
-                        activity = activity,
+                    val labels = listOf(
+                        stringResource(R.string.binding_up),
+                        stringResource(R.string.binding_right),
+                        stringResource(R.string.binding_down),
+                        stringResource(R.string.binding_left),
                     )
-
+                    labels.forEachIndexed { index, label ->
+                        BindingValueRow(
+                            label = label,
+                            value = element.getBindingAt(index),
+                            combo = element.getCombo(index)?.toList().orEmpty(),
+                            onSet = { openBindingDialog(index, label) },
+                        )
+                    }
+                } else if (selectedType == ControlElement.Type.BUTTON_GRID) {
                     val total = gridRows * gridCols
                     for (index in 0 until total) {
                         val row = index / gridCols + 1
                         val col = index % gridCols + 1
-                        BindingSpinnerRow(
-                            label = stringResource(R.string.binding_grid_cell_label, row, col),
+                        val label = stringResource(R.string.binding_grid_cell_label, row, col)
+                        BindingValueRow(
+                            label = label,
                             value = element.getBindingAt(index),
-                            options = bindingOptions,
-                            onValueChanged = { binding ->
-                                element.setBindingAt(index, binding)
-                                element.setCombo(index, null)
-                                saveAndInvalidate()
-                            },
-                            comboSummary = comboSummaryFor(element, index),
+                            combo = element.getCombo(index)?.toList().orEmpty(),
+                            onSet = { openBindingDialog(index, label) },
                         )
                     }
                 }
             }
+        }
+
+        if (bindingDialogIndex >= 0) {
+            val index = bindingDialogIndex
+            BindingSetupDialog(
+                title = bindingDialogTitle,
+                initialBinding = element.getBindingAt(index),
+                initialCombo = element.getCombo(index)?.toList().orEmpty(),
+                options = bindingOptions,
+                onDismiss = { bindingDialogIndex = -1 },
+                onSave = { binding, combo ->
+                    saveBindingSlot(index, binding, combo)
+                    bindingDialogIndex = -1
+                },
+            )
         }
 
         SettingSwitch(
@@ -933,126 +949,161 @@ internal fun IconPicker(
 }
 
 @Composable
-fun ComboEditor(
-    element: ControlElement,
-    profile: ControlsProfile,
-    onInvalidate: () -> Unit,
-    activity: ControlsEditorActivity,
-    modifier: Modifier = Modifier,
+private fun BindingValueRow(
+    label: String,
+    value: Binding,
+    combo: List<Binding>,
+    onSet: () -> Unit,
 ) {
-    var openIndex by remember(element) { mutableStateOf(-1) }
-    val total = element.getGridRows().coerceAtLeast(1) * element.getGridCols().coerceAtLeast(1)
-
-    SettingsSection(title = stringResource(R.string.combo_bindings), visible = true, modifier = modifier) {
-        Column(verticalArrangement = Arrangement.spacedBy(EditorSpacing)) {
-            for (index in 0 until total) {
-                val cols = element.getGridCols().coerceAtLeast(1)
-                val row = index / cols + 1
-                val col = index % cols + 1
-                val label = stringResource(R.string.binding_grid_cell_label, row, col)
-                val summary = comboSummaryFor(element, index)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(text = label, color = EditorSubText)
-                        Text(text = summary.ifEmpty { stringResource(R.string.none) }, color = EditorTextValue)
-                    }
-                    TextButton(onClick = { openIndex = index }, shape = SmallShape) {
-                        Text(text = stringResource(R.string.edit), color = EditorAccent)
-                    }
-                }
+    val summary = bindingSummary(value, combo, stringResource(R.string.none))
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = EditorSurface.copy(alpha = 0.72f),
+        shape = SmallShape,
+        border = BorderStroke(1.dp, EditorAccent.copy(alpha = 0.18f)),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(EditorSpacing),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(text = label, color = EditorSubText)
+                Text(text = summary, color = EditorTextValue, fontWeight = FontWeight.SemiBold)
+            }
+            TextButton(onClick = onSet, shape = SmallShape) {
+                Text(text = stringResource(R.string.set_binding), color = EditorAccent)
             }
         }
     }
+}
 
-    if (openIndex >= 0) {
-        val index = openIndex
-        val existingCombo = element.getCombo(index)
-        var ctrlChecked by remember(index) { mutableStateOf(existingCombo?.contains(Binding.KEY_CTRL_L) == true) }
-        var shiftChecked by remember(index) { mutableStateOf(existingCombo?.contains(Binding.KEY_SHIFT_L) == true) }
-        var altChecked by remember(index) { mutableStateOf(existingCombo?.contains(Binding.KEY_ALT_L) == true) }
-        val keyboardValues = remember { Binding.keyboardBindingValues().toList() }
-        val keyboardLabels = remember { keyboardValues.map { it.toString() } }
-        val currentMain = remember(index) {
-            val existingMain = existingCombo?.firstOrNull {
-                it.isKeyboard() && it != Binding.KEY_CTRL_L && it != Binding.KEY_SHIFT_L && it != Binding.KEY_ALT_L
-            } ?: element.getBindingAt(index)
-            keyboardValues.indexOf(existingMain).coerceAtLeast(0)
-        }
-        var mainIndex by remember(index) { mutableStateOf(currentMain) }
-        val comboTitle = remember(element, index, element.getType(), element.getGridCols()) {
-            comboLabelFor(element, index)
-        }
+@Composable
+private fun BindingSetupDialog(
+    title: String,
+    initialBinding: Binding,
+    initialCombo: List<Binding>,
+    options: List<Binding>,
+    onDismiss: () -> Unit,
+    onSave: (Binding, List<Binding>) -> Unit,
+) {
+    val cleanInitialCombo = remember(initialCombo) {
+        initialCombo.filter { it != Binding.NONE }.distinct()
+    }
+    val initialSelection = remember(initialBinding, cleanInitialCombo) {
+        if (initialBinding != Binding.NONE) initialBinding else cleanInitialCombo.lastOrNull() ?: Binding.NONE
+    }
+    var selectedBinding by remember(title, initialSelection) { mutableStateOf(initialSelection) }
+    var typedValue by remember(title, initialSelection) { mutableStateOf("") }
+    var combo by remember(title, cleanInitialCombo) { mutableStateOf(cleanInitialCombo) }
+    val optionLabels = remember(options) { options.map { it.toString() } }
+    val selectedIndex = options.indexOf(selectedBinding).coerceAtLeast(0)
+    val typedBinding = bindingFromTypedValue(typedValue)
+    val addCandidate = typedBinding ?: selectedBinding
+    val canAddCandidate = addCandidate != Binding.NONE && !combo.contains(addCandidate)
 
-        AlertDialog(
-            onDismissRequest = { openIndex = -1 },
-            title = { Text(text = stringResource(R.string.key_combo_title, comboTitle.replace("%", "%%")), color = EditorText) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(EditorSpacing)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(checked = ctrlChecked, onCheckedChange = { ctrlChecked = it })
-                        Text(text = stringResource(R.string.ctrl), color = EditorTextValue)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(text = stringResource(R.string.binding_setup_title, title), color = EditorText) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(EditorSpacing)) {
+                OutlinedTextField(
+                    value = typedValue,
+                    onValueChange = { value ->
+                        val nextValue = value.take(1)
+                        typedValue = nextValue
+                        bindingFromTypedValue(nextValue)?.let { selectedBinding = it }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(text = stringResource(R.string.binding_text_value)) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                    colors = outlinedTextFieldColors(),
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(EditorSpacing),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        SettingSpinner(
+                            label = stringResource(R.string.binding_selector),
+                            options = optionLabels,
+                            selectedIndex = selectedIndex,
+                            onSelected = { index ->
+                                selectedBinding = options.getOrNull(index) ?: Binding.NONE
+                                typedValue = ""
+                            },
+                        )
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(checked = shiftChecked, onCheckedChange = { shiftChecked = it })
-                        Text(text = stringResource(R.string.shift), color = EditorTextValue)
+                    IconButton(
+                        onClick = {
+                            if (canAddCandidate) combo = combo + addCandidate
+                        },
+                        enabled = canAddCandidate,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Add,
+                            contentDescription = stringResource(R.string.add_to_combo),
+                            tint = if (canAddCandidate) EditorAccent else EditorSubText,
+                        )
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(checked = altChecked, onCheckedChange = { altChecked = it })
-                        Text(text = stringResource(R.string.alt), color = EditorTextValue)
-                    }
-                    SettingSpinner(
-                        label = stringResource(R.string.main_key),
-                        options = keyboardLabels,
-                        selectedIndex = mainIndex,
-                        onSelected = { mainIndex = it },
-                    )
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val combo = buildList {
-                        if (ctrlChecked) add(Binding.KEY_CTRL_L)
-                        if (shiftChecked) add(Binding.KEY_SHIFT_L)
-                        if (altChecked) add(Binding.KEY_ALT_L)
-                        keyboardValues.getOrNull(mainIndex)?.let { main ->
-                            if (main != Binding.NONE) add(main)
+                Text(text = stringResource(R.string.combo_bindings), color = EditorSubText)
+                if (combo.isEmpty()) {
+                    Text(text = stringResource(R.string.none), color = EditorTextValue)
+                } else {
+                    Column(
+                        modifier = Modifier.heightIn(max = 180.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        combo.forEachIndexed { index, binding ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(EditorSpacing),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = binding.toString(),
+                                    modifier = Modifier.weight(1f),
+                                    color = EditorTextValue,
+                                )
+                                IconButton(onClick = { combo = combo.filterIndexed { itemIndex, _ -> itemIndex != index } }) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Delete,
+                                        contentDescription = stringResource(R.string.remove),
+                                        tint = EditorSubText,
+                                    )
+                                }
+                            }
                         }
                     }
-                    val mainBinding = keyboardValues.getOrNull(mainIndex) ?: Binding.NONE
-                    if (combo.isNotEmpty()) {
-                        element.setCombo(index, combo.toTypedArray())
-                        if (mainBinding != Binding.NONE) element.setBindingAt(index, mainBinding)
-                    } else {
-                        element.setCombo(index, null)
-                    }
-                    profile.save()
-                    onInvalidate()
-                    openIndex = -1
-                }) {
-                    Text(text = stringResource(R.string.save), color = EditorAccent)
                 }
-            },
-            dismissButton = {
-                Row {
-                    TextButton(onClick = {
-                        element.setCombo(index, null)
-                        profile.save()
-                        onInvalidate()
-                        openIndex = -1
-                    }) {
-                        Text(text = stringResource(R.string.clear_combo), color = EditorAccent)
-                    }
-                    TextButton(onClick = { openIndex = -1 }) {
-                        Text(text = stringResource(android.R.string.cancel), color = EditorTextValue)
-                    }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                onSave(typedBinding ?: selectedBinding, combo)
+            }) {
+                Text(text = stringResource(R.string.save), color = EditorAccent)
+            }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = { onSave(Binding.NONE, emptyList()) }) {
+                    Text(text = stringResource(R.string.clear), color = EditorAccent)
                 }
-            },
-        )
-    }
+                TextButton(onClick = onDismiss) {
+                    Text(text = stringResource(android.R.string.cancel), color = EditorTextValue)
+                }
+            }
+        },
+    )
 }
 
 @Composable
@@ -1084,29 +1135,6 @@ fun SettingsSection(
 }
 
 @Composable
-private fun BindingSpinnerRow(
-    label: String,
-    value: Binding,
-    options: List<Binding>,
-    onValueChanged: (Binding) -> Unit,
-    comboSummary: String? = null,
-) {
-    val selectedIndex = options.indexOf(value).coerceAtLeast(0)
-    val optionLabels = remember(options) { options.map { it.toString() } }
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        if (comboSummary != null && comboSummary.isNotEmpty()) {
-            Text(text = comboSummary, color = EditorSubText)
-        }
-        SettingSpinner(
-            label = label,
-            options = optionLabels,
-            selectedIndex = selectedIndex,
-            onSelected = { index -> onValueChanged(options.getOrNull(index) ?: Binding.NONE) },
-        )
-    }
-}
-
-@Composable
 private fun FillChip(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     TextButton(
         onClick = onClick,
@@ -1120,20 +1148,33 @@ private fun FillChip(text: String, onClick: () -> Unit, modifier: Modifier = Mod
     }
 }
 
-private fun comboSummaryFor(element: ControlElement, index: Int): String {
-    val combo = element.getCombo(index) ?: return ""
-    return combo.joinToString(" + ") { it.toString() }
+private fun bindingSummary(value: Binding, combo: List<Binding>, noneLabel: String): String {
+    val cleanCombo = combo.filter { it != Binding.NONE }
+    if (cleanCombo.isNotEmpty()) return cleanCombo.joinToString(" + ") { it.toString() }
+    return if (value != Binding.NONE) value.toString() else noneLabel
 }
 
-private fun comboLabelFor(element: ControlElement, index: Int): String {
-    return if (element.getType() == ControlElement.Type.BUTTON_GRID) {
-        val cols = element.getGridCols().coerceAtLeast(1)
-        val row = index / cols + 1
-        val col = index % cols + 1
-        "$row,$col"
-    } else {
-        (index + 1).toString()
+private fun bindingFromTypedValue(value: String): Binding? {
+    val char = value.firstOrNull() ?: return null
+    val bindingName = when {
+        char in 'a'..'z' -> "KEY_${char.uppercaseChar()}"
+        char in 'A'..'Z' -> "KEY_$char"
+        char in '0'..'9' -> "KEY_$char"
+        char == ' ' -> "KEY_SPACE"
+        char == '[' -> "KEY_BRACKET_LEFT"
+        char == ']' -> "KEY_BRACKET_RIGHT"
+        char == '\\' -> "KEY_BACKSLASH"
+        char == '/' -> "KEY_SLASH"
+        char == ';' -> "KEY_SEMICOLON"
+        char == ',' -> "KEY_COMMA"
+        char == '.' -> "KEY_PERIOD"
+        char == '\'' -> "KEY_APOSTROPHE"
+        char == '+' -> "KEY_KP_ADD"
+        char == '-' -> "KEY_MINUS"
+        char == '`' -> "KEY_GRAVE"
+        else -> return null
     }
+    return Binding.values().firstOrNull { it.name == bindingName }
 }
 
 private fun holdKeyBindingFromLabel(label: String): Binding {
