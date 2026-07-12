@@ -376,7 +376,7 @@ ReShade/
 
 ## 🎮 Frontends Workaround
 
-Bannerlator does not work by itself on frontends out of the box. See the [frontends workaround guide](https://github.com/star-emu/star/blob/marcescence/marcescence-frontends.md) to get it running.
+Bannerlator does not work by itself on frontends out of the box. See the [frontends workaround guide](https://github.com/The412Banner/Bannerlator/blob/main/marcescence-frontends.md) to get it running.
 
 ---
 
