@@ -293,6 +293,28 @@
                 android:max="50" />
         </LinearLayout>
 
+        <!-- Hold Key Settings (for TRACKPAD, MOUSE_AREA, STICK, DYNAMIC_STICK) -->
+        <LinearLayout
+            android:id="@+id/LLHoldKeySettings"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Hold Key (pressed while active)"
+                android:textStyle="bold"
+                android:layout_marginTop="8dp" />
+
+            <Spinner
+                android:id="@+id/SHoldKey"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:spinnerMode="dialog" />
+        </LinearLayout>
+
         <!-- Button Grid Settings -->
         <LinearLayout
             android:id="@+id/LLButtonGridSettings"

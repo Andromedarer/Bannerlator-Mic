@@ -324,11 +324,21 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
                                     Binding binding = Binding.fromString(keys.optString(k, null));
                                     if (binding != Binding.NONE) combo.add(binding);
                                 }
-                                if (!combo.isEmpty()) element.setCombo(idx, combo.toArray(new Binding[0]));
+                    if (!combo.isEmpty()) element.setCombo(idx, combo.toArray(new Binding[0]));
                             }
                             catch (JSONException | IllegalArgumentException e) {
                                 e.printStackTrace();
                             }
+                        }
+                    }
+
+                    // Load hold key if present
+                    if (elementJSONObject.has("holdKey")) {
+                        try {
+                            element.setHoldKey(Binding.fromString(elementJSONObject.getString("holdKey")));
+                        }
+                        catch (IllegalArgumentException e) {
+                            element.setHoldKey(Binding.NONE);
                         }
                     }
 

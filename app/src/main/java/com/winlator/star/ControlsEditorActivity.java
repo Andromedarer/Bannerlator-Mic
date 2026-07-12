@@ -270,6 +270,7 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
             View llDynamicStick = view.findViewById(R.id.LLDynamicStickSettings);
             View llMouseArea = view.findViewById(R.id.LLMouseAreaSettings);
             View llButtonGrid = view.findViewById(R.id.LLButtonGridSettings);
+            View llHoldKey = view.findViewById(R.id.LLHoldKeySettings);
             View llBindings = view.findViewById(R.id.LLBindings);
 
             if (llShape != null) llShape.setVisibility(type == ControlElement.Type.BUTTON ? View.VISIBLE : View.GONE);
@@ -279,6 +280,10 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
             if (llDynamicStick != null) llDynamicStick.setVisibility(type == ControlElement.Type.DYNAMIC_STICK ? View.VISIBLE : View.GONE);
             if (llMouseArea != null) llMouseArea.setVisibility(type == ControlElement.Type.MOUSE_AREA ? View.VISIBLE : View.GONE);
             if (llButtonGrid != null) llButtonGrid.setVisibility(type == ControlElement.Type.BUTTON_GRID ? View.VISIBLE : View.GONE);
+            // Show hold key for movement controls
+            if (llHoldKey != null) llHoldKey.setVisibility(
+                (type == ControlElement.Type.TRACKPAD || type == ControlElement.Type.MOUSE_AREA || type == ControlElement.Type.STICK || type == ControlElement.Type.DYNAMIC_STICK)
+                ? View.VISIBLE : View.GONE);
             // Hide bindings section for MOUSE_AREA (it controls mouse directly, no key mappings)
             if (llBindings != null) llBindings.setVisibility(type == ControlElement.Type.MOUSE_AREA ? View.GONE : View.VISIBLE);
 
@@ -442,6 +447,41 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
                     element.setGridCellShape(ControlElement.Shape.values()[position]);
                     profile.save();
                     inputControlsView.invalidate();
+                }
+                @Override public void onNothingSelected(AdapterView<?> parent) {}
+            });
+        }
+
+        // --- Hold Key spinner ---
+        Spinner sHoldKey = view.findViewById(R.id.SHoldKey);
+        if (sHoldKey != null) {
+            // Include keyboard keys + mouse buttons (exclude mouse move/scroll, gamepad)
+            List<Binding> holdKeyBindings = new ArrayList<>();
+            for (Binding b : Binding.values()) {
+                if (b == Binding.NONE) continue;
+                if (b.isKeyboard() || ((b.isMouse() || b.name().startsWith("MOUSE_")) && !b.isMouseMove())) {
+                    holdKeyBindings.add(b);
+                }
+            }
+            List<String> keyLabels = new ArrayList<>();
+            keyLabels.add("None");
+            for (Binding b : holdKeyBindings) keyLabels.add(b.toString());
+            AccentArrayAdapter<String> holdKeyAdapter = new AccentArrayAdapter<>(this, R.layout.binding_spinner_item, keyLabels);
+            holdKeyAdapter.setDropDownViewResource(R.layout.binding_spinner_dropdown_item);
+            sHoldKey.setAdapter(holdKeyAdapter);
+            // Find current selection index
+            Binding currentHoldKey = element.getHoldKey();
+            if (currentHoldKey == Binding.NONE) {
+                sHoldKey.setSelection(0, false);
+            } else {
+                int idx = holdKeyBindings.indexOf(currentHoldKey);
+                sHoldKey.setSelection(idx >= 0 ? 1 + idx : 0, false);
+            }
+            sHoldKey.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+                @Override public void onItemSelected(AdapterView<?> parent, View v, int position, long id) {
+                    if (position == 0) element.setHoldKey(Binding.NONE);
+                    else if (position - 1 < holdKeyBindings.size()) element.setHoldKey(holdKeyBindings.get(position - 1));
+                    profile.save();
                 }
                 @Override public void onNothingSelected(AdapterView<?> parent) {}
             });

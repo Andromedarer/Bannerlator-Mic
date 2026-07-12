@@ -110,7 +110,8 @@ public class ControlElement {
     private Shape gridCellShape;      // shape for each grid cell (default ROUND_RECT)
     private PointF mouseAreaLastPos;  // last touch position in MOUSE_AREA
     private Binding[][] comboBindings; // multi-key combos per binding slot (null = single key)
-    private long[] cellPressTimes;     // press timestamps for grid cell flash animation
+    private long[] cellPressTimes;     // per-cell press timestamps for flash animation
+    private Binding holdKey;           // key held while touch is active (TRACKPAD/MOUSE_AREA/STICK/DYNAMIC_STICK), default NONE
 
     public ControlElement(InputControlsView inputControlsView) {
         this.inputControlsView = inputControlsView;
@@ -134,6 +135,7 @@ public class ControlElement {
         gridCols = 0;
         gridCellShape = Shape.ROUND_RECT;
         mouseAreaLastPos = null;
+        holdKey = Binding.NONE;
         currentPointerId = -1;
         currentPosition = null;
         touchTime = null;
@@ -299,6 +301,9 @@ public class ControlElement {
         else if (cellPressTimes.length != bindings.length) cellPressTimes = Arrays.copyOf(cellPressTimes, bindings.length);
         cellPressTimes[index] = time;
     }
+
+    public Binding getHoldKey() { return holdKey != null ? holdKey : Binding.NONE; }
+    public void setHoldKey(Binding key) { this.holdKey = key != null ? key : Binding.NONE; }
 
     private Binding[] sanitizeCombo(Binding[] combo) {
         Binding[] sanitized = new Binding[combo.length];
@@ -1613,6 +1618,10 @@ public class ControlElement {
                 }
                 if (combosArr.length() > 0) elementJSONObject.put("combos", combosArr);
             }
+            // Serialize hold key if set
+            if (holdKey != null && holdKey != Binding.NONE) {
+                elementJSONObject.put("holdKey", holdKey.name());
+            }
             return elementJSONObject;
         }
         catch (JSONException e) {
@@ -1647,6 +1656,8 @@ public class ControlElement {
                 return true;
             }
             else if (type == Type.DYNAMIC_STICK) {
+                // Hold key stays pressed while stick is active
+                if (getHoldKey() != Binding.NONE) inputControlsView.handleInputEvent(getHoldKey(), true);
                 // Stick appears at touch point within the detection area
                 if (currentPosition == null) currentPosition = new PointF();
                 currentPosition.set(x, y);
@@ -1665,6 +1676,8 @@ public class ControlElement {
                 return true;
             }
             else if (type == Type.MOUSE_AREA) {
+                // Hold key stays pressed while mouse area is active
+                if (getHoldKey() != Binding.NONE) inputControlsView.handleInputEvent(getHoldKey(), true);
                 // Start mouse tracking from this position
                 if (mouseAreaLastPos == null) mouseAreaLastPos = new PointF();
                 mouseAreaLastPos.set(x, y);
@@ -1683,6 +1696,10 @@ public class ControlElement {
                 return true;
             }
             else {
+                if (type == Type.TRACKPAD || type == Type.STICK) {
+                    // Hold key stays pressed while trackpad/stick is active
+                    if (getHoldKey() != Binding.NONE) inputControlsView.handleInputEvent(getHoldKey(), true);
+                }
                 if (type == Type.TRACKPAD) {
                     if (currentPosition == null) currentPosition = new PointF();
                     currentPosition.set(x, y);
@@ -2002,6 +2019,11 @@ public class ControlElement {
                         else inputControlsView.handleInputEvent(getBindingAt(i), false);
                     }
                     states[i] = false;
+                }
+
+                // Release hold key for movement controls
+                if ((type == Type.TRACKPAD || type == Type.MOUSE_AREA || type == Type.STICK || type == Type.DYNAMIC_STICK) && getHoldKey() != Binding.NONE) {
+                    inputControlsView.handleInputEvent(getHoldKey(), false);
                 }
 
                 if (type == Type.RANGE_BUTTON) {
