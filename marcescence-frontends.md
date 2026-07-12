@@ -98,32 +98,34 @@ Beacon's default "launch the app" behaviour opens Bannerlator's games list, beca
 default launcher activity (`MainActivity`) without the shortcut. You have to use Beacon's **custom
 launch** so it targets `XServerDisplayActivity` and passes the `shortcut_path` extra.
 
-1. Put your exported `.desktop` shortcuts in a folder Beacon scans (e.g. `.../BeaconROMs/Windows/`),
-   using the `.desktop` extension.
-2. On that platform, turn on **Use custom launch** and paste the command for the build you installed.
+In Beacon: **Settings → + (add platform)** → Platform Type **Custom**, pick your Bannerlator build as
+the **Player app**, and set the **ROMs folder** to where your exported `.desktop` shortcuts live (e.g.
+`/storage/emulated/0/Winlator/Shortcuts/`). Under **Advanced** set **File handling: Default** and
+**Use custom launch: True**, then paste the command for the build you installed.
 
-`{file.path}` is Beacon's absolute-file-path token — it becomes the selected `.desktop`'s path, so
-Bannerlator opens **that game** directly.
+`{file_path}` is Beacon's absolute-file-path token — it becomes the selected `.desktop`'s path, so
+Bannerlator opens **that game** directly. (Beacon's file tokens are `{file_path}`, `{file_content}`
+and `{file_uri}` — use `{file_path}` here.)
 
 **Bannerlator Bionic — standard (`com.winlator.banner`):**
 
 ```
-am launch -n com.winlator.banner/com.winlator.star.XServerDisplayActivity --es shortcut_path {file.path}
+am start -n com.winlator.banner/com.winlator.star.XServerDisplayActivity -e shortcut_path {file_path}
 ```
 
 **Bannerlator Bionic Ludashi (`com.ludashi.benchmark`):**
 
 ```
-am launch -n com.ludashi.benchmark/com.winlator.star.XServerDisplayActivity --es shortcut_path {file.path}
+am start -n com.ludashi.benchmark/com.winlator.star.XServerDisplayActivity -e shortcut_path {file_path}
 ```
 
 **Bannerlator Bionic PuBG (`com.tencent.ig`):**
 
 ```
-am launch -n com.tencent.ig/com.winlator.star.XServerDisplayActivity --es shortcut_path {file.path}
+am start -n com.tencent.ig/com.winlator.star.XServerDisplayActivity -e shortcut_path {file_path}
 ```
 
-> `--es` passes a **string** extra (correct here). Do **not** use `{file_content}` — that passes the
-> file's *contents* instead of its path (that's a different app's scheme). If Beacon ever foregrounds an
-> already-open session instead of launching fresh, append ` --activity-clear-task --activity-clear-top`
-> (some Beacon builds honour these flags, some ignore them).
+> `-e` passes a **string** extra (`--es` works too). Use the `{file_path}` token — **not** `{file.path}`
+> (dot), which Beacon doesn't recognise and would pass literally, and **not** `{file_content}`, which
+> passes the file's *contents* instead of its path. If Beacon ever foregrounds an already-open session
+> instead of launching fresh, add ` --activity-clear-task --activity-clear-top`.
