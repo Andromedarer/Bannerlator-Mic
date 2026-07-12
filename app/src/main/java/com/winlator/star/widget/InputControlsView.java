@@ -352,6 +352,10 @@ public class InputControlsView extends View {
         }
     }
 
+    public void selectElementAt(ControlElement element) {
+        selectElement(element);
+    }
+
     private void selectElement(ControlElement element) {
         deselectAllElements();
         if (element != null) {

@@ -12,6 +12,7 @@ import android.os.Bundle;
 import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.view.MotionEvent;
 import android.view.animation.DecelerateInterpolator;
 import android.widget.FrameLayout;
 import android.widget.GridLayout;
@@ -143,7 +144,20 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
         sidebarScrollView = findViewById(R.id.SVSidebar);
         sidebarContent = findViewById(R.id.LLSidebarContent);
         if (sidebarOverlay != null) {
-            sidebarOverlay.setOnClickListener(v -> closeSidebar());
+            sidebarOverlay.setClickable(false);
+            sidebarOverlay.setOnTouchListener((v, event) -> {
+                if (event.getAction() == MotionEvent.ACTION_DOWN) {
+                    ControlElement hitElement = findElementAtScreen(event.getRawX(), event.getRawY());
+                    if (hitElement != null) {
+                        inputControlsView.selectElementAt(hitElement);
+                        showControlElementSettings(v);
+                        return true;
+                    }
+                    closeSidebar();
+                    return true;
+                }
+                return false;
+            });
         }
 
         View btAddElement = container.findViewById(R.id.BTAddElement);
@@ -615,6 +629,20 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
     }
     private void saveSidebarState() {
         profile.save();
+    }
+
+    /** Find a control element at the given raw screen coordinates (for overlay passthrough). */
+    private ControlElement findElementAtScreen(float rawX, float rawY) {
+        if (inputControlsView == null || profile == null || !profile.isElementsLoaded()) return null;
+        // Convert raw screen coordinates to local coordinates relative to the InputControlsView
+        int[] loc = new int[2];
+        inputControlsView.getLocationOnScreen(loc);
+        float localX = rawX - loc[0];
+        float localY = rawY - loc[1];
+        for (ControlElement element : profile.getElements()) {
+            if (element.containsPoint(localX, localY)) return element;
+        }
+        return null;
     }
 
     public void closeSidebar() {
