@@ -185,7 +185,7 @@ public class InputControlsView extends View {
             return;
         }
 
-        snappingSize = width / 100;
+        snappingSize = Math.max(1, width / 100);
         readyToDraw = true;
 
         if (editMode) {
@@ -461,8 +461,10 @@ public class InputControlsView extends View {
 
     @Override
     protected void onDetachedFromWindow() {
-        if (mouseMoveTimer != null)
+        if (mouseMoveTimer != null) {
             mouseMoveTimer.cancel();
+            mouseMoveTimer = null;
+        }
         super.onDetachedFromWindow();
     }
 
@@ -471,8 +473,10 @@ public class InputControlsView extends View {
     }
 
     private void createMouseMoveTimer() {
+        if (xServer == null || profile == null) return;
         WinHandler winHandler = xServer.getWinHandler();
-        if (mouseMoveTimer == null && profile != null) {
+        if (winHandler == null) return;
+        if (mouseMoveTimer == null) {
             final float cursorSpeed = profile.getCursorSpeed();
             mouseMoveTimer = new Timer();
             mouseMoveTimer.schedule(new TimerTask() {

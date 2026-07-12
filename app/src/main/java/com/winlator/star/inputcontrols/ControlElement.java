@@ -304,6 +304,21 @@ public class ControlElement {
 
     public Binding getHoldKey() { return holdKey != null ? holdKey : Binding.NONE; }
     public void setHoldKey(Binding key) { this.holdKey = key != null ? key : Binding.NONE; }
+    public float getVisualStickX() { return visualStickX; }
+    public void setVisualStickX(float visualStickX) { this.visualStickX = visualStickX; }
+    public float getVisualStickY() { return visualStickY; }
+    public void setVisualStickY(float visualStickY) { this.visualStickY = visualStickY; }
+    public PointF getStickTarget() { return stickTarget; }
+    public void setStickTarget(PointF stickTarget) { this.stickTarget = stickTarget; }
+    public float getLastFingerX() { return lastFingerX; }
+    public void setLastFingerX(float lastFingerX) { this.lastFingerX = lastFingerX; }
+    public float getLastFingerY() { return lastFingerY; }
+    public void setLastFingerY(float lastFingerY) { this.lastFingerY = lastFingerY; }
+    public PointF getMouseAreaLastPos() { return mouseAreaLastPos; }
+    public void setMouseAreaLastPos(PointF mouseAreaLastPos) { this.mouseAreaLastPos = mouseAreaLastPos; }
+    public Binding[][] getComboBindings() { return comboBindings; }
+    public void setComboBindings(Binding[][] comboBindings) { this.comboBindings = comboBindings; }
+    public void setCellPressTimes(long[] cellPressTimes) { this.cellPressTimes = cellPressTimes; }
 
     private Binding[] sanitizeCombo(Binding[] combo) {
         Binding[] sanitized = new Binding[combo.length];
@@ -333,7 +348,7 @@ public class ControlElement {
     }
 
     public void setBinding(Binding binding) {
-        Arrays.fill(bindings, binding);
+        Arrays.fill(bindings, binding != null ? binding : Binding.NONE);
     }
 
     public float getScale() {

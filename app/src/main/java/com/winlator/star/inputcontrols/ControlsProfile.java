@@ -249,11 +249,18 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
         virtualGamepad = false;
 
         File file = getProfileFile(context, id);
-        if (!file.isFile()) return;
+        if (!file.isFile()) {
+            elementsLoaded = true;
+            return;
+        }
 
         try {
             JSONObject profileJSONObject = new JSONObject(FileUtils.readString(file));
-            JSONArray elementsJSONArray = profileJSONObject.getJSONArray("elements");
+            JSONArray elementsJSONArray = profileJSONObject.optJSONArray("elements");
+            if (elementsJSONArray == null) {
+                elementsLoaded = true;
+                return;
+            }
             for (int i = 0; i < elementsJSONArray.length(); i++) {
                 // Skip a single malformed element (unknown type/shape/range from a fork's
                 // profile, missing keys, etc.) instead of aborting the whole load.
@@ -294,7 +301,8 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
 
                     boolean hasLoadedBinding = false;
                     boolean hasGamepadBinding = true;
-                    JSONArray bindingsJSONArray = elementJSONObject.getJSONArray("bindings");
+                    JSONArray bindingsJSONArray = elementJSONObject.optJSONArray("bindings");
+                    if (bindingsJSONArray == null) continue;
                     int bindingLimit = element.getType() == ControlElement.Type.BUTTON_GRID
                         ? Math.min(bindingsJSONArray.length(), element.getBindingCount())
                         : bindingsJSONArray.length();

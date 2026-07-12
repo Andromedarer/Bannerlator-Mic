@@ -85,6 +85,11 @@
     <string name="fill_qwerty">Fill: QWERTY</string>
     <string name="fill_function_keys">Fill: F1–F12</string>
     <string name="fill_numpad">Fill: NumPad</string>
+    <string name="quick_fill">Quick Fill</string>
+    <string name="hold_key">Hold Key (pressed while active)</string>
+    <string name="button_grid">Button Grid</string>
+    <string name="cell_shape">Cell Shape</string>
+    <string name="custom_icons">Custom Icons</string>
     <string name="clear">Clear</string>
     <string name="no_items_to_display_saves">Register a save file directory from one of your containers to get started!</string>
     <string name="do_you_want_to_remove_this_profile">Do you want to remove this profile?</string>

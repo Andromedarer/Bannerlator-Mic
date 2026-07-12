@@ -301,12 +301,12 @@
             android:orientation="vertical"
             android:visibility="gone">
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Hold Key (pressed while active)"
-                android:textStyle="bold"
-                android:layout_marginTop="8dp" />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/hold_key"
+                    android:textStyle="bold"
+                    android:layout_marginTop="8dp" />
 
             <Spinner
                 android:id="@+id/SHoldKey"
@@ -326,7 +326,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Button Grid"
+                android:text="@string/button_grid"
                 android:textStyle="bold"
                 android:layout_marginTop="8dp" />
 
@@ -357,7 +357,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Cell Shape"
+                android:text="@string/cell_shape"
                 android:layout_marginTop="8dp" />
 
             <Spinner
@@ -370,7 +370,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Quick Fill"
+                android:text="@string/quick_fill"
                 android:textStyle="bold"
                 android:layout_marginTop="10dp" />
 
@@ -486,7 +486,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Custom Icons" />
+                android:text="@string/custom_icons" />
 
             <HorizontalScrollView
                 android:layout_width="match_parent"
