@@ -24,11 +24,13 @@ import android.view.MotionEvent;
 import android.view.PointerIcon;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewConfiguration;
 import android.widget.FrameLayout;
 
 import androidx.preference.PreferenceManager;
 
 import com.winlator.star.R;
+import com.winlator.star.ControlsEditorActivity;
 import com.winlator.star.inputcontrols.Binding;
 import com.winlator.star.inputcontrols.ControlElement;
 import com.winlator.star.inputcontrols.ControlsProfile;
@@ -83,6 +85,27 @@ public class InputControlsView extends View {
     private Handler timeoutHandler; 
     private Runnable hideControlsRunnable; 
 
+    private static final long EDITOR_SETTINGS_LONG_PRESS_MS = 500L;
+    private int editorLongPressTouchSlop;
+    private ControlElement editorLongPressElement;
+    private float editorLongPressDownX;
+    private float editorLongPressDownY;
+    private long editorLongPressDownTimeMs;
+    private boolean editorLongPressTriggered = false;
+
+    private final Runnable editorLongPressRunnable = new Runnable() {
+        @Override
+        public void run() {
+            ControlElement element = editorLongPressElement;
+            if (!editMode || editorLongPressTriggered || element == null) return;
+            editorLongPressTriggered = true;
+            if (getContext() instanceof ControlsEditorActivity) {
+                ((ControlsEditorActivity)getContext()).showControlElementSettingsFor(element);
+            }
+            invalidate();
+        }
+    };
+
     private SharedPreferences preferences;
     private ControlElement stickElement;
     private boolean focusOnStick = false; 
@@ -129,13 +152,12 @@ public class InputControlsView extends View {
         setClickable(true);
         setFocusable(true);
         setFocusableInTouchMode(true);
-        requestFocus(); 
-        setBackgroundColor(0x00000000);
         setPointerIcon(PointerIcon.load(getResources(), R.drawable.hidden_pointer_arrow));
         if (getLayoutParams() == null) {
             setLayoutParams(new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         }
-        preferences = PreferenceManager.getDefaultSharedPreferences(this.getContext());
+        editorLongPressTouchSlop = ViewConfiguration.get(getContext()).getScaledTouchSlop();
+        preferences = PreferenceManager.getDefaultSharedPreferences(getContext());
     }
 
     public void setEditMode(boolean editMode) {
@@ -209,6 +231,11 @@ public class InputControlsView extends View {
             }
         }
 
+        if (editMode && editorLongPressElement != null && !editorLongPressTriggered) {
+            drawEditorLongPressPreview(canvas);
+            postInvalidateOnAnimation();
+        }
+
         super.onDraw(canvas);
     }
 
@@ -280,6 +307,50 @@ public class InputControlsView extends View {
         canvas.drawLine(cursor.x, 0, cursor.x, getMaxHeight(), paint);
 
         paint.setAntiAlias(true);
+    }
+
+    private void drawEditorLongPressPreview(Canvas canvas) {
+        if (editorLongPressElement == null) return;
+        Rect box = editorLongPressElement.getBoundingBox();
+        if (box == null || box.isEmpty()) return;
+
+        long elapsedMs = System.currentTimeMillis() - editorLongPressDownTimeMs;
+        float progress = Math.max(0f, Math.min(1f, elapsedMs / (float) EDITOR_SETTINGS_LONG_PRESS_MS));
+        float pulse = 0.5f + 0.5f * (float)Math.sin(elapsedMs / 70f);
+        float cx = box.centerX();
+        float cy = box.centerY();
+        float baseRadius = Math.max(box.width(), box.height()) * 0.5f + snappingSize * 0.15f;
+
+        paint.setAntiAlias(true);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(Math.max(3f, snappingSize * 0.18f));
+        paint.setColor(Color.argb((int)(90 + 80 * pulse), 79, 195, 247));
+        canvas.drawCircle(cx, cy, baseRadius + snappingSize * (0.15f + 0.15f * progress), paint);
+
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(Color.argb((int)(20 + 18 * pulse), 79, 195, 247));
+        canvas.drawCircle(cx, cy, Math.max(6f, snappingSize * (0.06f + 0.04f * progress)), paint);
+    }
+
+    private void startEditorLongPress(ControlElement element, float x, float y) {
+        cancelEditorLongPress();
+        editorLongPressElement = element;
+        editorLongPressDownX = x;
+        editorLongPressDownY = y;
+        editorLongPressDownTimeMs = System.currentTimeMillis();
+        editorLongPressTriggered = false;
+        removeCallbacks(editorLongPressRunnable);
+        postDelayed(editorLongPressRunnable, EDITOR_SETTINGS_LONG_PRESS_MS);
+        invalidate();
+    }
+
+    private void cancelEditorLongPress() {
+        removeCallbacks(editorLongPressRunnable);
+        editorLongPressElement = null;
+        editorLongPressDownX = 0f;
+        editorLongPressDownY = 0f;
+        editorLongPressDownTimeMs = 0L;
+        invalidate();
     }
 
     private void drawBackgroundImage(Canvas canvas) {
@@ -597,11 +668,24 @@ public class InputControlsView extends View {
                         offsetX = x - element.getX();
                         offsetY = y - element.getY();
                         moveCursor = false;
+                        startEditorLongPress(element, x, y);
+                    } else {
+                        cancelEditorLongPress();
                     }
                     selectElement(element);
                     break;
                 }
                 case MotionEvent.ACTION_MOVE: {
+                    if (editorLongPressTriggered) {
+                        return true;
+                    }
+                    if (editorLongPressElement != null) {
+                        float dx = event.getX() - editorLongPressDownX;
+                        float dy = event.getY() - editorLongPressDownY;
+                        if ((dx * dx + dy * dy) > (float)(editorLongPressTouchSlop * editorLongPressTouchSlop)) {
+                            cancelEditorLongPress();
+                        }
+                    }
                     if (selectedElement != null) {
                         int newX = (int)Mathf.roundTo(event.getX() - offsetX, snappingSize);
                         int newY = (int)Mathf.roundTo(event.getY() - offsetY, snappingSize);
@@ -625,6 +709,21 @@ public class InputControlsView extends View {
                     break;
                 }
                 case MotionEvent.ACTION_UP: {
+                    boolean longPressWasTriggered = editorLongPressTriggered;
+                    cancelEditorLongPress();
+                    editorLongPressTriggered = false;
+                    if (longPressWasTriggered) {
+                        moveCursor = false;
+                        break;
+                    }
+                    if (selectedElement != null && profile != null) profile.save();
+                    if (moveCursor) cursor.set((int)Mathf.roundTo(event.getX(), snappingSize), (int)Mathf.roundTo(event.getY(), snappingSize));
+                    invalidate();
+                    break;
+                }
+                case MotionEvent.ACTION_CANCEL: {
+                    cancelEditorLongPress();
+                    editorLongPressTriggered = false;
                     if (selectedElement != null && profile != null) profile.save();
                     if (moveCursor) cursor.set((int)Mathf.roundTo(event.getX(), snappingSize), (int)Mathf.roundTo(event.getY(), snappingSize));
                     invalidate();

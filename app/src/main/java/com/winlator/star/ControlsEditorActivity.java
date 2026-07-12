@@ -149,8 +149,7 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
                 if (event.getAction() == MotionEvent.ACTION_DOWN) {
                     ControlElement hitElement = findElementAtScreen(event.getRawX(), event.getRawY());
                     if (hitElement != null) {
-                        inputControlsView.selectElementAt(hitElement);
-                        showControlElementSettings(v);
+                        showControlElementSettingsFor(hitElement);
                         return true;
                     }
                     closeSidebar();
@@ -532,8 +531,12 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
     }
 
     private void showControlElementSettings(View anchorView) {
-        final ControlElement element = inputControlsView.getSelectedElement();
-        if (element == null || sidebarContent == null || sidebarScrollView == null || sidebarOverlay == null) return;
+        showControlElementSettingsFor(inputControlsView != null ? inputControlsView.getSelectedElement() : null);
+    }
+
+    public void showControlElementSettingsFor(ControlElement element) {
+        if (element == null || sidebarContent == null || sidebarScrollView == null || sidebarOverlay == null || inputControlsView == null) return;
+        inputControlsView.selectElementAt(element);
         if (sidebarOpen) saveSidebarState();
 
         sidebarComposeView = ensureSidebarComposeView();
