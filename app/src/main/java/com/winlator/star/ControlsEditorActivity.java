@@ -348,7 +348,7 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
     }
 
     // Two-option chooser: built-in picker first, then system SAF.
-    private void promptPickCustomIcon() {
+    public void promptPickCustomIcon() {
         new android.app.AlertDialog.Builder(this)
             .setItems(new CharSequence[]{getString(R.string.browse_files), getString(R.string.pick_via_system)}, (d, which) -> {
                 if (which == 0) {
@@ -445,314 +445,34 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
         final ControlElement element = inputControlsView.getSelectedElement();
         if (element == null || sidebarContent == null || sidebarScrollView == null || sidebarOverlay == null) return;
         if (sidebarOpen) saveSidebarState();
-        View view = LayoutInflater.from(new ContextThemeWrapper(this, R.style.AppTheme_Dark)).inflate(R.layout.control_element_settings, sidebarContent, false);
 
-        final Runnable updateLayout = () -> {
-            ControlElement.Type type = element.getType();
-            View llShape = view.findViewById(R.id.LLShape);
-            View cbToggle = view.findViewById(R.id.CBToggleSwitch);
-            View llCustom = view.findViewById(R.id.LLCustomTextIcon);
-            View llRange = view.findViewById(R.id.LLRangeOptions);
-            View llDynamicStick = view.findViewById(R.id.LLDynamicStickSettings);
-            View llMouseArea = view.findViewById(R.id.LLMouseAreaSettings);
-            View llButtonGrid = view.findViewById(R.id.LLButtonGridSettings);
-            View llHoldKey = view.findViewById(R.id.LLHoldKeySettings);
-            View llBindings = view.findViewById(R.id.LLBindings);
-
-            if (llShape != null) llShape.setVisibility(type == ControlElement.Type.BUTTON ? View.VISIBLE : View.GONE);
-            if (cbToggle != null) cbToggle.setVisibility(type == ControlElement.Type.BUTTON ? View.VISIBLE : View.GONE);
-            if (llCustom != null) llCustom.setVisibility(type == ControlElement.Type.BUTTON ? View.VISIBLE : View.GONE);
-            if (llRange != null) llRange.setVisibility(type == ControlElement.Type.RANGE_BUTTON ? View.VISIBLE : View.GONE);
-            if (llDynamicStick != null) llDynamicStick.setVisibility(type == ControlElement.Type.DYNAMIC_STICK ? View.VISIBLE : View.GONE);
-            if (llMouseArea != null) llMouseArea.setVisibility(type == ControlElement.Type.MOUSE_AREA ? View.VISIBLE : View.GONE);
-            if (llButtonGrid != null) llButtonGrid.setVisibility(type == ControlElement.Type.BUTTON_GRID ? View.VISIBLE : View.GONE);
-            // Show hold key for movement controls
-            if (llHoldKey != null) llHoldKey.setVisibility(
-                (type == ControlElement.Type.TRACKPAD || type == ControlElement.Type.MOUSE_AREA || type == ControlElement.Type.STICK || type == ControlElement.Type.DYNAMIC_STICK)
-                ? View.VISIBLE : View.GONE);
-            // Hide bindings section for MOUSE_AREA (it controls mouse directly, no key mappings)
-            if (llBindings != null) llBindings.setVisibility(type == ControlElement.Type.MOUSE_AREA ? View.GONE : View.VISIBLE);
-
-            loadBindingSpinners(element, view);
-        };
-
-        loadTypeSpinner(element, view.findViewById(R.id.SType), updateLayout);
-        loadShapeSpinner(element, view.findViewById(R.id.SShape));
-        loadRangeSpinner(element, view.findViewById(R.id.SRange));
-
-        RadioGroup rgOrientation = view.findViewById(R.id.RGOrientation);
-        if (rgOrientation != null) {
-            rgOrientation.check(element.getOrientation() == 1 ? R.id.RBVertical : R.id.RBHorizontal);
-            rgOrientation.setOnCheckedChangeListener((group, checkedId) -> {
-                element.setOrientation((byte)(checkedId == R.id.RBVertical ? 1 : 0));
-                profile.save();
-                inputControlsView.invalidate();
-            });
-        }
-
-        NumberPicker npColumns = view.findViewById(R.id.NPColumns);
-        if (npColumns != null) {
-            npColumns.setValue(element.getBindingCount());
-            npColumns.setOnValueChangeListener((numberPicker, value) -> {
-                element.setBindingCount(value);
-                profile.save();
-                inputControlsView.invalidate();
-            });
-        }
-
-        // --- Dynamic Stick sliders ---
-        SeekBar sbAreaWidthStick = view.findViewById(R.id.SBAreaWidthStick);
-        TextView tvAreaWidthStick = view.findViewById(R.id.TVAreaWidthStick);
-        if (sbAreaWidthStick != null) {
-            sbAreaWidthStick.setProgress(element.getAreaWidth());
-            if (tvAreaWidthStick != null) tvAreaWidthStick.setText(element.getAreaWidth() + "px");
-            sbAreaWidthStick.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-                @Override public void onProgressChanged(SeekBar sb, int val, boolean fromUser) {
-                    if (tvAreaWidthStick != null) tvAreaWidthStick.setText(val + "px");
-                    if (fromUser) { element.setAreaWidth(val); profile.save(); inputControlsView.invalidate(); }
-                }
-                @Override public void onStartTrackingTouch(SeekBar sb) {}
-                @Override public void onStopTrackingTouch(SeekBar sb) {}
-            });
-        }
-
-        SeekBar sbAreaHeightStick = view.findViewById(R.id.SBAreaHeightStick);
-        TextView tvAreaHeightStick = view.findViewById(R.id.TVAreaHeightStick);
-        if (sbAreaHeightStick != null) {
-            sbAreaHeightStick.setProgress(element.getAreaHeight());
-            if (tvAreaHeightStick != null) tvAreaHeightStick.setText(element.getAreaHeight() + "px");
-            sbAreaHeightStick.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-                @Override public void onProgressChanged(SeekBar sb, int val, boolean fromUser) {
-                    if (tvAreaHeightStick != null) tvAreaHeightStick.setText(val + "px");
-                    if (fromUser) { element.setAreaHeight(val); profile.save(); inputControlsView.invalidate(); }
-                }
-                @Override public void onStartTrackingTouch(SeekBar sb) {}
-                @Override public void onStopTrackingTouch(SeekBar sb) {}
-            });
-        }
-
-        SeekBar sbStickRadius = view.findViewById(R.id.SBStickRadius);
-        TextView tvStickRadius = view.findViewById(R.id.TVStickRadius);
-        if (sbStickRadius != null) {
-            sbStickRadius.setProgress(element.getStickRadius());
-            if (tvStickRadius != null) tvStickRadius.setText(element.getStickRadius() + "px");
-            sbStickRadius.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-                @Override public void onProgressChanged(SeekBar sb, int val, boolean fromUser) {
-                    if (tvStickRadius != null) tvStickRadius.setText(val + "px");
-                    if (fromUser) { element.setStickRadius(val); profile.save(); inputControlsView.invalidate(); }
-                }
-                @Override public void onStartTrackingTouch(SeekBar sb) {}
-                @Override public void onStopTrackingTouch(SeekBar sb) {}
-            });
-        }
-
-        // --- Mouse Area sliders ---
-        SeekBar sbAreaWidthMouse = view.findViewById(R.id.SBAreaWidthMouse);
-        TextView tvAreaWidthMouse = view.findViewById(R.id.TVAreaWidthMouse);
-        if (sbAreaWidthMouse != null) {
-            sbAreaWidthMouse.setProgress(element.getAreaWidth());
-            if (tvAreaWidthMouse != null) tvAreaWidthMouse.setText(element.getAreaWidth() + "px");
-            sbAreaWidthMouse.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-                @Override public void onProgressChanged(SeekBar sb, int val, boolean fromUser) {
-                    if (tvAreaWidthMouse != null) tvAreaWidthMouse.setText(val + "px");
-                    if (fromUser) { element.setAreaWidth(val); profile.save(); inputControlsView.invalidate(); }
-                }
-                @Override public void onStartTrackingTouch(SeekBar sb) {}
-                @Override public void onStopTrackingTouch(SeekBar sb) {}
-            });
-        }
-
-        SeekBar sbAreaHeightMouse = view.findViewById(R.id.SBAreaHeightMouse);
-        TextView tvAreaHeightMouse = view.findViewById(R.id.TVAreaHeightMouse);
-        if (sbAreaHeightMouse != null) {
-            sbAreaHeightMouse.setProgress(element.getAreaHeight());
-            if (tvAreaHeightMouse != null) tvAreaHeightMouse.setText(element.getAreaHeight() + "px");
-            sbAreaHeightMouse.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-                @Override public void onProgressChanged(SeekBar sb, int val, boolean fromUser) {
-                    if (tvAreaHeightMouse != null) tvAreaHeightMouse.setText(val + "px");
-                    if (fromUser) { element.setAreaHeight(val); profile.save(); inputControlsView.invalidate(); }
-                }
-                @Override public void onStartTrackingTouch(SeekBar sb) {}
-                @Override public void onStopTrackingTouch(SeekBar sb) {}
-            });
-        }
-
-        SeekBar sbMouseSensitivity = view.findViewById(R.id.SBMouseSensitivity);
-        TextView tvMouseSensitivity = view.findViewById(R.id.TVMouseSensitivity);
-        if (sbMouseSensitivity != null) {
-            int sensVal = Math.round(element.getMouseSensitivity() * 10);
-            sbMouseSensitivity.setProgress(sensVal);
-            if (tvMouseSensitivity != null) tvMouseSensitivity.setText(String.format("%.1fx", element.getMouseSensitivity()));
-            sbMouseSensitivity.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-                @Override public void onProgressChanged(SeekBar sb, int val, boolean fromUser) {
-                    float sens = val / 10.0f;
-                    if (tvMouseSensitivity != null) tvMouseSensitivity.setText(String.format("%.1fx", sens));
-                    if (fromUser) { element.setMouseSensitivity(sens); profile.save(); }
-                }
-                @Override public void onStartTrackingTouch(SeekBar sb) {}
-                @Override public void onStopTrackingTouch(SeekBar sb) {}
-            });
-        }
-
-        // --- Button Grid pickers ---
-        NumberPicker npGridRows = view.findViewById(R.id.NPGridRows);
-        if (npGridRows != null) {
-            npGridRows.setValue(getGridRowsForEditor(element));
-            npGridRows.setOnValueChangeListener((picker, val) -> {
-                int cols = getGridColsForEditor(element);
-                element.setGridRows(val);
-                element.setBindingCount(val * cols);
-                profile.save();
-                inputControlsView.invalidate();
-                loadBindingSpinners(element, view);
-            });
-        }
-
-        NumberPicker npGridCols = view.findViewById(R.id.NPGridCols);
-        if (npGridCols != null) {
-            npGridCols.setValue(getGridColsForEditor(element));
-            npGridCols.setOnValueChangeListener((picker, val) -> {
-                int rows = getGridRowsForEditor(element);
-                element.setGridCols(val);
-                element.setBindingCount(rows * val);
-                profile.save();
-                inputControlsView.invalidate();
-                loadBindingSpinners(element, view);
-            });
-        }
-
-        // Grid cell shape spinner
-        Spinner sGridCellShape = view.findViewById(R.id.SGridCellShape);
-        if (sGridCellShape != null) {
-            AccentArrayAdapter<String> shapeAdapter = new AccentArrayAdapter<>(this, R.layout.binding_spinner_item, ControlElement.Shape.names());
-            shapeAdapter.setDropDownViewResource(R.layout.binding_spinner_dropdown_item);
-            sGridCellShape.setAdapter(shapeAdapter);
-            sGridCellShape.setSelection(element.getGridCellShape().ordinal(), false);
-            sGridCellShape.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-                @Override public void onItemSelected(AdapterView<?> parent, View v, int position, long id) {
-                    element.setGridCellShape(ControlElement.Shape.values()[position]);
-                    profile.save();
-                    inputControlsView.invalidate();
-                }
-                @Override public void onNothingSelected(AdapterView<?> parent) {}
-            });
-        }
-
-        // --- Hold Key spinner ---
-        Spinner sHoldKey = view.findViewById(R.id.SHoldKey);
-        if (sHoldKey != null) {
-            // Include keyboard keys + mouse buttons (exclude mouse move/scroll, gamepad)
-            List<Binding> holdKeyBindings = new ArrayList<>();
-            for (Binding b : Binding.values()) {
-                if (b == Binding.NONE) continue;
-                if (b.isKeyboard() || ((b.isMouse() || b.name().startsWith("MOUSE_")) && !b.isMouseMove())) {
-                    holdKeyBindings.add(b);
-                }
+        ComposeView composeView = new ComposeView(this);
+        composeView.setContent(new Function2<Composer, Integer, Unit>() {
+            @Override
+            public Unit invoke(Composer composer, Integer changed) {
+                ControlsEditorSettingsPaneKt.ControlsEditorSettingsPane(
+                    element,
+                    profile,
+                    new Function0<Unit>() {
+                        @Override
+                        public Unit invoke() {
+                            inputControlsView.invalidate();
+                            return Unit.INSTANCE;
+                        }
+                    },
+                    customIconManager,
+                    ControlsEditorActivity.this,
+                    composer,
+                    0
+                );
+                return Unit.INSTANCE;
             }
-            List<String> keyLabels = new ArrayList<>();
-            keyLabels.add(getString(R.string.none));
-            for (Binding b : holdKeyBindings) keyLabels.add(b.toString());
-            AccentArrayAdapter<String> holdKeyAdapter = new AccentArrayAdapter<>(this, R.layout.binding_spinner_item, keyLabels);
-            holdKeyAdapter.setDropDownViewResource(R.layout.binding_spinner_dropdown_item);
-            sHoldKey.setAdapter(holdKeyAdapter);
-            // Find current selection index
-            Binding currentHoldKey = element.getHoldKey();
-            if (currentHoldKey == Binding.NONE) {
-                sHoldKey.setSelection(0, false);
-            } else {
-                int idx = holdKeyBindings.indexOf(currentHoldKey);
-                sHoldKey.setSelection(idx >= 0 ? 1 + idx : 0, false);
-            }
-            sHoldKey.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-                @Override public void onItemSelected(AdapterView<?> parent, View v, int position, long id) {
-                    if (position == 0) element.setHoldKey(Binding.NONE);
-                    else if (position - 1 < holdKeyBindings.size()) element.setHoldKey(holdKeyBindings.get(position - 1));
-                    profile.save();
-                }
-                @Override public void onNothingSelected(AdapterView<?> parent) {}
-            });
-        }
+        });
 
-        // --- Quick Fill buttons for grid ---
-        LinearLayout llQuickFill = view.findViewById(R.id.LLQuickFill);
-        if (llQuickFill != null) {
-            llQuickFill.removeAllViews();
-            final View settingsView = view; // capture for lambda
-            addQuickFillButton(llQuickFill, R.string.fill_qwerty, () -> {
-                fillGridQWERTY(element);
-                loadBindingSpinners(element, settingsView);
-            });
-            addQuickFillButton(llQuickFill, R.string.fill_function_keys, () -> {
-                fillGridFKeys(element);
-                loadBindingSpinners(element, settingsView);
-            });
-            addQuickFillButton(llQuickFill, R.string.fill_numpad, () -> {
-                fillGridNumPad(element);
-                loadBindingSpinners(element, settingsView);
-            });
-            addQuickFillButton(llQuickFill, R.string.clear, () -> {
-                prepareGridForFill(element);
-                int total = getGridCellCountForEditor(element);
-                for (int i = 0; i < total; i++) {
-                    clearGridCell(element, i);
-                }
-                profile.save();
-                inputControlsView.invalidate();
-                loadBindingSpinners(element, settingsView);
-            });
-        }
-
-        final TextView tvScale = view.findViewById(R.id.TVScale);
-        SeekBar sbScale = view.findViewById(R.id.SBScale);
-        if (sbScale != null) {
-            sbScale.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-                @Override
-                public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                    if (tvScale != null) tvScale.setText(progress+"%");
-                    if (fromUser) {
-                        progress = (int)Mathf.roundTo(progress, 5);
-                        seekBar.setProgress(progress);
-                        element.setScale(progress / 100.0f);
-                        profile.save();
-                        inputControlsView.invalidate();
-                    }
-                }
-                @Override public void onStartTrackingTouch(SeekBar seekBar) {}
-                @Override public void onStopTrackingTouch(SeekBar seekBar) {}
-            });
-            sbScale.setProgress((int)(element.getScale() * 100));
-        }
-
-        CheckBox cbToggleSwitch = view.findViewById(R.id.CBToggleSwitch);
-        if (cbToggleSwitch != null) {
-            cbToggleSwitch.setChecked(element.isToggleSwitch());
-            cbToggleSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
-                element.setToggleSwitch(isChecked);
-                profile.save();
-            });
-        }
-
-        final EditText etCustomText = view.findViewById(R.id.ETCustomText);
-        if (etCustomText != null) etCustomText.setText(element.getText());
-
-        // LOAD BOTH ICON LISTS
-        final LinearLayout llIconList = view.findViewById(R.id.LLIconList);
-        if (llIconList != null) loadIcons(llIconList, element.getIconId());
-
-        currentLLCustomIconList = view.findViewById(R.id.LLCustomIconList);
-        if (currentLLCustomIconList != null) loadCustomIcons(currentLLCustomIconList, element.getIconId());
-
-        View btAddIcon = view.findViewById(R.id.BTAddCustomIcon);
-        if (btAddIcon != null) btAddIcon.setOnClickListener(v -> promptPickCustomIcon());
-
-        updateLayout.run();
-
+        sidebarContent.removeAllViews();
+        sidebarContent.addView(composeView);
+        sidebarSettingsView = composeView;
         sidebarEditingElement = element;
-        sidebarSettingsView = view;
-        if (sidebarContent != null) {
-            sidebarContent.removeAllViews();
-            sidebarContent.addView(view);
-        }
 
         final float sidebarWidthPx = UnitUtils.dpToPx(300);
         final float screenWidth = getResources().getDisplayMetrics().widthPixels;
@@ -798,20 +518,7 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
     }
 
     private void saveSidebarState() {
-        if (sidebarEditingElement == null || sidebarSettingsView == null) return;
-
-        EditText etCustomText = sidebarSettingsView.findViewById(R.id.ETCustomText);
-        if (etCustomText != null) sidebarEditingElement.setText(etCustomText.getText().toString().trim());
-
-        LinearLayout llIconList = sidebarSettingsView.findViewById(R.id.LLIconList);
-        LinearLayout llCustomIconList = sidebarSettingsView.findViewById(R.id.LLCustomIconList);
-        short selectedIconId = 0;
-        if (llIconList != null) selectedIconId = getSelectedIdFromList(llIconList);
-        if (selectedIconId == 0 && llCustomIconList != null) selectedIconId = getSelectedIdFromList(llCustomIconList);
-        sidebarEditingElement.setIconId((byte) selectedIconId);
-
         profile.save();
-        inputControlsView.invalidate();
     }
 
     private void closeSidebar() {
@@ -843,7 +550,6 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
                     sidebarOverlay.setAlpha(1f);
                     sidebarSettingsView = null;
                     sidebarEditingElement = null;
-                    currentLLCustomIconList = null;
                     sidebarScrollView.animate().setListener(null);
                 }
             })
@@ -1204,12 +910,12 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
         return getGridRowsForEditor(element) * getGridColsForEditor(element);
     }
 
-    private void prepareGridForFill(ControlElement element) {
+    void prepareGridForFill(ControlElement element) {
         int total = getGridCellCountForEditor(element);
         if (element.getBindingCount() != total) element.setBindingCount(total);
     }
 
-    private void clearGridCell(ControlElement element, int index) {
+    void clearGridCell(ControlElement element, int index) {
         element.setBindingAt(index, Binding.NONE);
         element.setCombo(index, null);
     }
@@ -1230,7 +936,7 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
     }
 
     /** Fill grid with QWERTY row: A S D F ... (wraps) */
-    private void fillGridQWERTY(ControlElement element) {
+    void fillGridQWERTY(ControlElement element) {
         Binding[] keys = {
             Binding.KEY_Q, Binding.KEY_W, Binding.KEY_E, Binding.KEY_R, Binding.KEY_T, Binding.KEY_Y, Binding.KEY_U, Binding.KEY_I, Binding.KEY_O, Binding.KEY_P,
             Binding.KEY_A, Binding.KEY_S, Binding.KEY_D, Binding.KEY_F, Binding.KEY_G, Binding.KEY_H, Binding.KEY_J, Binding.KEY_K, Binding.KEY_L,
@@ -1247,7 +953,7 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
     }
 
     /** Fill grid with F1-F12 keys */
-    private void fillGridFKeys(ControlElement element) {
+    void fillGridFKeys(ControlElement element) {
         Binding[] keys = {
             Binding.KEY_F1, Binding.KEY_F2, Binding.KEY_F3, Binding.KEY_F4,
             Binding.KEY_F5, Binding.KEY_F6, Binding.KEY_F7, Binding.KEY_F8,
@@ -1264,7 +970,7 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
     }
 
     /** Fill grid with NumPad layout: 7 8 9 / 4 5 6 * / 1 2 3 - / 0 . + Enter */
-    private void fillGridNumPad(ControlElement element) {
+    void fillGridNumPad(ControlElement element) {
         Binding[] keys = {
             Binding.KEY_KP_7, Binding.KEY_KP_8, Binding.KEY_KP_9, Binding.KEY_KP_ADD,
             Binding.KEY_KP_4, Binding.KEY_KP_5, Binding.KEY_KP_6, Binding.KEY_MINUS,
