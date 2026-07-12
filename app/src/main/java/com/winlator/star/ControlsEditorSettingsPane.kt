@@ -121,6 +121,7 @@ fun ControlsEditorSettingsPane(
     var mouseAreaWidth by remember { mutableStateOf(element.getAreaWidth().coerceAtLeast(200)) }
     var mouseAreaHeight by remember { mutableStateOf(element.getAreaHeight().coerceAtLeast(200)) }
     var mouseSensitivity by remember { mutableStateOf((element.getMouseSensitivity() * 10f).roundToInt().coerceIn(1, 50)) }
+    var deadZonePct by remember { mutableStateOf((element.deadZone * 100f).roundToInt().coerceIn(0, 50)) }
     var gridRows by remember { mutableStateOf(element.getGridRows().coerceAtLeast(1)) }
     var gridCols by remember { mutableStateOf(element.getGridCols().coerceAtLeast(1)) }
     var gridCellShapeIndex by remember { mutableStateOf(element.getGridCellShape().ordinal) }
@@ -131,6 +132,7 @@ fun ControlsEditorSettingsPane(
     var bindingCount by remember { mutableStateOf(element.getBindingCount().coerceAtLeast(1)) }
 
     fun saveAndInvalidate() {
+        element.deadZone = deadZonePct / 100f
         profile.save()
         onInvalidate()
     }
@@ -147,6 +149,7 @@ fun ControlsEditorSettingsPane(
         mouseAreaWidth = element.getAreaWidth().coerceAtLeast(200)
         mouseAreaHeight = element.getAreaHeight().coerceAtLeast(200)
         mouseSensitivity = (element.getMouseSensitivity() * 10f).roundToInt().coerceIn(1, 50)
+        deadZonePct = (element.deadZone * 100f).roundToInt().coerceIn(0, 50)
         gridRows = element.getGridRows().coerceAtLeast(1)
         gridCols = element.getGridCols().coerceAtLeast(1)
         gridCellShapeIndex = element.getGridCellShape().ordinal
@@ -255,6 +258,21 @@ fun ControlsEditorSettingsPane(
                 saveAndInvalidate()
             },
         )
+
+        if (selectedType == ControlElement.Type.STICK || selectedType == ControlElement.Type.DYNAMIC_STICK) {
+            LabeledSlider(
+                label = stringResource(R.string.dead_zone),
+                value = deadZonePct,
+                rangeStart = 0,
+                rangeEnd = 50,
+                suffix = "%",
+                onValueChange = { value ->
+                    element.deadZone = value / 100f
+                    deadZonePct = value
+                    saveAndInvalidate()
+                },
+            )
+        }
 
         SettingsSection(title = stringResource(R.string.detection_area), visible = selectedType == ControlElement.Type.DYNAMIC_STICK) {
             LabeledSlider(

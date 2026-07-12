@@ -279,6 +279,7 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
                     if (elementJSONObject.has("orientation")) element.setOrientation((byte)elementJSONObject.getInt("orientation"));
 
                     // Load new fields for extended types (backward compatible)
+                    if (elementJSONObject.has("deadZone")) element.setDeadZone((float)elementJSONObject.getDouble("deadZone"));
                     if (elementJSONObject.has("areaWidth")) element.setAreaWidth(elementJSONObject.getInt("areaWidth"));
                     if (elementJSONObject.has("areaHeight")) element.setAreaHeight(elementJSONObject.getInt("areaHeight"));
                     if (elementJSONObject.has("stickRadius")) element.setStickRadius(elementJSONObject.getInt("stickRadius"));

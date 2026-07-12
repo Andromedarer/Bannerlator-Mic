@@ -27,6 +27,7 @@
     <string name="exit">Exit</string>
     <string name="no_control_element_selected">No control element selected</string>
     <string name="scale">Scale</string>
+    <string name="dead_zone">Dead Zone</string>
     <string name="shape">Shape</string>
     <string name="type">Type</string>
     <string name="binding">Binding</string>

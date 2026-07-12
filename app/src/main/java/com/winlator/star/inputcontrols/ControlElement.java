@@ -112,6 +112,7 @@ public class ControlElement {
     private Binding[][] comboBindings; // multi-key combos per binding slot (null = single key)
     private long[] cellPressTimes;     // per-cell press timestamps for flash animation
     private Binding holdKey;           // key held while touch is active (TRACKPAD/MOUSE_AREA/STICK/DYNAMIC_STICK), default NONE
+    private float deadZone = 0.15f;
 
     public ControlElement(InputControlsView inputControlsView) {
         this.inputControlsView = inputControlsView;
@@ -323,6 +324,8 @@ public class ControlElement {
 
     public Binding getHoldKey() { return holdKey != null ? holdKey : Binding.NONE; }
     public void setHoldKey(Binding key) { this.holdKey = key != null ? key : Binding.NONE; }
+    public float getDeadZone() { return deadZone; }
+    public void setDeadZone(float dz) { this.deadZone = Math.max(0f, Math.min(0.5f, dz)); }
     public float getVisualStickX() { return visualStickX; }
     public void setVisualStickX(float visualStickX) { this.visualStickX = visualStickX; }
     public float getVisualStickY() { return visualStickY; }
@@ -843,6 +846,12 @@ public class ControlElement {
                 int cy = boundingBox.centerY();
                 int oldColor = paint.getColor();
                 float outerRadius = boundingBox.height() * 0.5f;
+                float stickRadiusPx = snappingSize * 1.8f * scale;
+
+                // Dead zone indicator
+                paint.setStyle(Paint.Style.FILL);
+                paint.setColor(Color.argb(40, 255, 0, 0));
+                canvas.drawCircle(cx, cy, stickRadiusPx * deadZone, paint);
 
                 // Outer circle - black fill
                 paint.setStyle(Paint.Style.FILL);
@@ -908,6 +917,10 @@ public class ControlElement {
                     float sRadius = stickRadius > 0 ? stickRadius : 120;
                     float sx = currentPosition.x;
                     float sy = currentPosition.y;
+
+                    paint.setStyle(Paint.Style.FILL);
+                    paint.setColor(Color.argb(40, 255, 0, 0));
+                    canvas.drawCircle(sx, sy, (sRadius * scale * deadZone), paint);
 
                     // Outer circle
                     paint.setStyle(Paint.Style.FILL);
@@ -1138,12 +1151,20 @@ public class ControlElement {
                 int cx = boundingBox.centerX();
                 int cy = boundingBox.centerY();
                 float ringRadius = boundingBox.height() * 0.5f;
+                float stickRadiusPx = snappingSize * 1.8f * scale;
+
+                // Dead zone indicator
+                paint.setStyle(Paint.Style.FILL);
+                paint.setColor(Color.argb(40, 255, 0, 0));
+                canvas.drawCircle(cx, cy, stickRadiusPx * deadZone, paint);
 
                 int ringFillAlpha = fillAlpha;
                 int ringFill = Color.argb(ringFillAlpha, 0, 0, 0);
+
                 paint.setStyle(Paint.Style.FILL);
                 paint.setColor(ringFill);
                 canvas.drawCircle(cx, cy, ringRadius, paint);
+
 
                 if (glassEdgeAlpha > 0) {
                     paint.setShader(new RadialGradient(
@@ -1299,6 +1320,10 @@ public class ControlElement {
                     float sRadius = stickRadius > 0 ? stickRadius : 120;
                     float sx = visualStickX;
                     float sy = visualStickY;
+
+                    paint.setStyle(Paint.Style.FILL);
+                    paint.setColor(Color.argb(40, 255, 0, 0));
+                    canvas.drawCircle(sx, sy, (sRadius * scale * deadZone), paint);
 
                     // Outer ring
                     paint.setStyle(Paint.Style.FILL);
@@ -1617,6 +1642,7 @@ public class ControlElement {
                 elementJSONObject.put("range", range.name());
                 if (orientation != 0) elementJSONObject.put("orientation", orientation);
             }
+            elementJSONObject.put("deadZone", getDeadZone());
             if (type == Type.DYNAMIC_STICK) {
                 elementJSONObject.put("areaWidth", areaWidth);
                 elementJSONObject.put("areaHeight", areaHeight);
@@ -1837,16 +1863,16 @@ public class ControlElement {
                 if (firstBinding.isGamepad()) {
                     float magnitude = (float)Math.sqrt(normX * normX + normY * normY);
                     float finalX = 0, finalY = 0;
-                    if (magnitude > STICK_DEAD_ZONE) {
-                        float scale = Math.min(1.0f, (magnitude - STICK_DEAD_ZONE) * STICK_SENSITIVITY);
+                    if (magnitude > deadZone) {
+                        float scale = Math.min(1.0f, (magnitude - deadZone) * STICK_SENSITIVITY);
                         finalX = (normX / magnitude) * scale;
                         finalY = (normY / magnitude) * scale;
                     }
                     inputControlsView.handleStickInput(firstBinding, finalX, finalY);
                     for (byte i = 0; i < 4; i++) this.states[i] = true;
                 } else {
-                    final boolean[] st = {normY <= -STICK_DEAD_ZONE, normX >= STICK_DEAD_ZONE,
-                                          normY >= STICK_DEAD_ZONE, normX <= -STICK_DEAD_ZONE};
+                    final boolean[] st = {normY <= -deadZone, normX >= deadZone,
+                                          normY >= deadZone, normX <= -deadZone};
                     for (byte i = 0; i < 4; i++) {
                         float value = i == 1 || i == 3 ? normX : normY;
                         Binding binding = getBindingAt(i);
@@ -1902,39 +1928,39 @@ public class ControlElement {
                 if (currentPosition == null) currentPosition = new PointF();
                 currentPosition.x = boundingBox.left + deltaX * radius + radius;
                 currentPosition.y = boundingBox.top + deltaY * radius + radius;
-                
+
                 // Check if any binding is gamepad - if so, use unified stick input
                 Binding firstBinding = getBindingAt(0);
                 if (firstBinding.isGamepad()) {
                     // Use radial deadzone to prevent angle snapping
                     float magnitude = (float)Math.sqrt(deltaX * deltaX + deltaY * deltaY);
-                    
+
                     float finalX = 0;
                     float finalY = 0;
-                    
-                    if (magnitude > STICK_DEAD_ZONE) {
+
+                    if (magnitude > deadZone) {
                         // Normalize and apply sensitivity
                         float normalizedX = deltaX / magnitude;
                         float normalizedY = deltaY / magnitude;
-                        
+
                         // Scale magnitude by sensitivity, respecting deadzone
                         float scaledMagnitude = Math.max(0, magnitude - 0.01f) * STICK_SENSITIVITY;
                         scaledMagnitude = Math.min(scaledMagnitude, 1.0f);
-                        
+
                         finalX = normalizedX * scaledMagnitude;
                         finalY = normalizedY * scaledMagnitude;
                     }
-                    
+
                     // Use unified stick input method - sets both X and Y together
                     inputControlsView.handleStickInput(firstBinding, finalX, finalY);
-                    
+
                     // Mark all directions as active for proper release handling
                     for (byte i = 0; i < 4; i++) {
                         this.states[i] = true;
                     }
                 } else {
                     // Fallback to per-direction handling for mouse/keyboard bindings
-                    final boolean[] states = {deltaY <= -STICK_DEAD_ZONE, deltaX >= STICK_DEAD_ZONE, deltaY >= STICK_DEAD_ZONE, deltaX <= -STICK_DEAD_ZONE};
+                    final boolean[] states = {deltaY <= -deadZone, deltaX >= deadZone, deltaY >= deadZone, deltaX <= -deadZone};
                     for (byte i = 0; i < 4; i++) {
                         float value = i == 1 || i == 3 ? deltaX : deltaY;
                         Binding binding = getBindingAt(i);
@@ -2004,7 +2030,7 @@ public class ControlElement {
                 }
             }
             else {
-                final boolean[] states = {deltaY <= -DPAD_DEAD_ZONE, deltaX >= DPAD_DEAD_ZONE, deltaY >= DPAD_DEAD_ZONE, deltaX <= -DPAD_DEAD_ZONE};
+                final boolean[] states = {deltaY <= -deadZone, deltaX >= deadZone, deltaY >= deadZone, deltaX <= -deadZone};
 
                 for (byte i = 0; i < 4; i++) {
                     float value = i == 1 || i == 3 ? deltaX : deltaY;
