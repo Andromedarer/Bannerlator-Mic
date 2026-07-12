@@ -30,15 +30,16 @@ com.winlator.banner/com.winlator.star.XServerDisplayActivity
 
 ## The `am start` command
 
-Use the block for the build you installed. `{file.path}` is the full path to an exported Bannerlator
-`.desktop` shortcut.
+Use the block for the build you installed. Replace the quoted path with the full path to an exported
+Bannerlator `.desktop` shortcut. (A front-end substitutes this automatically — see ES-DE / Beacon
+below for the token each one uses.)
 
 **Bannerlator Bionic — standard (`com.winlator.banner`):**
 
 ```
 am start \
   -n com.winlator.banner/com.winlator.star.XServerDisplayActivity \
-  -e shortcut_path {file.path} \
+  -e shortcut_path "/storage/emulated/0/Winlator/Shortcuts/Your Game.desktop" \
   --activity-clear-task \
   --activity-clear-top
 ```
@@ -48,7 +49,7 @@ am start \
 ```
 am start \
   -n com.ludashi.benchmark/com.winlator.star.XServerDisplayActivity \
-  -e shortcut_path {file.path} \
+  -e shortcut_path "/storage/emulated/0/Winlator/Shortcuts/Your Game.desktop" \
   --activity-clear-task \
   --activity-clear-top
 ```
@@ -58,7 +59,7 @@ am start \
 ```
 am start \
   -n com.tencent.ig/com.winlator.star.XServerDisplayActivity \
-  -e shortcut_path {file.path} \
+  -e shortcut_path "/storage/emulated/0/Winlator/Shortcuts/Your Game.desktop" \
   --activity-clear-task \
   --activity-clear-top
 ```
