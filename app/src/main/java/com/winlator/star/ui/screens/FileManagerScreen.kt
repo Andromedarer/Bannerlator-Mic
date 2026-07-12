@@ -24,6 +24,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.CreateNewFolder
@@ -243,6 +244,7 @@ fun FileManagerScreen(
     var showNewFolderDialog by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<File?>(null) }
     var pendingRun by remember { mutableStateOf<File?>(null) }
+    var pendingAddShortcut by remember { mutableStateOf<File?>(null) }
     var isOperationRunning by remember { mutableStateOf(false) }
     var operationLabel by remember { mutableStateOf("") }
     var operationDeterminate by remember { mutableStateOf(false) }
@@ -357,6 +359,35 @@ fun FileManagerScreen(
                 Toast.makeText(context, "No container available — create one first", Toast.LENGTH_SHORT).show()
             containers.size == 1 -> runFileInContainer(file, containers.first())
             else -> pendingRun = file   // ask which container
+        }
+    }
+
+    // Create a PERMANENT Games/Shortcuts tile for [file] in [container] — same result as the
+    // Games-tab "+" button (ExeShortcutImporter writes into the container's desktop dir, so it
+    // shows up in the Shortcuts list and picks up cover art). Unlike runFile's throwaway desktop.
+    fun addShortcutInContainer(file: File, container: Container) {
+        scope.launch {
+            val name = withContext(Dispatchers.IO) {
+                runCatching {
+                    ExeShortcutImporter.addToShortcuts(context, container, file, file.nameWithoutExtension)
+                        .nameWithoutExtension
+                }.getOrNull()
+            }
+            if (name == null) {
+                Toast.makeText(context, "Couldn't add ${file.name} to Shortcuts", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(context, "Added \"$name\" to Shortcuts", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    fun addToShortcuts(file: File) {
+        containerManager ?: return
+        when {
+            containers.isEmpty() ->
+                Toast.makeText(context, "No container available — create one first", Toast.LENGTH_SHORT).show()
+            containers.size == 1 -> addShortcutInContainer(file, containers.first())
+            else -> pendingAddShortcut = file   // ask which container
         }
     }
 
@@ -598,6 +629,34 @@ fun FileManagerScreen(
             },
             confirmButton = {},
             dismissButton = { TextButton(onClick = { pendingRun = null }) { Text("Cancel") } },
+        )
+    }
+
+    if (pendingAddShortcut != null) {
+        val file = pendingAddShortcut
+        AlertDialog(
+            onDismissRequest = { pendingAddShortcut = null },
+            title = { Text("Add to which container?") },
+            text = {
+                Column {
+                    containers.forEach { container ->
+                        Text(
+                            text = container.name,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            fontSize = 14.sp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    pendingAddShortcut = null
+                                    if (file != null) addShortcutInContainer(file, container)
+                                }
+                                .padding(vertical = 10.dp),
+                        )
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { pendingAddShortcut = null }) { Text("Cancel") } },
         )
     }
 
@@ -854,6 +913,7 @@ fun FileManagerScreen(
                             menuExpanded = showMenuFor == file,
                             onDismissMenu = { showMenuFor = null },
                             onRun = { runFile(file) },
+                            onAddToShortcuts = { addToShortcuts(file) },
                             onCopy = { clipboardFile = file; isCutOperation = false; showMenuFor = null },
                             onCut = { clipboardFile = file; isCutOperation = true; showMenuFor = null },
                             onDelete = { selectedEntry = file; showMenuFor = null },
@@ -916,6 +976,7 @@ private fun FileItemRow(
     menuExpanded: Boolean,
     onDismissMenu: () -> Unit,
     onRun: () -> Unit,
+    onAddToShortcuts: () -> Unit,
     onCopy: () -> Unit,
     onCut: () -> Unit,
     onDelete: () -> Unit,
@@ -1033,6 +1094,16 @@ private fun FileItemRow(
                             text = { Text("Run") },
                             leadingIcon = { Icon(Icons.Filled.PlayArrow, null, tint = MaterialTheme.colorScheme.primary) },
                             onClick = { onDismissMenu(); onRun() },
+                        )
+                    }
+                    // Only real PE executables can become a permanent Games tile — this reuses the
+                    // same importer the Games-tab "+" button uses (Exec=wine <path>), which is only
+                    // correct for .exe, so we don't offer it for .bat/.sh/.msi.
+                    if (!isDir && file.name.lowercase().endsWith(".exe")) {
+                        DropdownMenuItem(
+                            text = { Text("Add to Shortcuts") },
+                            leadingIcon = { Icon(Icons.Filled.Add, null, tint = MaterialTheme.colorScheme.primary) },
+                            onClick = { onDismissMenu(); onAddToShortcuts() },
                         )
                     }
                     DropdownMenuItem(

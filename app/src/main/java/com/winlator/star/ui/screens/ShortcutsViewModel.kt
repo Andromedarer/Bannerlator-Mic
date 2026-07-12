@@ -35,10 +35,7 @@ import com.winlator.star.communityconfigs.UploadedConfigsStore.UploadedConfig
 import com.winlator.star.container.Container
 import com.winlator.star.container.ContainerManager
 import com.winlator.star.container.Shortcut
-import com.winlator.star.core.FileUtils
 import com.winlator.star.core.GPUInformation
-import com.winlator.star.core.WinePath
-import com.winlator.star.store.StarLaunchBridge
 import com.winlator.star.ui.screens.adrenodownload.DriverSources
 import com.winlator.star.ui.screens.adrenodownload.RemoteDriverRepository
 import kotlinx.coroutines.CompletableDeferred
@@ -900,36 +897,13 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
         }
         val displayName = sourceName.substringBeforeLast('.', sourceName)
         return try {
-            val shortcutFile = writeExeShortcut(container, exeFile, displayName)
+            // Delegate to the shared importer so the "+" flow and the File Manager's
+            // "Add to shortcuts" action write shortcuts identically. Refresh once now for
+            // the .desktop, then again from onCoverArtReady when the icon lands.
+            val shortcutFile = ExeShortcutImporter.addToShortcuts(
+                context, container, exeFile, displayName,
+            ) { refresh() }
             refresh()
-            // Cover art on a background thread — SteamGridDB lookup involves network I/O.
-            // Fallback chain: store URL (none here) → SGDB → PE icon extraction from the EXE.
-            val safeName = shortcutFile.nameWithoutExtension
-            val appCtx = context.applicationContext
-            Thread({
-                try {
-                    StarLaunchBridge.saveCoverArt(appCtx, container, shortcutFile, safeName, null)
-                    val iconFile = container.getIconsDir(64)?.let { File(it, "$safeName.png") }
-                    if (iconFile == null || !iconFile.exists()) {
-                        // SGDB miss — try extracting an icon from the EXE itself.
-                        ExeIconExtractor.extract(exeFile)?.let { bmp ->
-                            container.getIconsDir(64)?.let { iconsDir ->
-                                if (!iconsDir.exists()) iconsDir.mkdirs()
-                                FileUtils.saveBitmapToFile(bmp, File(iconsDir, "$safeName.png"))
-                            }
-                            try {
-                                Shortcut(container, shortcutFile).saveCustomCoverArt(bmp)
-                            } catch (e: Exception) {
-                                Log.w(TAG, "saveCustomCoverArt failed for $safeName", e)
-                            }
-                            Log.d(TAG, "PE icon extraction succeeded for $safeName")
-                        }
-                    }
-                    refresh()
-                } catch (e: Exception) {
-                    Log.w(TAG, "Cover art lookup failed for $safeName", e)
-                }
-            }, "exe-import-cover-art").start()
             ImportResult.Success(shortcutFile.nameWithoutExtension)
         } catch (e: IOException) {
             Log.e(TAG, "Failed to write EXE shortcut", e)
@@ -963,35 +937,6 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
             Log.e(TAG, "Failed to import shortcut file", e)
             ImportResult.Error("Failed to import: ${e.message ?: e.javaClass.simpleName}")
         }
-    }
-
-    private fun writeExeShortcut(container: Container, exeFile: File, displayName: String): File {
-        val desktopDir = container.getDesktopDir()
-        if (!desktopDir.exists()) desktopDir.mkdirs()
-
-        val safeName = displayName.replace(Regex("""[\\/:*?"<>|]"""), "_").trim().ifEmpty { "game" }
-        val shortcutFile = File(desktopDir, "$safeName.desktop")
-
-        // Resolve to a Wine drive letter against the container's mount map. Z: would
-        // map to imagefs root (chroot view) and not reach external storage, so we use
-        // F:/D:/etc. as defined in container.drives. If no existing drive contains the
-        // EXE path we add and persist a new letter pointing at the parent directory.
-        val winPath = WinePath.resolveWindowsPath(container, exeFile.absolutePath)
-        // 4-backslash separators per Winlator's two-pass StringUtils.unescape().
-        val escaped = WinePath.escapeForExec(winPath)
-        val content = buildString {
-            append("[Desktop Entry]\n")
-            append("Name=").append(displayName).append("\n")
-            append("Exec=wine ").append(escaped).append("\n")
-            append("Icon=").append(safeName).append("\n")
-            append("Type=Application\n")
-            append("StartupWMClass=explorer\n")
-            append("\n")
-            append("[Extra Data]\n")
-        }
-        shortcutFile.writeText(content)
-        Log.d(TAG, "Wrote EXE shortcut: ${shortcutFile.path} -> $winPath ($exeFile)")
-        return shortcutFile
     }
 
     private fun resolveLocalPath(ctx: Context, uri: Uri): String? {
