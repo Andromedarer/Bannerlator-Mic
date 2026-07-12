@@ -55,4 +55,31 @@
             style="@style/ToolButton"
             android:src="@drawable/icon_settings"  />
     </LinearLayout>
+
+    <View
+        android:id="@+id/VSidebarOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#99000000"
+        android:clickable="true"
+        android:focusable="true"
+        android:visibility="gone" />
+
+    <ScrollView
+        android:id="@+id/SVSidebar"
+        android:layout_width="300dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="start|top"
+        android:background="#FF1A1A2E"
+        android:fillViewport="true"
+        android:translationX="-300dp"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:id="@+id/LLSidebarContent"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="12dp" />
+    </ScrollView>
 </FrameLayout>

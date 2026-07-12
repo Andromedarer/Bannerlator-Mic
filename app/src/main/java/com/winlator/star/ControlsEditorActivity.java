@@ -1,16 +1,22 @@
 package com.winlator.star;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
+import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.view.animation.DecelerateInterpolator;
 import android.widget.AdapterView;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.GridLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.PopupWindow;
@@ -58,6 +64,15 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
     private ActivityResultLauncher<String> bgImagePickerLauncher;
     private ActivityResultLauncher<Intent> bgImagePickerInAppLauncher;
 
+    private View sidebarOverlay;
+    private View sidebarScrollView;
+    private LinearLayout sidebarContent;
+    private View sidebarSettingsView;
+    private ControlElement sidebarEditingElement;
+    private boolean sidebarOpen = false;
+    private boolean sidebarOnRight = false;
+    private android.app.AlertDialog activeControlTypeDialog;
+
     @Override
     public void onCreate(Bundle bundle) {
         super.onCreate(bundle);
@@ -75,6 +90,13 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
 
         FrameLayout container = findViewById(R.id.FLContainer);
         container.addView(inputControlsView, 0);
+
+        sidebarOverlay = findViewById(R.id.VSidebarOverlay);
+        sidebarScrollView = findViewById(R.id.SVSidebar);
+        sidebarContent = findViewById(R.id.LLSidebarContent);
+        if (sidebarOverlay != null) {
+            sidebarOverlay.setOnClickListener(v -> closeSidebar());
+        }
 
         container.findViewById(R.id.BTAddElement).setOnClickListener(this);
         container.findViewById(R.id.BTRemoveElement).setOnClickListener(this);
@@ -120,25 +142,117 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
     }
 
     private void showAddElementTypeDialog() {
-        final String[] typeNames = new String[ControlElement.Type.values().length];
-        for (int i = 0; i < typeNames.length; i++) {
-            typeNames[i] = ControlElement.Type.values()[i].name().replace("_", " ");
+        showAddElementPicker();
+    }
+
+    private void showAddElementPicker() {
+        View pickerView = LayoutInflater.from(this).inflate(R.layout.control_type_picker, null, false);
+        GridLayout grid = pickerView.findViewById(R.id.GLControlTypePicker);
+        if (grid == null) return;
+
+        final ControlElement.Type[] types = {
+            ControlElement.Type.BUTTON,
+            ControlElement.Type.D_PAD,
+            ControlElement.Type.RANGE_BUTTON,
+            ControlElement.Type.STICK,
+            ControlElement.Type.TRACKPAD,
+            ControlElement.Type.DYNAMIC_STICK,
+            ControlElement.Type.MOUSE_AREA,
+            ControlElement.Type.BUTTON_GRID
+        };
+        final int[] icons = {
+            R.drawable.icon_keyboard,
+            R.drawable.icon_gamepad,
+            R.drawable.icon_screen_effect,
+            R.drawable.icon_gamepad,
+            R.drawable.icon_mouse,
+            R.drawable.icon_gamepad,
+            R.drawable.icon_mouse,
+            R.drawable.icon_palette
+        };
+
+        grid.removeAllViews();
+        for (int i = 0; i < types.length; i++) {
+            final ControlElement.Type type = types[i];
+            grid.addView(createControlTypePickerItem(grid, type, icons[i]));
         }
-        new android.app.AlertDialog.Builder(this)
-            .setTitle("Select Control Type")
-            .setItems(typeNames, (d, which) -> {
-                ControlElement.Type type = ControlElement.Type.values()[which];
-                if (inputControlsView.addElement(type)) {
-                    // For BUTTON_GRID, immediately open settings to configure grid
-                    if (type == ControlElement.Type.BUTTON_GRID) {
-                        ControlElement el = inputControlsView.getSelectedElement();
-                        if (el != null) showControlElementSettings(findViewById(R.id.BTElementSettings));
-                    }
-                } else {
-                    AppUtils.showToast(this, R.string.no_profile_selected);
-                }
-            })
-            .show();
+
+        activeControlTypeDialog = new android.app.AlertDialog.Builder(this)
+            .setTitle(R.string.select_control_type)
+            .setView(pickerView)
+            .setNegativeButton(android.R.string.cancel, null)
+            .create();
+        activeControlTypeDialog.show();
+    }
+
+    private View createControlTypePickerItem(GridLayout parent, ControlElement.Type type, int iconResId) {
+        int cellMargin = (int) UnitUtils.dpToPx(6);
+        int cellPadding = (int) UnitUtils.dpToPx(12);
+        int iconSize = (int) UnitUtils.dpToPx(36);
+
+        LinearLayout cell = new LinearLayout(this);
+        GridLayout.LayoutParams params = new GridLayout.LayoutParams();
+        params.width = 0;
+        params.height = FrameLayout.LayoutParams.WRAP_CONTENT;
+        params.columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f);
+        params.setMargins(cellMargin, cellMargin, cellMargin, cellMargin);
+        cell.setLayoutParams(params);
+        cell.setOrientation(LinearLayout.VERTICAL);
+        cell.setGravity(Gravity.CENTER);
+        cell.setPadding(cellPadding, cellPadding, cellPadding, cellPadding);
+        cell.setClickable(true);
+        cell.setFocusable(true);
+
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(0xFF1F2937);
+        background.setCornerRadius(UnitUtils.dpToPx(12));
+        background.setStroke((int) UnitUtils.dpToPx(1), 0xFF334155);
+        cell.setBackground(background);
+
+        ImageView icon = new ImageView(this);
+        LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(iconSize, iconSize);
+        icon.setLayoutParams(iconLp);
+        icon.setImageResource(iconResId);
+        if (type == ControlElement.Type.DYNAMIC_STICK) {
+            icon.setColorFilter(0xFF8B5CF6, android.graphics.PorterDuff.Mode.SRC_IN);
+        }
+        cell.addView(icon);
+
+        TextView label = new TextView(this);
+        LinearLayout.LayoutParams labelLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        labelLp.topMargin = (int) UnitUtils.dpToPx(8);
+        label.setLayoutParams(labelLp);
+        label.setText(getControlTypeLabel(type));
+        label.setTextColor(0xFFFFFFFF);
+        label.setTextSize(13f);
+        label.setGravity(Gravity.CENTER);
+        cell.addView(label);
+
+        cell.setOnClickListener(v -> {
+            if (inputControlsView.addElement(type)) {
+                ControlElement selectedElement = inputControlsView.getSelectedElement();
+                if (selectedElement != null) showControlElementSettings(findViewById(R.id.BTElementSettings));
+                if (activeControlTypeDialog != null) activeControlTypeDialog.dismiss();
+            } else {
+                AppUtils.showToast(this, R.string.no_profile_selected);
+            }
+        });
+
+        return cell;
+    }
+
+    private String getControlTypeLabel(ControlElement.Type type) {
+        switch (type) {
+            case BUTTON: return "Button";
+            case D_PAD: return "D-Pad";
+            case RANGE_BUTTON: return "Range Button";
+            case STICK: return "Stick";
+            case TRACKPAD: return "Trackpad";
+            case DYNAMIC_STICK: return "Dynamic Stick";
+            case MOUSE_AREA: return "Mouse Area";
+            case BUTTON_GRID: return "Button Grid";
+            default: return type.name().replace('_', ' ');
+        }
     }
 
     private void showBackgroundImageDialog() {
@@ -259,7 +373,8 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
 
     private void showControlElementSettings(View anchorView) {
         final ControlElement element = inputControlsView.getSelectedElement();
-        View view = LayoutInflater.from(this).inflate(R.layout.control_element_settings, null);
+        if (sidebarOpen) saveSidebarState();
+        View view = LayoutInflater.from(this).inflate(R.layout.control_element_settings, sidebarContent, false);
 
         final Runnable updateLayout = () -> {
             ControlElement.Type type = element.getType();
@@ -561,19 +676,104 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
 
         updateLayout.run();
 
-        PopupWindow popupWindow = AppUtils.showPopupWindow(anchorView, view, 340, 0);
-        popupWindow.setOnDismissListener(() -> {
-            if (etCustomText != null) element.setText(etCustomText.getText().toString().trim());
-            
-            // Check both lists for selection
-            short selectedIconId = 0;
-            if (llIconList != null) selectedIconId = getSelectedIdFromList(llIconList);
-            if (selectedIconId == 0 && currentLLCustomIconList != null) selectedIconId = getSelectedIdFromList(currentLLCustomIconList);
+        sidebarEditingElement = element;
+        sidebarSettingsView = view;
+        if (sidebarContent != null) {
+            sidebarContent.removeAllViews();
+            sidebarContent.addView(view);
+        }
 
-            element.setIconId((byte)selectedIconId);
-            profile.save();
-            inputControlsView.invalidate();
-        });
+        final float sidebarWidthPx = UnitUtils.dpToPx(300);
+        final float screenWidth = getResources().getDisplayMetrics().widthPixels;
+        final float centerX = element.getX() + (element.getScale() * 60f) / 2f;
+        sidebarOnRight = centerX <= screenWidth / 2f;
+
+        boolean animateIn = !sidebarOpen || sidebarScrollView == null || sidebarScrollView.getVisibility() != View.VISIBLE;
+
+        if (sidebarScrollView != null) {
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) sidebarScrollView.getLayoutParams();
+            lp.gravity = sidebarOnRight ? (Gravity.END | Gravity.TOP) : (Gravity.START | Gravity.TOP);
+            sidebarScrollView.setLayoutParams(lp);
+            sidebarScrollView.animate().cancel();
+            sidebarScrollView.setVisibility(View.VISIBLE);
+            sidebarScrollView.setAlpha(1f);
+            if (animateIn) {
+                sidebarScrollView.setTranslationX(sidebarOnRight ? sidebarWidthPx : -sidebarWidthPx);
+                sidebarScrollView.animate()
+                    .translationX(0f)
+                    .setDuration(250)
+                    .setInterpolator(new DecelerateInterpolator())
+                    .start();
+            } else {
+                sidebarScrollView.setTranslationX(0f);
+            }
+        }
+
+        if (sidebarOverlay != null) {
+            sidebarOverlay.animate().cancel();
+            sidebarOverlay.setVisibility(View.VISIBLE);
+            if (animateIn) {
+                sidebarOverlay.setAlpha(0f);
+                sidebarOverlay.animate().alpha(1f).setDuration(200).start();
+            } else {
+                sidebarOverlay.setAlpha(1f);
+            }
+        }
+
+        sidebarOpen = true;
+    }
+
+    private void saveSidebarState() {
+        if (sidebarEditingElement == null || sidebarSettingsView == null) return;
+
+        EditText etCustomText = sidebarSettingsView.findViewById(R.id.ETCustomText);
+        if (etCustomText != null) sidebarEditingElement.setText(etCustomText.getText().toString().trim());
+
+        LinearLayout llIconList = sidebarSettingsView.findViewById(R.id.LLIconList);
+        LinearLayout llCustomIconList = sidebarSettingsView.findViewById(R.id.LLCustomIconList);
+        short selectedIconId = 0;
+        if (llIconList != null) selectedIconId = getSelectedIdFromList(llIconList);
+        if (selectedIconId == 0 && llCustomIconList != null) selectedIconId = getSelectedIdFromList(llCustomIconList);
+        sidebarEditingElement.setIconId((byte) selectedIconId);
+
+        profile.save();
+        inputControlsView.invalidate();
+    }
+
+    private void closeSidebar() {
+        if (sidebarScrollView == null || sidebarOverlay == null) return;
+        if (sidebarScrollView.getVisibility() != View.VISIBLE) return;
+
+        saveSidebarState();
+        sidebarOpen = false;
+
+        final float sidebarWidthPx = UnitUtils.dpToPx(300);
+        sidebarOverlay.animate().cancel();
+        sidebarScrollView.animate().cancel();
+
+        sidebarOverlay.animate()
+            .alpha(0f)
+            .setDuration(200)
+            .start();
+
+        sidebarScrollView.animate()
+            .translationX(sidebarOnRight ? sidebarWidthPx : -sidebarWidthPx)
+            .setDuration(250)
+            .setInterpolator(new DecelerateInterpolator())
+            .setListener(new AnimatorListenerAdapter() {
+                @Override
+                public void onAnimationEnd(Animator animation) {
+                    sidebarScrollView.setVisibility(View.GONE);
+                    sidebarOverlay.setVisibility(View.GONE);
+                    sidebarScrollView.setAlpha(1f);
+                    sidebarOverlay.setAlpha(1f);
+                    sidebarSettingsView = null;
+                    sidebarEditingElement = null;
+                    currentLLCustomIconList = null;
+                    sidebarScrollView.animate().setListener(null);
+                }
+            })
+            .start();
     }
 
     private short getSelectedIdFromList(LinearLayout parent) {
@@ -998,6 +1198,10 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
 
     @Override
     public void onBackPressed() {
+        if (sidebarScrollView != null && sidebarScrollView.getVisibility() == View.VISIBLE) {
+            closeSidebar();
+            return;
+        }
         super.onBackPressed();
         overridePendingTransition(R.anim.slide_in_down, R.anim.slide_out_up);
     }
