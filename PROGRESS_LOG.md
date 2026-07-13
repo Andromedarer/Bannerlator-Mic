@@ -1,5 +1,17 @@
 # Star-Compose — Progress Log
 
+## 2026-07-13 — 🍷 New Proton 10.0-4 (unixlib + fast-yield, stripped+zstd) shipped + in-app catalog; broken P11 x86-64 rows pulled
+
+> **Proton-layer work on `The412Banner/proton-wine` + `winlator-contents` (no Bannerlator app change). Full detail: [[project_fexcore_unixlib_transition]].**
+>
+> **✅ Proton 10.0-4 rebuilt for size + parity → release [`build-p10-20260713`](https://github.com/The412Banner/proton-wine/releases/tag/build-p10-20260713) (Latest).** Mirrored the P11 size recipe onto `proton_10.0` (tip `90130591f4`): `-g0 -O2` + `CROSSCFLAGS` + `llvm-strip --strip-all`, outer `.wcp`→zstd, ccache wired into both SDK CI workflows. Also cherry-picked P11's env-gated **fast-yield** (`WINE_FAST_YIELD`, dormant by default → full P11 parity: FEX-unixlib loader + `$PREFIX` search + fast-yield). Result: arm64ec `.wcp` **~88MB (was 269MB XZ)**, both SDKs. Assets (arm64ec only — x86_64 excluded, same box64 display bug as P11, user device-confirmed): `proton-10.0-4-arm64ec-sdk28.wcp` md5 `4c28af64…` + `-sdk35.wcp` md5 `5347177f…`. Marked **Latest** (P11 `build-p11-20260712` demoted); old 269MB pre-release `build-p10-20260710-sdk28` + tag deleted. arm64ec device-boot-verified working.
+>
+> **✅ `winlator-contents` catalog updated (in-app download list, serves from main):** ADDED `proton-10.0-4-arm64ec-sdk28` + `-sdk35` rows → build-p10-20260713 assets (commit `1ba89ad`, both URLs HTTP 200). REMOVED the broken `proton-11.0-1-x86_64-sdk28`/`-sdk35` rows (commit `a55883b`) — x86_64 Proton 11 never renders under box64 (GUI/games show no window). In-app Proton is now **arm64ec-only** across the board.
+>
+> **🔖 NEXT RELEASE NOTES (2.7) — MENTION (supersedes the stale 2.6-accumulator item #2 below, which pointed at the now-removed P11 x86-64 layers):**
+> 1. **New Proton 10.0-4 compatibility layer** downloadable in-app: **`proton-10.0-4-arm64ec-sdk28`** (Android 9 / SDK 28) + **`proton-10.0-4-arm64ec-sdk35`** (Android 15 / SDK 35) — bionic arm64ec, FEX-unixlib + fast-yield, ~3× smaller/faster install (stripped + zstd). Runs on FEXCore.
+> 2. **Removed** the two non-functional Proton 11 x86-64 catalog entries (didn't render under box64).
+
 ## 2026-07-12 — ✅ COMMUNITY-CONFIG BACKEND BUGS: Bug B + B2 SHIPPED (worker+site deployed, round-trip verified); Bug A RECON-PREPPED for later
 
 > **Worker = `bannerhub-configs-worker` (CF). All changes to the shared config backend; app untouched.**
