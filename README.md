@@ -56,7 +56,7 @@
 |---|---|
 | **App label** | `Bannerlator Bionic` (standard) · `Bannerlator Bionic PuBG` (pubg) · `Bannerlator Bionic Ludashi` (ludashi) |
 | **Packages** | `com.winlator.banner` (standard) · `com.tencent.ig` (pubg) · `com.ludashi.benchmark` (ludashi) |
-| **Version** | Bannerlator **V 2.6** — built from Star **marcescence** (`versionName 2.6`, `versionCode 43`) |
+| **Version** | Bannerlator **V 2.6.1** — built from Star **marcescence** (`versionName 2.6.1`, `versionCode 44`) |
 | **Android SDK** | `compileSdk 34` · `targetSdk 28` · `minSdk 26` (Android 8.0+) |
 | **Lineage** | Winlator → cmod → Bionic Nightly → Star Bionic → **marcescence** → **Bannerlator** |
 
@@ -66,7 +66,7 @@
 
 - [📌 Project Notice](#-project-notice)
 - [ℹ️ Information](#ℹ️-information)
-- [🆕 What's New in 2.5.2](#-whats-new-in-252)
+- [🆕 What's New in 2.6.1](#-whats-new-in-261)
 - [✨ Full Features](#-full-features)
   - [🍷 Windows compatibility](#-windows-compatibility)
   - [🎨 Graphics & translation layers](#-graphics--translation-layers)
@@ -92,7 +92,25 @@
 
 ---
 
-## 🆕 What's New in 2.5.2
+## 🆕 What's New in 2.6.1
+
+2.6.1 is a **small hotfix-and-tweak** release on top of 2.6. The headline is an **Adreno graphics fix**: on 2.5 and later, some **Adreno (Qualcomm)** devices saw everything run slower and heavy titles like **Skyrim AE stop launching entirely** — a BC-texture (BCn) transcode meant only for **Mali / Xclipse** GPUs was being forced on Adreno too, where BCn is already supported in hardware, so it was pure wasted work. It's now switched **off on Adreno** (Mali / Xclipse are completely unchanged). Two small tweaks round it out. Like the last few releases it's an **app-side** update — **no ImageFS reinstall** — your containers, themes, custom accent and per-game settings carry over untouched; just install over 2.6.
+
+**🟣 Adreno: BCn transcode no longer forced — fix.** The integrated-wrapper BCn emulation (`WRAPPER_EMULATE_BCN`) was being emitted for **every** GPU, but the BCn-aware wrapper builds shipped since 2.5 (Wrapper-leegao / Wrapper-gamenative) act on it — so on **Adreno 7xx** it forced a pointless per-texture transcode: global slowdown and BC-heavy DX11 games (e.g. *Skyrim AE*) failing to launch. It's now gated **off on Qualcomm (0x5143)**, mirroring the existing `bcn_layer` and compute-decode vendor guards. **Mali / Xclipse / PowerVR behaviour is untouched** — the entire point of the 2.5 Mali hardening work still stands. *(Diagnosed from an Adreno-750 / Snapdragon 8 Gen 3 report; if you're on Adreno and rolled back to 2.4, this is your fix.)*
+
+**🔗 "Add to Shortcuts" for `.exe` files — new.** The built-in **File Manager** gains an **Add to Shortcuts** action on any `.exe`, so you can turn an executable into a game shortcut without going through the container editor.
+
+**🎮 Community-config XInput round-trips correctly — fix.** A shared config's **XInput** input setting is a bitmask, not a plain on/off flag — it was being written back as `1/0`, so applying certain shared configs could land the wrong controller mode. It now round-trips faithfully.
+
+<details>
+<summary><b>Previously in 2.6</b> — Community Config <i>Sharing</i> + optional accounts</summary>
+
+2.6 completed **Community Configs**: 2.5.2 gave you the browse-and-apply half, and 2.6 added the other half — **share your own working setups**, locally or online, straight from the same Community Configs menu. Sharing captures your **entire per-game setup** (38 of 39 shortcut settings — the full DXVK/VKD3D config, graphics, emulator, wrapper incl. **VEGAS**, Turnip driver and input), and a brand-new **optional account system** (username + password, one-time recovery key, **no email**) lets your uploads follow you across devices and carry your name — everything still works anonymously without one. Also app-side, **no ImageFS reinstall**. *(Includes a community VEGAS-dialog improvement from [isygold](https://github.com/isygold) — [#84](https://github.com/The412Banner/Bannerlator/pull/84).)*
+
+</details>
+
+<details>
+<summary><b>Previously in 2.5.2</b> — Community Configs (browse &amp; apply) + two Proton 11 layers</summary>
 
 2.5.2 adds **Community Configs** — a way to browse **community-shared, per-game/per-device tuning configs** right inside the app and apply a known-good setup to your game in one tap, without hunting through Discord screenshots. It also ships **two new Proton 11 x86-64 compatibility layers** in the downloadable catalog. Like the last few releases it's an **app-side** update — **no ImageFS reinstall** — your containers, themes, custom accent and per-game settings carry over untouched; just install over 2.5.1.
 
@@ -207,6 +225,8 @@
 **🧰 In-game Task Manager.** **"New Task" now works on the Vulkan / Native renderers** — the dialog used to be invisible over those surfaces — and running processes are shown as **cards**.
 
 **🧹 Consistency & readability.** The Games and Containers lists now share one card style with consistent depth on every theme, and legacy dropdowns, spinners, dialogs and section headers follow the accent too — with a luminance floor so text never goes dark-on-dark on a dark custom accent.
+
+</details>
 
 </details>
 
