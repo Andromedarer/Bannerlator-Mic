@@ -1824,8 +1824,11 @@ public class ControlElement {
         if (!isValidBindingIndex(index)) return;
         if (hasCombo(index)) {
             for (Binding b : getCombo(index)) {
-                inputControlsView.handleInputEvent(b, state);
+                // Suppress per-binding gamepad state sends; batch them at the end
+                // so the game receives the full combo as one atomic update.
+                inputControlsView.handleInputEvent(null, b, state, 0, false);
             }
+            inputControlsView.sendGamepadUpdate();
         } else {
             inputControlsView.handleInputEvent(getBindingAt(index), state, value);
         }

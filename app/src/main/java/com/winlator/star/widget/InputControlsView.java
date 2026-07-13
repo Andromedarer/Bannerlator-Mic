@@ -917,6 +917,15 @@ public class InputControlsView extends View {
         }
     }
 
+    /** Send a batched gamepad state update to Wine — call this ONCE after setting
+     *  all combo keys with sendUpdate=false. */
+    public void sendGamepadUpdate() {
+        WinHandler winHandler = xServer != null ? xServer.getWinHandler() : null;
+        if (winHandler != null) {
+            winHandler.sendGamepadState();
+        }
+    }
+
     public void handleInputEvent(Binding binding, boolean isActionDown, float offset) {
         handleInputEvent(null, binding, isActionDown, offset);
     }

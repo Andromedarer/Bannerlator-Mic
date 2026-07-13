@@ -1001,8 +1001,18 @@ private fun BindingSetupDialog(
     var selectedBinding by remember(title, initialSelection) { mutableStateOf(initialSelection) }
     var typedValue by remember(title, initialSelection) { mutableStateOf("") }
     var combo by remember(title, cleanInitialCombo) { mutableStateOf(cleanInitialCombo) }
-    val optionLabels = remember(options) { options.map { it.toString() } }
-    val selectedIndex = options.indexOf(selectedBinding).coerceAtLeast(0)
+    var filterCategory by remember(title) { mutableStateOf("All") }
+
+    val filteredOptions = remember(filterCategory) {
+        when (filterCategory) {
+            "Keyboard" -> Binding.keyboardBindingValues().toList()
+            "Mouse" -> Binding.mouseBindingValues().toList()
+            "Gamepad" -> Binding.gamepadBindingValues().toList()
+            else -> options // "All"
+        }
+    }
+    val optionLabels = remember(filteredOptions) { filteredOptions.map { it.toString() } }
+    val selectedIndex = filteredOptions.indexOf(selectedBinding).coerceAtLeast(0)
     val typedBinding = bindingFromTypedValue(typedValue)
     val addCandidate = typedBinding ?: selectedBinding
     val canAddCandidate = addCandidate != Binding.NONE && !combo.contains(addCandidate)
@@ -1012,6 +1022,44 @@ private fun BindingSetupDialog(
         title = { Text(text = stringResource(R.string.binding_setup_title, title), color = EditorText) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(EditorSpacing)) {
+                // Category filter chips
+                val filterCategories = listOf("All", "Keyboard", "Mouse", "Gamepad")
+                val filterLabels = listOf(
+                    stringResource(R.string.binding_filter_all),
+                    stringResource(R.string.binding_filter_keyboard),
+                    stringResource(R.string.binding_filter_mouse),
+                    stringResource(R.string.binding_filter_gamepad),
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    filterCategories.forEachIndexed { index, category ->
+                        val isSelected = category == filterCategory
+                        TextButton(
+                            onClick = {
+                                filterCategory = category
+                                // Fall back to first option when switching filters
+                                if (filteredOptions.isNotEmpty() && !filteredOptions.contains(selectedBinding)) {
+                                    selectedBinding = filteredOptions.firstOrNull() ?: Binding.NONE
+                                }
+                                typedValue = ""
+                            },
+                            shape = SmallShape,
+                            colors = ButtonDefaults.textButtonColors(
+                                contentColor = if (isSelected) EditorAccent else EditorSubText,
+                            ),
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(
+                                text = filterLabels[index],
+                                color = if (isSelected) EditorAccent else EditorSubText,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                            )
+                        }
+                    }
+                }
+
                 OutlinedTextField(
                     value = typedValue,
                     onValueChange = { value ->
@@ -1036,7 +1084,7 @@ private fun BindingSetupDialog(
                             options = optionLabels,
                             selectedIndex = selectedIndex,
                             onSelected = { index ->
-                                selectedBinding = options.getOrNull(index) ?: Binding.NONE
+                                selectedBinding = filteredOptions.getOrNull(index) ?: Binding.NONE
                                 typedValue = ""
                             },
                         )

@@ -23,6 +23,12 @@
     <string name="starting_up">Starting up…</string>
     <string name="unable_to_install_system_files">Unable to install system files</string>
     <string name="keyboard">Keyboard</string>
+    <string name="mouse">Mouse</string>
+    <string name="gamepad">Gamepad</string>
+    <string name="binding_filter_all">All</string>
+    <string name="binding_filter_keyboard">Keyboard</string>
+    <string name="binding_filter_mouse">Mouse</string>
+    <string name="binding_filter_gamepad">Gamepad</string>
     <string name="toggle_fullscreen">Toggle Fullscreen</string>
     <string name="exit">Exit</string>
     <string name="no_control_element_selected">No control element selected</string>
