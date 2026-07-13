@@ -3249,23 +3249,30 @@ public class XServerDisplayActivity extends AppCompatActivity {
         String bcnEmulationType = graphicsDriverConfig.get("bcnEmulationType");
 
         if (bcnEmulation != null) {
+            // Adreno/Qualcomm (vendor 0x5143) has NATIVE BCn. The integrated-wrapper BCn
+            // emulation (WRAPPER_EMULATE_BCN) is honored by the BCn-aware Wrapper-leegao/
+            // Wrapper-gamenative builds shipped since 2.5 — on Adreno it is pure per-texture
+            // overhead and can abort BC-heavy DX11 titles (e.g. Skyrim AE) on load. Force it
+            // OFF on Qualcomm, mirroring the ENABLE_BCN_COMPUTE guards below and the bcn_layer
+            // vendor gate. Only 0x5143 is skipped; Mali/Xclipse/PowerVR behaviour is unchanged.
+            boolean isQualcomm = GPUInformation.getVendorID(null, null) == 0x5143;
             switch (bcnEmulation) {
                 case "auto" -> {
-                    if ("compute".equals(bcnEmulationType) && GPUInformation.getVendorID(null, null) != 0x5143) {
+                    if ("compute".equals(bcnEmulationType) && !isQualcomm) {
                         envVars.put("ENABLE_BCN_COMPUTE", "1");
                         envVars.put("BCN_COMPUTE_AUTO", "1");
                     }
-                    envVars.put("WRAPPER_EMULATE_BCN", "3");
+                    envVars.put("WRAPPER_EMULATE_BCN", isQualcomm ? "0" : "3");
                 }
                 case "full" -> {
-                    if ("compute".equals(bcnEmulationType) && GPUInformation.getVendorID(null, null) != 0x5143) {
+                    if ("compute".equals(bcnEmulationType) && !isQualcomm) {
                         envVars.put("ENABLE_BCN_COMPUTE", "1");
                         envVars.put("BCN_COMPUTE_AUTO", "0");
                     }
-                    envVars.put("WRAPPER_EMULATE_BCN", "2");
+                    envVars.put("WRAPPER_EMULATE_BCN", isQualcomm ? "0" : "2");
                 }
                 case "none" -> envVars.put("WRAPPER_EMULATE_BCN", "0");
-                default -> envVars.put("WRAPPER_EMULATE_BCN", "1");
+                default -> envVars.put("WRAPPER_EMULATE_BCN", isQualcomm ? "0" : "1");
             }
         }
 
