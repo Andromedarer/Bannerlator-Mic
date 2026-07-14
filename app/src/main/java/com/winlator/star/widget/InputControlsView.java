@@ -809,7 +809,7 @@ public class InputControlsView extends View {
                 case MotionEvent.ACTION_POINTER_DOWN: {
                     float x = event.getX(actionIndex);
                     float y = event.getY(actionIndex);
-                    if (touchpadView != null) touchpadView.setPointerButtonLeftEnabled(true);
+                    if (touchpadView != null) touchpadView.setPointerButtonLeftEnabled(!hasVisibleMouseLeftButton());
                     for (ControlElement element : profile.getElements()) {
                         if (isElementHiddenByGroup(element)) continue;
                         if (element.handleTouchDown(pointerId, x, y)) {
@@ -825,9 +825,6 @@ public class InputControlsView extends View {
                                 }
                             }
                             break;
-                        }
-                        if (touchpadView != null && element.getBindingAt(0) == Binding.MOUSE_LEFT_BUTTON) {
-                            touchpadView.setPointerButtonLeftEnabled(false);
                         }
                     }
                     if (!handled && touchpadView != null) touchpadView.onTouchEvent(event);
@@ -865,6 +862,14 @@ public class InputControlsView extends View {
             }
         }
         return true;
+    }
+
+    private boolean hasVisibleMouseLeftButton() {
+        if (profile == null) return false;
+        for (ControlElement element : profile.getElements()) {
+            if (!isElementHiddenByGroup(element) && element.getBindingAt(0) == Binding.MOUSE_LEFT_BUTTON) return true;
+        }
+        return false;
     }
 
     private void resetTouchscreenTimeout() {
