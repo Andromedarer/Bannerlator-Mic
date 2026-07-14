@@ -20,6 +20,9 @@ import java.util.Locale;
 import java.util.Map;
 
 public class ControlsProfile implements Comparable<ControlsProfile> {
+    public static final int SCHEMA_VERSION = 2;
+    public static final int MIN_EDITOR_VERSION = 2;
+
     public final int id;
     private String name;
     private float cursorSpeed = 1.0f;
@@ -269,6 +272,8 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
 
         try {
             JSONObject data = new JSONObject();
+            data.put("schemaVersion", SCHEMA_VERSION);
+            data.put("minEditorVersion", MIN_EDITOR_VERSION);
             data.put("id", id);
             data.put("name", name);
             data.put("cursorSpeed", Float.valueOf(cursorSpeed));
