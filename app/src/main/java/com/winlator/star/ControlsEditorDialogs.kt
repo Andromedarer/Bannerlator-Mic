@@ -43,7 +43,6 @@ import kotlin.math.roundToInt
 
 const val DIALOG_ADD_ELEMENT = "add_element"
 const val DIALOG_BACKGROUND_IMAGE = "background_image"
-const val DIALOG_BACKGROUND_OPACITY = "background_opacity"
 const val DIALOG_GROUP_VISIBILITY = "group_visibility"
 const val DIALOG_CUSTOM_ICON_SOURCE = "custom_icon_source"
 
@@ -77,14 +76,11 @@ fun ControlsEditorDialogHost(
         when (dialogMode) {
             DIALOG_ADD_ELEMENT -> AddElementDialog(onDismiss = actions::onDismiss, onAddElement = actions::onAddElement)
             DIALOG_BACKGROUND_IMAGE -> BackgroundImageDialog(
+                backgroundOpacity = backgroundOpacity,
                 onDismiss = actions::onDismiss,
                 onPickBackgroundFile = actions::onPickBackgroundFile,
                 onPickBackgroundSystem = actions::onPickBackgroundSystem,
                 onClearBackground = actions::onClearBackground,
-            )
-            DIALOG_BACKGROUND_OPACITY -> BackgroundOpacityDialog(
-                backgroundOpacity = backgroundOpacity,
-                onDismiss = actions::onDismiss,
                 onBackgroundOpacityChange = actions::onBackgroundOpacityChange,
             )
             DIALOG_GROUP_VISIBILITY -> GroupVisibilityDialog(
@@ -184,11 +180,16 @@ private fun ControlTypeCard(
 
 @Composable
 private fun BackgroundImageDialog(
+    backgroundOpacity: Float,
     onDismiss: () -> Unit,
     onPickBackgroundFile: () -> Unit,
     onPickBackgroundSystem: () -> Unit,
     onClearBackground: () -> Unit,
+    onBackgroundOpacityChange: (Float) -> Unit,
 ) {
+    var opacity by remember(backgroundOpacity) { mutableStateOf(backgroundOpacity.coerceIn(0f, 1f)) }
+    val opacityPercent = (opacity * 100f).roundToInt().coerceIn(0, 100)
+
     EditorAlertDialog(
         onDismiss = onDismiss,
         title = stringResource(R.string.set_background_image),
@@ -197,30 +198,6 @@ private fun BackgroundImageDialog(
                 DialogActionButton(text = stringResource(R.string.browse_files), onClick = onPickBackgroundFile)
                 DialogActionButton(text = stringResource(R.string.pick_via_system), onClick = onPickBackgroundSystem)
                 DialogActionButton(text = stringResource(R.string.clear_background), onClick = onClearBackground)
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text(text = stringResource(R.string.cancel), color = DialogAccent)
-            }
-        },
-    )
-}
-
-@Composable
-private fun BackgroundOpacityDialog(
-    backgroundOpacity: Float,
-    onDismiss: () -> Unit,
-    onBackgroundOpacityChange: (Float) -> Unit,
-) {
-    var opacity by remember(backgroundOpacity) { mutableStateOf(backgroundOpacity.coerceIn(0f, 1f)) }
-    val opacityPercent = (opacity * 100f).roundToInt().coerceIn(0, 100)
-
-    EditorAlertDialog(
-        onDismiss = onDismiss,
-        title = stringResource(R.string.background_opacity),
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
                     text = stringResource(R.string.opacity_percent, opacityPercent),
                     color = DialogSubText,

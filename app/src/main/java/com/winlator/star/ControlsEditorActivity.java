@@ -39,7 +39,7 @@ import kotlin.Unit;
 import kotlin.jvm.functions.Function0;
 import kotlin.jvm.functions.Function2;
 
-public class ControlsEditorActivity extends AppCompatActivity implements View.OnClickListener {
+public class ControlsEditorActivity extends AppCompatActivity {
     private InputControlsView inputControlsView;
     private ControlsProfile profile;
     private CustomIconManager customIconManager;
@@ -99,7 +99,7 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
                             @Override
                             public Unit invoke() {
                                 ControlElement selectedElement = inputControlsView.getSelectedElement();
-                                if (selectedElement != null) showControlElementSettings(findViewById(R.id.BTElementSettings));
+                                if (selectedElement != null) showControlElementSettingsFor(selectedElement);
                                 else AppUtils.showToast(ControlsEditorActivity.this, R.string.no_control_element_selected);
                                 return Unit.INSTANCE;
                             }
@@ -150,13 +150,6 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
             });
         }
 
-        View btAddElement = container.findViewById(R.id.BTAddElement);
-        if (btAddElement != null) btAddElement.setOnClickListener(this);
-        View btRemoveElement = container.findViewById(R.id.BTRemoveElement);
-        if (btRemoveElement != null) btRemoveElement.setOnClickListener(this);
-        View btElementSettings = container.findViewById(R.id.BTElementSettings);
-        if (btElementSettings != null) btElementSettings.setOnClickListener(this);
-
         // Custom-icon pickers: the built-in file picker (primary) and the system SAF picker (secondary).
         iconPickerLauncher = registerForActivityResult(new ActivityResultContracts.GetContent(), uri -> {
             if (uri != null) addCustomIconFromUri(uri);
@@ -181,30 +174,49 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
     }
 
     private void setBackgroundImageFromUri(Uri uri) {
-        try (InputStream is = getContentResolver().openInputStream(uri)) {
-            if (is == null) {
-                AppUtils.showToast(this, R.string.unable_to_load_image);
-                return;
-            }
-
-            Bitmap bitmap = BitmapFactory.decodeStream(is);
+        try {
+            Bitmap bitmap = decodeSampledBitmap(uri);
             if (bitmap != null) {
                 inputControlsView.setBackgroundImage(bitmap);
-                refreshSidebarSettings();
                 AppUtils.showToast(this, R.string.background_image_set);
             } else {
                 AppUtils.showToast(this, R.string.unable_to_load_image);
             }
-        } catch (IOException e) {
+        } catch (IOException | SecurityException | OutOfMemoryError e) {
             AppUtils.showToast(this, R.string.unable_to_load_image);
         }
     }
 
-    private void showAddElementTypeDialog() {
-        showAddElementPicker();
+    private Bitmap decodeSampledBitmap(Uri uri) throws IOException {
+        int targetWidth = inputControlsView.getWidth();
+        int targetHeight = inputControlsView.getHeight();
+        if (targetWidth <= 0 || targetHeight <= 0) {
+            targetWidth = getResources().getDisplayMetrics().widthPixels;
+            targetHeight = getResources().getDisplayMetrics().heightPixels;
+        }
+
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        try (InputStream stream = getContentResolver().openInputStream(uri)) {
+            if (stream == null) return null;
+            BitmapFactory.decodeStream(stream, null, bounds);
+        }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null;
+
+        int sampleSize = 1;
+        while (bounds.outWidth / (sampleSize * 2) >= targetWidth
+                || bounds.outHeight / (sampleSize * 2) >= targetHeight) {
+            sampleSize *= 2;
+        }
+
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inSampleSize = sampleSize;
+        try (InputStream stream = getContentResolver().openInputStream(uri)) {
+            return stream != null ? BitmapFactory.decodeStream(stream, null, options) : null;
+        }
     }
 
-    private void showAddElementPicker() {
+    private void showAddElementTypeDialog() {
         showComposeDialog(ControlsEditorDialogsKt.DIALOG_ADD_ELEMENT);
     }
 
@@ -221,7 +233,7 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
         if (inputControlsView.addElement(type)) {
             ControlElement selectedElement = inputControlsView.getSelectedElement();
             closeComposeDialog();
-            if (selectedElement != null) showControlElementSettings(findViewById(R.id.BTElementSettings));
+            if (selectedElement != null) showControlElementSettingsFor(selectedElement);
         } else {
             AppUtils.showToast(this, R.string.no_profile_selected);
         }
@@ -333,7 +345,6 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
     private void clearBackgroundImage() {
         closeComposeDialog();
         inputControlsView.setBackgroundImage(null);
-        refreshSidebarSettings();
         AppUtils.showToast(this, R.string.background_cleared);
     }
 
@@ -365,50 +376,6 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
         } else {
             AppUtils.showToast(this, R.string.no_control_element_selected);
         }
-    }
-
-    @Override
-    public void onClick(View v) {
-        switch (v.getId()) {
-            case R.id.BTAddElement:
-                showAddElementTypeDialog();
-                break;
-            case R.id.BTRemoveElement:
-                removeElement();
-                break;
-            case R.id.BTElementSettings:
-                ControlElement selectedElement = inputControlsView.getSelectedElement();
-                if (selectedElement != null) showControlElementSettings(v);
-                else AppUtils.showToast(this, R.string.no_control_element_selected);
-                break;
-        }
-    }
-
-    @Override
-    public boolean onCreateOptionsMenu(android.view.Menu menu) {
-        getMenuInflater().inflate(R.menu.controls_editor_menu, menu);
-        return true;
-    }
-
-    @Override
-    public boolean onOptionsItemSelected(android.view.MenuItem item) {
-        if (item.getItemId() == R.id.menu_set_background) {
-            showBackgroundImageDialog();
-            return true;
-        }
-        else if (item.getItemId() == R.id.menu_bg_opacity) {
-            showBackgroundOpacityDialog();
-            return true;
-        }
-        return super.onOptionsItemSelected(item);
-    }
-
-    private void showBackgroundOpacityDialog() {
-        showComposeDialog(ControlsEditorDialogsKt.DIALOG_BACKGROUND_OPACITY);
-    }
-
-    private void showControlElementSettings(View anchorView) {
-        showControlElementSettingsFor(inputControlsView != null ? inputControlsView.getSelectedElement() : null);
     }
 
     public void showControlElementSettingsFor(ControlElement element) {
@@ -661,6 +628,7 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
     @Override
     protected void onDestroy() {
         activeDialogMode = null;
+        if (inputControlsView != null) inputControlsView.setBackgroundImage(null);
         super.onDestroy();
     }
 }

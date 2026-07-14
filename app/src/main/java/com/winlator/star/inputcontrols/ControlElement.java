@@ -103,13 +103,12 @@ public class ControlElement {
     private Object touchTime;
 
     // --- New fields for DYNAMIC_STICK, MOUSE_AREA, BUTTON_GRID ---
-    private int areaWidth;            // detection area width (snapping units)
-    private int areaHeight;           // detection area height (snapping units)
+    private int areaWidth;            // detection area width in current-view pixels
+    private int areaHeight;           // detection area height in current-view pixels
     private int stickRadius;          // visual stick radius (for DYNAMIC_STICK)
     private boolean stickVisible;     // current visibility (for DYNAMIC_STICK)
     private float visualStickX;       // smoothed visual stick center X (for animation)
     private float visualStickY;       // smoothed visual stick center Y (for animation)
-    private PointF stickTarget;       // target position for stick animation (touch point)
     private float lastFingerX;        // latest finger X (for thumb position in draw)
     private float lastFingerY;        // latest finger Y (for thumb position in draw)
     private float mouseSensitivity;   // cursor speed multiplier (for MOUSE_AREA), default 1.0
@@ -137,7 +136,6 @@ public class ControlElement {
         stickVisible = false;
         visualStickX = 0;
         visualStickY = 0;
-        stickTarget = null;
         lastFingerX = 0;
         lastFingerY = 0;
         mouseSensitivity = 1.0f;
@@ -299,15 +297,12 @@ public class ControlElement {
         boundingBoxNeedsUpdate = true;
     }
 
-    // --- New getters/setters ---
     public int getAreaWidth() { return areaWidth; }
     public void setAreaWidth(int areaWidth) { this.areaWidth = clamp(areaWidth, MIN_AREA_SIZE, MAX_AREA_SIZE); boundingBoxNeedsUpdate = true; }
     public int getAreaHeight() { return areaHeight; }
     public void setAreaHeight(int areaHeight) { this.areaHeight = clamp(areaHeight, MIN_AREA_SIZE, MAX_AREA_SIZE); boundingBoxNeedsUpdate = true; }
     public int getStickRadius() { return stickRadius; }
     public void setStickRadius(int stickRadius) { this.stickRadius = clamp(stickRadius, MIN_STICK_RADIUS, MAX_STICK_RADIUS); }
-    public boolean isStickVisible() { return stickVisible; }
-    public void setStickVisible(boolean visible) { this.stickVisible = visible; inputControlsView.invalidate(); }
     public float getMouseSensitivity() { return mouseSensitivity; }
     public void setMouseSensitivity(float s) { this.mouseSensitivity = Math.max(0.1f, Math.min(5.0f, s)); }
     public int getGridRows() { return gridRows; }
@@ -328,7 +323,6 @@ public class ControlElement {
         comboBindings[index] = sanitizeCombo(combo);
     }
     public boolean hasCombo(int index) { return getCombo(index) != null && getCombo(index).length > 0; }
-    public long[] getCellPressTimes() { return cellPressTimes; }
     public void setCellPressTime(int index, long time) {
         if (!isValidBindingIndex(index)) return;
         if (cellPressTimes == null) cellPressTimes = new long[bindings.length];
@@ -346,21 +340,6 @@ public class ControlElement {
         this.groupId = (trimmedId == null || trimmedId.isEmpty()) ? null : trimmedId;
     }
     public boolean isInGroup() { return groupId != null && inputControlsView.getProfile() != null && inputControlsView.getProfile().getGroup(groupId) != null; }
-    public float getVisualStickX() { return visualStickX; }
-    public void setVisualStickX(float visualStickX) { this.visualStickX = visualStickX; }
-    public float getVisualStickY() { return visualStickY; }
-    public void setVisualStickY(float visualStickY) { this.visualStickY = visualStickY; }
-    public PointF getStickTarget() { return stickTarget; }
-    public void setStickTarget(PointF stickTarget) { this.stickTarget = stickTarget; }
-    public float getLastFingerX() { return lastFingerX; }
-    public void setLastFingerX(float lastFingerX) { this.lastFingerX = lastFingerX; }
-    public float getLastFingerY() { return lastFingerY; }
-    public void setLastFingerY(float lastFingerY) { this.lastFingerY = lastFingerY; }
-    public PointF getMouseAreaLastPos() { return mouseAreaLastPos; }
-    public void setMouseAreaLastPos(PointF mouseAreaLastPos) { this.mouseAreaLastPos = mouseAreaLastPos; }
-    public Binding[][] getComboBindings() { return comboBindings; }
-    public void setComboBindings(Binding[][] comboBindings) { this.comboBindings = comboBindings; }
-    public void setCellPressTimes(long[] cellPressTimes) { this.cellPressTimes = cellPressTimes; }
 
     private Binding[] sanitizeCombo(Binding[] combo) {
         Binding[] sanitized = new Binding[combo.length];
@@ -1670,13 +1649,14 @@ public class ControlElement {
             elementJSONObject.put("deadZone", getDeadZone());
             if (groupId != null) elementJSONObject.put("groupId", groupId);
             if (type == Type.DYNAMIC_STICK) {
-                elementJSONObject.put("areaWidth", areaWidth);
-                elementJSONObject.put("areaHeight", areaHeight);
-                elementJSONObject.put("stickRadius", stickRadius);
+                elementJSONObject.put("areaWidthRatio", (float)areaWidth / Math.max(1, inputControlsView.getMaxWidth()));
+                elementJSONObject.put("areaHeightRatio", (float)areaHeight / Math.max(1, inputControlsView.getMaxHeight()));
+                int shortSide = Math.max(1, Math.min(inputControlsView.getMaxWidth(), inputControlsView.getMaxHeight()));
+                elementJSONObject.put("stickRadiusRatio", (float)stickRadius / shortSide);
             }
             if (type == Type.MOUSE_AREA) {
-                elementJSONObject.put("areaWidth", areaWidth);
-                elementJSONObject.put("areaHeight", areaHeight);
+                elementJSONObject.put("areaWidthRatio", (float)areaWidth / Math.max(1, inputControlsView.getMaxWidth()));
+                elementJSONObject.put("areaHeightRatio", (float)areaHeight / Math.max(1, inputControlsView.getMaxHeight()));
                 elementJSONObject.put("mouseSensitivity", Float.valueOf(mouseSensitivity));
             }
             if (type == Type.BUTTON_GRID) {
@@ -1748,9 +1728,6 @@ public class ControlElement {
                 if (currentPosition == null) currentPosition = new PointF();
                 currentPosition.set(x, y);
                 stickVisible = true;
-                // Initialize animation target to touch position
-                if (stickTarget == null) stickTarget = new PointF();
-                stickTarget.set(x, y);
                 // Jump visual position to target on initial touch (no interpolation for first frame)
                 visualStickX = x;
                 visualStickY = y;
@@ -1857,7 +1834,6 @@ public class ControlElement {
         }
         if (type == Type.DYNAMIC_STICK) {
             stickVisible = false;
-            stickTarget = null;
             visualStickX = 0;
             visualStickY = 0;
             lastFingerX = 0;
@@ -2158,7 +2134,6 @@ public class ControlElement {
                 else if (type == Type.STICK || type == Type.DYNAMIC_STICK) {
                     if (type == Type.DYNAMIC_STICK) {
                         stickVisible = false;
-                        stickTarget = null;
                         visualStickX = 0;
                         visualStickY = 0;
                         lastFingerX = 0;

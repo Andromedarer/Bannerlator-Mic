@@ -8,6 +8,7 @@ import android.net.Uri;
 import android.os.Environment;
 import android.util.JsonReader;
 
+import androidx.annotation.Nullable;
 import androidx.preference.PreferenceManager;
 
 import com.winlator.star.SettingsFragment;
@@ -139,6 +140,8 @@ public class InputControlsManager {
 
         try {
             JSONObject data = new JSONObject(FileUtils.readString(ControlsProfile.getProfileFile(context, source.id)));
+            data.put("schemaVersion", ControlsProfile.SCHEMA_VERSION);
+            data.put("minEditorVersion", ControlsProfile.MIN_EDITOR_VERSION);
             data.put("id", newId);
             data.put("name", newName);
             if (data.has("template")) data.remove("template");
@@ -156,11 +159,19 @@ public class InputControlsManager {
         if (file.isFile() && file.delete()) profiles.remove(profile);
     }
 
+    @Nullable
     public ControlsProfile importProfile(JSONObject data) {
         try {
             if (!data.has("id") || !data.has("name")) return null;
+            int schemaVersion = data.optInt("schemaVersion", 1);
+            int minEditorVersion = data.optInt("minEditorVersion", 1);
+            if (schemaVersion > ControlsProfile.SCHEMA_VERSION
+                    || minEditorVersion > ControlsProfile.EDITOR_VERSION) return null;
+
             int newId = ++maxProfileId;
             File newFile = ControlsProfile.getProfileFile(context, newId);
+            data.put("schemaVersion", ControlsProfile.SCHEMA_VERSION);
+            data.put("minEditorVersion", ControlsProfile.MIN_EDITOR_VERSION);
             data.put("id", newId);
             FileUtils.writeString(newFile, data.toString());
             ControlsProfile newProfile = loadProfile(context, newFile);
@@ -186,6 +197,7 @@ public class InputControlsManager {
     }
 
     public File exportProfile(ControlsProfile profile) {
+        profile.save();
         File destination;
         SharedPreferences sp = PreferenceManager.getDefaultSharedPreferences(context);
         String winlatorPath = sp.getString("winlator_path_uri", null);

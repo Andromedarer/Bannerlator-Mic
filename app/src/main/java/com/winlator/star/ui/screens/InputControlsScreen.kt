@@ -128,6 +128,7 @@ fun InputControlsScreen(selectedProfileId: Int = 0) {
             try {
                 val json = FileUtils.readString(context, uri)
                 val imported = manager.importProfile(JSONObject(json))
+                    ?: throw IllegalArgumentException("Unsupported control profile version")
                 importProfileCallback!!(imported)
             } catch (_: Exception) {
                 AppUtils.showToast(context, R.string.unable_to_import_profile)

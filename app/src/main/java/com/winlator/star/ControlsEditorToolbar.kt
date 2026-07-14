@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
@@ -54,7 +55,9 @@ fun ControlsEditorToolbar(
             horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             Column(
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                modifier = Modifier
+                    .widthIn(min = 88.dp, max = 132.dp)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
                 horizontalAlignment = Alignment.Start,
                 verticalArrangement = Arrangement.Center,
             ) {
@@ -101,7 +104,7 @@ private fun ToolbarIconButton(
 ) {
     Box(
         modifier = Modifier
-            .size(40.dp)
+            .size(48.dp)
             .clip(ToolbarButtonShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,

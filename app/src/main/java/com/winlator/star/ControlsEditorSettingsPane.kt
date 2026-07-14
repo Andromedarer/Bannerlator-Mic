@@ -79,7 +79,7 @@ private val EditorTextValue = Color.White.copy(alpha = 0.9f)
 private val EditorShape = RoundedCornerShape(EditorPadding)
 private val SmallShape = RoundedCornerShape(10.dp)
 
-internal data class PickerIcon(
+private data class PickerIcon(
     val id: Int,
     val bitmap: Bitmap?,
 )
@@ -286,8 +286,9 @@ fun ControlsEditorSettingsPane(
                 val rounded = ((value / 5f).roundToInt() * 5).coerceIn(50, 150)
                 element.setScale(rounded / 100f)
                 scaleValue = rounded
-                saveAndInvalidate()
+                onInvalidate()
             },
+            onValueChangeFinished = ::saveAndInvalidate,
         )
 
         if (selectedType == ControlElement.Type.STICK || selectedType == ControlElement.Type.DYNAMIC_STICK || selectedType == ControlElement.Type.D_PAD) {
@@ -300,8 +301,9 @@ fun ControlsEditorSettingsPane(
                 onValueChange = { value ->
                     element.deadZone = value / 100f
                     deadZonePct = value
-                    saveAndInvalidate()
+                    onInvalidate()
                 },
+                onValueChangeFinished = ::saveAndInvalidate,
             )
         }
 
@@ -315,8 +317,9 @@ fun ControlsEditorSettingsPane(
                 onValueChange = { value ->
                     element.setAreaWidth(value)
                     detectionWidth = value
-                    saveAndInvalidate()
+                    onInvalidate()
                 },
+                onValueChangeFinished = ::saveAndInvalidate,
             )
             LabeledSlider(
                 label = stringResource(R.string.area_height),
@@ -327,8 +330,9 @@ fun ControlsEditorSettingsPane(
                 onValueChange = { value ->
                     element.setAreaHeight(value)
                     detectionHeight = value
-                    saveAndInvalidate()
+                    onInvalidate()
                 },
+                onValueChangeFinished = ::saveAndInvalidate,
             )
             LabeledSlider(
                 label = stringResource(R.string.stick_radius),
@@ -339,8 +343,9 @@ fun ControlsEditorSettingsPane(
                 onValueChange = { value ->
                     element.setStickRadius(value)
                     stickRadius = value
-                    saveAndInvalidate()
+                    onInvalidate()
                 },
+                onValueChangeFinished = ::saveAndInvalidate,
             )
         }
 
@@ -354,8 +359,9 @@ fun ControlsEditorSettingsPane(
                 onValueChange = { value ->
                     element.setAreaWidth(value)
                     mouseAreaWidth = value
-                    saveAndInvalidate()
+                    onInvalidate()
                 },
+                onValueChangeFinished = ::saveAndInvalidate,
             )
             LabeledSlider(
                 label = stringResource(R.string.area_height),
@@ -366,8 +372,9 @@ fun ControlsEditorSettingsPane(
                 onValueChange = { value ->
                     element.setAreaHeight(value)
                     mouseAreaHeight = value
-                    saveAndInvalidate()
+                    onInvalidate()
                 },
+                onValueChangeFinished = ::saveAndInvalidate,
             )
             LabeledSlider(
                 label = stringResource(R.string.mouse_sensitivity),
@@ -379,8 +386,9 @@ fun ControlsEditorSettingsPane(
                 onValueChange = { value ->
                     element.setMouseSensitivity(value / 10f)
                     mouseSensitivity = value
-                    saveAndInvalidate()
+                    onInvalidate()
                 },
+                onValueChangeFinished = ::saveAndInvalidate,
             )
         }
 
@@ -440,22 +448,16 @@ fun ControlsEditorSettingsPane(
             )
             QuickFillBar(
                 onQwerty = {
-                    activity.prepareGridForFill(element)
                     activity.fillGridQWERTY(element)
                     bindingCount = element.getBindingCount().coerceAtLeast(1)
-                    saveAndInvalidate()
                 },
                 onFunctionKeys = {
-                    activity.prepareGridForFill(element)
                     activity.fillGridFKeys(element)
                     bindingCount = element.getBindingCount().coerceAtLeast(1)
-                    saveAndInvalidate()
                 },
                 onNumPad = {
-                    activity.prepareGridForFill(element)
                     activity.fillGridNumPad(element)
                     bindingCount = element.getBindingCount().coerceAtLeast(1)
-                    saveAndInvalidate()
                 },
                 onClear = {
                     activity.prepareGridForFill(element)
@@ -499,6 +501,16 @@ fun ControlsEditorSettingsPane(
                         val row = index / gridCols + 1
                         val col = index % gridCols + 1
                         val label = stringResource(R.string.binding_grid_cell_label, row, col)
+                        BindingValueRow(
+                            label = label,
+                            value = element.getBindingAt(index),
+                            combo = element.getCombo(index)?.toList().orEmpty(),
+                            onSet = { openBindingDialog(index, label) },
+                        )
+                    }
+                } else if (selectedType == ControlElement.Type.RANGE_BUTTON) {
+                    for (index in 0 until bindingCount) {
+                        val label = stringResource(R.string.binding_slot_label, index + 1)
                         BindingValueRow(
                             label = label,
                             value = element.getBindingAt(index),
@@ -711,7 +723,7 @@ fun ControlsEditorSettingsPane(
 }
 
 @Composable
-fun LabeledSlider(
+private fun LabeledSlider(
     label: String,
     value: Int,
     rangeStart: Int,
@@ -720,6 +732,7 @@ fun LabeledSlider(
     modifier: Modifier = Modifier,
     format: (Int) -> String = { current -> "$current$suffix" },
     onValueChange: (Int) -> Unit,
+    onValueChangeFinished: () -> Unit = {},
 ) {
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(
@@ -742,6 +755,7 @@ fun LabeledSlider(
             modifier = Modifier.widthIn(max = EditorMaxSliderWidth),
             value = value.toFloat(),
             onValueChange = { onValueChange(it.roundToInt().coerceIn(rangeStart, rangeEnd)) },
+            onValueChangeFinished = onValueChangeFinished,
             valueRange = rangeStart.toFloat()..rangeEnd.toFloat(),
         )
     }
@@ -749,7 +763,7 @@ fun LabeledSlider(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingSpinner(
+private fun SettingSpinner(
     label: String,
     options: List<String>,
     selectedIndex: Int,
@@ -803,7 +817,7 @@ fun SettingSpinner(
 }
 
 @Composable
-fun SettingRadioGroup(
+private fun SettingRadioGroup(
     label: String,
     options: List<String>,
     selectedIndex: Int,
@@ -833,7 +847,7 @@ fun SettingRadioGroup(
 }
 
 @Composable
-fun SettingSwitch(
+private fun SettingSwitch(
     label: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
@@ -853,7 +867,7 @@ fun SettingSwitch(
 }
 
 @Composable
-fun NumberPickerRow(
+private fun NumberPickerRow(
     label: String,
     value: Int,
     minValue: Int,
@@ -889,7 +903,7 @@ fun NumberPickerRow(
 }
 
 @Composable
-fun QuickFillBar(
+private fun QuickFillBar(
     onQwerty: () -> Unit,
     onFunctionKeys: () -> Unit,
     onNumPad: () -> Unit,
@@ -912,7 +926,7 @@ fun QuickFillBar(
 }
 
 @Composable
-internal fun IconPicker(
+private fun IconPicker(
     icons: List<PickerIcon>,
     selectedId: Int,
     onSelected: (Int) -> Unit,
@@ -1003,13 +1017,17 @@ private fun BindingSetupDialog(
     var combo by remember(title, cleanInitialCombo) { mutableStateOf(cleanInitialCombo) }
     var filterCategory by remember(title) { mutableStateOf("All") }
 
-    val filteredOptions = remember(filterCategory) {
-        when (filterCategory) {
+    fun optionsForCategory(category: String): List<Binding> {
+        return when (category) {
             "Keyboard" -> Binding.keyboardBindingValues().toList()
             "Mouse" -> Binding.mouseBindingValues().toList()
             "Gamepad" -> Binding.gamepadBindingValues().toList()
             else -> options // "All"
         }
+    }
+
+    val filteredOptions = remember(filterCategory, options) {
+        optionsForCategory(filterCategory)
     }
     val optionLabels = remember(filteredOptions) { filteredOptions.map { it.toString() } }
     val selectedIndex = filteredOptions.indexOf(selectedBinding).coerceAtLeast(0)
@@ -1038,10 +1056,10 @@ private fun BindingSetupDialog(
                         val isSelected = category == filterCategory
                         TextButton(
                             onClick = {
+                                val nextOptions = optionsForCategory(category)
                                 filterCategory = category
-                                // Fall back to first option when switching filters
-                                if (filteredOptions.isNotEmpty() && !filteredOptions.contains(selectedBinding)) {
-                                    selectedBinding = filteredOptions.firstOrNull() ?: Binding.NONE
+                                if (selectedBinding !in nextOptions) {
+                                    selectedBinding = nextOptions.firstOrNull() ?: Binding.NONE
                                 }
                                 typedValue = ""
                             },
@@ -1155,7 +1173,7 @@ private fun BindingSetupDialog(
 }
 
 @Composable
-fun SettingsSection(
+private fun SettingsSection(
     title: String,
     visible: Boolean,
     modifier: Modifier = Modifier,
@@ -1247,7 +1265,7 @@ private fun loadBuiltInIcons(activity: ControlsEditorActivity): List<PickerIcon>
 }
 
 private fun loadCustomIcons(customIconManager: CustomIconManager): List<PickerIcon> {
-    return customIconManager.customIconIds.mapNotNull { id ->
+    return customIconManager.getCustomIconIds().mapNotNull { id ->
         val bitmap = customIconManager.loadIcon(id)
         PickerIcon(id = id.toInt(), bitmap = bitmap)
     }
@@ -1278,6 +1296,3 @@ private fun outlinedTextFieldColors() = OutlinedTextFieldDefaults.colors(
     focusedContainerColor = EditorBackground,
     unfocusedContainerColor = EditorBackground,
 )
-
-private val CustomIconManager.customIconIds: List<Short>
-    get() = getCustomIconIds()

@@ -20,8 +20,9 @@ import java.util.Locale;
 import java.util.Map;
 
 public class ControlsProfile implements Comparable<ControlsProfile> {
+    public static final int EDITOR_VERSION = 2;
     public static final int SCHEMA_VERSION = 2;
-    public static final int MIN_EDITOR_VERSION = 2;
+    public static final int MIN_EDITOR_VERSION = EDITOR_VERSION;
 
     public final int id;
     private String name;
@@ -45,10 +46,6 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
     public static class GroupInfo {
         private final String name;
         private boolean visible = true;
-
-        public GroupInfo(String name) {
-            this(name, true);
-        }
 
         public GroupInfo(String name, boolean visible) {
             this.name = name;
@@ -205,6 +202,18 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
         }
     }
 
+    private static Integer readScaledDimension(
+            JSONObject elementJSONObject,
+            String ratioKey,
+            String legacyPixelKey,
+            int referenceSize) throws JSONException {
+        if (elementJSONObject.has(ratioKey)) {
+            return (int)Math.round(elementJSONObject.getDouble(ratioKey) * Math.max(1, referenceSize));
+        }
+        if (elementJSONObject.has(legacyPixelKey)) return elementJSONObject.getInt(legacyPixelKey);
+        return null;
+    }
+
     public GroupInfo getGroup(String name) {
         if (name == null) return null;
         name = name.trim();
@@ -229,17 +238,6 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
             groups.put(trimmedName, group);
         }
         return group;
-    }
-
-    public void removeGroup(String name) {
-        if (name == null) return;
-        name = name.trim();
-        if (name.isEmpty()) return;
-        ensureGroupsLoaded();
-        if (groups.remove(name) == null) return;
-        for (ControlElement element : elements) {
-            if (name.equals(element.getGroupId())) element.setGroupId(null);
-        }
     }
 
     public void setGroupVisible(String name, boolean visible) {
@@ -435,9 +433,18 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
                         element.setGroupId(elementJSONObject.optString("groupId", null));
                         if (element.getGroupId() != null && getGroup(element.getGroupId()) == null) addGroup(element.getGroupId());
                     }
-                    if (elementJSONObject.has("areaWidth")) element.setAreaWidth(elementJSONObject.getInt("areaWidth"));
-                    if (elementJSONObject.has("areaHeight")) element.setAreaHeight(elementJSONObject.getInt("areaHeight"));
-                    if (elementJSONObject.has("stickRadius")) element.setStickRadius(elementJSONObject.getInt("stickRadius"));
+                    Integer areaWidth = readScaledDimension(
+                        elementJSONObject, "areaWidthRatio", "areaWidth", inputControlsView.getMaxWidth());
+                    if (areaWidth != null) element.setAreaWidth(areaWidth);
+                    Integer areaHeight = readScaledDimension(
+                        elementJSONObject, "areaHeightRatio", "areaHeight", inputControlsView.getMaxHeight());
+                    if (areaHeight != null) element.setAreaHeight(areaHeight);
+                    Integer stickRadius = readScaledDimension(
+                        elementJSONObject,
+                        "stickRadiusRatio",
+                        "stickRadius",
+                        Math.min(inputControlsView.getMaxWidth(), inputControlsView.getMaxHeight()));
+                    if (stickRadius != null) element.setStickRadius(stickRadius);
                     if (elementJSONObject.has("mouseSensitivity")) element.setMouseSensitivity((float)elementJSONObject.getDouble("mouseSensitivity"));
                     if (elementJSONObject.has("gridRows")) element.setGridRows(elementJSONObject.getInt("gridRows"));
                     if (elementJSONObject.has("gridCols")) element.setGridCols(elementJSONObject.getInt("gridCols"));

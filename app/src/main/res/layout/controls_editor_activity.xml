@@ -13,24 +13,6 @@
         android:layout_marginTop="8dp" />
 
     <View
-        android:id="@+id/BTAddElement"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:visibility="gone" />
-
-    <View
-        android:id="@+id/BTRemoveElement"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:visibility="gone" />
-
-    <View
-        android:id="@+id/BTElementSettings"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:visibility="gone" />
-
-    <View
         android:id="@+id/VSidebarOverlay"
         android:layout_width="match_parent"
         android:layout_height="match_parent"

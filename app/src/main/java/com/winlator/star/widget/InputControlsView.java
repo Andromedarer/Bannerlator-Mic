@@ -72,7 +72,7 @@ public class InputControlsView extends View {
     private VisualStyle visualStyle = VisualStyle.GAMEHUB;
     private TouchpadView touchpadView;
     private XServer xServer;
-    private final Bitmap[] icons = new Bitmap[1024]; // Increased size for custom icons
+    private final Bitmap[] icons = new Bitmap[256];
     private final CustomIconManager customIconManager;
     private Timer mouseMoveTimer;
     private final PointF mouseMoveOffset = new PointF();
@@ -82,7 +82,7 @@ public class InputControlsView extends View {
     private Bitmap backgroundImage;
     private float backgroundOpacity = 0.65f;
 
-    private Handler timeoutHandler; 
+    private Handler timeoutHandler;
     private Runnable hideControlsRunnable; 
 
     private static final long EDITOR_SETTINGS_LONG_PRESS_MS = 500L;
@@ -366,15 +366,12 @@ public class InputControlsView extends View {
     }
 
     public void setBackgroundImage(Bitmap bitmap) {
+        if (backgroundImage == bitmap) return;
         if (backgroundImage != null && !backgroundImage.isRecycled()) {
             backgroundImage.recycle();
         }
         this.backgroundImage = bitmap;
         invalidate();
-    }
-
-    public Bitmap getBackgroundImage() {
-        return backgroundImage;
     }
 
     public void setBackgroundOpacity(float opacity) {
@@ -384,10 +381,6 @@ public class InputControlsView extends View {
 
     public float getBackgroundOpacity() {
         return backgroundOpacity;
-    }
-
-    public synchronized boolean addElement() {
-        return addElement(ControlElement.Type.BUTTON);
     }
 
     public synchronized boolean addElement(ControlElement.Type type) {
@@ -445,25 +438,23 @@ public class InputControlsView extends View {
 
     public synchronized void setProfile(ControlsProfile profile) {
         releaseActiveControls();
+        stopMouseMoveTimer();
         if (profile != null) {
             this.profile = profile;
             if (!profile.isElementsLoaded() && getWidth() > 0 && getHeight() > 0 && snappingSize > 0) profile.loadElements(this);
             deselectAllElements();
         }
         else this.profile = null;
+        createMouseMoveTimer();
     }
 
-    public synchronized void releaseActiveControls() {
+    private synchronized void releaseActiveControls() {
         if (profile != null && profile.isElementsLoaded()) {
             for (ControlElement element : profile.getElements()) {
                 element.releaseActiveInputs();
             }
         }
         mouseMoveOffset.set(0, 0);
-        if (mouseMoveTimer != null) {
-            mouseMoveTimer.cancel();
-            mouseMoveTimer = null;
-        }
     }
 
     public boolean isShowTouchscreenControls() {
@@ -596,6 +587,7 @@ public class InputControlsView extends View {
     }
 
     public void setXServer(XServer xServer) {
+        stopMouseMoveTimer();
         this.xServer = xServer;
         createMouseMoveTimer();
     }
@@ -606,10 +598,9 @@ public class InputControlsView extends View {
 
     @Override
     protected void onDetachedFromWindow() {
-        if (mouseMoveTimer != null) {
-            mouseMoveTimer.cancel();
-            mouseMoveTimer = null;
-        }
+        cancelEditorLongPress();
+        releaseActiveControls();
+        stopMouseMoveTimer();
         super.onDetachedFromWindow();
     }
 
@@ -849,7 +840,6 @@ public class InputControlsView extends View {
                 }
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_POINTER_UP:
-                case MotionEvent.ACTION_CANCEL:
                     for (ControlElement element : profile.getElements()) {
                         if (isElementHiddenByGroup(element)) continue;
                         if (element.handleTouchUp(pointerId)) {
@@ -859,6 +849,10 @@ public class InputControlsView extends View {
                     }
                     if (!handled && touchpadView != null) touchpadView.onTouchEvent(event);
                     break;
+                case MotionEvent.ACTION_CANCEL:
+                    releaseActiveControls();
+                    if (touchpadView != null) touchpadView.onTouchEvent(event);
+                    break;
             }
         }
         return true;
@@ -867,7 +861,15 @@ public class InputControlsView extends View {
     private boolean hasVisibleMouseLeftButton() {
         if (profile == null) return false;
         for (ControlElement element : profile.getElements()) {
-            if (!isElementHiddenByGroup(element) && element.getBindingAt(0) == Binding.MOUSE_LEFT_BUTTON) return true;
+            if (isElementHiddenByGroup(element)) continue;
+            for (int index = 0; index < element.getBindingCount(); index++) {
+                if (element.getBindingAt(index) == Binding.MOUSE_LEFT_BUTTON) return true;
+                Binding[] combo = element.getCombo(index);
+                if (combo == null) continue;
+                for (Binding binding : combo) {
+                    if (binding == Binding.MOUSE_LEFT_BUTTON) return true;
+                }
+            }
         }
         return false;
     }
@@ -911,7 +913,7 @@ public class InputControlsView extends View {
         if (!firstBinding.isGamepad()) return;
         GamepadState state = profile.getGamepadState();
         WinHandler winHandler = xServer != null ? xServer.getWinHandler() : null;
-        boolean isLeftStick = firstBinding == Binding.GAMEPAD_LEFT_THUMB_UP || 
+        boolean isLeftStick = firstBinding == Binding.GAMEPAD_LEFT_THUMB_UP ||
                              firstBinding == Binding.GAMEPAD_LEFT_THUMB_DOWN ||
                              firstBinding == Binding.GAMEPAD_LEFT_THUMB_LEFT ||
                              firstBinding == Binding.GAMEPAD_LEFT_THUMB_RIGHT;
@@ -924,6 +926,13 @@ public class InputControlsView extends View {
         }
         if (winHandler != null) {
             winHandler.sendGamepadState();
+        }
+    }
+
+    private void stopMouseMoveTimer() {
+        if (mouseMoveTimer != null) {
+            mouseMoveTimer.cancel();
+            mouseMoveTimer = null;
         }
     }
 
