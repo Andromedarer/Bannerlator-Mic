@@ -451,8 +451,7 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
                         element.setBinding(Binding.NONE);
                     }
 
-                    boolean hasLoadedBinding = false;
-                    boolean hasGamepadBinding = true;
+                    boolean elementUsesGamepad = false;
                     JSONArray bindingsJSONArray = elementJSONObject.optJSONArray("bindings");
                     if (bindingsJSONArray != null) {
                         int bindingLimit = element.getType() == ControlElement.Type.BUTTON_GRID
@@ -460,9 +459,8 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
                             : bindingsJSONArray.length();
                         for (int j = 0; j < bindingLimit; j++) {
                             Binding binding = Binding.fromString(bindingsJSONArray.optString(j, null));
-                            hasLoadedBinding = true;
                             element.setBindingAt(j, binding);
-                            if (!binding.isGamepad()) hasGamepadBinding = false;
+                            if (binding.isGamepad()) elementUsesGamepad = true;
                         }
                     }
 
@@ -484,8 +482,9 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
                                 for (int k = 0; k < keys.length(); k++) {
                                     Binding binding = Binding.fromString(keys.optString(k, null));
                                     if (binding != Binding.NONE) combo.add(binding);
+                                    if (binding.isGamepad()) elementUsesGamepad = true;
                                 }
-                    if (!combo.isEmpty()) element.setCombo(idx, combo.toArray(new Binding[0]));
+                                if (!combo.isEmpty()) element.setCombo(idx, combo.toArray(new Binding[0]));
                             }
                             catch (JSONException | IllegalArgumentException e) {
                                 e.printStackTrace();
@@ -503,7 +502,7 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
                         }
                     }
 
-                    if (!virtualGamepad && hasLoadedBinding && hasGamepadBinding) virtualGamepad = true;
+                    if (!virtualGamepad && elementUsesGamepad) virtualGamepad = true;
                     elements.add(element);
                 }
                 catch (JSONException | IllegalArgumentException e) {

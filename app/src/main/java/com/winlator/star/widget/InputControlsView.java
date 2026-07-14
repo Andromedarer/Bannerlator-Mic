@@ -80,7 +80,7 @@ public class InputControlsView extends View {
 
     // Background image for editor reference
     private Bitmap backgroundImage;
-    private float backgroundOpacity = 0.3f;
+    private float backgroundOpacity = 0.65f;
 
     private Handler timeoutHandler; 
     private Runnable hideControlsRunnable; 
@@ -212,9 +212,7 @@ public class InputControlsView extends View {
         readyToDraw = true;
 
         if (editMode) {
-            canvas.drawColor(backgroundImage != null && !backgroundImage.isRecycled()
-                ? Color.argb(56, 0, 0, 0)
-                : Color.BLACK);
+            canvas.drawColor(Color.BLACK);
             drawBackgroundImage(canvas);
             drawGrid(canvas);
             drawCursor(canvas);
@@ -811,7 +809,7 @@ public class InputControlsView extends View {
                 case MotionEvent.ACTION_POINTER_DOWN: {
                     float x = event.getX(actionIndex);
                     float y = event.getY(actionIndex);
-                    touchpadView.setPointerButtonLeftEnabled(true);
+                    if (touchpadView != null) touchpadView.setPointerButtonLeftEnabled(true);
                     for (ControlElement element : profile.getElements()) {
                         if (isElementHiddenByGroup(element)) continue;
                         if (element.handleTouchDown(pointerId, x, y)) {
@@ -826,12 +824,13 @@ public class InputControlsView extends View {
                                     }
                                 }
                             }
+                            break;
                         }
-                        if (element.getBindingAt(0) == Binding.MOUSE_LEFT_BUTTON) {
+                        if (touchpadView != null && element.getBindingAt(0) == Binding.MOUSE_LEFT_BUTTON) {
                             touchpadView.setPointerButtonLeftEnabled(false);
                         }
                     }
-                    if (!handled) touchpadView.onTouchEvent(event);
+                    if (!handled && touchpadView != null) touchpadView.onTouchEvent(event);
                     break;
                 }
                 case MotionEvent.ACTION_MOVE: {
@@ -842,9 +841,12 @@ public class InputControlsView extends View {
                         handled = false;
                         for (ControlElement element : profile.getElements()) {
                             if (isElementHiddenByGroup(element)) continue;
-                            if (element.handleTouchMove(pid, x, y)) handled = true;
+                            if (element.handleTouchMove(pid, x, y)) {
+                                handled = true;
+                                break;
+                            }
                         }
-                        if (!handled) touchpadView.onTouchEvent(event);
+                        if (!handled && touchpadView != null) touchpadView.onTouchEvent(event);
                     }
                     break;
                 }
@@ -853,9 +855,12 @@ public class InputControlsView extends View {
                 case MotionEvent.ACTION_CANCEL:
                     for (ControlElement element : profile.getElements()) {
                         if (isElementHiddenByGroup(element)) continue;
-                        if (element.handleTouchUp(pointerId)) handled = true;
+                        if (element.handleTouchUp(pointerId)) {
+                            handled = true;
+                            break;
+                        }
                     }
-                    if (!handled) touchpadView.onTouchEvent(event);
+                    if (!handled && touchpadView != null) touchpadView.onTouchEvent(event);
                     break;
             }
         }
