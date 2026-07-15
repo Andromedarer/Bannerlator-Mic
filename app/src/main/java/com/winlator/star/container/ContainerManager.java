@@ -14,6 +14,7 @@ import com.winlator.star.core.MSLink;
 import com.winlator.star.core.OnExtractFileListener;
 import com.winlator.star.core.TarCompressorUtils;
 import com.winlator.star.core.WineInfo;
+import com.winlator.star.core.WineRegistryEditor;
 import com.winlator.star.xenvironment.ImageFs;
 
 import java.util.Arrays;
@@ -143,6 +144,17 @@ public class ContainerManager {
             if (!extractContainerPatternFile(container, container.getWineVersion(), contentsManager, containerDir, null)) {
                 FileUtils.delete(containerDir);
                 return null;
+            }
+
+            // New containers default to full administrator (UAC off). Wine's wineboot leaves
+            // EnableLUA=1 for most Wine versions (only some prefixPacks ship it off), which makes
+            // installers/tools that query the elevation token refuse to run. Stamp EnableLUA=0 on
+            // the freshly-extracted prefix so every new container runs elevated regardless of the
+            // Wine version's default. (Existing containers are untouched.)
+            File systemRegFile = new File(containerDir, ".wine/system.reg");
+            try (WineRegistryEditor registryEditor = new WineRegistryEditor(systemRegFile)) {
+                registryEditor.setCreateKeyIfNotExist(true);
+                registryEditor.setDwordValue("Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System", "EnableLUA", 0);
             }
 
 //            // Extract the selected graphics driver files
