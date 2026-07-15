@@ -963,6 +963,26 @@ private fun WineConfigTab(
                 onSelect = { opt -> viewModel.selectedMouseWarpIndex = viewModel.mouseWarpEntries.indexOf(opt).coerceAtLeast(0) }
             )
         }
+
+        // System section — "Run as administrator" (default ON) toggles UAC in the prefix. Backed by
+        // EnableLUA in .wine/system.reg (source of truth): the VM reads it on load and writes it on
+        // save/create (mirrors the DirectInput mouse-warp registry idiom above).
+        SectionBox(title = "System") {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Run as administrator")
+                    Text(
+                        "Disables UAC so everything runs elevated (helps installers/tools that require admin)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = viewModel.runAsAdmin,
+                    onCheckedChange = { viewModel.runAsAdmin = it }
+                )
+            }
+        }
     }
 }
 
