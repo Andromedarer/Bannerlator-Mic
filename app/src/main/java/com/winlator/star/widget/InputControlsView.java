@@ -7,13 +7,10 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.ColorFilter;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.Point;
 import android.graphics.PointF;
-import android.graphics.PorterDuff;
-import android.graphics.PorterDuffColorFilter;
 import android.graphics.Rect;
 import android.os.Handler;
 import android.os.VibrationEffect;
@@ -107,18 +104,6 @@ public class InputControlsView extends View {
     };
 
     private SharedPreferences preferences;
-    private ControlElement stickElement;
-    private boolean focusOnStick = false; 
-
-    public boolean isFocusedOnStick() {
-        return focusOnStick;
-    }
-
-    public void setFocusOnStick(boolean focus) {
-        this.focusOnStick = focus;
-        invalidate(); 
-    }
-
     @SuppressLint("ResourceType")
     public InputControlsView(Context context) {
         super(context);
@@ -133,19 +118,6 @@ public class InputControlsView extends View {
         this.timeoutHandler = timeoutHandler; 
         this.hideControlsRunnable = hideControlsRunnable; 
         initView();
-    }
-
-    public InputControlsView(Context context, boolean focusOnStick) {
-        super(context);
-        this.customIconManager = new CustomIconManager(context);
-        this.focusOnStick = focusOnStick;
-        initView();
-        
-        if (focusOnStick) {
-            setLayoutParams(new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        } else {
-            setLayoutParams(new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        }
     }
 
     private void initView() {
@@ -192,16 +164,8 @@ public class InputControlsView extends View {
 
     @Override
     protected synchronized void onDraw(Canvas canvas) {
-        int width, height;
-
-        if (stickElement != null && isFocusedOnStick()) {
-            Rect boundingBox = stickElement.getBoundingBox();
-            width = boundingBox.width();
-            height = boundingBox.height();
-        } else {
-            width = getWidth();
-            height = getHeight();
-        }
+        int width = getWidth();
+        int height = getHeight();
 
         if (width == 0 || height == 0) {
             readyToDraw = false;
@@ -218,11 +182,7 @@ public class InputControlsView extends View {
             drawCursor(canvas);
         }
 
-        if (stickElement != null) {
-            stickElement.draw(canvas);
-        }
-
-        if (profile != null && showTouchscreenControls && !isFocusedOnStick()) {
+        if (profile != null && showTouchscreenControls) {
             if (!profile.isElementsLoaded()) profile.loadElements(this);
             for (ControlElement element : profile.getElements()) {
                 if (isElementHiddenByGroup(element)) continue;
@@ -236,37 +196,6 @@ public class InputControlsView extends View {
         }
 
         super.onDraw(canvas);
-    }
-
-    public void resetStickPosition() {
-        if (stickElement != null) {
-            Rect boundingBox = stickElement.getBoundingBox();
-            float centerX = boundingBox.centerX();
-            float centerY = boundingBox.centerY();
-            stickElement.setCurrentPosition(centerX, centerY); 
-            invalidate(); 
-        }
-    }
-
-    public void initializeStickElement(float x, float y, float scale) {
-        stickElement = new ControlElement(this);
-        stickElement.setType(ControlElement.Type.STICK); 
-        stickElement.setX((int) x);
-        stickElement.setY((int) y);
-        stickElement.setScale(scale);
-        invalidate(); 
-    }
-
-    public void updateStickPosition(float x, float y) {
-        if (stickElement != null) {
-            stickElement.getCurrentPosition().x = x;  
-            stickElement.getCurrentPosition().y = y;  
-            invalidate(); 
-        }
-    }
-
-    public ControlElement getStickElement() {
-        return stickElement;
     }
 
     private void drawGrid(Canvas canvas) {
@@ -480,11 +409,6 @@ public class InputControlsView extends View {
         return AppThemeState.getCurrentAccentArgb();
     }
 
-    public int getSecondaryColor() {
-        int accent = resolveBaseAccentArgb();
-        return Color.argb((int)(overlayOpacity * 255), Color.red(accent), Color.green(accent), Color.blue(accent));
-    }
-
     public int getAccentColor() {
         return 0xff000000 | (resolveBaseAccentArgb() & 0x00ffffff);
     }
@@ -567,11 +491,6 @@ public class InputControlsView extends View {
 
     public Path getPath() {
         return path;
-    }
-
-    public ColorFilter getColorFilter() {
-        // Return a white tint filter for system icons
-        return new PorterDuffColorFilter(0xffffffff, PorterDuff.Mode.SRC_IN);
     }
 
     public TouchpadView getTouchpadView() {

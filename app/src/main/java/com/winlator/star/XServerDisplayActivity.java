@@ -28,7 +28,6 @@ import android.widget.ArrayAdapter;
 import android.widget.CheckBox;
 import android.widget.FrameLayout;
 import android.widget.Spinner;
-import android.widget.TextView;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
@@ -2867,19 +2866,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
         }
         return shortcutName;
-    }
-
-    private void setTextColorForDialog(ViewGroup viewGroup, int color) {
-        for (int i = 0; i < viewGroup.getChildCount(); i++) {
-            View child = viewGroup.getChildAt(i);
-            if (child instanceof ViewGroup) {
-                // If the child is a ViewGroup, recursively apply the color
-                setTextColorForDialog((ViewGroup) child, color);
-            } else if (child instanceof TextView) {
-                // If the child is a TextView, set its text color
-                ((TextView) child).setTextColor(color);
-            }
-        }
     }
 
     private void showInputControlsDialog() {

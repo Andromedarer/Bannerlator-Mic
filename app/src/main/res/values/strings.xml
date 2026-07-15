@@ -48,11 +48,8 @@
     <string name="grid_rows">Rows</string>
     <string name="grid_cols">Columns</string>
     <string name="overlay_opacity">Overlay Opacity</string>
-    <string name="controls_follow_app_theme">Follow app theme</string>
     <string name="controls_accent_color">Controls accent color</string>
     <string name="profile">Profile</string>
-    <string name="select_profile">Select Profile</string>
-    <string name="profile_name">Profile Name</string>
     <string name="name">Name</string>
     <string name="ok">OK</string>
     <string name="cancel">Cancel</string>
@@ -106,7 +103,6 @@
     <string name="do_you_want_to_remove_this_wine_version">Do you want to remove this wine version?</string>
     <string name="do_you_want_to_remove_this_preset">Do you want to remove this preset?</string>
     <string name="do_you_want_to_end_this_process">Do you want to end this process?</string>
-    <string name="controls_editor">Controls Editor</string>
     <string name="enabled">Enabled</string>
     <string name="disabled">Disabled</string>
     <string name="container">Container</string>
@@ -132,8 +128,6 @@
     <string name="none">None</string>
     <string name="custom_text">Custom Text</string>
     <string name="icon">Icon</string>
-    <string name="import_profile">Import Profile</string>
-    <string name="export_profile">Export Profile</string>
     <string name="touchpad_help">Touchpad Help</string>
     <string name="touchpad_help_mouse_left_click_title">Mouse Left-Click</string>
     <string name="touchpad_help_mouse_left_click_description">Short tap with one finger</string>
@@ -146,13 +140,11 @@
     <string name="duplicate">Duplicate</string>
     <string name="about">About</string>
     <string name="credits_and_third_party_apps">Credits and Third-party apps</string>
-    <string name="external_controllers">External Controllers</string>
     <string name="graphics_driver">Graphics Driver</string>
     <string name="audio_driver">Audio Driver</string>
     <string name="loading">Loading…</string>
     <string name="press_any_button_on_your_controller">Press any button on your controller</string>
     <string name="bindings">bindings</string>
-    <string name="show_touchscreen_controls">Show Touchscreen Controls</string>
     <string name="dxwrapper">DX Wrapper</string>
     <string name="mouse_warp_override">Mouse Warp Override</string>
     <string name="direct3d">Direct3D</string>
@@ -480,7 +472,6 @@
     ]]></string>
     <string name="help_exclusive_xinput">Certain games like Rayman Origins and Need for Speed: Most Wanted 2005 when using DInput require this to be disabled.</string>
     <string name="enable_xinput_and_dinput_same_time">Some games may support both APIs. Enabling both XInput and DInput simultaneously in such games may cause control issues, as seen in titles like The Binding of Isaac and the Resident Evil series.</string>
-    <string name="warning_gamepad_mouse_mix">Warning: Mixing gamepad and mouse bindings on the same controller may cause unexpected behavior in games. It is recommended to use only gamepad bindings or only mouse/keyboard bindings.</string>
     <string name="startup_normal">Normal (Load all services)</string>
     <string name="startup_essential">Essential (Load only essential services)</string>
     <string name="startup_aggressive">Aggressive (Stop services on startup)</string>
@@ -518,8 +509,6 @@
     <string name="pip_mode">PiP Mode</string>
     <string name="configure">Configure</string>
     <string name="enable_sendinput_mode">Use Windows SendInput Mode</string>
-    <string name="enable_touchscreen_timeout">Touchscreen Timeout (Requires Restart)</string>
-    <string name="enable_touchscreen_haptics">Enable Touchscreen Haptic Feedback</string>
     <string name="help_steamgrid">SteamGrid API Key</string>
     <string name="disable_xinput_for_shortcut">Disable Xinput (For Exclusive M/KB Control)</string>
     <string name="num_controllers">Number of Controllers</string>
@@ -796,5 +785,4 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="save_backup_format_winlator_sub">Sibling Winlator / WinNative builds</string>
     <string name="save_backup_next">Next</string>
 </resources>
-
 
