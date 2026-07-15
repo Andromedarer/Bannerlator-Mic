@@ -87,6 +87,55 @@ fun ControlsEditorToolbar(
 }
 
 @Composable
+fun InGameControlsEditorToolbar(
+    profileName: String,
+    onAddClick: () -> Unit,
+    onRemoveClick: () -> Unit,
+    onSettingsClick: () -> Unit,
+    onGroupsClick: () -> Unit,
+    onDoneClick: () -> Unit,
+) {
+    Surface(
+        color = ToolbarBackground,
+        contentColor = Color.White,
+        shape = ToolbarShape,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Column(
+                modifier = Modifier
+                    .widthIn(min = 88.dp, max = 132.dp)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.editing_in_game),
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                )
+                Text(
+                    text = profileName,
+                    color = colorResource(R.color.colorAccent),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+
+            ToolbarDivider()
+            ToolbarIconButton(iconRes = R.drawable.icon_add, contentDescription = stringResource(R.string.add), onClick = onAddClick)
+            ToolbarIconButton(iconRes = R.drawable.icon_remove, contentDescription = stringResource(R.string.remove), onClick = onRemoveClick)
+            ToolbarIconButton(iconRes = R.drawable.icon_settings, contentDescription = stringResource(R.string.settings), onClick = onSettingsClick)
+            ToolbarIconButton(iconRes = R.drawable.icon_group, contentDescription = stringResource(R.string.groups), onClick = onGroupsClick)
+            ToolbarDivider()
+            ToolbarIconButton(iconRes = R.drawable.icon_save, contentDescription = stringResource(R.string.save_and_close), onClick = onDoneClick)
+        }
+    }
+}
+
+@Composable
 private fun ToolbarDivider() {
     Box(
         modifier = Modifier

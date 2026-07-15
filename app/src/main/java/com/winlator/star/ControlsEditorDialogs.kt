@@ -56,6 +56,7 @@ private val DialogShape = RoundedCornerShape(10.dp)
 interface ControlsEditorDialogActions {
     fun onDismiss()
     fun onAddElement(type: ControlElement.Type)
+    fun onAddAndroidKeyboardButton()
     fun onPickBackgroundFile()
     fun onPickBackgroundSystem()
     fun onClearBackground()
@@ -74,7 +75,11 @@ fun ControlsEditorDialogHost(
 ) {
     MaterialTheme(colorScheme = controlsEditorDialogColorScheme()) {
         when (dialogMode) {
-            DIALOG_ADD_ELEMENT -> AddElementDialog(onDismiss = actions::onDismiss, onAddElement = actions::onAddElement)
+            DIALOG_ADD_ELEMENT -> AddElementDialog(
+                onDismiss = actions::onDismiss,
+                onAddElement = actions::onAddElement,
+                onAddAndroidKeyboardButton = actions::onAddAndroidKeyboardButton,
+            )
             DIALOG_BACKGROUND_IMAGE -> BackgroundImageDialog(
                 backgroundOpacity = backgroundOpacity,
                 onDismiss = actions::onDismiss,
@@ -101,10 +106,12 @@ fun ControlsEditorDialogHost(
 private fun AddElementDialog(
     onDismiss: () -> Unit,
     onAddElement: (ControlElement.Type) -> Unit,
+    onAddAndroidKeyboardButton: () -> Unit,
 ) {
     val items = remember {
         listOf(
             ControlTypeItem(ControlElement.Type.BUTTON, R.drawable.icon_keyboard, R.string.control_type_button),
+            ControlTypeItem(ControlElement.Type.BUTTON, R.drawable.icon_keyboard, R.string.control_type_android_keyboard, true),
             ControlTypeItem(ControlElement.Type.D_PAD, R.drawable.icon_gamepad, R.string.control_type_d_pad),
             ControlTypeItem(ControlElement.Type.RANGE_BUTTON, R.drawable.icon_screen_effect, R.string.control_type_range_button),
             ControlTypeItem(ControlElement.Type.STICK, R.drawable.icon_gamepad, R.string.control_type_stick),
@@ -126,7 +133,10 @@ private fun AddElementDialog(
                             ControlTypeCard(
                                 item = item,
                                 modifier = Modifier.weight(1f),
-                                onClick = { onAddElement(item.type) },
+                                onClick = {
+                                    if (item.androidKeyboard) onAddAndroidKeyboardButton()
+                                    else onAddElement(item.type)
+                                },
                             )
                         }
                         if (rowItems.size == 1) Spacer(modifier = Modifier.weight(1f))
@@ -372,4 +382,5 @@ private data class ControlTypeItem(
     val type: ControlElement.Type,
     val iconRes: Int,
     val labelRes: Int,
+    val androidKeyboard: Boolean = false,
 )

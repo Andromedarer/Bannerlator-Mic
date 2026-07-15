@@ -1,5 +1,6 @@
 package com.winlator.star
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.animation.AnimatedVisibility
@@ -91,7 +92,9 @@ fun ControlsEditorSettingsPane(
     onInvalidate: () -> Unit,
     customIconManager: CustomIconManager,
     customIconReloadKey: Int,
-    activity: ControlsEditorActivity,
+    context: Context,
+    onClose: () -> Unit,
+    onPickCustomIcon: () -> Unit,
 ) {
     val typeOptions = remember { ControlElement.Type.names().toList() }
     val shapeOptions = remember { ControlElement.Shape.names().toList() }
@@ -99,7 +102,7 @@ fun ControlsEditorSettingsPane(
     val bindingOptions = remember { Binding.values().toList() }
     val holdKeyOptions = remember {
         buildList {
-            add(activity.getString(R.string.none))
+            add(context.getString(R.string.none))
             for (binding in Binding.values()) {
                 if (binding == Binding.NONE) continue
                 if (binding.isKeyboard() || (binding.isMouse() && !binding.isMouseMove())) {
@@ -109,8 +112,8 @@ fun ControlsEditorSettingsPane(
         }
     }
 
-    val builtInIcons = remember(activity) { loadBuiltInIcons(activity) }
-    val customIcons = remember(activity, customIconReloadKey) { loadCustomIcons(customIconManager) }
+    val builtInIcons = remember(context) { loadBuiltInIcons(context) }
+    val customIcons = remember(context, customIconReloadKey) { loadCustomIcons(customIconManager) }
 
     var typeIndex by remember { mutableStateOf(element.getType().ordinal) }
     var shapeIndex by remember { mutableStateOf(element.getShape().ordinal) }
@@ -147,6 +150,45 @@ fun ControlsEditorSettingsPane(
         element.deadZone = deadZonePct / 100f
         profile.save()
         onInvalidate()
+    }
+
+    fun prepareGridForFill() {
+        val total = element.getGridRows().coerceAtLeast(1) * element.getGridCols().coerceAtLeast(1)
+        if (element.getBindingCount() != total) element.setBindingCount(total)
+    }
+
+    fun fillGrid(keys: Array<Binding>) {
+        prepareGridForFill()
+        for (index in 0 until element.getBindingCount()) {
+            element.setBindingAt(index, keys.getOrElse(index) { Binding.NONE })
+            element.setCombo(index, null)
+        }
+        bindingCount = element.getBindingCount().coerceAtLeast(1)
+        profile.save()
+        onInvalidate()
+    }
+
+    val qwertyKeys = remember {
+        arrayOf(
+            Binding.KEY_Q, Binding.KEY_W, Binding.KEY_E, Binding.KEY_R, Binding.KEY_T, Binding.KEY_Y, Binding.KEY_U, Binding.KEY_I, Binding.KEY_O, Binding.KEY_P,
+            Binding.KEY_A, Binding.KEY_S, Binding.KEY_D, Binding.KEY_F, Binding.KEY_G, Binding.KEY_H, Binding.KEY_J, Binding.KEY_K, Binding.KEY_L,
+            Binding.KEY_Z, Binding.KEY_X, Binding.KEY_C, Binding.KEY_V, Binding.KEY_B, Binding.KEY_N, Binding.KEY_M,
+        )
+    }
+    val functionKeys = remember {
+        arrayOf(
+            Binding.KEY_F1, Binding.KEY_F2, Binding.KEY_F3, Binding.KEY_F4,
+            Binding.KEY_F5, Binding.KEY_F6, Binding.KEY_F7, Binding.KEY_F8,
+            Binding.KEY_F9, Binding.KEY_F10, Binding.KEY_F11, Binding.KEY_F12,
+        )
+    }
+    val numPadKeys = remember {
+        arrayOf(
+            Binding.KEY_KP_7, Binding.KEY_KP_8, Binding.KEY_KP_9, Binding.KEY_KP_ADD,
+            Binding.KEY_KP_4, Binding.KEY_KP_5, Binding.KEY_KP_6, Binding.KEY_MINUS,
+            Binding.KEY_KP_1, Binding.KEY_KP_2, Binding.KEY_KP_3, Binding.KEY_ENTER,
+            Binding.KEY_KP_0, Binding.KEY_PERIOD, Binding.KEY_BKSP, Binding.KEY_ESC,
+        )
     }
 
     fun openBindingDialog(index: Int, title: String) {
@@ -205,7 +247,7 @@ fun ControlsEditorSettingsPane(
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = { activity.closeSidebar() }) {
+            IconButton(onClick = onClose) {
                 Icon(
                     imageVector = Icons.Filled.Close,
                     contentDescription = stringResource(android.R.string.cancel),
@@ -447,23 +489,14 @@ fun ControlsEditorSettingsPane(
                 },
             )
             QuickFillBar(
-                onQwerty = {
-                    activity.fillGridQWERTY(element)
-                    bindingCount = element.getBindingCount().coerceAtLeast(1)
-                },
-                onFunctionKeys = {
-                    activity.fillGridFKeys(element)
-                    bindingCount = element.getBindingCount().coerceAtLeast(1)
-                },
-                onNumPad = {
-                    activity.fillGridNumPad(element)
-                    bindingCount = element.getBindingCount().coerceAtLeast(1)
-                },
+                onQwerty = { fillGrid(qwertyKeys) },
+                onFunctionKeys = { fillGrid(functionKeys) },
+                onNumPad = { fillGrid(numPadKeys) },
                 onClear = {
-                    activity.prepareGridForFill(element)
-                    val total = gridRows * gridCols
-                    for (index in 0 until total) {
-                        activity.clearGridCell(element, index)
+                    prepareGridForFill()
+                    for (index in 0 until element.getBindingCount()) {
+                        element.setBindingAt(index, Binding.NONE)
+                        element.setCombo(index, null)
                     }
                     saveAndInvalidate()
                 },
@@ -587,7 +620,7 @@ fun ControlsEditorSettingsPane(
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(EditorSpacing), verticalAlignment = Alignment.CenterVertically) {
                     TextButton(
-                        onClick = { activity.promptPickCustomIcon() },
+                        onClick = onPickCustomIcon,
                         shape = SmallShape,
                     ) {
                         Text(text = stringResource(R.string.add), color = EditorAccent)
@@ -1250,13 +1283,13 @@ private fun holdKeyBindingFromLabel(label: String): Binding {
     return Binding.NONE
 }
 
-private fun loadBuiltInIcons(activity: ControlsEditorActivity): List<PickerIcon> {
+private fun loadBuiltInIcons(context: Context): List<PickerIcon> {
     val icons = mutableListOf<PickerIcon>()
     try {
-        val filenames = activity.assets.list("inputcontrols/icons/") ?: emptyArray()
+        val filenames = context.assets.list("inputcontrols/icons/") ?: emptyArray()
         for (filename in filenames) {
             val id = filename.substringBefore('.').toIntOrNull() ?: continue
-            val bitmap = activity.assets.open("inputcontrols/icons/$filename").use { BitmapFactory.decodeStream(it) }
+            val bitmap = context.assets.open("inputcontrols/icons/$filename").use { BitmapFactory.decodeStream(it) }
             icons.add(PickerIcon(id = id, bitmap = bitmap))
         }
     } catch (_: Exception) {

@@ -239,6 +239,20 @@ public class ControlsEditorActivity extends AppCompatActivity {
         }
     }
 
+    private void addAndroidKeyboardButton() {
+        if (!inputControlsView.addElement(ControlElement.Type.BUTTON)) {
+            AppUtils.showToast(this, R.string.no_profile_selected);
+            return;
+        }
+        ControlElement element = inputControlsView.getSelectedElement();
+        element.setBindingAt(0, Binding.SHOW_ANDROID_KEYBOARD);
+        element.setText(getString(R.string.keyboard));
+        profile.save();
+        inputControlsView.invalidate();
+        closeComposeDialog();
+        showControlElementSettingsFor(element);
+    }
+
     // Shared: add a custom icon from any Uri (file:// from the in-app picker, content:// from SAF).
     private void addCustomIconFromUri(Uri uri) {
         ControlElement selectedElement = inputControlsView.getSelectedElement();
@@ -291,6 +305,10 @@ public class ControlsEditorActivity extends AppCompatActivity {
                         @Override
                         public void onAddElement(ControlElement.Type type) {
                             addElement(type);
+                        }
+                        @Override
+                        public void onAddAndroidKeyboardButton() {
+                            addAndroidKeyboardButton();
                         }
                         @Override
                         public void onPickBackgroundFile() {
@@ -458,6 +476,20 @@ public class ControlsEditorActivity extends AppCompatActivity {
                     customIconManager,
                     reloadKey,
                     ControlsEditorActivity.this,
+                    new Function0<Unit>() {
+                        @Override
+                        public Unit invoke() {
+                            closeSidebar();
+                            return Unit.INSTANCE;
+                        }
+                    },
+                    new Function0<Unit>() {
+                        @Override
+                        public Unit invoke() {
+                            promptPickCustomIcon();
+                            return Unit.INSTANCE;
+                        }
+                    },
                     composer,
                     0
                 );
@@ -530,85 +562,6 @@ public class ControlsEditorActivity extends AppCompatActivity {
                 }
             })
             .start();
-    }
-
-
-    private int getGridRowsForEditor(ControlElement element) {
-        return Math.max(1, element.getGridRows());
-    }
-
-    private int getGridColsForEditor(ControlElement element) {
-        return Math.max(1, element.getGridCols());
-    }
-
-    private int getGridCellCountForEditor(ControlElement element) {
-        return getGridRowsForEditor(element) * getGridColsForEditor(element);
-    }
-
-    void prepareGridForFill(ControlElement element) {
-        int total = getGridCellCountForEditor(element);
-        if (element.getBindingCount() != total) element.setBindingCount(total);
-    }
-
-    void clearGridCell(ControlElement element, int index) {
-        if (index < 0 || index >= element.getBindingCount()) return;
-        element.setBindingAt(index, Binding.NONE);
-        element.setCombo(index, null);
-    }
-
-    /** Fill grid with QWERTY row: A S D F ... (wraps) */
-    void fillGridQWERTY(ControlElement element) {
-        Binding[] keys = {
-            Binding.KEY_Q, Binding.KEY_W, Binding.KEY_E, Binding.KEY_R, Binding.KEY_T, Binding.KEY_Y, Binding.KEY_U, Binding.KEY_I, Binding.KEY_O, Binding.KEY_P,
-            Binding.KEY_A, Binding.KEY_S, Binding.KEY_D, Binding.KEY_F, Binding.KEY_G, Binding.KEY_H, Binding.KEY_J, Binding.KEY_K, Binding.KEY_L,
-            Binding.KEY_Z, Binding.KEY_X, Binding.KEY_C, Binding.KEY_V, Binding.KEY_B, Binding.KEY_N, Binding.KEY_M
-        };
-        prepareGridForFill(element);
-        int total = getGridCellCountForEditor(element);
-        for (int i = 0; i < total; i++) {
-            element.setBindingAt(i, i < keys.length ? keys[i] : Binding.NONE);
-            element.setCombo(i, null);
-        }
-        profile.save();
-        inputControlsView.invalidate();
-        refreshSidebarSettings();
-    }
-
-    /** Fill grid with F1-F12 keys */
-    void fillGridFKeys(ControlElement element) {
-        Binding[] keys = {
-            Binding.KEY_F1, Binding.KEY_F2, Binding.KEY_F3, Binding.KEY_F4,
-            Binding.KEY_F5, Binding.KEY_F6, Binding.KEY_F7, Binding.KEY_F8,
-            Binding.KEY_F9, Binding.KEY_F10, Binding.KEY_F11, Binding.KEY_F12
-        };
-        prepareGridForFill(element);
-        int total = getGridCellCountForEditor(element);
-        for (int i = 0; i < total; i++) {
-            element.setBindingAt(i, i < keys.length ? keys[i] : Binding.NONE);
-            element.setCombo(i, null);
-        }
-        profile.save();
-        inputControlsView.invalidate();
-        refreshSidebarSettings();
-    }
-
-    /** Fill grid with NumPad layout: 7 8 9 / 4 5 6 * / 1 2 3 - / 0 . + Enter */
-    void fillGridNumPad(ControlElement element) {
-        Binding[] keys = {
-            Binding.KEY_KP_7, Binding.KEY_KP_8, Binding.KEY_KP_9, Binding.KEY_KP_ADD,
-            Binding.KEY_KP_4, Binding.KEY_KP_5, Binding.KEY_KP_6, Binding.KEY_MINUS,
-            Binding.KEY_KP_1, Binding.KEY_KP_2, Binding.KEY_KP_3, Binding.KEY_ENTER,
-            Binding.KEY_KP_0, Binding.KEY_PERIOD, Binding.KEY_BKSP, Binding.KEY_ESC
-        };
-        prepareGridForFill(element);
-        int total = getGridCellCountForEditor(element);
-        for (int i = 0; i < total; i++) {
-            element.setBindingAt(i, i < keys.length ? keys[i] : Binding.NONE);
-            element.setCombo(i, null);
-        }
-        profile.save();
-        inputControlsView.invalidate();
-        refreshSidebarSettings();
     }
 
     @Override

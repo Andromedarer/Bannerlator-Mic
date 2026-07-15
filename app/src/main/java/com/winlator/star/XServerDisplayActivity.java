@@ -171,7 +171,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private String hudRendererLabel = null;     // full "Vulkan | DXVK" label for classic FrameRating.setRenderer
     private String hudEngineShort = null;       // short API/dx name for PerfHudView.setEngineLabel
     private String hudGpuName = null;           // GPU model string from _MESA_DRV_GPU_NAME
-    private Runnable editInputControlsCallback;
+    private InGameControlsEditor inGameControlsEditor;
+    private boolean inGameEditorPreviousShowTouchscreen;
     private Shortcut shortcut;
     private String graphicsDriver = Container.DEFAULT_GRAPHICS_DRIVER;
     private HashMap<String, String> graphicsDriverConfig;
@@ -414,7 +415,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     	Log.d("XServerDisplayActivity", "Picking refresh rate " + maxRefresh);
 
-    	return maxRefresh;
+        return maxRefresh;
+    }
+
+    protected void showGuestKeyboard() {
+        AppUtils.showKeyboard(this);
     }
 
 
@@ -512,7 +517,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         state.setIsRelativeMouseMovement(isRelativeMouseMovement);
         state.setIsMouseDisabled(isMouseDisabled);
         state.onClose                  = () -> runOnUiThread(() -> drawerLayout.closeDrawers());
-        state.onKeyboard               = () -> AppUtils.showKeyboard(this);
+        state.onKeyboard               = this::showGuestKeyboard;
         state.onInputControls          = () -> showInputControlsDialog();
         state.onScreenEffects          = () -> showScreenEffectsDialog();
         state.onGraphicEngine          = () -> { XServerDrawerState.INSTANCE.selectTab(com.winlator.star.ui.TabType.GRAPHICS); runOnUiThread(() -> drawerLayout.openDrawer(GravityCompat.START)); };
@@ -1160,11 +1165,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
     }
 
     private void ensurePointerCapture(String reason) {
-        if (!isRelativeMouseMovement || touchpadView == null) return;
+        if (!isRelativeMouseMovement || touchpadView == null || inGameControlsEditor != null) return;
 
         final int[] tries = {0};
         Runnable attempt = new Runnable() {
             @Override public void run() {
+                if (inGameControlsEditor != null) return;
                 if (!hasWindowFocus()) { touchpadView.postDelayed(this, 50); return; }
                 if (!touchpadView.isAttachedToWindow()) { touchpadView.postDelayed(this, 50); return; }
 
@@ -1181,18 +1187,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // Try quickly a few times to dodge transient focus transitions
         touchpadView.postDelayed(attempt, 50); // First attempt
     }
-
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == MainActivity.EDIT_INPUT_CONTROLS_REQUEST_CODE && resultCode == Activity.RESULT_OK) {
-            if (editInputControlsCallback != null) {
-                editInputControlsCallback.run();
-                editInputControlsCallback = null;
-            }
-        }
-    }
-
 
     @Override
     public void onResume() {
@@ -1711,6 +1705,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        if (inGameControlsEditor != null) {
+            inGameControlsEditor.dispose();
+            inGameControlsEditor = null;
+        }
         super.onDestroy();
         stopDxApiDetection();
         if (wineDebugLogCallback != null) {
@@ -1745,6 +1743,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     @Override
     public void onBackPressed() {
+        if (inGameControlsEditor != null) {
+            if (inGameControlsEditor.handleBack()) return;
+            closeInGameControlsEditor();
+            return;
+        }
         if (environment != null) {
             if (!drawerLayout.isDrawerOpen(GravityCompat.START)) {
                 drawerLayout.openDrawer(GravityCompat.START);
@@ -1790,7 +1793,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
 
-        if (hasFocus && cursorLock) {
+        if (hasFocus && cursorLock && inGameControlsEditor == null) {
             touchpadView.requestPointerCapture();
             touchpadView.setOnCapturedPointerListener(new View.OnCapturedPointerListener() {
                 @Override
@@ -2300,6 +2303,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         rootView.addView(touchpadView);
 
         inputControlsView = new InputControlsView(this, timeoutHandler, hideControlsRunnable);
+        inputControlsView.setShowKeyboardCallback(this::showGuestKeyboard);
         float savedOverlayOpacity = preferences.getFloat("overlay_opacity", InputControlsView.DEFAULT_OVERLAY_OPACITY);
         inputControlsView.setOverlayOpacity(savedOverlayOpacity);
         XServerDrawerState.INSTANCE.setOverlayOpacity(savedOverlayOpacity); // seed the Controls-tab slider
@@ -2682,16 +2686,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         };
 
         ds.onInputControlsSettings = () -> {
-            int currentIdx = ds.getSelectedProfileIdx().getValue();
-            Intent intent = new Intent(this, MainActivity.class);
-            intent.putExtra("edit_input_controls", true);
-            intent.putExtra("selected_profile_id",
-                currentIdx > 0 ? inputControlsManager.getProfiles().get(currentIdx - 1).id : 0);
-            editInputControlsCallback = () -> {
-                hideInputControls();
-                inputControlsManager.loadProfiles(true);
-            };
-            controlsEditorActivityResultLauncher.launch(intent);
+            openInGameControlsEditorFromDialog();
         };
 
         // Vibration state
@@ -2840,15 +2835,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
 
 
-    private ActivityResultLauncher<Intent> controlsEditorActivityResultLauncher = registerForActivityResult(
-            new ActivityResultContracts.StartActivityForResult(),
-            result -> {
-                if (editInputControlsCallback != null) {
-                    editInputControlsCallback.run();
-                    editInputControlsCallback = null;
+    private final ActivityResultLauncher<String> inGameIconPickerLauncher = registerForActivityResult(
+            new ActivityResultContracts.GetContent(),
+            uri -> {
+                if (uri != null && inGameControlsEditor != null) {
+                    inGameControlsEditor.addCustomIcon(uri);
                 }
-            }
-    );
+            });
 
     private String parseShortcutNameFromDesktopFile(File desktopFile) {
         String shortcutName = "";
@@ -2906,19 +2899,58 @@ public class XServerDisplayActivity extends AppCompatActivity {
         };
 
         ds.onInputControlsSettings = () -> {
-            int currentIdx = ds.getSelectedProfileIdx().getValue();
-            Intent intent = new Intent(this, MainActivity.class);
-            intent.putExtra("edit_input_controls", true);
-            intent.putExtra("selected_profile_id",
-                currentIdx > 0 ? inputControlsManager.getProfiles().get(currentIdx - 1).id : 0);
-            editInputControlsCallback = () -> {
-                hideInputControls();
-                inputControlsManager.loadProfiles(true);
-            };
-            controlsEditorActivityResultLauncher.launch(intent);
+            openInGameControlsEditorFromDialog();
         };
-
         ds.show(XServerDialogState.ActiveDialog.INPUT_CONTROLS);
+    }
+
+    private void openInGameControlsEditorFromDialog() {
+        if (inGameControlsEditor != null || inputControlsView == null) return;
+        int selectedIndex = XServerDialogState.INSTANCE.getSelectedProfileIdx().getValue();
+        ArrayList<ControlsProfile> profiles = inputControlsManager.getProfiles(true);
+        if (selectedIndex <= 0 || selectedIndex - 1 >= profiles.size()) {
+            AppUtils.showToast(this, R.string.no_profile_selected);
+            return;
+        }
+
+        ControlsProfile profile = profiles.get(selectedIndex - 1);
+        inGameEditorPreviousShowTouchscreen = inputControlsView.isShowTouchscreenControls();
+        XServerDialogState.INSTANCE.dismiss();
+        drawerLayout.closeDrawers();
+        releasePointerCaptureIfNeeded("in-game-controls-editor");
+
+        showInputControls(profile);
+        inputControlsView.setShowTouchscreenControls(true);
+        inputControlsView.setEditorBackgroundVisible(false);
+        inputControlsView.setEditMode(true);
+
+        FrameLayout container = findViewById(R.id.FLXServerDisplay);
+        inGameControlsEditor = new InGameControlsEditor(
+                this,
+                container,
+                inputControlsView,
+                profile,
+                this::closeInGameControlsEditor,
+                () -> inGameIconPickerLauncher.launch("image/*"));
+    }
+
+    private void closeInGameControlsEditor() {
+        if (inGameControlsEditor == null) return;
+        inGameControlsEditor.dispose();
+        inGameControlsEditor = null;
+        inputControlsView.setEditorBackgroundVisible(true);
+        inputControlsView.setEditMode(false);
+        inputControlsView.setShowTouchscreenControls(inGameEditorPreviousShowTouchscreen);
+        inputControlsView.requestFocus();
+        inputControlsView.invalidate();
+        seedControlsColorState();
+        if (inGameEditorPreviousShowTouchscreen
+                && preferences.getBoolean("touchscreen_timeout_enabled", false)) {
+            startTouchscreenTimeout();
+        }
+        if (cursorLock) {
+            inputControlsView.postDelayed(() -> ensurePointerCapture("in-game-controls-editor-closed"), 250);
+        }
     }
 
     private void simulateConfirmInputControlsDialog() {
@@ -3376,6 +3408,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     @Override
     public boolean dispatchGenericMotionEvent(MotionEvent event) {
+        if (inGameControlsEditor != null) {
+            super.dispatchGenericMotionEvent(event);
+            return true;
+        }
         boolean handledByWinHandler = false;
         boolean handledByTouchpadView = false;
 
@@ -3410,6 +3446,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
+        if (inGameControlsEditor != null) {
+            super.dispatchKeyEvent(event);
+            return true;
+        }
 
         // Handle the PlayStation or Xbox Home button to open the drawer
         if (event.getAction() == KeyEvent.ACTION_DOWN) {

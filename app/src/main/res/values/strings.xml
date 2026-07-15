@@ -48,6 +48,9 @@
     <string name="grid_rows">Rows</string>
     <string name="grid_cols">Columns</string>
     <string name="overlay_opacity">Overlay Opacity</string>
+    <string name="editing_in_game">Editing in game</string>
+    <string name="save_and_close">Save and close</string>
+    <string name="control_type_android_keyboard">Android Keyboard</string>
     <string name="controls_accent_color">Controls accent color</string>
     <string name="profile">Profile</string>
     <string name="name">Name</string>
@@ -785,4 +788,3 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="save_backup_format_winlator_sub">Sibling Winlator / WinNative builds</string>
     <string name="save_backup_next">Next</string>
 </resources>
-

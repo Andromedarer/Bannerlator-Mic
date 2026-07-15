@@ -119,6 +119,16 @@ public class XrActivity extends XServerDisplayActivity implements TextWatcher {
         text.addTextChangedListener(this);
     }
 
+    @Override
+    protected void showGuestKeyboard() {
+        isSBS = false;
+        isImmersive = false;
+        resetText();
+        EditText text = findViewById(R.id.XRTextInput);
+        AppUtils.showKeyboard(this);
+        text.requestFocus();
+    }
+
     public static XrActivity getInstance() {
         return instance;
     }
@@ -257,13 +267,7 @@ public class XrActivity extends XServerDisplayActivity implements TextWatcher {
 
             // Show system keyboard
             if (getButtonClicked(buttons, primaryPress)) {
-                instance.runOnUiThread(() -> {
-                    isSBS = false;
-                    isImmersive = false;
-                    instance.resetText();
-                    AppUtils.showKeyboard(instance);
-                    instance.findViewById(R.id.XRTextInput).requestFocus();
-                });
+                instance.runOnUiThread(instance::showGuestKeyboard);
             }
 
             // Store the OpenXR data

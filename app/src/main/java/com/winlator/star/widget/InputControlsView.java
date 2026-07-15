@@ -50,6 +50,10 @@ import java.util.Timer;
 import java.util.TimerTask;
 
 public class InputControlsView extends View {
+    public interface OnEditorElementSettingsRequested {
+        void onSettingsRequested(ControlElement element);
+    }
+
     // 0.75 under the linear opacity mapping (ControlElement.drawGameHub) matches the visible
     // dimness the old 0.4 produced under the previous 0.5+0.7*opacity curve.
     public static final float DEFAULT_OVERLAY_OPACITY = 0.75f;
@@ -89,6 +93,9 @@ public class InputControlsView extends View {
     private float editorLongPressDownY;
     private long editorLongPressDownTimeMs;
     private boolean editorLongPressTriggered = false;
+    private boolean editorBackgroundVisible = true;
+    private OnEditorElementSettingsRequested onEditorElementSettingsRequested;
+    private Runnable showKeyboardCallback;
 
     private final Runnable editorLongPressRunnable = new Runnable() {
         @Override
@@ -96,7 +103,9 @@ public class InputControlsView extends View {
             ControlElement element = editorLongPressElement;
             if (!editMode || editorLongPressTriggered || element == null) return;
             editorLongPressTriggered = true;
-            if (getContext() instanceof ControlsEditorActivity) {
+            if (onEditorElementSettingsRequested != null) {
+                onEditorElementSettingsRequested.onSettingsRequested(element);
+            } else if (getContext() instanceof ControlsEditorActivity) {
                 ((ControlsEditorActivity)getContext()).showControlElementSettingsFor(element);
             }
             invalidate();
@@ -133,7 +142,28 @@ public class InputControlsView extends View {
     }
 
     public void setEditMode(boolean editMode) {
+        if (this.editMode == editMode) return;
+        releaseActiveControls();
+        cancelEditorLongPress();
+        if (timeoutHandler != null && hideControlsRunnable != null) {
+            timeoutHandler.removeCallbacks(hideControlsRunnable);
+        }
         this.editMode = editMode;
+        setVisibility(View.VISIBLE);
+        invalidate();
+    }
+
+    public void setEditorBackgroundVisible(boolean visible) {
+        editorBackgroundVisible = visible;
+        invalidate();
+    }
+
+    public void setOnEditorElementSettingsRequested(OnEditorElementSettingsRequested listener) {
+        onEditorElementSettingsRequested = listener;
+    }
+
+    public void setShowKeyboardCallback(Runnable callback) {
+        showKeyboardCallback = callback;
     }
 
     public void setOverlayOpacity(float overlayOpacity) {
@@ -176,8 +206,10 @@ public class InputControlsView extends View {
         readyToDraw = true;
 
         if (editMode) {
-            canvas.drawColor(Color.BLACK);
-            drawBackgroundImage(canvas);
+            if (editorBackgroundVisible) {
+                canvas.drawColor(Color.BLACK);
+                drawBackgroundImage(canvas);
+            }
             drawGrid(canvas);
             drawCursor(canvas);
         }
@@ -628,7 +660,7 @@ public class InputControlsView extends View {
     @Override
     public boolean onTouchEvent(MotionEvent event) {
         boolean hapticsEnabled = preferences.getBoolean("touchscreen_haptics_enabled", true);
-        resetTouchscreenTimeout();
+        if (!editMode) resetTouchscreenTimeout();
 
         if (editMode && readyToDraw) {
             switch (event.getAction()) {
@@ -879,6 +911,10 @@ public class InputControlsView extends View {
         // press/release fire getBindingAt(1) unconditionally, so a normal one-binding button injected this
         // junk event on every tap. Skip NONE here; real dual-binding buttons still fire when slot 1 is set.
         if (binding == Binding.NONE) return;
+        if (binding == Binding.SHOW_ANDROID_KEYBOARD) {
+            if (isActionDown && showKeyboardCallback != null) showKeyboardCallback.run();
+            return;
+        }
         WinHandler winHandler = xServer != null ? xServer.getWinHandler() : null;
         if (binding.isGamepad()) {
             GamepadState state = (controller != null) ? controller.remappedState : profile.getGamepadState();
