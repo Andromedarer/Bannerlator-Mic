@@ -30,4 +30,15 @@ public class GamepadState {
         return (byte)(dpad[0] ? -1 : (dpad[2] ? 1 : 0));
     }
 
+    public void reset() {
+        thumbLX = 0;
+        thumbLY = 0;
+        thumbRX = 0;
+        thumbRY = 0;
+        triggerL = 0;
+        triggerR = 0;
+        buttons = 0;
+        java.util.Arrays.fill(dpad, false);
+    }
+
 }

@@ -703,6 +703,21 @@ public class WinHandler {
         return handled;
     }
 
+    public void releaseAllControllerInputs() {
+        for (ExternalController controller : controllers.values()) {
+            controller.state.reset();
+            controller.remappedState.reset();
+            sendGamepadState(controller);
+        }
+        ControlsProfile profile = activity.getInputControlsView().getProfile();
+        if (profile == null) return;
+        for (ExternalController controller : profile.loadControllers()) {
+            controller.state.reset();
+            controller.remappedState.reset();
+            sendGamepadState(controller);
+        }
+    }
+
     public byte getInputType() {
         return inputType;
     }

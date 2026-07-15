@@ -16,6 +16,7 @@ import com.winlator.star.core.AppUtils;
 import com.winlator.star.core.FileUtils;
 
 import org.json.JSONException;
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.File;
@@ -25,10 +26,17 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 
 public class InputControlsManager {
+    private static final Object PROFILE_IMPORT_LOCK = new Object();
     private final Context context;
     private ArrayList<ControlsProfile> profiles;
     private int maxProfileId;
@@ -103,6 +111,7 @@ public class InputControlsManager {
         if (files != null) {
             for (File file : files) {
                 ControlsProfile profile = loadProfile(context, file);
+                if (profile == null) continue;
                 if (!(ignoreTemplates && profile.isTemplate())) profiles.add(profile);
                 maxProfileId = Math.max(maxProfileId, profile.id);
             }
@@ -161,20 +170,72 @@ public class InputControlsManager {
 
     @Nullable
     public ControlsProfile importProfile(JSONObject data) {
+        synchronized (PROFILE_IMPORT_LOCK) {
+            return importProfileLocked(data);
+        }
+    }
+
+    private ControlsProfile importProfileLocked(JSONObject data) {
+        CustomIconManager customIconManager = new CustomIconManager(context);
+        ArrayList<Short> importedIconIds = new ArrayList<>();
         try {
-            if (!data.has("id") || !data.has("name")) return null;
+            Object profileName = data.opt("name");
+            if (!data.has("id") || !(profileName instanceof String)
+                    || ((String)profileName).trim().isEmpty()) return null;
             int schemaVersion = data.optInt("schemaVersion", 1);
             int minEditorVersion = data.optInt("minEditorVersion", 1);
             if (schemaVersion > ControlsProfile.SCHEMA_VERSION
                     || minEditorVersion > ControlsProfile.EDITOR_VERSION) return null;
+
+            Map<Integer, Integer> iconIdMap = new HashMap<>();
+            JSONArray embeddedIcons = data.optJSONArray("customIcons");
+            if (embeddedIcons != null) {
+                JSONArray elements = data.optJSONArray("elements");
+                if (elements != null) {
+                    for (int i = 0; i < elements.length(); i++) {
+                        JSONObject element = elements.optJSONObject(i);
+                        int iconId = element != null ? element.optInt("iconId", 0) : 0;
+                        if (iconId >= CustomIconManager.CUSTOM_ICON_ID_OFFSET
+                                && iconId <= CustomIconManager.MAX_CUSTOM_ICON_ID) iconIdMap.put(iconId, 0);
+                    }
+                }
+                for (int i = 0; i < embeddedIcons.length(); i++) {
+                    JSONObject embeddedIcon = embeddedIcons.optJSONObject(i);
+                    if (embeddedIcon == null) continue;
+                    int sourceId = embeddedIcon.optInt("id", -1);
+                    if (!iconIdMap.containsKey(sourceId) || iconIdMap.get(sourceId) != 0) continue;
+                    CustomIconManager.ImportedIcon importedIcon = customIconManager.importEncodedIcon(
+                            embeddedIcon.optString("png", null));
+                    if (importedIcon != null) {
+                        iconIdMap.put(sourceId, (int)importedIcon.id);
+                        if (importedIcon.created) importedIconIds.add(importedIcon.id);
+                    }
+                }
+                for (int targetId : iconIdMap.values()) {
+                    if (targetId == 0) {
+                        rollbackImportedIcons(customIconManager, importedIconIds);
+                        return null;
+                    }
+                }
+                data.remove("customIcons");
+            }
+            remapIconIds(data, iconIdMap);
 
             int newId = ++maxProfileId;
             File newFile = ControlsProfile.getProfileFile(context, newId);
             data.put("schemaVersion", ControlsProfile.SCHEMA_VERSION);
             data.put("minEditorVersion", ControlsProfile.MIN_EDITOR_VERSION);
             data.put("id", newId);
-            FileUtils.writeString(newFile, data.toString());
+            if (!FileUtils.writeString(newFile, data.toString())) {
+                rollbackImportedIcons(customIconManager, importedIconIds);
+                return null;
+            }
             ControlsProfile newProfile = loadProfile(context, newFile);
+            if (newProfile == null) {
+                newFile.delete();
+                rollbackImportedIcons(customIconManager, importedIconIds);
+                return null;
+            }
 
             int foundIndex = -1;
             for (int i = 0; i < profiles.size(); i++) {
@@ -186,32 +247,97 @@ public class InputControlsManager {
             }
 
             if (foundIndex != -1) {
+                ControlsProfile replacedProfile = profiles.get(foundIndex);
+                File replacedFile = ControlsProfile.getProfileFile(context, replacedProfile.id);
+                if (!replacedFile.equals(newFile)) replacedFile.delete();
                 profiles.set(foundIndex, newProfile);
             }
             else profiles.add(newProfile);
             return newProfile;
         }
-        catch (JSONException e) {
+        catch (JSONException | RuntimeException e) {
+            rollbackImportedIcons(customIconManager, importedIconIds);
             return null;
         }
     }
 
     public File exportProfile(ControlsProfile profile) {
-        profile.save();
+        if (!profile.save()) return null;
         File destination;
         SharedPreferences sp = PreferenceManager.getDefaultSharedPreferences(context);
         String winlatorPath = sp.getString("winlator_path_uri", null);
         if (winlatorPath != null) {
             Uri winlatorUri = Uri.parse(winlatorPath);
-            destination = new File(FileUtils.getFilePathFromUri(context, winlatorUri), "profiles/" + profile.getName() + ".icp");
+            destination = new File(FileUtils.getFilePathFromUri(context, winlatorUri), "profiles/" + getSafeProfileName(profile) + ".icp");
         }
         else {
-            destination = new File(SettingsFragment.DEFAULT_WINLATOR_PATH, "profiles/" + profile.getName() + ".icp");
+            destination = new File(SettingsFragment.DEFAULT_WINLATOR_PATH, "profiles/" + getSafeProfileName(profile) + ".icp");
         }
-        FileUtils.copy(ControlsProfile.getProfileFile(context, profile.id), destination);
+        File source = ControlsProfile.getProfileFile(context, profile.id);
+        try {
+            JSONObject data = new JSONObject(FileUtils.readString(source));
+            JSONArray elements = data.optJSONArray("elements");
+            Set<Integer> iconIds = new HashSet<>();
+            if (elements != null) {
+                for (int i = 0; i < elements.length(); i++) {
+                    JSONObject element = elements.optJSONObject(i);
+                    if (element == null) continue;
+                    int iconId = element.optInt("iconId", 0);
+                    if (iconId >= CustomIconManager.CUSTOM_ICON_ID_OFFSET) iconIds.add(iconId);
+                }
+            }
+
+            CustomIconManager customIconManager = new CustomIconManager(context);
+            JSONArray embeddedIcons = new JSONArray();
+            for (int iconId : iconIds) {
+                String encodedIcon = customIconManager.encodeIcon(iconId);
+                if (encodedIcon == null) return null;
+                JSONObject embeddedIcon = new JSONObject();
+                embeddedIcon.put("id", iconId);
+                embeddedIcon.put("png", encodedIcon);
+                embeddedIcons.put(embeddedIcon);
+            }
+            if (embeddedIcons.length() > 0) data.put("customIcons", embeddedIcons);
+            else data.remove("customIcons");
+            File parent = destination.getParentFile();
+            if (parent != null && !parent.exists() && !parent.mkdirs()) return null;
+            File temporaryFile = new File(parent, destination.getName() + ".tmp");
+            if (!FileUtils.writeString(temporaryFile, data.toString())) return null;
+            try {
+                Files.move(temporaryFile.toPath(), destination.toPath(),
+                        StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            }
+            catch (IOException atomicMoveError) {
+                Files.move(temporaryFile.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            }
+        }
+        catch (JSONException | IOException e) {
+            return null;
+        }
         MediaScannerConnection.scanFile(context, new String[]{destination.getAbsolutePath()}, null, null);
         return destination.isFile() ? destination : null;
     }
+
+    static void remapIconIds(JSONObject data, Map<Integer, Integer> iconIdMap) throws JSONException {
+        JSONArray elements = data.optJSONArray("elements");
+        if (elements == null || iconIdMap.isEmpty()) return;
+        for (int i = 0; i < elements.length(); i++) {
+            JSONObject element = elements.optJSONObject(i);
+            if (element == null) continue;
+            int sourceIconId = element.optInt("iconId", 0);
+            Integer targetIconId = iconIdMap.get(sourceIconId);
+            if (targetIconId != null) element.put("iconId", targetIconId);
+        }
+    }
+
+    private static String getSafeProfileName(ControlsProfile profile) {
+        return profile.getName().replaceAll("[\\\\/:*?\"<>|]", "_");
+    }
+
+    private static void rollbackImportedIcons(CustomIconManager manager, ArrayList<Short> importedIconIds) {
+        for (short iconId : importedIconIds) manager.deleteIcon(iconId);
+    }
+
 
     public static ControlsProfile loadProfile(Context context, File file) {
         try {
@@ -259,14 +385,15 @@ public class InputControlsManager {
                 }
             }
 
+            if (profileName == null || profileName.trim().isEmpty()) return null;
             ControlsProfile profile = new ControlsProfile(context, profileId);
             profile.setName(profileName);
-            profile.setCursorSpeed(cursorSpeed);
+            profile.setCursorSpeed(Float.isNaN(cursorSpeed) ? 1.0f : cursorSpeed);
             profile.setCustomAccentEnabled(customAccentEnabled);
             profile.setCustomAccentColor(customAccentColor);
             return profile;
         }
-        catch (IOException e) {
+        catch (IOException | IllegalStateException | NumberFormatException e) {
             return null;
         }
     }

@@ -1165,14 +1165,16 @@ public class XServerDisplayActivity extends AppCompatActivity {
     }
 
     private void ensurePointerCapture(String reason) {
-        if (!isRelativeMouseMovement || touchpadView == null || inGameControlsEditor != null) return;
+        if ((!isRelativeMouseMovement && !cursorLock) || touchpadView == null || inGameControlsEditor != null) return;
 
         final int[] tries = {0};
         Runnable attempt = new Runnable() {
             @Override public void run() {
+                if (isFinishing() || isDestroyed()) return;
                 if (inGameControlsEditor != null) return;
-                if (!hasWindowFocus()) { touchpadView.postDelayed(this, 50); return; }
+                if (!hasWindowFocus()) return;
                 if (!touchpadView.isAttachedToWindow()) { touchpadView.postDelayed(this, 50); return; }
+                if (tries[0]++ >= 40) return;
 
                 // Make sure the view can take focus
                 touchpadView.setFocusableInTouchMode(true);
@@ -1793,8 +1795,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
 
-        if (hasFocus && cursorLock && inGameControlsEditor == null) {
+        if (hasFocus && (cursorLock || isRelativeMouseMovement) && inGameControlsEditor == null) {
             touchpadView.requestPointerCapture();
+            pointerCaptureRequested = true;
             touchpadView.setOnCapturedPointerListener(new View.OnCapturedPointerListener() {
                 @Override
                 public boolean onCapturedPointer(View view, MotionEvent event) {
@@ -1806,6 +1809,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         else if (!hasFocus) {
             touchpadView.releasePointerCapture();
             touchpadView.setOnCapturedPointerListener(null);
+            pointerCaptureRequested = false;
         }
     }
 
@@ -2918,6 +2922,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         XServerDialogState.INSTANCE.dismiss();
         drawerLayout.closeDrawers();
         releasePointerCaptureIfNeeded("in-game-controls-editor");
+        if (winHandler != null) winHandler.releaseAllControllerInputs();
 
         showInputControls(profile);
         inputControlsView.setShowTouchscreenControls(true);
@@ -2948,7 +2953,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 && preferences.getBoolean("touchscreen_timeout_enabled", false)) {
             startTouchscreenTimeout();
         }
-        if (cursorLock) {
+        if (isRelativeMouseMovement || cursorLock) {
             inputControlsView.postDelayed(() -> ensurePointerCapture("in-game-controls-editor-closed"), 250);
         }
     }

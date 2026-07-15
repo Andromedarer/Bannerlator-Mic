@@ -40,6 +40,7 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
     private boolean controllersLoaded = false;
     private boolean groupsLoaded = false;
     private boolean virtualGamepad = false;
+    private final ArrayList<Object> elementOrder = new ArrayList<>();
     private final Context context;
     private GamepadState gamepadState;
 
@@ -265,11 +266,13 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
         return getGroupElements(groupId).size();
     }
 
-    public void save() {
+    public boolean save() {
         File file = getProfileFile(context, id);
 
         try {
-            JSONObject data = new JSONObject();
+            JSONObject data = file.isFile()
+                    ? new JSONObject(FileUtils.readString(file))
+                    : new JSONObject();
             data.put("schemaVersion", SCHEMA_VERSION);
             data.put("minEditorVersion", MIN_EDITOR_VERSION);
             data.put("id", id);
@@ -306,7 +309,18 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
                 JSONArray existingElements = profileJSONObject.optJSONArray("elements");
                 if (existingElements != null) elementsJSONArray = existingElements;
             }
-            else for (ControlElement element : elements) elementsJSONArray.put(element.toJSONObject());
+            else {
+                ArrayList<ControlElement> remainingElements = new ArrayList<>(elements);
+                for (Object entry : elementOrder) {
+                    if (entry instanceof ControlElement) {
+                        ControlElement element = (ControlElement)entry;
+                        if (remainingElements.remove(element)) elementsJSONArray.put(element.toJSONObject());
+                    } else {
+                        elementsJSONArray.put(entry);
+                    }
+                }
+                for (ControlElement element : remainingElements) elementsJSONArray.put(element.toJSONObject());
+            }
             data.put("elements", elementsJSONArray);
 
             JSONArray controllersJSONArray = new JSONArray();
@@ -321,10 +335,13 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
                 }
             }
             if (controllersJSONArray.length() > 0) data.put("controllers", controllersJSONArray);
+            else data.remove("controllers");
 
-            FileUtils.writeString(file, data.toString());
+            return FileUtils.writeString(file, data.toString());
         }
-        catch (JSONException e) {}
+        catch (JSONException e) {
+            return false;
+        }
     }
 
     public static File getProfileFile(Context context, int id) {
@@ -393,6 +410,7 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
 
     public void loadElements(InputControlsView inputControlsView) {
         elements.clear();
+        elementOrder.clear();
         elementsLoaded = false;
         virtualGamepad = false;
 
@@ -515,9 +533,13 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
                     }
 
                     if (!virtualGamepad && elementUsesGamepad) virtualGamepad = true;
+                    element.setSourceJSONObject(elementJSONObject);
                     elements.add(element);
+                    elementOrder.add(element);
                 }
                 catch (JSONException | IllegalArgumentException e) {
+                    Object unknownElement = elementsJSONArray.opt(i);
+                    if (unknownElement != null) elementOrder.add(unknownElement);
                     e.printStackTrace();
                 }
             }

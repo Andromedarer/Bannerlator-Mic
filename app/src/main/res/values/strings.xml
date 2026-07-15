@@ -51,6 +51,9 @@
     <string name="editing_in_game">Editing in game</string>
     <string name="save_and_close">Save and close</string>
     <string name="control_type_android_keyboard">Android Keyboard</string>
+    <string name="change_control_type">Change control type?</string>
+    <string name="change_control_type_warning">Changing type resets bindings, combos, text, icon, and type-specific settings.</string>
+    <string name="confirm_change">Change</string>
     <string name="controls_accent_color">Controls accent color</string>
     <string name="profile">Profile</string>
     <string name="name">Name</string>
@@ -68,6 +71,14 @@
     <string name="control_type_dynamic_stick">Dynamic Stick</string>
     <string name="control_type_mouse_area">Mouse Area</string>
     <string name="control_type_button_grid">Button Grid</string>
+    <string name="control_shape_circle">Circle</string>
+    <string name="control_shape_rectangle">Rectangle</string>
+    <string name="control_shape_rounded_rectangle">Rounded rectangle</string>
+    <string name="control_shape_square">Square</string>
+    <string name="control_range_a_z">A to Z</string>
+    <string name="control_range_0_9">0 to 9</string>
+    <string name="control_range_f1_f12">F1 to F12</string>
+    <string name="control_range_numpad_0_9">Numpad 0 to 9</string>
     <string name="set_background_image">Set Background Image</string>
     <string name="select_background_image">Select background image</string>
     <string name="select_icon_image">Select icon image</string>

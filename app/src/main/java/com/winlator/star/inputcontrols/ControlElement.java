@@ -91,10 +91,12 @@ public class ControlElement {
     private int currentPointerId = -1;
     private final Rect boundingBox = new Rect();
     private boolean[] states = new boolean[4];
+    private boolean[] activeBindingSlots = new boolean[4];
+    private boolean holdKeyActive;
     private final Path path = new Path();
     private boolean boundingBoxNeedsUpdate = true;
     private String text = "";
-    private byte iconId;
+    private short iconId;
     private Range range;
     private byte orientation;
     private PointF currentPosition;
@@ -121,9 +123,23 @@ public class ControlElement {
     private Binding holdKey;           // key held while touch is active (TRACKPAD/MOUSE_AREA/STICK/DYNAMIC_STICK), default NONE
     private float deadZone = 0.15f;
     private String groupId = null;
+    private JSONObject sourceJSONObject;
 
     public ControlElement(InputControlsView inputControlsView) {
         this.inputControlsView = inputControlsView;
+    }
+
+    public void setSourceJSONObject(JSONObject sourceJSONObject) {
+        if (sourceJSONObject == null) {
+            this.sourceJSONObject = null;
+            return;
+        }
+        try {
+            this.sourceJSONObject = new JSONObject(sourceJSONObject.toString());
+        }
+        catch (JSONException e) {
+            this.sourceJSONObject = null;
+        }
     }
 
     private void reset() {
@@ -144,6 +160,10 @@ public class ControlElement {
         gridCellShape = Shape.ROUND_RECT;
         mouseAreaLastPos = null;
         holdKey = Binding.NONE;
+        holdKeyActive = false;
+        toggleSwitch = false;
+        deadZone = 0.15f;
+        orientation = 0;
         currentPointerId = -1;
         currentPosition = null;
         touchTime = null;
@@ -203,6 +223,7 @@ public class ControlElement {
 
     public void setType(Type type) {
         this.type = type;
+        sourceJSONObject = null;
         reset();
     }
 
@@ -223,6 +244,7 @@ public class ControlElement {
         if (preserveExisting && bindings != null) {
             Binding[] oldBindings = bindings;
             boolean[] oldStates = states;
+            boolean[] oldActiveBindingSlots = activeBindingSlots;
             Binding[][] oldComboBindings = comboBindings;
             long[] oldCellPressTimes = cellPressTimes;
 
@@ -231,12 +253,16 @@ public class ControlElement {
                 Arrays.fill(bindings, oldBindings.length, safeBindingCount, Binding.NONE);
             }
             states = oldStates != null ? Arrays.copyOf(oldStates, safeBindingCount) : new boolean[safeBindingCount];
+            activeBindingSlots = oldActiveBindingSlots != null
+                    ? Arrays.copyOf(oldActiveBindingSlots, safeBindingCount)
+                    : new boolean[safeBindingCount];
             comboBindings = oldComboBindings != null ? Arrays.copyOf(oldComboBindings, safeBindingCount) : null;
             cellPressTimes = oldCellPressTimes != null ? Arrays.copyOf(oldCellPressTimes, safeBindingCount) : null;
         } else {
             bindings = new Binding[safeBindingCount];
             Arrays.fill(bindings, Binding.NONE);
             states = new boolean[safeBindingCount];
+            activeBindingSlots = new boolean[safeBindingCount];
             comboBindings = null;
             cellPressTimes = null;
         }
@@ -250,6 +276,7 @@ public class ControlElement {
         bindings = Arrays.copyOf(bindings, safeBindingCount);
         Arrays.fill(bindings, oldLength, bindings.length, Binding.NONE);
         states = Arrays.copyOf(states, safeBindingCount);
+        activeBindingSlots = Arrays.copyOf(activeBindingSlots, safeBindingCount);
         if (comboBindings != null) comboBindings = Arrays.copyOf(comboBindings, safeBindingCount);
         if (cellPressTimes != null) cellPressTimes = Arrays.copyOf(cellPressTimes, safeBindingCount);
         boundingBoxNeedsUpdate = true;
@@ -420,12 +447,12 @@ public class ControlElement {
         this.text = text != null ? text : "";
     }
 
-    public byte getIconId() {
+    public short getIconId() {
         return iconId;
     }
 
     public void setIconId(int iconId) {
-        this.iconId = (byte)iconId;
+        this.iconId = (short)Math.max(0, Math.min(255, iconId));
     }
 
     public Rect getBoundingBox() {
@@ -1606,7 +1633,7 @@ public class ControlElement {
     }
 
     private void drawIcon(Canvas canvas, float cx, float cy, float width, float height, int iconId) {
-        Bitmap icon = inputControlsView.getIcon((byte)iconId);
+        Bitmap icon = inputControlsView.getIcon(iconId);
         if (icon == null) return;
 
         Paint paint = inputControlsView.getPaint();
@@ -1627,7 +1654,7 @@ public class ControlElement {
 
     public JSONObject toJSONObject() {
         try {
-            JSONObject elementJSONObject = new JSONObject();
+            JSONObject elementJSONObject = copyForSerialization(sourceJSONObject);
             elementJSONObject.put("type", type.name());
             elementJSONObject.put("shape", shape.name());
 
@@ -1640,7 +1667,7 @@ public class ControlElement {
             elementJSONObject.put("y", (float)y / inputControlsView.getMaxHeight());
             elementJSONObject.put("toggleSwitch", toggleSwitch);
             elementJSONObject.put("text", text);
-            elementJSONObject.put("iconId", iconId & 0xFF);
+            elementJSONObject.put("iconId", iconId);
 
             if (type == Type.RANGE_BUTTON && range != null) {
                 elementJSONObject.put("range", range.name());
@@ -1695,6 +1722,19 @@ public class ControlElement {
         }
     }
 
+    static JSONObject copyForSerialization(JSONObject sourceJSONObject) throws JSONException {
+        JSONObject elementJSONObject = sourceJSONObject != null
+                ? new JSONObject(sourceJSONObject.toString())
+                : new JSONObject();
+        String[] optionalKeys = {
+                "range", "orientation", "groupId", "areaWidthRatio", "areaHeightRatio",
+                "stickRadiusRatio", "areaWidth", "areaHeight", "stickRadius",
+                "mouseSensitivity", "gridRows", "gridCols", "gridCellShape", "combos", "holdKey"
+        };
+        for (String key : optionalKeys) elementJSONObject.remove(key);
+        return elementJSONObject;
+    }
+
     public boolean containsPoint(float x, float y) {
         return getBoundingBox().contains((int)(x + 0.5f), (int)(y + 0.5f));
     }
@@ -1704,6 +1744,18 @@ public class ControlElement {
         return !toggleSwitch && (binding == Binding.GAMEPAD_BUTTON_L3 || binding == Binding.GAMEPAD_BUTTON_R3);
     }
 
+    public boolean isAndroidKeyboardButton() {
+        for (int index = 0; index < Math.min(2, bindings.length); index++) {
+            if (getBindingAt(index) == Binding.SHOW_ANDROID_KEYBOARD) return true;
+            Binding[] combo = getCombo(index);
+            if (combo == null) continue;
+            for (Binding binding : combo) {
+                if (binding == Binding.SHOW_ANDROID_KEYBOARD) return true;
+            }
+        }
+        return false;
+    }
+
     public boolean handleTouchDown(int pointerId, float x, float y) {
         if (currentPointerId == -1 && containsPoint(x, y)) {
             currentPointerId = pointerId;
@@ -1711,7 +1763,7 @@ public class ControlElement {
                 states[0] = true;
                 inputControlsView.invalidate();
                 if (isKeepButtonPressedAfterMinTime()) touchTime = System.currentTimeMillis();
-                if (!toggleSwitch || !selected) {
+                if (!toggleSwitch || !selected || isAndroidKeyboardButton()) {
                     pressBindingSlot(0);
                     pressBindingSlot(1);
                 }
@@ -1723,7 +1775,7 @@ public class ControlElement {
             }
             else if (type == Type.DYNAMIC_STICK) {
                 // Hold key stays pressed while stick is active
-                if (getHoldKey() != Binding.NONE) inputControlsView.handleInputEvent(getHoldKey(), true);
+                pressHoldKey();
                 // Stick appears at touch point within the detection area
                 if (currentPosition == null) currentPosition = new PointF();
                 currentPosition.set(x, y);
@@ -1740,7 +1792,7 @@ public class ControlElement {
             }
             else if (type == Type.MOUSE_AREA) {
                 // Hold key stays pressed while mouse area is active
-                if (getHoldKey() != Binding.NONE) inputControlsView.handleInputEvent(getHoldKey(), true);
+                pressHoldKey();
                 // Start mouse tracking from this position
                 if (mouseAreaLastPos == null) mouseAreaLastPos = new PointF();
                 mouseAreaLastPos.set(x, y);
@@ -1761,7 +1813,7 @@ public class ControlElement {
             else {
                 if (type == Type.TRACKPAD || type == Type.STICK) {
                     // Hold key stays pressed while trackpad/stick is active
-                    if (getHoldKey() != Binding.NONE) inputControlsView.handleInputEvent(getHoldKey(), true);
+                    pressHoldKey();
                 }
                 if (type == Type.TRACKPAD) {
                     if (currentPosition == null) currentPosition = new PointF();
@@ -1799,26 +1851,67 @@ public class ControlElement {
 
     private void handleBindingSlot(int index, boolean state, float value) {
         if (!isValidBindingIndex(index)) return;
+        boolean wasActive = activeBindingSlots[index];
+        boolean analogUpdate = state && wasActive && slotContainsMouseMove(index);
+        if (state == wasActive && !analogUpdate) return;
+        if (!analogUpdate) activeBindingSlots[index] = state;
         if (hasCombo(index)) {
             for (Binding b : getCombo(index)) {
                 // Suppress per-binding gamepad state sends; batch them at the end
                 // so the game receives the full combo as one atomic update.
-                inputControlsView.handleInputEvent(null, b, state, 0, false);
+                if (b.isMouseMove()) {
+                    inputControlsView.handleMouseMoveInput(this, index, b, state, value);
+                } else if (!analogUpdate) {
+                    inputControlsView.handleCountedInputEvent(b, state, value, false);
+                }
             }
             inputControlsView.sendGamepadUpdate();
         } else {
-            inputControlsView.handleInputEvent(getBindingAt(index), state, value);
+            Binding binding = getBindingAt(index);
+            if (binding.isMouseMove()) inputControlsView.handleMouseMoveInput(this, index, binding, state, value);
+            else if (analogUpdate) inputControlsView.handleInputEvent(binding, true, value);
+            else inputControlsView.handleCountedInputEvent(binding, state, value, true);
         }
     }
 
+    private boolean slotContainsMouseMove(int index) {
+        if (getBindingAt(index).isMouseMove()) return true;
+        Binding[] combo = getCombo(index);
+        if (combo == null) return false;
+        for (Binding binding : combo) if (binding.isMouseMove()) return true;
+        return false;
+    }
+
+    private void pressHoldKey() {
+        Binding holdKey = getHoldKey();
+        if (holdKeyActive || holdKey == Binding.NONE) return;
+        holdKeyActive = true;
+        inputControlsView.handleCountedInputEvent(holdKey, true, 0, true);
+    }
+
+    private void releaseHoldKey() {
+        if (!holdKeyActive) return;
+        holdKeyActive = false;
+        inputControlsView.handleCountedInputEvent(getHoldKey(), false, 0, true);
+    }
+
+    private boolean usesUnifiedGamepadStick() {
+        return (type == Type.STICK || type == Type.DYNAMIC_STICK || type == Type.TRACKPAD)
+                && getBindingAt(0).isGamepad();
+    }
+
+    private void releaseUnifiedGamepadStick() {
+        if (usesUnifiedGamepadStick()) inputControlsView.handleStickInput(this, getBindingAt(0), 0, 0);
+    }
+
     public void releaseActiveInputs() {
-        if (states != null) {
-            for (int i = 0; i < states.length; i++) {
-                if (states[i]) {
-                    releaseBindingSlot(i);
-                    states[i] = false;
-                }
+        if (activeBindingSlots != null) {
+            for (int i = 0; i < activeBindingSlots.length; i++) {
+                if (activeBindingSlots[i]) releaseBindingSlot(i);
             }
+        }
+        if (states != null) {
+            Arrays.fill(states, false);
         }
         if (type == Type.BUTTON && selected) {
             releaseBindingSlot(0);
@@ -1826,9 +1919,8 @@ public class ControlElement {
             selected = false;
         }
 
-        if ((type == Type.TRACKPAD || type == Type.MOUSE_AREA || type == Type.STICK || type == Type.DYNAMIC_STICK) && getHoldKey() != Binding.NONE) {
-            inputControlsView.handleInputEvent(getHoldKey(), false);
-        }
+        releaseUnifiedGamepadStick();
+        releaseHoldKey();
         if (type == Type.RANGE_BUTTON && scroller != null) {
             scroller.handleTouchUp();
         }
@@ -1907,11 +1999,11 @@ public class ControlElement {
                         finalX = (normX / magnitude) * scale;
                         finalY = (normY / magnitude) * scale;
                     }
-                    inputControlsView.handleStickInput(firstBinding, finalX, finalY);
+                    inputControlsView.handleStickInput(this, firstBinding, finalX, finalY);
                     for (byte i = 0; i < 4; i++) this.states[i] = true;
                 } else {
-                    final boolean[] st = {normY <= -deadZone, normX >= deadZone,
-                                          normY >= deadZone, normX <= -deadZone};
+                    final boolean[] st = {normY < -deadZone, normX > deadZone,
+                                          normY > deadZone, normX < -deadZone};
                     for (byte i = 0; i < 4; i++) {
                         float value = i == 1 || i == 3 ? normX : normY;
                         Binding binding = getBindingAt(i);
@@ -1991,7 +2083,7 @@ public class ControlElement {
                     }
 
                     // Use unified stick input method - sets both X and Y together
-                    inputControlsView.handleStickInput(firstBinding, finalX, finalY);
+                    inputControlsView.handleStickInput(this, firstBinding, finalX, finalY);
 
                     // Mark all directions as active for proper release handling
                     for (byte i = 0; i < 4; i++) {
@@ -1999,7 +2091,7 @@ public class ControlElement {
                     }
                 } else {
                     // Fallback to per-direction handling for mouse/keyboard bindings
-                    final boolean[] states = {deltaY <= -deadZone, deltaX >= deadZone, deltaY >= deadZone, deltaX <= -deadZone};
+                    final boolean[] states = {deltaY < -deadZone, deltaX > deadZone, deltaY > deadZone, deltaX < -deadZone};
                     for (byte i = 0; i < 4; i++) {
                         float value = i == 1 || i == 3 ? deltaX : deltaY;
                         Binding binding = getBindingAt(i);
@@ -2031,7 +2123,7 @@ public class ControlElement {
                     float finalY = Mathf.clamp(interpY * Mathf.sign(valueY), -1, 1);
                     
                     // Use unified stick input
-                    inputControlsView.handleStickInput(firstBinding, finalX, finalY);
+                    inputControlsView.handleStickInput(this, firstBinding, finalX, finalY);
                     
                     // Mark all as active
                     for (byte i = 0; i < 4; i++) {
@@ -2073,7 +2165,7 @@ public class ControlElement {
                 }
             }
             else {
-                final boolean[] states = {deltaY <= -deadZone, deltaX >= deadZone, deltaY >= deadZone, deltaX <= -deadZone};
+                final boolean[] states = {deltaY < -deadZone, deltaX > deadZone, deltaY > deadZone, deltaX < -deadZone};
 
                 for (byte i = 0; i < 4; i++) {
                     float value = i == 1 || i == 3 ? deltaX : deltaY;
@@ -2106,12 +2198,12 @@ public class ControlElement {
                     }
                     touchTime = null;
                 }
-                else if (!toggleSwitch || selected) {
+                else if (!toggleSwitch || selected || isAndroidKeyboardButton()) {
                     releaseBindingSlot(0);
                     releaseBindingSlot(1);
                 }
 
-                if (toggleSwitch) {
+                if (toggleSwitch && !isAndroidKeyboardButton()) {
                     selected = !selected;
                 }
             }
@@ -2124,9 +2216,8 @@ public class ControlElement {
                 }
 
                 // Release hold key for movement controls
-                if ((type == Type.TRACKPAD || type == Type.MOUSE_AREA || type == Type.STICK || type == Type.DYNAMIC_STICK) && getHoldKey() != Binding.NONE) {
-                    inputControlsView.handleInputEvent(getHoldKey(), false);
-                }
+                releaseUnifiedGamepadStick();
+                releaseHoldKey();
 
                 if (type == Type.RANGE_BUTTON) {
                     scroller.handleTouchUp();

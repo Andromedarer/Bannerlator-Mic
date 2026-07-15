@@ -47,6 +47,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -66,6 +67,8 @@ import com.winlator.star.inputcontrols.Binding
 import com.winlator.star.inputcontrols.ControlElement
 import com.winlator.star.inputcontrols.ControlsProfile
 import com.winlator.star.inputcontrols.CustomIconManager
+import kotlinx.coroutines.delay
+import java.util.Locale
 import kotlin.math.roundToInt
 
 private val EditorMaxSliderWidth = 300.dp
@@ -96,9 +99,28 @@ fun ControlsEditorSettingsPane(
     onClose: () -> Unit,
     onPickCustomIcon: () -> Unit,
 ) {
-    val typeOptions = remember { ControlElement.Type.names().toList() }
-    val shapeOptions = remember { ControlElement.Shape.names().toList() }
-    val rangeOptions = remember { ControlElement.Range.names().toList() }
+    val typeOptions = listOf(
+        stringResource(R.string.control_type_button),
+        stringResource(R.string.control_type_d_pad),
+        stringResource(R.string.control_type_range_button),
+        stringResource(R.string.control_type_stick),
+        stringResource(R.string.control_type_trackpad),
+        stringResource(R.string.control_type_dynamic_stick),
+        stringResource(R.string.control_type_mouse_area),
+        stringResource(R.string.control_type_button_grid),
+    )
+    val shapeOptions = listOf(
+        stringResource(R.string.control_shape_circle),
+        stringResource(R.string.control_shape_rectangle),
+        stringResource(R.string.control_shape_rounded_rectangle),
+        stringResource(R.string.control_shape_square),
+    )
+    val rangeOptions = listOf(
+        stringResource(R.string.control_range_a_z),
+        stringResource(R.string.control_range_0_9),
+        stringResource(R.string.control_range_f1_f12),
+        stringResource(R.string.control_range_numpad_0_9),
+    )
     val bindingOptions = remember { Binding.values().toList() }
     val holdKeyOptions = remember {
         buildList {
@@ -140,6 +162,7 @@ fun ControlsEditorSettingsPane(
     var newGroupName by remember { mutableStateOf("") }
     var bindingDialogIndex by remember(element) { mutableStateOf(-1) }
     var bindingDialogTitle by remember(element) { mutableStateOf("") }
+    var pendingTypeIndex by remember(element) { mutableStateOf<Int?>(null) }
 
     fun saveAndInvalidate() {
         val normalizedGroupId = groupId.trim()
@@ -201,6 +224,10 @@ fun ControlsEditorSettingsPane(
         val mainBinding = if (binding != Binding.NONE) binding else cleanCombo.lastOrNull() ?: Binding.NONE
         element.setBindingAt(index, mainBinding)
         element.setCombo(index, if (cleanCombo.isEmpty()) null else cleanCombo.toTypedArray())
+        if (mainBinding == Binding.SHOW_ANDROID_KEYBOARD || cleanCombo.contains(Binding.SHOW_ANDROID_KEYBOARD)) {
+            element.setToggleSwitch(false)
+            toggleSwitch = false
+        }
         saveAndInvalidate()
     }
 
@@ -234,6 +261,14 @@ fun ControlsEditorSettingsPane(
         syncFromElement()
     }
 
+    LaunchedEffect(customText) {
+        delay(300)
+        if (element.getText() == customText) profile.save()
+    }
+    DisposableEffect(element) {
+        onDispose { profile.save() }
+    }
+
     MaterialTheme(colorScheme = controlsEditorColorScheme()) {
         Column(
             modifier = Modifier
@@ -262,9 +297,29 @@ fun ControlsEditorSettingsPane(
                 options = typeOptions,
                 selectedIndex = typeIndex,
                 onSelected = { index ->
-                    element.setType(ControlElement.Type.values()[index])
-                    syncFromElement()
-                    saveAndInvalidate()
+                    if (index != typeIndex) pendingTypeIndex = index
+                },
+            )
+        }
+
+        if (pendingTypeIndex != null) {
+            AlertDialog(
+                onDismissRequest = { pendingTypeIndex = null },
+                title = { Text(stringResource(R.string.change_control_type)) },
+                text = { Text(stringResource(R.string.change_control_type_warning)) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val index = pendingTypeIndex ?: return@TextButton
+                        element.setType(ControlElement.Type.values()[index])
+                        pendingTypeIndex = null
+                        syncFromElement()
+                        saveAndInvalidate()
+                    }) { Text(stringResource(R.string.confirm_change)) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingTypeIndex = null }) {
+                        Text(stringResource(R.string.cancel))
+                    }
                 },
             )
         }
@@ -424,7 +479,7 @@ fun ControlsEditorSettingsPane(
                 rangeStart = 1,
                 rangeEnd = 50,
                 suffix = "x",
-                format = { value -> String.format("%.1fx", value / 10f) },
+                format = { value -> String.format(Locale.getDefault(), "%.1fx", value / 10f) },
                 onValueChange = { value ->
                     element.setMouseSensitivity(value / 10f)
                     mouseSensitivity = value
@@ -573,7 +628,8 @@ fun ControlsEditorSettingsPane(
         SettingSwitch(
             label = stringResource(R.string.toggle_switch),
             checked = toggleSwitch,
-            visible = selectedType == ControlElement.Type.BUTTON,
+            visible = selectedType == ControlElement.Type.BUTTON
+                && !element.isAndroidKeyboardButton,
             onCheckedChange = { checked ->
                 toggleSwitch = checked
                 element.setToggleSwitch(checked)
@@ -589,7 +645,7 @@ fun ControlsEditorSettingsPane(
                         val text = value.take(8)
                         customText = text
                         element.setText(text)
-                        saveAndInvalidate()
+                        onInvalidate()
                     },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,

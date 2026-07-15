@@ -45,7 +45,9 @@ import com.winlator.star.xserver.XServer;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Timer;
 import java.util.TimerTask;
 
@@ -96,6 +98,43 @@ public class InputControlsView extends View {
     private boolean editorBackgroundVisible = true;
     private OnEditorElementSettingsRequested onEditorElementSettingsRequested;
     private Runnable showKeyboardCallback;
+    private final Map<Binding, Integer> activeVirtualBindings = new HashMap<>();
+    private final Map<ControlElement, VirtualStickState> activeVirtualSticks = new HashMap<>();
+    private final Map<VirtualMouseBindingKey, Float> activeVirtualMouseBindings = new HashMap<>();
+
+    private static class VirtualStickState {
+        final Binding binding;
+        final float x;
+        final float y;
+
+        VirtualStickState(Binding binding, float x, float y) {
+            this.binding = binding;
+            this.x = x;
+            this.y = y;
+        }
+    }
+
+    private static class VirtualMouseBindingKey {
+        final ControlElement owner;
+        final int slot;
+        final Binding binding;
+
+        VirtualMouseBindingKey(ControlElement owner, int slot, Binding binding) {
+            this.owner = owner;
+            this.slot = slot;
+            this.binding = binding;
+        }
+
+        @Override public boolean equals(Object obj) {
+            if (!(obj instanceof VirtualMouseBindingKey)) return false;
+            VirtualMouseBindingKey other = (VirtualMouseBindingKey)obj;
+            return owner == other.owner && slot == other.slot && binding == other.binding;
+        }
+
+        @Override public int hashCode() {
+            return 31 * (31 * System.identityHashCode(owner) + slot) + binding.ordinal();
+        }
+    }
 
     private final Runnable editorLongPressRunnable = new Runnable() {
         @Override
@@ -133,7 +172,7 @@ public class InputControlsView extends View {
         setClickable(true);
         setFocusable(true);
         setFocusableInTouchMode(true);
-        setPointerIcon(PointerIcon.load(getResources(), R.drawable.hidden_pointer_arrow));
+        setPointerIcon(PointerIcon.load(getResources(), R.xml.hidden_pointer_arrow));
         if (getLayoutParams() == null) {
             setLayoutParams(new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         }
@@ -415,6 +454,9 @@ public class InputControlsView extends View {
                 element.releaseActiveInputs();
             }
         }
+        activeVirtualBindings.clear();
+        activeVirtualSticks.clear();
+        activeVirtualMouseBindings.clear();
         mouseMoveOffset.set(0, 0);
     }
 
@@ -597,20 +639,12 @@ public class InputControlsView extends View {
 
         for (int i = 0; i < axes.length; i++) {
             float value = values[i];
-            if (Math.abs(value) > ControlElement.STICK_DEAD_ZONE) {
-                byte sign = Mathf.sign(value);
+            byte activeSign = Math.abs(value) > ControlElement.STICK_DEAD_ZONE ? Mathf.sign(value) : 0;
+            for (byte sign = -1; sign <= 1; sign += 2) {
                 int keyCode = ExternalControllerBinding.getKeyCodeForAxis(axes[i], sign);
                 ExternalControllerBinding controllerBinding = controller.getControllerBinding(keyCode);
                 if (controllerBinding != null) {
-                    handleInputEvent(controller, controllerBinding.getBinding(), true, value, false);
-                }
-            } else {
-                for (byte sign = -1; sign <= 1; sign += 2) {
-                    int keyCode = ExternalControllerBinding.getKeyCodeForAxis(axes[i], sign);
-                    ExternalControllerBinding controllerBinding = controller.getControllerBinding(keyCode);
-                    if (controllerBinding != null) {
-                        handleInputEvent(controller, controllerBinding.getBinding(), false, value, false);
-                    }
+                    handleInputEvent(controller, controllerBinding.getBinding(), sign == activeSign, value, false);
                 }
             }
         }
@@ -717,6 +751,7 @@ public class InputControlsView extends View {
                     break;
                 }
                 case MotionEvent.ACTION_UP: {
+                    performClick();
                     boolean longPressWasTriggered = editorLongPressTriggered;
                     cancelEditorLongPress();
                     editorLongPressTriggered = false;
@@ -809,6 +844,12 @@ public class InputControlsView extends View {
         return true;
     }
 
+    @Override
+    public boolean performClick() {
+        super.performClick();
+        return true;
+    }
+
     private boolean hasVisibleMouseLeftButton() {
         if (profile == null) return false;
         for (ControlElement element : profile.getElements()) {
@@ -860,24 +901,89 @@ public class InputControlsView extends View {
         handleInputEvent(controller, binding, isActionDown, 0);
     }
 
-    public void handleStickInput(Binding firstBinding, float deltaX, float deltaY) {
+    public void handleStickInput(ControlElement owner, Binding firstBinding, float deltaX, float deltaY) {
         if (!firstBinding.isGamepad()) return;
-        GamepadState state = profile.getGamepadState();
+        if (deltaX == 0 && deltaY == 0) activeVirtualSticks.remove(owner);
+        else activeVirtualSticks.put(owner, new VirtualStickState(firstBinding, deltaX, deltaY));
+
+        rebuildVirtualStickAxes();
         WinHandler winHandler = xServer != null ? xServer.getWinHandler() : null;
-        boolean isLeftStick = firstBinding == Binding.GAMEPAD_LEFT_THUMB_UP ||
-                             firstBinding == Binding.GAMEPAD_LEFT_THUMB_DOWN ||
-                             firstBinding == Binding.GAMEPAD_LEFT_THUMB_LEFT ||
-                             firstBinding == Binding.GAMEPAD_LEFT_THUMB_RIGHT;
-        if (isLeftStick) {
-            state.thumbLX = deltaX;
-            state.thumbLY = deltaY;
+        if (winHandler != null) winHandler.sendGamepadState();
+    }
+
+    private void rebuildVirtualStickAxes() {
+        if (profile == null) return;
+        GamepadState state = profile.getGamepadState();
+        state.thumbLX = state.thumbLY = state.thumbRX = state.thumbRY = 0;
+        for (VirtualStickState stick : activeVirtualSticks.values()) {
+            if (isLeftStickBinding(stick.binding)) {
+                state.thumbLX = Mathf.clamp(state.thumbLX + stick.x, -1, 1);
+                state.thumbLY = Mathf.clamp(state.thumbLY + stick.y, -1, 1);
+            } else {
+                state.thumbRX = Mathf.clamp(state.thumbRX + stick.x, -1, 1);
+                state.thumbRY = Mathf.clamp(state.thumbRY + stick.y, -1, 1);
+            }
+        }
+        for (Binding binding : activeVirtualBindings.keySet()) {
+            if (isThumbBinding(binding)) applyThumbBinding(state, binding);
+        }
+    }
+
+    private static void applyThumbBinding(GamepadState state, Binding binding) {
+        switch (binding) {
+            case GAMEPAD_LEFT_THUMB_UP: state.thumbLY = Mathf.clamp(state.thumbLY - 1, -1, 1); break;
+            case GAMEPAD_LEFT_THUMB_RIGHT: state.thumbLX = Mathf.clamp(state.thumbLX + 1, -1, 1); break;
+            case GAMEPAD_LEFT_THUMB_DOWN: state.thumbLY = Mathf.clamp(state.thumbLY + 1, -1, 1); break;
+            case GAMEPAD_LEFT_THUMB_LEFT: state.thumbLX = Mathf.clamp(state.thumbLX - 1, -1, 1); break;
+            case GAMEPAD_RIGHT_THUMB_UP: state.thumbRY = Mathf.clamp(state.thumbRY - 1, -1, 1); break;
+            case GAMEPAD_RIGHT_THUMB_RIGHT: state.thumbRX = Mathf.clamp(state.thumbRX + 1, -1, 1); break;
+            case GAMEPAD_RIGHT_THUMB_DOWN: state.thumbRY = Mathf.clamp(state.thumbRY + 1, -1, 1); break;
+            case GAMEPAD_RIGHT_THUMB_LEFT: state.thumbRX = Mathf.clamp(state.thumbRX - 1, -1, 1); break;
+        }
+    }
+
+    private static boolean isThumbBinding(Binding binding) {
+        return binding == Binding.GAMEPAD_LEFT_THUMB_UP
+                || binding == Binding.GAMEPAD_LEFT_THUMB_RIGHT
+                || binding == Binding.GAMEPAD_LEFT_THUMB_DOWN
+                || binding == Binding.GAMEPAD_LEFT_THUMB_LEFT
+                || binding == Binding.GAMEPAD_RIGHT_THUMB_UP
+                || binding == Binding.GAMEPAD_RIGHT_THUMB_RIGHT
+                || binding == Binding.GAMEPAD_RIGHT_THUMB_DOWN
+                || binding == Binding.GAMEPAD_RIGHT_THUMB_LEFT;
+    }
+
+    private static boolean isLeftStickBinding(Binding binding) {
+        return binding == Binding.GAMEPAD_LEFT_THUMB_UP
+                || binding == Binding.GAMEPAD_LEFT_THUMB_DOWN
+                || binding == Binding.GAMEPAD_LEFT_THUMB_LEFT
+                || binding == Binding.GAMEPAD_LEFT_THUMB_RIGHT;
+    }
+
+    public void handleMouseMoveInput(ControlElement owner, int slot, Binding binding, boolean pressed, float offset) {
+        VirtualMouseBindingKey key = new VirtualMouseBindingKey(owner, slot, binding);
+        if (pressed) {
+            float value = offset != 0 ? offset
+                    : (binding == Binding.MOUSE_MOVE_LEFT || binding == Binding.MOUSE_MOVE_UP ? -1 : 1);
+            activeVirtualMouseBindings.put(key, value);
         } else {
-            state.thumbRX = deltaX;
-            state.thumbRY = deltaY;
+            activeVirtualMouseBindings.remove(key);
         }
-        if (winHandler != null) {
-            winHandler.sendGamepadState();
+
+        float x = 0;
+        float y = 0;
+        for (Map.Entry<VirtualMouseBindingKey, Float> entry : activeVirtualMouseBindings.entrySet()) {
+            Binding activeBinding = entry.getKey().binding;
+            if (activeBinding == Binding.MOUSE_MOVE_LEFT || activeBinding == Binding.MOUSE_MOVE_RIGHT) {
+                x += entry.getValue();
+            } else if (activeBinding == Binding.MOUSE_MOVE_UP || activeBinding == Binding.MOUSE_MOVE_DOWN) {
+                y += entry.getValue();
+            }
         }
+        mouseMoveOffset.x = Mathf.clamp(x, -1, 1);
+        mouseMoveOffset.y = Mathf.clamp(y, -1, 1);
+        if (pressed) createMouseMoveTimer();
+        else if (activeVirtualMouseBindings.isEmpty()) stopMouseMoveTimer();
     }
 
     private void stopMouseMoveTimer() {
@@ -991,8 +1097,41 @@ public class InputControlsView extends View {
         }
     }
 
-    public Bitmap getIcon(byte id) {
-        int index = id & 0xFF; // Convert signed byte to unsigned int (0-255)
+    public void handleCountedInputEvent(Binding binding, boolean isActionDown, float offset, boolean sendUpdate) {
+        if (binding == null || binding == Binding.NONE) return;
+        Pointer.Button pointerButton = binding.getPointerButton();
+        boolean momentary = binding == Binding.SHOW_ANDROID_KEYBOARD
+                || binding.isMouseMove()
+                || pointerButton == Pointer.Button.BUTTON_SCROLL_UP
+                || pointerButton == Pointer.Button.BUTTON_SCROLL_DOWN;
+        if (momentary) {
+            handleInputEvent(null, binding, isActionDown, offset, sendUpdate);
+            return;
+        }
+
+        int count = activeVirtualBindings.getOrDefault(binding, 0);
+        boolean stateChanged = false;
+        if (isActionDown) {
+            activeVirtualBindings.put(binding, count + 1);
+            stateChanged = count == 0;
+        } else if (count <= 1) {
+            activeVirtualBindings.remove(binding);
+            stateChanged = count == 1;
+        } else {
+            activeVirtualBindings.put(binding, count - 1);
+        }
+        if (!stateChanged) return;
+        if (isThumbBinding(binding)) {
+            rebuildVirtualStickAxes();
+            WinHandler winHandler = xServer != null ? xServer.getWinHandler() : null;
+            if (winHandler != null && sendUpdate) winHandler.sendGamepadState();
+        } else {
+            handleInputEvent(null, binding, isActionDown, offset, sendUpdate);
+        }
+    }
+
+    public Bitmap getIcon(int id) {
+        int index = id;
         if (index >= icons.length) return null;
 
         if (icons[index] == null) {

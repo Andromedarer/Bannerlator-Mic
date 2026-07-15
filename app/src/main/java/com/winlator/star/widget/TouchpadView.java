@@ -79,7 +79,7 @@ public class TouchpadView extends View {
         setClickable(true);
         setFocusable(true);
         setFocusableInTouchMode(false);
-        setPointerIcon(PointerIcon.load(getResources(), R.drawable.hidden_pointer_arrow));
+        setPointerIcon(PointerIcon.load(getResources(), R.xml.hidden_pointer_arrow));
         updateXform(AppUtils.getScreenWidth(), AppUtils.getScreenHeight(), xServer.screenInfo.width, xServer.screenInfo.height);
         // Initialize SharedPreferences here
         this.preferences = PreferenceManager.getDefaultSharedPreferences(context);

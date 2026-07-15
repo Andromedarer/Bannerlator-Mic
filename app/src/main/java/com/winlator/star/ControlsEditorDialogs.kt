@@ -126,8 +126,11 @@ private fun AddElementDialog(
         onDismiss = onDismiss,
         title = stringResource(R.string.select_control_type),
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items.chunked(2).forEach { rowItems ->
+            LazyColumn(
+                modifier = Modifier.heightIn(max = 420.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(items.chunked(2)) { rowItems ->
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         rowItems.forEach { item ->
                             ControlTypeCard(
