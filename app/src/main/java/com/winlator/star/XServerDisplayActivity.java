@@ -96,6 +96,7 @@ import com.winlator.star.renderer.effects.FXAAEffect;
 import com.winlator.star.renderer.effects.NTSCCombinedEffect;
 import com.winlator.star.renderer.effects.ToonEffect;
 import com.winlator.star.renderer.effects.HDREffect;
+import com.winlator.star.widget.FpsCounter;
 import com.winlator.star.widget.FrameRating;
 import com.winlator.star.widget.FrameRatingHorizontal;
 import com.winlator.star.widget.InputControlsView;
@@ -167,6 +168,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private FrameRating frameRating = null;
     private FrameRatingHorizontal frameRatingHorizontal = null;
     private PerfHudView perfHud = null;          // GameHub-style HUD (used when hudStyle=gamehub instead of the two above)
+    // Single authoritative FPS source: ticked once per present, read by every overlay so they all
+    // show the identical number (there is one place per renderer to feed).
+    private final FpsCounter fpsCounter = new FpsCounter();
     private boolean fpsHudHorizontal = false;   // active FPS-overlay orientation (tap to toggle in-game)
     // Async-arriving HUD labels are cached so a HUD built live (style swapped mid-game) is populated too.
     private String hudRendererLabel = null;     // full "Vulkan | DXVK" label for classic FrameRating.setRenderer
@@ -964,12 +968,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 }
                     
                 if (frameRatingWindowId == window.id) {
+                    fpsCounter.tick();
                     if (frameRating != null) frameRating.update();
                     if (frameRatingHorizontal != null) frameRatingHorizontal.update();
                     if (perfHud != null) perfHud.update();
                 }
             }
-           
+
             @Override
             public void onMapWindow(Window window) {
                 // Log the class name of the mapped window
@@ -2228,6 +2233,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // drives it). Gate on the FPS window so we only count game frames.
             vkRenderer.setHudFrameTick(wid -> {
                 if (wid == frameRatingWindowId) {
+                    fpsCounter.tick();
                     if (frameRating != null) frameRating.update();
                     if (frameRatingHorizontal != null) frameRatingHorizontal.update();
                     if (perfHud != null) perfHud.update();
@@ -2259,6 +2265,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // per present here (same as the Vulkan/ASR ticks) — otherwise the HUD freezes in native mode.
             glr.setHudFrameTick(wid -> {
                 if (wid == frameRatingWindowId) {
+                    fpsCounter.tick();
                     if (frameRating != null) frameRating.update();
                     if (frameRatingHorizontal != null) frameRatingHorizontal.update();
                     if (perfHud != null) perfHud.update();
@@ -2277,6 +2284,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             asr.setSfCompatMode(resolvedSfCompatMode());
             asr.setHudFrameTick(wid -> {
                 if (wid == frameRatingWindowId) {
+                    fpsCounter.tick();
                     if (frameRating != null) frameRating.update();
                     if (frameRatingHorizontal != null) frameRatingHorizontal.update();
                     if (perfHud != null) perfHud.update();
@@ -4103,6 +4111,7 @@ return true;
     private void buildPerfHud(String fpsConfigString) {
         FrameLayout rootView = findViewById(R.id.FLXServerDisplay);
         perfHud = new PerfHudView(this);
+        perfHud.setFpsCounter(fpsCounter);
         FrameLayout.LayoutParams plp = new FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT,
             ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -4132,6 +4141,7 @@ return true;
         // Create BOTH orientations up front so the user can flip between them in-game with a tap;
         // only the active one is ever made visible.
         frameRatingHorizontal = new FrameRatingHorizontal(this);
+        frameRatingHorizontal.setFpsCounter(fpsCounter);
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT,
             ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -4149,6 +4159,7 @@ return true;
         rootView.addView(frameRatingHorizontal);
 
         frameRating = new FrameRating(this, graphicsDriverConfig);
+        frameRating.setFpsCounter(fpsCounter);
         // Explicit WRAP_CONTENT params: without them, FrameLayout's default params are
         // MATCH_PARENT x MATCH_PARENT, so the vertical HUD's view (and thus its tap-to-toggle
         // hit area) covered the WHOLE screen — a tap far from the overlay flipped orientation.
@@ -4248,6 +4259,7 @@ return true;
         else if (frameRatingWindowId != -1) {
             frameRatingWindowId = -1;
             Log.d("XServerDisplayActivity", "Hiding hud for Window " + window.getName());
+            fpsCounter.reset();
             runOnUiThread(() -> {
                 if (frameRating != null) {
                     frameRating.setVisibility(View.GONE);
