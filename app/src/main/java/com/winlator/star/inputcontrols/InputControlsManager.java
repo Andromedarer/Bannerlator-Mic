@@ -36,6 +36,9 @@ import java.util.Map;
 import java.util.Set;
 
 public class InputControlsManager {
+    static final String ICPX_FORMAT = "bannerlator.icpx";
+    static final int ICPX_FORMAT_VERSION = 1;
+    static final int ICPX_MIN_READER_VERSION = 1;
     private static final Object PROFILE_IMPORT_LOCK = new Object();
     private final Context context;
     private ArrayList<ControlsProfile> profiles;
@@ -179,6 +182,7 @@ public class InputControlsManager {
         CustomIconManager customIconManager = new CustomIconManager(context);
         ArrayList<Short> importedIconIds = new ArrayList<>();
         try {
+            if (!isSupportedTransportFormat(data)) return null;
             Object profileName = data.opt("name");
             if (!data.has("id") || !(profileName instanceof String)
                     || ((String)profileName).trim().isEmpty()) return null;
@@ -225,6 +229,9 @@ public class InputControlsManager {
             File newFile = ControlsProfile.getProfileFile(context, newId);
             data.put("schemaVersion", ControlsProfile.SCHEMA_VERSION);
             data.put("minEditorVersion", ControlsProfile.MIN_EDITOR_VERSION);
+            data.remove("format");
+            data.remove("formatVersion");
+            data.remove("minReaderVersion");
             data.put("id", newId);
             if (!FileUtils.writeString(newFile, data.toString())) {
                 rollbackImportedIcons(customIconManager, importedIconIds);
@@ -268,10 +275,10 @@ public class InputControlsManager {
         String winlatorPath = sp.getString("winlator_path_uri", null);
         if (winlatorPath != null) {
             Uri winlatorUri = Uri.parse(winlatorPath);
-            destination = new File(FileUtils.getFilePathFromUri(context, winlatorUri), "profiles/" + getSafeProfileName(profile) + ".icp");
+            destination = new File(FileUtils.getFilePathFromUri(context, winlatorUri), "profiles/" + getSafeProfileName(profile) + ".icpx");
         }
         else {
-            destination = new File(SettingsFragment.DEFAULT_WINLATOR_PATH, "profiles/" + getSafeProfileName(profile) + ".icp");
+            destination = new File(SettingsFragment.DEFAULT_WINLATOR_PATH, "profiles/" + getSafeProfileName(profile) + ".icpx");
         }
         File source = ControlsProfile.getProfileFile(context, profile.id);
         try {
@@ -299,6 +306,7 @@ public class InputControlsManager {
             }
             if (embeddedIcons.length() > 0) data.put("customIcons", embeddedIcons);
             else data.remove("customIcons");
+            addTransportHeader(data);
             File parent = destination.getParentFile();
             if (parent != null && !parent.exists() && !parent.mkdirs()) return null;
             File temporaryFile = new File(parent, destination.getName() + ".tmp");
@@ -328,6 +336,34 @@ public class InputControlsManager {
             Integer targetIconId = iconIdMap.get(sourceIconId);
             if (targetIconId != null) element.put("iconId", targetIconId);
         }
+    }
+
+    static boolean isSupportedTransportFormat(JSONObject data) {
+        if (!data.has("format")) return true;
+        if (!ICPX_FORMAT.equals(data.optString("format", ""))) return false;
+        Integer formatVersion = getIntegralVersion(data, "formatVersion");
+        Integer minReaderVersion = getIntegralVersion(data, "minReaderVersion");
+        return formatVersion != null
+                && minReaderVersion != null
+                && formatVersion >= 1
+                && minReaderVersion >= 1
+                && minReaderVersion <= formatVersion
+                && minReaderVersion <= ICPX_FORMAT_VERSION;
+    }
+
+    private static Integer getIntegralVersion(JSONObject data, String key) {
+        Object value = data.opt(key);
+        if (!(value instanceof Number)) return null;
+        double number = ((Number)value).doubleValue();
+        if (!Double.isFinite(number) || number != Math.rint(number)
+                || number < Integer.MIN_VALUE || number > Integer.MAX_VALUE) return null;
+        return (int)number;
+    }
+
+    static void addTransportHeader(JSONObject data) throws JSONException {
+        data.put("format", ICPX_FORMAT);
+        data.put("formatVersion", ICPX_FORMAT_VERSION);
+        data.put("minReaderVersion", ICPX_MIN_READER_VERSION);
     }
 
     private static String getSafeProfileName(ControlsProfile profile) {

@@ -51,6 +51,47 @@ class InputControlsFormatTest {
     }
 
     @Test
+    fun transportFormat_acceptsLegacyAndCurrentIcpxOnly() {
+        assertTrue(InputControlsManager.isSupportedTransportFormat(JSONObject()))
+        assertTrue(InputControlsManager.isSupportedTransportFormat(JSONObject()
+            .put("format", InputControlsManager.ICPX_FORMAT)
+            .put("formatVersion", InputControlsManager.ICPX_FORMAT_VERSION)
+            .put("minReaderVersion", InputControlsManager.ICPX_MIN_READER_VERSION)))
+        assertFalse(InputControlsManager.isSupportedTransportFormat(JSONObject()
+            .put("format", "another-fork.icpx")
+            .put("formatVersion", 1)
+            .put("minReaderVersion", 1)))
+        assertTrue(InputControlsManager.isSupportedTransportFormat(JSONObject()
+            .put("format", InputControlsManager.ICPX_FORMAT)
+            .put("formatVersion", InputControlsManager.ICPX_FORMAT_VERSION + 1)
+            .put("minReaderVersion", 1)))
+        assertFalse(InputControlsManager.isSupportedTransportFormat(JSONObject()
+            .put("format", InputControlsManager.ICPX_FORMAT)
+            .put("formatVersion", InputControlsManager.ICPX_FORMAT_VERSION + 1)
+            .put("minReaderVersion", InputControlsManager.ICPX_FORMAT_VERSION + 1)))
+        assertFalse(InputControlsManager.isSupportedTransportFormat(JSONObject()
+            .put("format", InputControlsManager.ICPX_FORMAT)
+            .put("formatVersion", 1.5)
+            .put("minReaderVersion", 1)))
+        assertFalse(InputControlsManager.isSupportedTransportFormat(JSONObject()
+            .put("format", InputControlsManager.ICPX_FORMAT)
+            .put("formatVersion", "1")
+            .put("minReaderVersion", 1)))
+    }
+
+    @Test
+    fun transportHeader_identifiesVersionedIcpxFormat() {
+        val root = JSONObject().put("name", "Portable profile")
+
+        InputControlsManager.addTransportHeader(root)
+
+        assertEquals(InputControlsManager.ICPX_FORMAT, root.getString("format"))
+        assertEquals(InputControlsManager.ICPX_FORMAT_VERSION, root.getInt("formatVersion"))
+        assertEquals(InputControlsManager.ICPX_MIN_READER_VERSION, root.getInt("minReaderVersion"))
+        assertEquals("Portable profile", root.getString("name"))
+    }
+
+    @Test
     fun gamepadReset_neutralizesEveryField() {
         val state = GamepadState().apply {
             thumbLX = 1f

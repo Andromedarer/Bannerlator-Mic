@@ -56,6 +56,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -266,18 +267,30 @@ fun InputControlsScreen(selectedProfileId: Int = 0) {
                             val positions = selectedItems.toList()
                             currentProfile = null
                             val processedCount = AtomicInteger()
+                            val failedCount = AtomicInteger()
                             for (position in positions) {
                                 HttpUtils.download(
                                     "https://raw.githubusercontent.com/brunodev85/winlator/main/input_controls/${items[position]}"
                                 ) { content ->
-                                    if (content != null) {
-                                        try { manager.importProfile(JSONObject(content)) } catch (_: Exception) { }
-                                    }
+                                    val imported = if (content != null) {
+                                        try { manager.importProfile(JSONObject(content)) } catch (_: Exception) { null }
+                                    } else null
+                                    if (imported == null) failedCount.incrementAndGet()
                                     if (processedCount.incrementAndGet() == positions.size) {
                                         (context as? Activity)?.runOnUiThread {
                                             isDownloading = false
                                             refreshProfiles()
                                             refreshControllers()
+                                            if (failedCount.get() > 0) {
+                                                AppUtils.showToast(
+                                                    context,
+                                                    context.resources.getQuantityString(
+                                                        R.plurals.profiles_not_imported,
+                                                        failedCount.get(),
+                                                        failedCount.get(),
+                                                    ),
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -374,7 +387,11 @@ fun InputControlsScreen(selectedProfileId: Int = 0) {
                                 0 -> {
                                     setCallback()
                                     importInAppLauncher.launch(
-                                        InAppFilePicker.buildIntent(act, InAppFilePicker.ICP, "Select control profile")
+                                        InAppFilePicker.buildIntent(
+                                            act,
+                                            InAppFilePicker.ICP,
+                                            act.getString(R.string.select_control_profile),
+                                        )
                                     )
                                 }
                                 1 -> {
@@ -389,7 +406,7 @@ fun InputControlsScreen(selectedProfileId: Int = 0) {
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest),
                 modifier = Modifier.weight(1f)
-            ) { Text("Import Profile", color = MaterialTheme.colorScheme.onBackground, fontSize = 12.sp) }
+            ) { Text(stringResource(R.string.import_control_profile), color = MaterialTheme.colorScheme.onBackground, fontSize = 12.sp) }
             Button(
                 onClick = {
                     if (currentProfile != null) {
@@ -400,7 +417,7 @@ fun InputControlsScreen(selectedProfileId: Int = 0) {
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest),
                 modifier = Modifier.weight(1f)
-            ) { Text("Export Profile", color = MaterialTheme.colorScheme.onBackground, fontSize = 12.sp) }
+            ) { Text(stringResource(R.string.export_control_profile_icpx), color = MaterialTheme.colorScheme.onBackground, fontSize = 12.sp) }
         }
 
         // ── Controls Editor ─────────────────────────────────────────
