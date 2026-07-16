@@ -115,4 +115,14 @@ class InputControlsFormatTest {
         assertEquals(0, state.buttons.toInt())
         assertTrue(state.dpad.none { it })
     }
+
+    @Test
+    fun trackpadSensitivity_scalesDeltaAndIsPersistedForSupportedTypes() {
+        assertEquals(3f, ControlElement.scaleTrackpadDelta(3f, 1f))
+        assertEquals(6f, ControlElement.scaleTrackpadDelta(3f, 2f))
+        assertEquals(1.5f, ControlElement.scaleTrackpadDelta(3f, 0.5f))
+        assertTrue(ControlElement.usesMouseSensitivity(ControlElement.Type.TRACKPAD))
+        assertTrue(ControlElement.usesMouseSensitivity(ControlElement.Type.MOUSE_AREA))
+        assertFalse(ControlElement.usesMouseSensitivity(ControlElement.Type.STICK))
+    }
 }

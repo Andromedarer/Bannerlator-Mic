@@ -489,6 +489,23 @@ fun ControlsEditorSettingsPane(
             )
         }
 
+        SettingsSection(title = stringResource(R.string.mouse_sensitivity), visible = selectedType == ControlElement.Type.TRACKPAD) {
+            LabeledSlider(
+                label = stringResource(R.string.mouse_sensitivity),
+                value = mouseSensitivity,
+                rangeStart = 1,
+                rangeEnd = 50,
+                suffix = "x",
+                format = { value -> String.format(Locale.getDefault(), "%.1fx", value / 10f) },
+                onValueChange = { value ->
+                    element.setMouseSensitivity(value / 10f)
+                    mouseSensitivity = value
+                    onInvalidate()
+                },
+                onValueChangeFinished = ::saveAndInvalidate,
+            )
+        }
+
         SettingsSection(
             title = stringResource(R.string.hold_key),
             visible = selectedType == ControlElement.Type.TRACKPAD || selectedType == ControlElement.Type.MOUSE_AREA || selectedType == ControlElement.Type.STICK || selectedType == ControlElement.Type.DYNAMIC_STICK,

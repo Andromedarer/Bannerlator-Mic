@@ -113,7 +113,7 @@ public class ControlElement {
     private float visualStickY;       // smoothed visual stick center Y (for animation)
     private float lastFingerX;        // latest finger X (for thumb position in draw)
     private float lastFingerY;        // latest finger Y (for thumb position in draw)
-    private float mouseSensitivity;   // cursor speed multiplier (for MOUSE_AREA), default 1.0
+    private float mouseSensitivity;   // cursor speed multiplier (for TRACKPAD/MOUSE_AREA), default 1.0
     private int gridRows;             // rows in button grid (for BUTTON_GRID)
     private int gridCols;             // columns in button grid (for BUTTON_GRID)
     private Shape gridCellShape;      // shape for each grid cell (default ROUND_RECT)
@@ -1681,10 +1681,12 @@ public class ControlElement {
                 int shortSide = Math.max(1, Math.min(inputControlsView.getMaxWidth(), inputControlsView.getMaxHeight()));
                 elementJSONObject.put("stickRadiusRatio", (float)stickRadius / shortSide);
             }
+            if (usesMouseSensitivity(type)) {
+                elementJSONObject.put("mouseSensitivity", Float.valueOf(mouseSensitivity));
+            }
             if (type == Type.MOUSE_AREA) {
                 elementJSONObject.put("areaWidthRatio", (float)areaWidth / Math.max(1, inputControlsView.getMaxWidth()));
                 elementJSONObject.put("areaHeightRatio", (float)areaHeight / Math.max(1, inputControlsView.getMaxHeight()));
-                elementJSONObject.put("mouseSensitivity", Float.valueOf(mouseSensitivity));
             }
             if (type == Type.BUTTON_GRID) {
                 elementJSONObject.put("gridRows", getEffectiveGridRows());
@@ -2111,8 +2113,8 @@ public class ControlElement {
                     if (interpolator == null) interpolator = new CubicBezierInterpolator();
                     interpolator.set(0.075f, 0.95f, 0.45f, 0.95f);
                     
-                    float valueX = deltaX;
-                    float valueY = deltaY;
+                    float valueX = scaleTrackpadDelta(deltaX, mouseSensitivity);
+                    float valueY = scaleTrackpadDelta(deltaY, mouseSensitivity);
                     if (Math.abs(valueX) > TRACKPAD_ACCELERATION_THRESHOLD) valueX *= STICK_SENSITIVITY;
                     if (Math.abs(valueY) > TRACKPAD_ACCELERATION_THRESHOLD) valueY *= STICK_SENSITIVITY;
                     
@@ -2136,7 +2138,7 @@ public class ControlElement {
                     int cursorDy = 0;
 
                     for (byte i = 0; i < 4; i++) {
-                        float value = (i == 1 || i == 3 ? deltaX : deltaY);
+                        float value = scaleTrackpadDelta(i == 1 || i == 3 ? deltaX : deltaY, mouseSensitivity);
                         Binding binding = getBindingAt(i);
                         if (Math.abs(value) > TouchpadView.CURSOR_ACCELERATION_THRESHOLD) value *= TouchpadView.CURSOR_ACCELERATION;
                         if (hasCombo(i)) {
@@ -2252,6 +2254,14 @@ public class ControlElement {
             currentPosition = new PointF(x, y); // Initialize to the center (same as outer circle)
         }
         return currentPosition;
+    }
+
+    static boolean usesMouseSensitivity(Type type) {
+        return type == Type.TRACKPAD || type == Type.MOUSE_AREA;
+    }
+
+    static float scaleTrackpadDelta(float delta, float sensitivity) {
+        return delta * sensitivity;
     }
 
     // New setter for current position to allow resetting
