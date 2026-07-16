@@ -16,8 +16,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -1444,6 +1442,51 @@ private fun UpscalerModeButtons(selected: Int, enabled: Boolean, onSelect: (Int)
     }
 }
 
+// Multi-select cousin of FullscreenModeButtons: each item toggles independently, but shares the exact
+// box style (accent fill + bold black text ON; black bg + accentDim 1dp border + accent medium text OFF)
+// and the aligned equal-width grid (weight(1f), short rows padded with Spacer so widths stay equal).
+// Callers build the list of currently-VISIBLE chips FIRST, then this chunks per row — so per-style
+// gating never leaves holes or misaligns the grid.
+@Composable
+private fun ModeChipGrid(items: List<Triple<String, Boolean, () -> Unit>>, perRow: Int) {
+    val accent = MaterialTheme.colorScheme.primary
+    val accentDim = LocalAccentDim.current
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        items.chunked(perRow).forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                row.forEach { (label, isOn, onTap) ->
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isOn) accent else Color.Black)
+                            .border(
+                                width = 1.dp,
+                                color = if (isOn) accent else accentDim,
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .clickable { onTap() }
+                            .padding(vertical = 9.dp)
+                    ) {
+                        Text(
+                            label,
+                            color = if (isOn) Color.Black else accent,
+                            fontSize = 12.sp,
+                            fontWeight = if (isOn) FontWeight.Bold else FontWeight.Medium
+                        )
+                    }
+                }
+                // Pad short final rows so every chip keeps the same width (grid stays aligned).
+                repeat(perRow - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
+}
+
 // Manual refresh-rate slider — snaps to [Off] + each supported panel rate (which may be unevenly
 // spaced, e.g. 60/90/120/144). Off (0) = no manual lock. The label tracks the snapped value live
 // while dragging; the actual panel rate is applied on release so we don't flash through modes mid-drag.
@@ -1556,7 +1599,7 @@ private fun SeShaderToggle(label: String, checked: Boolean, enabled: Boolean = t
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 // ───── HUD Tab ─────
 
 @Composable
@@ -1596,14 +1639,13 @@ private fun HudContent(state: XServerDrawerState) {
         // Quick presets: set the cap in one tap. Shares limitVal with the slider above, so the
         // slider thumb snaps to the picked value (and the matching chip highlights on any value).
         Spacer(Modifier.height(6.dp))
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            listOf(30, 60, 90, 120).forEach { preset ->
-                HudToggleChip("$preset", limitVal == preset) { limitVal = preset; applyLimiter() }
-            }
-        }
+        // Single aligned row of 4, same box style as the Fullscreen/Scaling mode buttons.
+        ModeChipGrid(
+            listOf(30, 60, 90, 120).map { preset ->
+                Triple("$preset", limitVal == preset) { limitVal = preset; applyLimiter() }
+            },
+            perRow = 4
+        )
         Text(
             "Caps on-screen FPS. Works with any frame-gen engine or none.",
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
@@ -1771,29 +1813,29 @@ private fun HudContent(state: XServerDrawerState) {
     // config key and live-applies, exactly like the old ToggleRows.
     Text("Metrics", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
     Spacer(Modifier.height(4.dp))
-    FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        HudToggleChip("FPS", showFPS) { showFPS = !showFPS; apply() }
-        if (rich) HudToggleChip("FPS graph", showGraph) { showGraph = !showGraph; apply() }
-        HudToggleChip("CPU", showCPU) { showCPU = !showCPU; apply() }
-        if (gameNative) HudToggleChip("CPU graph", showCpuGraph) { showCpuGraph = !showCpuGraph; apply() }
-        HudToggleChip("GPU", showGPU) { showGPU = !showGPU; apply() }
-        if (gameNative) HudToggleChip("GPU graph", showGpuGraph) { showGpuGraph = !showGpuGraph; apply() }
-        HudToggleChip("RAM", showRAM) { showRAM = !showRAM; apply() }
-        HudToggleChip("Power", showPower) { showPower = !showPower; apply() }
-        HudToggleChip("Temp", showTemp) { showTemp = !showTemp; apply() }
+    // Build the currently-VISIBLE chips first (respecting per-style gating), then chunk into an
+    // aligned 3-wide grid — so hidden chips never leave holes. Each stays an independent toggle.
+    val metricChips = buildList<Triple<String, Boolean, () -> Unit>> {
+        add(Triple("FPS", showFPS) { showFPS = !showFPS; apply() })
+        if (rich) add(Triple("FPS graph", showGraph) { showGraph = !showGraph; apply() })
+        add(Triple("CPU", showCPU) { showCPU = !showCPU; apply() })
+        if (gameNative) add(Triple("CPU graph", showCpuGraph) { showCpuGraph = !showCpuGraph; apply() })
+        add(Triple("GPU", showGPU) { showGPU = !showGPU; apply() })
+        if (gameNative) add(Triple("GPU graph", showGpuGraph) { showGpuGraph = !showGpuGraph; apply() })
+        add(Triple("RAM", showRAM) { showRAM = !showRAM; apply() })
+        add(Triple("Power", showPower) { showPower = !showPower; apply() })
+        add(Triple("Temp", showTemp) { showTemp = !showTemp; apply() })
         if (gameNative) {
-            HudToggleChip("GPU temp", showGpuTemp) { showGpuTemp = !showGpuTemp; apply() }
-            HudToggleChip("Battery", showBattery) { showBattery = !showBattery; apply() }
-            HudToggleChip("Runtime", showRuntime) { showRuntime = !showRuntime; apply() }
-            HudToggleChip("Clock", showClock) { showClock = !showClock; apply() }
+            add(Triple("GPU temp", showGpuTemp) { showGpuTemp = !showGpuTemp; apply() })
+            add(Triple("Battery", showBattery) { showBattery = !showBattery; apply() })
+            add(Triple("Runtime", showRuntime) { showRuntime = !showRuntime; apply() })
+            add(Triple("Clock", showClock) { showClock = !showClock; apply() })
         }
-        HudToggleChip("Engine", showEngine) { showEngine = !showEngine; apply() }
-        if (rich) HudToggleChip("GPU model", showGpuModel) { showGpuModel = !showGpuModel; apply() }
-        if (gameHub) HudToggleChip("Dual battery", dualBattery) { dualBattery = !dualBattery; apply() }
+        add(Triple("Engine", showEngine) { showEngine = !showEngine; apply() })
+        if (rich) add(Triple("GPU model", showGpuModel) { showGpuModel = !showGpuModel; apply() })
+        if (gameHub) add(Triple("Dual battery", dualBattery) { dualBattery = !dualBattery; apply() })
     }
+    ModeChipGrid(metricChips, perRow = 3)
 
     if (gameHub) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
@@ -1838,29 +1880,6 @@ private fun HudChipRow(label: String, options: List<String>, selected: Int, onSe
                 }
             }
         }
-    }
-}
-
-// ───── Compact on/off metric chip (wrap-content, for FlowRow) ─────
-// Same accent-fill / surface visual language as HudChipRow: filled accent + black
-// text when on, surface + normal text when off. Sized to content so it wraps.
-@Composable
-private fun HudToggleChip(text: String, on: Boolean, onToggle: () -> Unit) {
-    val accent = MaterialTheme.colorScheme.primary
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(if (on) accent else MaterialTheme.colorScheme.surface)
-            .clickable { onToggle() }
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text,
-            style = MaterialTheme.typography.bodySmall,
-            color = if (on) Color.Black else MaterialTheme.colorScheme.onSurface,
-            fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal
-        )
     }
 }
 
