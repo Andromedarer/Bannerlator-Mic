@@ -96,6 +96,7 @@ import com.winlator.star.renderer.effects.FXAAEffect;
 import com.winlator.star.renderer.effects.NTSCCombinedEffect;
 import com.winlator.star.renderer.effects.ToonEffect;
 import com.winlator.star.renderer.effects.HDREffect;
+import com.winlator.star.widget.FpsCounter;
 import com.winlator.star.widget.FrameRating;
 import com.winlator.star.widget.FrameRatingHorizontal;
 import com.winlator.star.widget.InputControlsView;
@@ -167,6 +168,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private FrameRating frameRating = null;
     private FrameRatingHorizontal frameRatingHorizontal = null;
     private PerfHudView perfHud = null;          // GameHub-style HUD (used when hudStyle=gamehub instead of the two above)
+    private com.winlator.star.widget.perfhud.PerformanceHudView gameNativeHud = null; // GameNative-style HUD (hudStyle=gamenative)
+    // Single authoritative FPS source: ticked once per present, read by every overlay so they all
+    // show the identical number (there is one place per renderer to feed).
+    private final FpsCounter fpsCounter = new FpsCounter();
     private boolean fpsHudHorizontal = false;   // active FPS-overlay orientation (tap to toggle in-game)
     // Async-arriving HUD labels are cached so a HUD built live (style swapped mid-game) is populated too.
     private String hudRendererLabel = null;     // full "Vulkan | DXVK" label for classic FrameRating.setRenderer
@@ -363,6 +368,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                         if (frameRatingHorizontal != null) frameRatingHorizontal.setRenderer(label);
                         if (frameRating != null) frameRating.setRenderer(label);
                         if (perfHud != null) perfHud.setEngineLabel(api);
+                        if (gameNativeHud != null) gameNativeHud.setEngineLabel(api);
                     });
                     return;
                 }
@@ -675,21 +681,27 @@ public class XServerDisplayActivity extends AppCompatActivity {
             if (newConfig == null) return;
             state.setFpsConfig(newConfig);
             runOnUiThread(() -> {
-                boolean wantGameHub = new com.winlator.star.core.KeyValueSet(newConfig)
-                    .get("hudStyle", "classic").equals("gamehub");
-                boolean haveGameHub = perfHud != null;
-                boolean haveAnyHud = perfHud != null || frameRating != null || frameRatingHorizontal != null;
-                // Live style swap: build the requested HUD and tear down the other, but only if a HUD
-                // is already on screen (FPS was enabled for this launch). View mutation is safe here —
-                // this callback runs on the UI thread.
-                if (haveAnyHud && wantGameHub != haveGameHub) {
-                    if (wantGameHub) { removeClassicHud(); buildPerfHud(newConfig); }
-                    else { removePerfHud(); buildClassicHud(newConfig); }
+                String wantStyle = new com.winlator.star.core.KeyValueSet(newConfig)
+                    .get("hudStyle", "classic");
+                String haveStyle = perfHud != null ? "gamehub"
+                    : gameNativeHud != null ? "gamenative"
+                    : (frameRating != null || frameRatingHorizontal != null) ? "classic" : null;
+                // Live style swap: build the requested HUD and tear down the other two, but only if a
+                // HUD is already on screen (FPS was enabled for this launch). View mutation is safe
+                // here — this callback runs on the UI thread.
+                if (haveStyle != null && !wantStyle.equals(haveStyle)) {
+                    removePerfHud();
+                    removeClassicHud();
+                    removeGameNativeHud();
+                    if (wantStyle.equals("gamehub")) buildPerfHud(newConfig);
+                    else if (wantStyle.equals("gamenative")) buildGameNativeHud(newConfig);
+                    else buildClassicHud(newConfig);
                 } else {
                     // Same style (or no HUD built): just push the new config to whatever exists.
                     if (frameRating != null) frameRating.applyConfig(newConfig);
                     if (frameRatingHorizontal != null) frameRatingHorizontal.applyConfig(newConfig);
                     if (perfHud != null) perfHud.applyConfig(newConfig);
+                    if (gameNativeHud != null) gameNativeHud.applyConfig(newConfig);
                 }
             });
             if (container != null) {
@@ -964,12 +976,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 }
                     
                 if (frameRatingWindowId == window.id) {
+                    fpsCounter.tick();
                     if (frameRating != null) frameRating.update();
                     if (frameRatingHorizontal != null) frameRatingHorizontal.update();
                     if (perfHud != null) perfHud.update();
                 }
             }
-           
+
             @Override
             public void onMapWindow(Window window) {
                 // Log the class name of the mapped window
@@ -2228,6 +2241,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // drives it). Gate on the FPS window so we only count game frames.
             vkRenderer.setHudFrameTick(wid -> {
                 if (wid == frameRatingWindowId) {
+                    fpsCounter.tick();
                     if (frameRating != null) frameRating.update();
                     if (frameRatingHorizontal != null) frameRatingHorizontal.update();
                     if (perfHud != null) perfHud.update();
@@ -2259,6 +2273,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // per present here (same as the Vulkan/ASR ticks) — otherwise the HUD freezes in native mode.
             glr.setHudFrameTick(wid -> {
                 if (wid == frameRatingWindowId) {
+                    fpsCounter.tick();
                     if (frameRating != null) frameRating.update();
                     if (frameRatingHorizontal != null) frameRatingHorizontal.update();
                     if (perfHud != null) perfHud.update();
@@ -2277,6 +2292,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             asr.setSfCompatMode(resolvedSfCompatMode());
             asr.setHudFrameTick(wid -> {
                 if (wid == frameRatingWindowId) {
+                    fpsCounter.tick();
                     if (frameRating != null) frameRating.update();
                     if (frameRatingHorizontal != null) frameRatingHorizontal.update();
                     if (perfHud != null) perfHud.update();
@@ -2330,7 +2346,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             String fpsConfigString = container.getFPSCounterConfig();
             com.winlator.star.core.KeyValueSet fpsConfig = new com.winlator.star.core.KeyValueSet(fpsConfigString);
             fpsHudHorizontal = fpsConfig.get("hudMode", "vertical").equals("horizontal");
-            boolean gameHubHud = fpsConfig.get("hudStyle", "classic").equals("gamehub");
+            String hudStyle = fpsConfig.get("hudStyle", "classic");
 
             String resolvedR = resolvedRenderer();
             String rendererMode = "vulkan".equals(resolvedR) ? "Vulkan"
@@ -2339,9 +2355,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
             hudRendererLabel = rendererMode + " | " + dxName;
             hudEngineShort = dxName;
 
-            // Build whichever HUD the container selected. The other style is created on demand
-            // if the user swaps hudStyle in the in-game drawer (see buildPerfHud/buildClassicHud).
-            if (gameHubHud) buildPerfHud(fpsConfigString);
+            // Build whichever HUD the container selected. The other styles are created on demand
+            // if the user swaps hudStyle in the in-game drawer (see buildPerfHud/buildClassicHud/
+            // buildGameNativeHud).
+            if (hudStyle.equals("gamehub")) buildPerfHud(fpsConfigString);
+            else if (hudStyle.equals("gamenative")) buildGameNativeHud(fpsConfigString);
             else buildClassicHud(fpsConfigString);
 
             // The label above is the configured D3D9/10/11 wrapper; probe what the game actually
@@ -4103,6 +4121,7 @@ return true;
     private void buildPerfHud(String fpsConfigString) {
         FrameLayout rootView = findViewById(R.id.FLXServerDisplay);
         perfHud = new PerfHudView(this);
+        perfHud.setFpsCounter(fpsCounter);
         FrameLayout.LayoutParams plp = new FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT,
             ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -4132,6 +4151,7 @@ return true;
         // Create BOTH orientations up front so the user can flip between them in-game with a tap;
         // only the active one is ever made visible.
         frameRatingHorizontal = new FrameRatingHorizontal(this);
+        frameRatingHorizontal.setFpsCounter(fpsCounter);
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT,
             ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -4149,6 +4169,7 @@ return true;
         rootView.addView(frameRatingHorizontal);
 
         frameRating = new FrameRating(this, graphicsDriverConfig);
+        frameRating.setFpsCounter(fpsCounter);
         // Explicit WRAP_CONTENT params: without them, FrameLayout's default params are
         // MATCH_PARENT x MATCH_PARENT, so the vertical HUD's view (and thus its tap-to-toggle
         // hit area) covered the WHOLE screen — a tap far from the overlay flipped orientation.
@@ -4180,6 +4201,40 @@ return true;
         }
     }
 
+    /** Build the GameNative-style HUD and add it to the overlay. Safe to call live (UI thread). */
+    private void buildGameNativeHud(String fpsConfigString) {
+        FrameLayout rootView = findViewById(R.id.FLXServerDisplay);
+        gameNativeHud = new com.winlator.star.widget.perfhud.PerformanceHudView(this);
+        gameNativeHud.setFpsCounter(fpsCounter);
+        FrameLayout.LayoutParams plp = new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            android.view.Gravity.TOP | android.view.Gravity.START
+        );
+        plp.topMargin = 10;
+        plp.leftMargin = 10;
+        gameNativeHud.setLayoutParams(plp);
+        gameNativeHud.applyConfig(fpsConfigString);
+        gameNativeHud.setOnTapListener(this::toggleFpsHudOrientation);
+        if (hudEngineShort != null) gameNativeHud.setEngineLabel(hudEngineShort);
+        if (hudGpuName != null) gameNativeHud.setGpuModel(hudGpuName);
+        gameNativeHud.setVertical(!fpsHudHorizontal);
+        gameNativeHud.setOnMovedListener((x, y) -> persistHudPosition("hudPosGN", x, y));
+        restoreHudPosition(gameNativeHud, "hudPosGN");
+        // Visible immediately if the game window is already mapped (live swap); otherwise it is
+        // revealed by changeFrameRatingVisibility once the window appears (launch path).
+        gameNativeHud.setVisibility(frameRatingWindowId != -1 ? View.VISIBLE : View.GONE);
+        rootView.addView(gameNativeHud);
+    }
+
+    private void removeGameNativeHud() {
+        if (gameNativeHud != null) {
+            FrameLayout rootView = findViewById(R.id.FLXServerDisplay);
+            rootView.removeView(gameNativeHud);
+            gameNativeHud = null;
+        }
+    }
+
     private void removeClassicHud() {
         FrameLayout rootView = findViewById(R.id.FLXServerDisplay);
         if (frameRating != null) { rootView.removeView(frameRating); frameRating = null; }
@@ -4187,11 +4242,14 @@ return true;
     }
 
     private void toggleFpsHudOrientation() {
-        if (perfHud == null && frameRating == null && frameRatingHorizontal == null) return;
+        if (perfHud == null && gameNativeHud == null && frameRating == null && frameRatingHorizontal == null) return;
         fpsHudHorizontal = !fpsHudHorizontal;
         if (perfHud != null) {
             // One view draws both layouts; vertical = !horizontal.
             perfHud.setVertical(!fpsHudHorizontal);
+        } else if (gameNativeHud != null) {
+            // One view draws both layouts; vertical = !horizontal.
+            gameNativeHud.setVertical(!fpsHudHorizontal);
         } else {
             boolean wasShown =
                 (frameRatingHorizontal != null && frameRatingHorizontal.getVisibility() == View.VISIBLE)
@@ -4216,7 +4274,7 @@ return true;
     }
 
     private void changeFrameRatingVisibility(Window window, Property property) {
-        if (perfHud == null && frameRating == null && frameRatingHorizontal == null) return;
+        if (perfHud == null && gameNativeHud == null && frameRating == null && frameRatingHorizontal == null) return;
 
         if (property != null) {
             if (frameRatingWindowId == -1 && property.nameAsString().contains("_MESA_DRV")) {
@@ -4226,6 +4284,7 @@ return true;
                 runOnUiThread(() -> {
                     // Show only the active orientation (both widgets exist for tap-toggle).
                     if (perfHud != null) perfHud.setVisibility(View.VISIBLE);
+                    if (gameNativeHud != null) gameNativeHud.setVisibility(View.VISIBLE);
                     if (fpsHudHorizontal) {
                         if (frameRatingHorizontal != null) frameRatingHorizontal.setVisibility(View.VISIBLE);
                     } else {
@@ -4238,16 +4297,20 @@ return true;
                 if (perfHud != null) perfHud.update();
             }
             if (property.nameAsString().contains("_MESA_DRV_GPU_NAME")) {
-                hudGpuName = property.toString();
+                // Reduce the raw renderer string (e.g. "zink Vulkan 1.4(Wrapper(Adreno (TM) 750)
+                // (MESA_TURNIP))") to just the chip ("Adreno 750") for the HUD GPU-model row.
+                hudGpuName = com.winlator.star.core.GPUInformation.extractModelName(property.toString());
                 runOnUiThread(() -> {
                     if (frameRating != null) frameRating.setGpuName(hudGpuName);
                     if (perfHud != null) perfHud.setGpuModel(hudGpuName);
+                    if (gameNativeHud != null) gameNativeHud.setGpuModel(hudGpuName);
                 });
             }
         }
         else if (frameRatingWindowId != -1) {
             frameRatingWindowId = -1;
             Log.d("XServerDisplayActivity", "Hiding hud for Window " + window.getName());
+            fpsCounter.reset();
             runOnUiThread(() -> {
                 if (frameRating != null) {
                     frameRating.setVisibility(View.GONE);
@@ -4258,6 +4321,7 @@ return true;
                     frameRatingHorizontal.reset();
                 }
                 if (perfHud != null) perfHud.setVisibility(View.GONE);
+                if (gameNativeHud != null) gameNativeHud.setVisibility(View.GONE);
             });
         }
     }

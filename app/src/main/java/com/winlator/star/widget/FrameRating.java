@@ -19,23 +19,27 @@ import com.winlator.star.core.GPUInformation;
 import com.winlator.star.core.KeyValueSet;
 import com.winlator.star.core.StringUtils;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileReader;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Locale;
 
 public class FrameRating extends FrameLayout implements Runnable {
     private final Context context;
-    private long lastTime = 0;
-    private int frameCount = 0;
+    // FPS is sourced from the shared FpsCounter (single source of truth); this view no longer counts
+    // frames. lastRefreshTime only throttles the (relatively expensive) metric reads + UI post.
+    private long lastRefreshTime = 0;
     private float lastFPS = 0;
     private float cpuTemp = 0;
     private int gpuLoad = 0;
     private float batteryTemp = 0;
     private float batteryWattage = 0; // Changed from int batteryVoltage
     private final String totalRAM;
+
+    private FpsCounter fpsCounter = null;
+    /** Shared authoritative FPS source; set by the host so every overlay shows the identical number. */
+    public void setFpsCounter(FpsCounter c) { this.fpsCounter = c; }
+
+    // Device-complete metric readers (GPU load / CPU temp) live in the single shared collector.
+    private final HudMetrics metrics;
 
     private final TextView tvFPS;
     private final TextView tvRenderer;
@@ -72,19 +76,6 @@ public class FrameRating extends FrameLayout implements Runnable {
     private java.util.function.BiConsumer<Float, Float> onMovedListener = null;
     public void setOnMovedListener(java.util.function.BiConsumer<Float, Float> l) { this.onMovedListener = l; }
 
-    // Fallback thermal paths (used only if zone auto-discovery finds nothing).
-    private static final String[] THERMAL_PATHS = {
-        "/sys/class/thermal/thermal_zone0/temp", "/sys/class/thermal/thermal_zone1/temp",
-        "/sys/class/thermal/thermal_zone7/temp", "/sys/class/thermal/thermal_zone10/temp",
-        "/sys/devices/virtual/thermal/thermal_zone0/temp", "/sys/class/hwmon/hwmon0/temp1_input",
-        "/sys/devices/system/cpu/cpu0/cpufreq/cpu_temp"
-    };
-
-    // CPU temp `temp` files discovered by matching each thermal zone's `type` against CPU sensor
-    // names. The hardcoded zone indices above are wrong on many SoCs (e.g. SM8350/Pocket FIT),
-    // which is why CPU read 0.0°C. Discovered once and cached.
-    private String[] cpuThermalPaths = null;
-
     public FrameRating(Context context, HashMap<String, ?> graphicsDriverConfig) {
         this(context, graphicsDriverConfig, null);
     }
@@ -97,6 +88,7 @@ public class FrameRating extends FrameLayout implements Runnable {
         super(context, attrs, defStyleAttr);
         this.context = context;
         this.graphicsDriverConfig = graphicsDriverConfig;
+        this.metrics = new HudMetrics(context);
 
         LayoutInflater.from(context).inflate(R.layout.frame_rating, this, true);
 
@@ -177,7 +169,7 @@ public class FrameRating extends FrameLayout implements Runnable {
             // Scale
             int scaleInt = Integer.parseInt(config.get("hudScale", "100"));
             float scaleFactor = Math.max(50, Math.min(150, scaleInt)) / 100.0f;
-            this.setPivotX(0); 
+            this.setPivotX(0);
             this.setPivotY(0);
             this.setScaleX(scaleFactor);
             this.setScaleY(scaleFactor);
@@ -191,7 +183,7 @@ public class FrameRating extends FrameLayout implements Runnable {
             this.setScaleY(1.0f);
             this.setAlpha(1.0f);
         }
-        
+
         updateParentVisibility();
     }
 
@@ -203,8 +195,8 @@ public class FrameRating extends FrameLayout implements Runnable {
                              (rowGPU != null && rowGPU.getVisibility() == VISIBLE) ||
                              (rowCPUTemp != null && rowCPUTemp.getVisibility() == VISIBLE) ||
                              (rowGPULoad != null && rowGPULoad.getVisibility() == VISIBLE) ||
-                             (rowBatteryTemp != null && rowBatteryTemp.getVisibility() == VISIBLE) || 
-                             (rowBatteryVoltage != null && rowBatteryVoltage.getVisibility() == VISIBLE); 
+                             (rowBatteryTemp != null && rowBatteryTemp.getVisibility() == VISIBLE) ||
+                             (rowBatteryVoltage != null && rowBatteryVoltage.getVisibility() == VISIBLE);
         setVisibility(anyVisible ? VISIBLE : GONE);
     }
 
@@ -223,89 +215,6 @@ public class FrameRating extends FrameLayout implements Runnable {
         return StringUtils.formatBytes(usedMem, false);
     }
 
-    // Scan /sys/class/thermal/thermal_zone* once and keep the `temp` files whose `type` names a
-    // CPU sensor (cpu, cpuss, cpu-*-usr, mtktscpu, …). Caches the result (even if empty) so we
-    // only scan once. Returns the list (possibly empty).
-    private String[] discoverCpuThermalPaths() {
-        if (cpuThermalPaths != null) return cpuThermalPaths;
-        ArrayList<String> found = new ArrayList<>();
-        try {
-            File thermalDir = new File("/sys/class/thermal");
-            File[] zones = thermalDir.listFiles((dir, name) -> name.startsWith("thermal_zone"));
-            if (zones != null) {
-                for (File zone : zones) {
-                    try (BufferedReader r = new BufferedReader(new FileReader(new File(zone, "type")))) {
-                        String type = r.readLine();
-                        if (type == null) continue;
-                        type = type.trim().toLowerCase(Locale.ENGLISH);
-                        // CPU cores on Qualcomm/MediaTek expose types like cpuss, cpu-0-0-usr,
-                        // mtktscpu, cpu_thermal. Exclude GPU/non-cpu zones.
-                        if (type.contains("cpu") && !type.contains("gpu")) {
-                            File tempFile = new File(zone, "temp");
-                            if (tempFile.canRead()) found.add(tempFile.getAbsolutePath());
-                        }
-                    } catch (Exception ignored) {}
-                }
-            }
-        } catch (Exception ignored) {}
-        cpuThermalPaths = found.toArray(new String[0]);
-        return cpuThermalPaths;
-    }
-
-    private float readTemp(String path) {
-        try (BufferedReader reader = new BufferedReader(new FileReader(path))) {
-            String line = reader.readLine();
-            if (line != null) {
-                float temp = Float.parseFloat(line.trim());
-                // Sensors report milli-°C or °C.
-                if (temp > 1000) temp /= 1000.0f;
-                // Reject implausible readings (offline sensors report 0 or huge values).
-                if (temp > 0 && temp < 150) return temp;
-            }
-        } catch (Exception ignored) {}
-        return 0;
-    }
-
-    private float getCPUTemperature() {
-        // Prefer auto-discovered CPU zones; report the hottest core.
-        float max = 0;
-        for (String path : discoverCpuThermalPaths()) {
-            float t = readTemp(path);
-            if (t > max) max = t;
-        }
-        if (max > 0) return max;
-        // Fallback to the legacy hardcoded list.
-        for (String path : THERMAL_PATHS) {
-            float t = readTemp(path);
-            if (t > 0) return t;
-        }
-        return 0;
-    }
-
-    private int calculateGPULoad() {
-        try {
-            BufferedReader reader = new BufferedReader(new FileReader("/sys/class/kgsl/kgsl-3d0/gpubusy"));
-            String line = reader.readLine();
-            reader.close();
-            if (line != null) {
-                String[] parts = line.trim().split("\\s+");
-                if (parts.length >= 2) {
-                    long busy = Long.parseLong(parts[0]);
-                    long total = Long.parseLong(parts[1]);
-                    if (total != 0) return (int) ((busy * 100) / total);
-                }
-            }
-        } catch (Exception e) {
-            try {
-                BufferedReader reader = new BufferedReader(new FileReader("/sys/class/misc/mali0/device/utilisation"));
-                String line = reader.readLine();
-                reader.close();
-                if (line != null) return Integer.parseInt(line.trim());
-            } catch (Exception e2) {}
-        }
-        return 0;
-    }
-
     public void setRenderer(String renderer) {
         if (tvRenderer != null) tvRenderer.setText(renderer);
     }
@@ -315,42 +224,45 @@ public class FrameRating extends FrameLayout implements Runnable {
     }
 
     public void reset() {
+        lastRefreshTime = 0;
+        lastFPS = 0;
         if (tvRenderer != null) tvRenderer.setText("OpenGL");
         Object version = graphicsDriverConfig.get("version");
         if (tvGPU != null) tvGPU.setText(GPUInformation.getRenderer(version != null ? version.toString() : "", context));
     }
 
+    /**
+     * Called once per presented frame from the host tick sites. The FPS number comes from the shared
+     * {@link FpsCounter}; metric reads + the UI post are self-throttled to 500 ms so sysfs is not hit
+     * every present on the epoll thread.
+     */
     public void update() {
-        if (lastTime == 0) lastTime = SystemClock.elapsedRealtime();
         long time = SystemClock.elapsedRealtime();
-        
-        if (time >= lastTime + 500) {
-            lastFPS = ((float) (frameCount * 1000) / (time - lastTime));
-            cpuTemp = getCPUTemperature();
-            gpuLoad = calculateGPULoad();
+        if (lastRefreshTime != 0 && time < lastRefreshTime + 500) return;
+        lastRefreshTime = time;
 
-            Intent batteryStatus = context.registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
-            if (batteryStatus != null) {
-                batteryTemp = batteryStatus.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) / 10.0f;
-                
-                // Calculate Power Usage in Watts
-                BatteryManager bm = (BatteryManager) context.getSystemService(Context.BATTERY_SERVICE);
-                long microAmps = bm.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW);
-                int voltageMv = batteryStatus.getIntExtra(BatteryManager.EXTRA_VOLTAGE, 0);
-                
-                // Only show positive discharge wattage; if charging (microAmps > 0), show 0W
-                if (microAmps < 0) {
-                    batteryWattage = (Math.abs(microAmps) * voltageMv) / 1000000000.0f;
-                } else {
-                    batteryWattage = 0.0f;
-                }
+        lastFPS = fpsCounter != null ? fpsCounter.getCurrentFPS() : 0f;
+        cpuTemp = metrics.getTemperature();
+        gpuLoad = metrics.getGPULoad();
+
+        Intent batteryStatus = context.registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+        if (batteryStatus != null) {
+            batteryTemp = batteryStatus.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) / 10.0f;
+
+            // Calculate Power Usage in Watts
+            BatteryManager bm = (BatteryManager) context.getSystemService(Context.BATTERY_SERVICE);
+            long microAmps = bm.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW);
+            int voltageMv = batteryStatus.getIntExtra(BatteryManager.EXTRA_VOLTAGE, 0);
+
+            // Only show positive discharge wattage; if charging (microAmps > 0), show 0W
+            if (microAmps < 0) {
+                batteryWattage = (Math.abs(microAmps) * voltageMv) / 1000000000.0f;
+            } else {
+                batteryWattage = 0.0f;
             }
-            
-            post(this); 
-            lastTime = time;
-            frameCount = 0;
         }
-        frameCount++;
+
+        post(this);
     }
 
     @Override
@@ -368,7 +280,7 @@ public class FrameRating extends FrameLayout implements Runnable {
         if (tvRAM != null) tvRAM.setText(getAvailableRAM() + " Used / " + totalRAM);
         if (tvCPUTemp != null) tvCPUTemp.setText(String.format(Locale.ENGLISH, "%.1f°C", cpuTemp));
         if (tvGPULoad != null) tvGPULoad.setText(gpuLoad + "%");
-        
+
         if (tvBatteryTemp != null) tvBatteryTemp.setText(String.format(Locale.ENGLISH, "%.1f°C", batteryTemp));
         if (tvBatteryVoltage != null) tvBatteryVoltage.setText(String.format(Locale.ENGLISH, "%.2fW", batteryWattage));
     }

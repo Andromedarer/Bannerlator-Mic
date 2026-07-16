@@ -1442,6 +1442,51 @@ private fun UpscalerModeButtons(selected: Int, enabled: Boolean, onSelect: (Int)
     }
 }
 
+// Multi-select cousin of FullscreenModeButtons: each item toggles independently, but shares the exact
+// box style (accent fill + bold black text ON; black bg + accentDim 1dp border + accent medium text OFF)
+// and the aligned equal-width grid (weight(1f), short rows padded with Spacer so widths stay equal).
+// Callers build the list of currently-VISIBLE chips FIRST, then this chunks per row — so per-style
+// gating never leaves holes or misaligns the grid.
+@Composable
+private fun ModeChipGrid(items: List<Triple<String, Boolean, () -> Unit>>, perRow: Int) {
+    val accent = MaterialTheme.colorScheme.primary
+    val accentDim = LocalAccentDim.current
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        items.chunked(perRow).forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                row.forEach { (label, isOn, onTap) ->
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isOn) accent else Color.Black)
+                            .border(
+                                width = 1.dp,
+                                color = if (isOn) accent else accentDim,
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .clickable { onTap() }
+                            .padding(vertical = 9.dp)
+                    ) {
+                        Text(
+                            label,
+                            color = if (isOn) Color.Black else accent,
+                            fontSize = 12.sp,
+                            fontWeight = if (isOn) FontWeight.Bold else FontWeight.Medium
+                        )
+                    }
+                }
+                // Pad short final rows so every chip keeps the same width (grid stays aligned).
+                repeat(perRow - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
+}
+
 // Manual refresh-rate slider — snaps to [Off] + each supported panel rate (which may be unevenly
 // spaced, e.g. 60/90/120/144). Off (0) = no manual lock. The label tracks the snapped value live
 // while dragging; the actual panel rate is applied on release so we don't flash through modes mid-drag.
@@ -1591,6 +1636,16 @@ private fun HudContent(state: XServerDrawerState) {
             { limitVal = it.roundToInt() }, { applyLimiter() },
             format = { "${it.roundToInt()}" }
         )
+        // Quick presets: set the cap in one tap. Shares limitVal with the slider above, so the
+        // slider thumb snaps to the picked value (and the matching chip highlights on any value).
+        Spacer(Modifier.height(6.dp))
+        // Single aligned row of 4, same box style as the Fullscreen/Scaling mode buttons.
+        ModeChipGrid(
+            listOf(30, 60, 90, 120).map { preset ->
+                Triple("$preset", limitVal == preset) { limitVal = preset; applyLimiter() }
+            },
+            perRow = 4
+        )
         Text(
             "Caps on-screen FPS. Works with any frame-gen engine or none.",
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
@@ -1664,7 +1719,12 @@ private fun HudContent(state: XServerDrawerState) {
     // Orientation is flipped by tapping the HUD in-game; preserve it on write-back.
     val hudMode = remember(cfg) { cfg.getOrDefault("hudMode", "vertical") }
 
-    var gameHub by remember(cfg) { mutableStateOf(cfg.getOrDefault("hudStyle", "classic") == "gamehub") }
+    // 3-way HUD style: classic | gamehub | gamenative.
+    val styles = listOf("classic", "gamehub", "gamenative")
+    var hudStyle by remember(cfg) { mutableStateOf(cfg.getOrDefault("hudStyle", "classic")) }
+    val gameHub = hudStyle == "gamehub"
+    val gameNative = hudStyle == "gamenative"
+    val rich = gameHub || gameNative   // both styles share opacity + FPS graph + GPU model + color/outline
     var showFPS by remember(cfg) { mutableStateOf(b("showFPS", "showFPS", "1")) }
     var showGraph by remember(cfg) { mutableStateOf(b("showFPSGraph", "showFPSGraph", "0")) }
     var showCPU by remember(cfg) { mutableStateOf(b("showCPUUsage", "showCPULoad", "1")) }
@@ -1675,6 +1735,13 @@ private fun HudContent(state: XServerDrawerState) {
     var showEngine by remember(cfg) { mutableStateOf(b("showEngine", "showRenderer", "1")) }
     var showGpuModel by remember(cfg) { mutableStateOf(b("showGpuModel", "showGpuModel", "0")) }
     var dualBattery by remember(cfg) { mutableStateOf(b("hudDualBattery", "hudDualBattery", "0")) }
+    // GameNative-only extra metrics (absent = off is the intended default).
+    var showGpuTemp by remember(cfg) { mutableStateOf(b("showGpuTemp", "showGpuTemp", "0")) }
+    var showBattery by remember(cfg) { mutableStateOf(b("showBattery", "showBattery", "0")) }
+    var showRuntime by remember(cfg) { mutableStateOf(b("showRuntime", "showRuntime", "0")) }
+    var showClock by remember(cfg) { mutableStateOf(b("showClock", "showClock", "0")) }
+    var showCpuGraph by remember(cfg) { mutableStateOf(b("showCPUGraph", "showCPUGraph", "0")) }
+    var showGpuGraph by remember(cfg) { mutableStateOf(b("showGPUGraph", "showGPUGraph", "0")) }
 
     var scaleValue by remember(cfg) { mutableFloatStateOf(cfg.getOrDefault("hudScale", "92").toFloatOrNull() ?: 92f) }
     var opacityValue by remember(cfg) { mutableFloatStateOf(cfg.getOrDefault("hudOpacity", "80").toFloatOrNull() ?: 80f) }
@@ -1691,7 +1758,7 @@ private fun HudContent(state: XServerDrawerState) {
     // Identical key set to ContainerDetailScreen.FpsCounterConfigDialog.buildConfig(),
     // so the in-game drawer and the pre-launch dialog stay fully interchangeable.
     fun buildConfig(): String = listOf(
-        "hudStyle=${if (gameHub) "gamehub" else "classic"}",
+        "hudStyle=$hudStyle",
         "hudMode=$hudMode",
         "showFPS=${i(showFPS)}",
         "showFPSGraph=${i(showGraph)}",
@@ -1706,6 +1773,12 @@ private fun HudContent(state: XServerDrawerState) {
         "showRenderer=${i(showEngine)}",
         "showGpuModel=${i(showGpuModel)}",
         "hudDualBattery=${i(dualBattery)}",
+        "showGpuTemp=${i(showGpuTemp)}",
+        "showBattery=${i(showBattery)}",
+        "showRuntime=${i(showRuntime)}",
+        "showClock=${i(showClock)}",
+        "showCPUGraph=${i(showCpuGraph)}",
+        "showGPUGraph=${i(showGpuGraph)}",
         "hudSkin=$skin",
         "hudColor=$color",
         "hudOutline=$outline",
@@ -1716,10 +1789,13 @@ private fun HudContent(state: XServerDrawerState) {
 
     fun apply() { state.onFpsConfigApply?.invoke(buildConfig()) }
 
-    ToggleRow("GameHub-style HUD", gameHub) { gameHub = !gameHub; apply() }
+    HudChipRow("HUD style", listOf("Classic", "GameHub", "GameNative"), styles.indexOf(hudStyle).coerceAtLeast(0)) { hudStyle = styles[it]; apply() }
     Text(
-        if (gameHub) "Rich overlay: skins, colored fields, live FPS graph. Style change applies on next launch."
-        else "Classic Bannerlator overlay.",
+        when (hudStyle) {
+            "gamehub" -> "Rich overlay: skins, colored fields, live FPS graph. Style change applies on next launch."
+            "gamenative" -> "GameNative-style overlay: compact pill or stacked list with live graphs. Style change applies on next launch."
+            else -> "Classic Bannerlator overlay."
+        },
         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), fontSize = 11.sp,
         modifier = Modifier.padding(start = 4.dp, top = 2.dp, bottom = 4.dp)
     )
@@ -1727,25 +1803,47 @@ private fun HudContent(state: XServerDrawerState) {
     HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
 
     LabeledSlider("HUD Scale", scaleValue, 50f..150f, { scaleValue = it }, { apply() }, format = { "${it.toInt()}%" })
-    if (gameHub) LabeledSlider("HUD Opacity", opacityValue, 0f..100f, { opacityValue = it }, { apply() }, format = { "${it.toInt()}%" })
+    if (rich) LabeledSlider("HUD Opacity", opacityValue, 0f..100f, { opacityValue = it }, { apply() }, format = { "${it.toInt()}%" })
     else LabeledSlider("HUD Transparency", transValue, 0f..50f, { transValue = it }, { apply() }, format = { "${it.toInt()}" })
 
     HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
 
-    ToggleRow("Frame rate (FPS)", showFPS) { showFPS = !showFPS; apply() }
-    if (gameHub) ToggleRow("FPS graph", showGraph) { showGraph = !showGraph; apply() }
-    ToggleRow("CPU", showCPU) { showCPU = !showCPU; apply() }
-    ToggleRow("GPU", showGPU) { showGPU = !showGPU; apply() }
-    ToggleRow("Memory (RAM)", showRAM) { showRAM = !showRAM; apply() }
-    ToggleRow("Power", showPower) { showPower = !showPower; apply() }
-    ToggleRow("Temperature", showTemp) { showTemp = !showTemp; apply() }
-    ToggleRow("Engine", showEngine) { showEngine = !showEngine; apply() }
-    if (gameHub) {
-        ToggleRow("GPU model", showGpuModel) { showGpuModel = !showGpuModel; apply() }
-        ToggleRow("Dual-battery power fix", dualBattery) { dualBattery = !dualBattery; apply() }
+    // Compact multi-select metric chips (filled = on) in a wrap layout, replacing the
+    // stacked Switch rows so ~13 metrics fit in a few rows. Each chip toggles the same
+    // config key and live-applies, exactly like the old ToggleRows.
+    Text("Metrics", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
+    Spacer(Modifier.height(4.dp))
+    // Build the currently-VISIBLE chips first (respecting per-style gating), then chunk into an
+    // aligned 3-wide grid — so hidden chips never leave holes. Each stays an independent toggle.
+    val metricChips = buildList<Triple<String, Boolean, () -> Unit>> {
+        add(Triple("FPS", showFPS) { showFPS = !showFPS; apply() })
+        if (rich) add(Triple("FPS graph", showGraph) { showGraph = !showGraph; apply() })
+        add(Triple("CPU", showCPU) { showCPU = !showCPU; apply() })
+        if (gameNative) add(Triple("CPU graph", showCpuGraph) { showCpuGraph = !showCpuGraph; apply() })
+        add(Triple("GPU", showGPU) { showGPU = !showGPU; apply() })
+        if (gameNative) add(Triple("GPU graph", showGpuGraph) { showGpuGraph = !showGpuGraph; apply() })
+        add(Triple("RAM", showRAM) { showRAM = !showRAM; apply() })
+        add(Triple("Power", showPower) { showPower = !showPower; apply() })
+        add(Triple("Temp", showTemp) { showTemp = !showTemp; apply() })
+        if (gameNative) {
+            add(Triple("GPU temp", showGpuTemp) { showGpuTemp = !showGpuTemp; apply() })
+            add(Triple("Battery", showBattery) { showBattery = !showBattery; apply() })
+            add(Triple("Runtime", showRuntime) { showRuntime = !showRuntime; apply() })
+            add(Triple("Clock", showClock) { showClock = !showClock; apply() })
+        }
+        add(Triple("Engine", showEngine) { showEngine = !showEngine; apply() })
+        if (rich) add(Triple("GPU model", showGpuModel) { showGpuModel = !showGpuModel; apply() })
+        if (gameHub) add(Triple("Dual battery", dualBattery) { dualBattery = !dualBattery; apply() })
+    }
+    ModeChipGrid(metricChips, perRow = 3)
 
+    if (gameHub) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
         HudChipRow("HUD skin", listOf("Classic", "Neon", "Mono"), skins.indexOf(skin)) { skin = skins[it]; apply() }
+        HudChipRow("HUD color", listOf("Soft", "Mid", "Vivid"), colors.indexOf(color)) { color = colors[it]; apply() }
+        HudChipRow("HUD outline", listOf("Off", "Soft", "Strong"), outlines.indexOf(outline)) { outline = outlines[it]; apply() }
+    } else if (gameNative) {
+        HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
         HudChipRow("HUD color", listOf("Soft", "Mid", "Vivid"), colors.indexOf(color)) { color = colors[it]; apply() }
         HudChipRow("HUD outline", listOf("Off", "Soft", "Strong"), outlines.indexOf(outline)) { outline = outlines[it]; apply() }
     }

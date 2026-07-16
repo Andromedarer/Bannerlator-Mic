@@ -84,10 +84,13 @@ public class PerfHudView extends View {
     private final ArrayDeque<Float> fpsHistory = new ArrayDeque<>();
     private static final int GRAPH_SAMPLES = 50;
 
-    // ---- Metric collection (frame-tick, mirrors FrameRating.update()) -----
+    // ---- Metric collection (frame-tick, throttled to 500 ms) --------------
     private final HudMetrics metrics;
     private long lastTime = 0;
-    private int frameCount = 0;
+
+    // Shared authoritative FPS source (single source of truth across all overlays). Set by the host.
+    private FpsCounter fpsCounter = null;
+    public void setFpsCounter(FpsCounter c) { this.fpsCounter = c; }
 
     // ---- Paints (rebuilt when scale/skin/outline change) ------------------
     private final float density;
@@ -331,30 +334,31 @@ public class PerfHudView extends View {
 
     private static float clamp01(float v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
 
-    // ---- Frame tick: count frames, refresh metrics every 500ms ------------
-    /** Called by the host on each presented frame (same cadence as FrameRating.update()). */
+    // ---- Frame tick: refresh metrics every 500ms (FPS from shared counter) -
+    /**
+     * Called by the host on each presented frame. The FPS number comes from the shared
+     * {@link FpsCounter} (single source of truth); this method self-throttles the metric reads +
+     * UI post to 500 ms so sysfs is not hit every present on the epoll thread.
+     */
     public void update() {
-        if (lastTime == 0) lastTime = SystemClock.elapsedRealtime();
         long time = SystemClock.elapsedRealtime();
-        frameCount++;
-        if (time >= lastTime + 500) {
-            fps = (float) (frameCount * 1000) / (time - lastTime);
-            frameTimeMs = 1000f / Math.max(fps, 1f);
-            cpuUsage = metrics.getCPUUsage();
-            gpuUsage = metrics.getGPULoad();
-            ramPercent = metrics.getRAMPercent();
-            tempC = metrics.getTemperature();
-            HudMetrics.Battery b = metrics.getBattery(dualBattery);
-            powerW = b.watts;
-            charging = b.charging;
-            fpsHistory.addLast(fps);
-            while (fpsHistory.size() > GRAPH_SAMPLES) fpsHistory.removeFirst();
-            lastTime = time;
-            frameCount = 0;
-            // update() runs on the X-server epoll thread; requestLayout()/invalidate()
-            // must touch the view on the UI thread (FrameRating does the same via post()).
-            post(refreshOnUi);
-        }
+        if (lastTime != 0 && time < lastTime + 500) return;
+        lastTime = time;
+
+        fps = fpsCounter != null ? fpsCounter.getCurrentFPS() : 0f;
+        frameTimeMs = 1000f / Math.max(fps, 1f);
+        cpuUsage = metrics.getCPUUsage();
+        gpuUsage = metrics.getGPULoad();
+        ramPercent = metrics.getRAMPercent();
+        tempC = metrics.getTemperature();
+        HudMetrics.Battery b = metrics.getBattery(dualBattery);
+        powerW = b.watts;
+        charging = b.charging;
+        fpsHistory.addLast(fps);
+        while (fpsHistory.size() > GRAPH_SAMPLES) fpsHistory.removeFirst();
+        // update() runs on the X-server epoll thread; requestLayout()/invalidate()
+        // must touch the view on the UI thread (FrameRating does the same via post()).
+        post(refreshOnUi);
     }
 
     // Reused each refresh (~2×/sec) to relayout+redraw on the UI thread.
