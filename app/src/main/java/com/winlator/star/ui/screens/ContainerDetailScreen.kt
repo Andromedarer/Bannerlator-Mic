@@ -2207,7 +2207,12 @@ internal fun FpsCounterConfigDialog(
 
     // Orientation (vertical/horizontal) is toggled live by tapping the HUD in-game; preserve it.
     val hudMode = remember { cfg.getOrDefault("hudMode", "vertical") }
-    var gameHub by remember { mutableStateOf(cfg.getOrDefault("hudStyle", "classic") == "gamehub") }
+    // 3-way HUD style: classic | gamehub | gamenative.
+    val styles = listOf("classic", "gamehub", "gamenative")
+    var hudStyle by remember { mutableStateOf(cfg.getOrDefault("hudStyle", "classic")) }
+    val gameHub = hudStyle == "gamehub"
+    val gameNative = hudStyle == "gamenative"
+    val rich = gameHub || gameNative   // both styles share opacity + FPS graph + GPU model + color/outline
 
     // Unified metric toggles (emitted under both classic + gamehub key names so either HUD honors them).
     var showFPS      by remember { mutableStateOf(bool("showFPS", "showFPS", "1")) }
@@ -2220,6 +2225,13 @@ internal fun FpsCounterConfigDialog(
     var showEngine   by remember { mutableStateOf(bool("showEngine", "showRenderer", "1")) }
     var showGpuModel by remember { mutableStateOf(bool("showGpuModel", "showGpuModel", "0")) }
     var dualBattery  by remember { mutableStateOf(bool("hudDualBattery", "hudDualBattery", "0")) }
+    // GameNative-only extra metrics (absent = off is the intended default).
+    var showGpuTemp  by remember { mutableStateOf(bool("showGpuTemp", "showGpuTemp", "0")) }
+    var showBattery  by remember { mutableStateOf(bool("showBattery", "showBattery", "0")) }
+    var showRuntime  by remember { mutableStateOf(bool("showRuntime", "showRuntime", "0")) }
+    var showClock    by remember { mutableStateOf(bool("showClock", "showClock", "0")) }
+    var showCpuGraph by remember { mutableStateOf(bool("showCPUGraph", "showCPUGraph", "0")) }
+    var showGpuGraph by remember { mutableStateOf(bool("showGPUGraph", "showGPUGraph", "0")) }
 
     var hudScale by remember { mutableStateOf(cfg.getOrDefault("hudScale", "92").toIntOrNull() ?: 92) }
     var hudOpacity by remember { mutableStateOf(cfg.getOrDefault("hudOpacity", "80").toIntOrNull() ?: 80) }
@@ -2234,7 +2246,7 @@ internal fun FpsCounterConfigDialog(
 
     fun i(v: Boolean) = if (v) "1" else "0"
     fun buildConfig(): String = listOf(
-        "hudStyle=${if (gameHub) "gamehub" else "classic"}",
+        "hudStyle=$hudStyle",
         "hudMode=$hudMode",
         "showFPS=${i(showFPS)}",
         "showFPSGraph=${i(showGraph)}",
@@ -2249,6 +2261,12 @@ internal fun FpsCounterConfigDialog(
         "showRenderer=${i(showEngine)}",
         "showGpuModel=${i(showGpuModel)}",
         "hudDualBattery=${i(dualBattery)}",
+        "showGpuTemp=${i(showGpuTemp)}",
+        "showBattery=${i(showBattery)}",
+        "showRuntime=${i(showRuntime)}",
+        "showClock=${i(showClock)}",
+        "showCPUGraph=${i(showCpuGraph)}",
+        "showGPUGraph=${i(showGpuGraph)}",
         "hudSkin=$skin",
         "hudColor=$color",
         "hudOutline=$outline",
@@ -2266,14 +2284,17 @@ internal fun FpsCounterConfigDialog(
                     .heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.7f).dp)
                     .verticalScroll(rememberScrollState())
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Switch(checked = gameHub, onCheckedChange = { gameHub = it })
-                    Spacer(Modifier.width(8.dp))
-                    Text("GameHub-style HUD", modifier = Modifier.weight(1f))
-                }
+                HudThreeStop(
+                    "HUD style",
+                    listOf("Classic", "GameHub", "GameNative"),
+                    styles.indexOf(hudStyle).coerceAtLeast(0)
+                ) { hudStyle = styles[it] }
                 Text(
-                    if (gameHub) "Rich overlay: skins, colored fields, live FPS graph."
-                    else "Classic Bannerlator overlay.",
+                    when (hudStyle) {
+                        "gamehub" -> "Rich overlay: skins, colored fields, live FPS graph."
+                        "gamenative" -> "GameNative-style overlay: compact pill or stacked list with live graphs."
+                        else -> "Classic Bannerlator overlay."
+                    },
                     style = MaterialTheme.typography.bodySmall
                 )
                 Spacer(Modifier.height(4.dp))
@@ -2284,17 +2305,23 @@ internal fun FpsCounterConfigDialog(
                 Spacer(Modifier.height(12.dp))
 
                 HudToggleRow("Frame rate (FPS)", showFPS) { showFPS = it }
-                if (gameHub) HudToggleRow("FPS graph", showGraph) { showGraph = it }
+                if (rich) HudToggleRow("FPS graph", showGraph) { showGraph = it }
                 HudToggleRow("CPU", showCPU) { showCPU = it }
+                if (gameNative) HudToggleRow("CPU graph", showCpuGraph) { showCpuGraph = it }
                 HudToggleRow("GPU", showGPU) { showGPU = it }
+                if (gameNative) HudToggleRow("GPU graph", showGpuGraph) { showGpuGraph = it }
                 HudToggleRow("Memory (RAM)", showRAM) { showRAM = it }
                 HudToggleRow("Power", showPower) { showPower = it }
                 HudToggleRow("Temperature", showTemp) { showTemp = it }
-                HudToggleRow("Engine", showEngine) { showEngine = it }
-                if (gameHub) {
-                    HudToggleRow("GPU model", showGpuModel) { showGpuModel = it }
-                    HudToggleRow("Dual-battery power fix", dualBattery) { dualBattery = it }
+                if (gameNative) {
+                    HudToggleRow("GPU temperature", showGpuTemp) { showGpuTemp = it }
+                    HudToggleRow("Battery %", showBattery) { showBattery = it }
+                    HudToggleRow("Battery runtime", showRuntime) { showRuntime = it }
+                    HudToggleRow("Clock", showClock) { showClock = it }
                 }
+                HudToggleRow("Engine", showEngine) { showEngine = it }
+                if (rich) HudToggleRow("GPU model", showGpuModel) { showGpuModel = it }
+                if (gameHub) HudToggleRow("Dual-battery power fix", dualBattery) { dualBattery = it }
 
                 Spacer(Modifier.height(12.dp))
                 Text("HUD Scale: $hudScale%", style = MaterialTheme.typography.bodySmall)
@@ -2304,7 +2331,7 @@ internal fun FpsCounterConfigDialog(
                     valueRange = 50f..150f, steps = 99
                 )
 
-                if (gameHub) {
+                if (rich) {
                     Spacer(Modifier.height(4.dp))
                     Text("HUD Opacity: $hudOpacity%", style = MaterialTheme.typography.bodySmall)
                     Slider(
@@ -2313,7 +2340,9 @@ internal fun FpsCounterConfigDialog(
                         valueRange = 0f..100f, steps = 99
                     )
                     Spacer(Modifier.height(8.dp))
-                    HudThreeStop("HUD skin", listOf("Classic", "Neon", "Mono"), skins.indexOf(skin)) { skin = skins[it] }
+                    if (gameHub) {
+                        HudThreeStop("HUD skin", listOf("Classic", "Neon", "Mono"), skins.indexOf(skin)) { skin = skins[it] }
+                    }
                     HudThreeStop("HUD color", listOf("Soft", "Mid", "Vivid"), colors.indexOf(color)) { color = colors[it] }
                     HudThreeStop("HUD outline", listOf("Off", "Soft", "Strong"), outlines.indexOf(outline)) { outline = outlines[it] }
                 } else {

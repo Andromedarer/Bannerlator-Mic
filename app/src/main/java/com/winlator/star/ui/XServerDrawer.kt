@@ -1664,7 +1664,12 @@ private fun HudContent(state: XServerDrawerState) {
     // Orientation is flipped by tapping the HUD in-game; preserve it on write-back.
     val hudMode = remember(cfg) { cfg.getOrDefault("hudMode", "vertical") }
 
-    var gameHub by remember(cfg) { mutableStateOf(cfg.getOrDefault("hudStyle", "classic") == "gamehub") }
+    // 3-way HUD style: classic | gamehub | gamenative.
+    val styles = listOf("classic", "gamehub", "gamenative")
+    var hudStyle by remember(cfg) { mutableStateOf(cfg.getOrDefault("hudStyle", "classic")) }
+    val gameHub = hudStyle == "gamehub"
+    val gameNative = hudStyle == "gamenative"
+    val rich = gameHub || gameNative   // both styles share opacity + FPS graph + GPU model + color/outline
     var showFPS by remember(cfg) { mutableStateOf(b("showFPS", "showFPS", "1")) }
     var showGraph by remember(cfg) { mutableStateOf(b("showFPSGraph", "showFPSGraph", "0")) }
     var showCPU by remember(cfg) { mutableStateOf(b("showCPUUsage", "showCPULoad", "1")) }
@@ -1675,6 +1680,13 @@ private fun HudContent(state: XServerDrawerState) {
     var showEngine by remember(cfg) { mutableStateOf(b("showEngine", "showRenderer", "1")) }
     var showGpuModel by remember(cfg) { mutableStateOf(b("showGpuModel", "showGpuModel", "0")) }
     var dualBattery by remember(cfg) { mutableStateOf(b("hudDualBattery", "hudDualBattery", "0")) }
+    // GameNative-only extra metrics (absent = off is the intended default).
+    var showGpuTemp by remember(cfg) { mutableStateOf(b("showGpuTemp", "showGpuTemp", "0")) }
+    var showBattery by remember(cfg) { mutableStateOf(b("showBattery", "showBattery", "0")) }
+    var showRuntime by remember(cfg) { mutableStateOf(b("showRuntime", "showRuntime", "0")) }
+    var showClock by remember(cfg) { mutableStateOf(b("showClock", "showClock", "0")) }
+    var showCpuGraph by remember(cfg) { mutableStateOf(b("showCPUGraph", "showCPUGraph", "0")) }
+    var showGpuGraph by remember(cfg) { mutableStateOf(b("showGPUGraph", "showGPUGraph", "0")) }
 
     var scaleValue by remember(cfg) { mutableFloatStateOf(cfg.getOrDefault("hudScale", "92").toFloatOrNull() ?: 92f) }
     var opacityValue by remember(cfg) { mutableFloatStateOf(cfg.getOrDefault("hudOpacity", "80").toFloatOrNull() ?: 80f) }
@@ -1691,7 +1703,7 @@ private fun HudContent(state: XServerDrawerState) {
     // Identical key set to ContainerDetailScreen.FpsCounterConfigDialog.buildConfig(),
     // so the in-game drawer and the pre-launch dialog stay fully interchangeable.
     fun buildConfig(): String = listOf(
-        "hudStyle=${if (gameHub) "gamehub" else "classic"}",
+        "hudStyle=$hudStyle",
         "hudMode=$hudMode",
         "showFPS=${i(showFPS)}",
         "showFPSGraph=${i(showGraph)}",
@@ -1706,6 +1718,12 @@ private fun HudContent(state: XServerDrawerState) {
         "showRenderer=${i(showEngine)}",
         "showGpuModel=${i(showGpuModel)}",
         "hudDualBattery=${i(dualBattery)}",
+        "showGpuTemp=${i(showGpuTemp)}",
+        "showBattery=${i(showBattery)}",
+        "showRuntime=${i(showRuntime)}",
+        "showClock=${i(showClock)}",
+        "showCPUGraph=${i(showCpuGraph)}",
+        "showGPUGraph=${i(showGpuGraph)}",
         "hudSkin=$skin",
         "hudColor=$color",
         "hudOutline=$outline",
@@ -1716,10 +1734,13 @@ private fun HudContent(state: XServerDrawerState) {
 
     fun apply() { state.onFpsConfigApply?.invoke(buildConfig()) }
 
-    ToggleRow("GameHub-style HUD", gameHub) { gameHub = !gameHub; apply() }
+    HudChipRow("HUD style", listOf("Classic", "GameHub", "GameNative"), styles.indexOf(hudStyle).coerceAtLeast(0)) { hudStyle = styles[it]; apply() }
     Text(
-        if (gameHub) "Rich overlay: skins, colored fields, live FPS graph. Style change applies on next launch."
-        else "Classic Bannerlator overlay.",
+        when (hudStyle) {
+            "gamehub" -> "Rich overlay: skins, colored fields, live FPS graph. Style change applies on next launch."
+            "gamenative" -> "GameNative-style overlay: compact pill or stacked list with live graphs. Style change applies on next launch."
+            else -> "Classic Bannerlator overlay."
+        },
         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), fontSize = 11.sp,
         modifier = Modifier.padding(start = 4.dp, top = 2.dp, bottom = 4.dp)
     )
@@ -1727,25 +1748,37 @@ private fun HudContent(state: XServerDrawerState) {
     HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
 
     LabeledSlider("HUD Scale", scaleValue, 50f..150f, { scaleValue = it }, { apply() }, format = { "${it.toInt()}%" })
-    if (gameHub) LabeledSlider("HUD Opacity", opacityValue, 0f..100f, { opacityValue = it }, { apply() }, format = { "${it.toInt()}%" })
+    if (rich) LabeledSlider("HUD Opacity", opacityValue, 0f..100f, { opacityValue = it }, { apply() }, format = { "${it.toInt()}%" })
     else LabeledSlider("HUD Transparency", transValue, 0f..50f, { transValue = it }, { apply() }, format = { "${it.toInt()}" })
 
     HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
 
     ToggleRow("Frame rate (FPS)", showFPS) { showFPS = !showFPS; apply() }
-    if (gameHub) ToggleRow("FPS graph", showGraph) { showGraph = !showGraph; apply() }
+    if (rich) ToggleRow("FPS graph", showGraph) { showGraph = !showGraph; apply() }
     ToggleRow("CPU", showCPU) { showCPU = !showCPU; apply() }
+    if (gameNative) ToggleRow("CPU graph", showCpuGraph) { showCpuGraph = !showCpuGraph; apply() }
     ToggleRow("GPU", showGPU) { showGPU = !showGPU; apply() }
+    if (gameNative) ToggleRow("GPU graph", showGpuGraph) { showGpuGraph = !showGpuGraph; apply() }
     ToggleRow("Memory (RAM)", showRAM) { showRAM = !showRAM; apply() }
     ToggleRow("Power", showPower) { showPower = !showPower; apply() }
     ToggleRow("Temperature", showTemp) { showTemp = !showTemp; apply() }
+    if (gameNative) {
+        ToggleRow("GPU temperature", showGpuTemp) { showGpuTemp = !showGpuTemp; apply() }
+        ToggleRow("Battery %", showBattery) { showBattery = !showBattery; apply() }
+        ToggleRow("Battery runtime", showRuntime) { showRuntime = !showRuntime; apply() }
+        ToggleRow("Clock", showClock) { showClock = !showClock; apply() }
+    }
     ToggleRow("Engine", showEngine) { showEngine = !showEngine; apply() }
+    if (rich) ToggleRow("GPU model", showGpuModel) { showGpuModel = !showGpuModel; apply() }
     if (gameHub) {
-        ToggleRow("GPU model", showGpuModel) { showGpuModel = !showGpuModel; apply() }
         ToggleRow("Dual-battery power fix", dualBattery) { dualBattery = !dualBattery; apply() }
 
         HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
         HudChipRow("HUD skin", listOf("Classic", "Neon", "Mono"), skins.indexOf(skin)) { skin = skins[it]; apply() }
+        HudChipRow("HUD color", listOf("Soft", "Mid", "Vivid"), colors.indexOf(color)) { color = colors[it]; apply() }
+        HudChipRow("HUD outline", listOf("Off", "Soft", "Strong"), outlines.indexOf(outline)) { outline = outlines[it]; apply() }
+    } else if (gameNative) {
+        HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
         HudChipRow("HUD color", listOf("Soft", "Mid", "Vivid"), colors.indexOf(color)) { color = colors[it]; apply() }
         HudChipRow("HUD outline", listOf("Off", "Soft", "Strong"), outlines.indexOf(outline)) { outline = outlines[it]; apply() }
     }
