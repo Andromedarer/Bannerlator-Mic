@@ -805,7 +805,6 @@ public class InputControlsView extends View {
                 case MotionEvent.ACTION_POINTER_DOWN: {
                     float x = event.getX(actionIndex);
                     float y = event.getY(actionIndex);
-                    if (touchpadView != null) touchpadView.setPointerButtonLeftEnabled(!hasVisibleMouseLeftButton());
                     if (expandedElement != null) {
                         if (isElementHiddenByGroup(expandedElement)) {
                             expandedElement.setExpanded(false);
@@ -932,23 +931,6 @@ public class InputControlsView extends View {
     public boolean performClick() {
         super.performClick();
         return true;
-    }
-
-    private boolean hasVisibleMouseLeftButton() {
-        if (profile == null) return false;
-        for (ControlElement element : profile.getElements()) {
-            if (isElementHiddenByGroup(element)) continue;
-            if (element.getType() == ControlElement.Type.EXPANDABLE_BUTTON && !element.isExpanded()) continue;
-            for (int index = 0; index < element.getBindingCount(); index++) {
-                if (element.getBindingAt(index) == Binding.MOUSE_LEFT_BUTTON) return true;
-                Binding[] combo = element.getCombo(index);
-                if (combo == null) continue;
-                for (Binding binding : combo) {
-                    if (binding == Binding.MOUSE_LEFT_BUTTON) return true;
-                }
-            }
-        }
-        return false;
     }
 
     private void resetTouchscreenTimeout() {
