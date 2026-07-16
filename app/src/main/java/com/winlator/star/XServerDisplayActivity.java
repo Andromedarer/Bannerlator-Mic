@@ -4297,7 +4297,9 @@ return true;
                 if (perfHud != null) perfHud.update();
             }
             if (property.nameAsString().contains("_MESA_DRV_GPU_NAME")) {
-                hudGpuName = property.toString();
+                // Reduce the raw renderer string (e.g. "zink Vulkan 1.4(Wrapper(Adreno (TM) 750)
+                // (MESA_TURNIP))") to just the chip ("Adreno 750") for the HUD GPU-model row.
+                hudGpuName = com.winlator.star.core.GPUInformation.extractModelName(property.toString());
                 runOnUiThread(() -> {
                     if (frameRating != null) frameRating.setGpuName(hudGpuName);
                     if (perfHud != null) perfHud.setGpuModel(hudGpuName);
