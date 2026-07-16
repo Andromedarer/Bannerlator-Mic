@@ -57,6 +57,15 @@ public abstract class GPUInformation {
                 java.util.regex.Pattern.CASE_INSENSITIVE).matcher(s);
         if (m.find()) return "PowerVR " + m.group(1);
 
+        // Fallback for GPUs we have no explicit pattern for: strip the wrapper/driver scaffolding so a
+        // raw "zink Vulkan X(Wrapper(<NAME>) (<DRIVER>))" never leaks "Wrapper" or the driver tag into
+        // the HUD. Take the inner Wrapper(...) name when present, then drop MESA/driver tags and parens.
+        java.util.regex.Matcher wrap = java.util.regex.Pattern.compile("(?i)wrapper\\(").matcher(s);
+        if (wrap.find()) s = s.substring(wrap.end());
+        s = s.replaceAll("(?i)\\(?\\bMESA[_A-Za-z0-9]*\\)?", " ") // MESA_TURNIP / (MESA...) driver tags
+             .replaceAll("[()]", " ")
+             .replaceAll("\\s+", " ")
+             .trim();
         return s;
     }
 
