@@ -108,6 +108,7 @@ fun ControlsEditorSettingsPane(
         stringResource(R.string.control_type_dynamic_stick),
         stringResource(R.string.control_type_mouse_area),
         stringResource(R.string.control_type_button_grid),
+        stringResource(R.string.control_type_expandable_button),
     )
     val shapeOptions = listOf(
         stringResource(R.string.control_shape_circle),
@@ -120,6 +121,16 @@ fun ControlsEditorSettingsPane(
         stringResource(R.string.control_range_0_9),
         stringResource(R.string.control_range_f1_f12),
         stringResource(R.string.control_range_numpad_0_9),
+    )
+    val expandableLayoutOptions = listOf(
+        stringResource(R.string.expandable_layout_radial),
+        stringResource(R.string.expandable_layout_list),
+    )
+    val expandableDirectionOptions = listOf(
+        stringResource(R.string.direction_up),
+        stringResource(R.string.direction_right),
+        stringResource(R.string.direction_down),
+        stringResource(R.string.direction_left),
     )
     val bindingOptions = remember { Binding.values().toList() }
     val holdKeyOptions = remember {
@@ -163,6 +174,9 @@ fun ControlsEditorSettingsPane(
     var bindingDialogIndex by remember(element) { mutableStateOf(-1) }
     var bindingDialogTitle by remember(element) { mutableStateOf("") }
     var pendingTypeIndex by remember(element) { mutableStateOf<Int?>(null) }
+    var expandableChildCount by remember { mutableStateOf(element.getExpandableChildCount().coerceAtLeast(1)) }
+    var expandableLayoutIndex by remember { mutableStateOf(element.getExpandableLayout().ordinal) }
+    var expandableDirectionIndex by remember { mutableStateOf(element.getExpandableDirection().ordinal) }
 
     fun saveAndInvalidate() {
         val normalizedGroupId = groupId.trim()
@@ -252,6 +266,9 @@ fun ControlsEditorSettingsPane(
         customText = element.getText()
         selectedIconId = element.getIconId().toInt() and 0xFF
         bindingCount = element.getBindingCount().coerceAtLeast(1)
+        expandableChildCount = element.getExpandableChildCount().coerceAtLeast(1)
+        expandableLayoutIndex = element.getExpandableLayout().ordinal
+        expandableDirectionIndex = element.getExpandableDirection().ordinal
         groupId = element.groupId ?: ""
     }
 
@@ -324,7 +341,10 @@ fun ControlsEditorSettingsPane(
             )
         }
 
-        SettingsSection(title = stringResource(R.string.shape), visible = selectedType == ControlElement.Type.BUTTON) {
+        SettingsSection(
+            title = stringResource(R.string.shape),
+            visible = selectedType == ControlElement.Type.BUTTON || selectedType == ControlElement.Type.EXPANDABLE_BUTTON,
+        ) {
             SettingSpinner(
                 label = stringResource(R.string.shape),
                 options = shapeOptions,
@@ -575,6 +595,46 @@ fun ControlsEditorSettingsPane(
             )
         }
 
+        SettingsSection(
+            title = stringResource(R.string.expandable_button_settings),
+            visible = selectedType == ControlElement.Type.EXPANDABLE_BUTTON,
+        ) {
+            NumberPickerRow(
+                label = stringResource(R.string.child_button_count),
+                value = expandableChildCount,
+                minValue = 1,
+                maxValue = ControlElement.MAX_EXPANDABLE_CHILDREN,
+                onValueChange = { value ->
+                    expandableChildCount = value
+                    element.setExpandableChildCount(value)
+                    bindingCount = element.getBindingCount()
+                    saveAndInvalidate()
+                },
+            )
+            SettingSpinner(
+                label = stringResource(R.string.expandable_layout),
+                options = expandableLayoutOptions,
+                selectedIndex = expandableLayoutIndex,
+                onSelected = { index ->
+                    expandableLayoutIndex = index
+                    element.setExpandableLayout(ControlElement.ExpandableLayout.values()[index])
+                    saveAndInvalidate()
+                },
+            )
+            if (expandableLayoutIndex == ControlElement.ExpandableLayout.LIST.ordinal) {
+                SettingSpinner(
+                    label = stringResource(R.string.expandable_direction),
+                    options = expandableDirectionOptions,
+                    selectedIndex = expandableDirectionIndex,
+                    onSelected = { index ->
+                        expandableDirectionIndex = index
+                        element.setExpandableDirection(ControlElement.ExpandableDirection.values()[index])
+                        saveAndInvalidate()
+                    },
+                )
+            }
+        }
+
         if (selectedType != ControlElement.Type.MOUSE_AREA) {
             SettingsSection(title = stringResource(R.string.bindings), visible = true) {
                 if (selectedType == ControlElement.Type.BUTTON) {
@@ -606,6 +666,16 @@ fun ControlsEditorSettingsPane(
                         val row = index / gridCols + 1
                         val col = index % gridCols + 1
                         val label = stringResource(R.string.binding_grid_cell_label, row, col)
+                        BindingValueRow(
+                            label = label,
+                            value = element.getBindingAt(index),
+                            combo = element.getCombo(index)?.toList().orEmpty(),
+                            onSet = { openBindingDialog(index, label) },
+                        )
+                    }
+                } else if (selectedType == ControlElement.Type.EXPANDABLE_BUTTON) {
+                    for (index in 0 until expandableChildCount) {
+                        val label = stringResource(R.string.child_button_label, index + 1)
                         BindingValueRow(
                             label = label,
                             value = element.getBindingAt(index),
@@ -654,7 +724,10 @@ fun ControlsEditorSettingsPane(
             },
         )
 
-        SettingsSection(title = stringResource(R.string.custom_text), visible = selectedType == ControlElement.Type.BUTTON) {
+        SettingsSection(
+            title = stringResource(R.string.custom_text),
+            visible = selectedType == ControlElement.Type.BUTTON || selectedType == ControlElement.Type.EXPANDABLE_BUTTON,
+        ) {
             Column(verticalArrangement = Arrangement.spacedBy(EditorSpacing)) {
                 OutlinedTextField(
                     value = customText,

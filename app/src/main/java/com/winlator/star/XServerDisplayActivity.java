@@ -480,6 +480,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         hideControlsRunnable = () -> {
             if (isTimeoutEnabled) {
+                inputControlsView.releaseActiveControls();
                 inputControlsView.setVisibility(View.GONE);
                 Log.d("XServerDisplayActivity", "Touchscreen controls hidden after timeout.");
             }

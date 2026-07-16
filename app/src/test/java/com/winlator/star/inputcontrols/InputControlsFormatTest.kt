@@ -39,6 +39,9 @@ class InputControlsFormatTest {
             .put("combos", JSONArray().put(JSONArray().put(0)))
             .put("holdKey", "KEY_W")
             .put("gridCellShape", "CIRCLE")
+            .put("expandableChildCount", 8)
+            .put("expandableLayout", "LIST")
+            .put("expandableDirection", "RIGHT")
             .put("forkField", "keep")
 
         val copy = ControlElement.copyForSerialization(source)
@@ -47,6 +50,9 @@ class InputControlsFormatTest {
         assertFalse(copy.has("combos"))
         assertFalse(copy.has("holdKey"))
         assertFalse(copy.has("gridCellShape"))
+        assertFalse(copy.has("expandableChildCount"))
+        assertFalse(copy.has("expandableLayout"))
+        assertFalse(copy.has("expandableDirection"))
         assertEquals("keep", copy.getString("forkField"))
     }
 
@@ -124,5 +130,16 @@ class InputControlsFormatTest {
         assertTrue(ControlElement.usesMouseSensitivity(ControlElement.Type.TRACKPAD))
         assertTrue(ControlElement.usesMouseSensitivity(ControlElement.Type.MOUSE_AREA))
         assertFalse(ControlElement.usesMouseSensitivity(ControlElement.Type.STICK))
+    }
+
+    @Test
+    fun expandableButton_childCountIsClampedToSupportedRange() {
+        assertEquals(1, ControlElement.clampExpandableChildCount(0))
+        assertEquals(4, ControlElement.clampExpandableChildCount(4))
+        assertEquals(10, ControlElement.clampExpandableChildCount(11))
+        assertEquals(ControlElement.Type.values().last(), ControlElement.Type.EXPANDABLE_BUTTON)
+        assertEquals(4, ControlElement.calculateExpandableItemsPerLane(500f, 100f, 20f, 10))
+        assertEquals(1, ControlElement.calculateExpandableItemsPerLane(50f, 100f, 20f, 10))
+        assertEquals(3, ControlElement.calculateExpandableItemsPerLane(1000f, 100f, 20f, 3))
     }
 }

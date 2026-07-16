@@ -44,8 +44,9 @@ public class ControlElement {
     private static final float MIN_SCALE = 0.5f;
     private static final float MAX_SCALE = 1.5f;
     private static final long GRID_FLASH_DURATION_MS = 150;
+    public static final int MAX_EXPANDABLE_CHILDREN = 10;
     public enum Type {
-        BUTTON, D_PAD, RANGE_BUTTON, STICK, TRACKPAD, DYNAMIC_STICK, MOUSE_AREA, BUTTON_GRID;
+        BUTTON, D_PAD, RANGE_BUTTON, STICK, TRACKPAD, DYNAMIC_STICK, MOUSE_AREA, BUTTON_GRID, EXPANDABLE_BUTTON;
 
         public static String[] names() {
             Type[] types = values();
@@ -79,6 +80,9 @@ public class ControlElement {
             return names;
         }
     }
+    public enum ExpandableLayout { RADIAL, LIST }
+    public enum ExpandableDirection { UP, RIGHT, DOWN, LEFT }
+
     private final InputControlsView inputControlsView;
     private Type type = Type.BUTTON;
     private Shape shape = Shape.CIRCLE;
@@ -124,6 +128,15 @@ public class ControlElement {
     private float deadZone = 0.15f;
     private String groupId = null;
     private JSONObject sourceJSONObject;
+    private ExpandableLayout expandableLayout = ExpandableLayout.RADIAL;
+    private ExpandableDirection expandableDirection = ExpandableDirection.UP;
+    private boolean expanded;
+    private int activeExpandableChild = -1;
+    private float expandedOffsetX;
+    private float expandedOffsetY;
+    private int expandedItemsPerLane;
+    private float expandedChildScale = 1.0f;
+    private final Rect expandedBoundingBox = new Rect();
 
     public ControlElement(InputControlsView inputControlsView) {
         this.inputControlsView = inputControlsView;
@@ -167,6 +180,10 @@ public class ControlElement {
         currentPointerId = -1;
         currentPosition = null;
         touchTime = null;
+        expandableLayout = ExpandableLayout.RADIAL;
+        expandableDirection = ExpandableDirection.UP;
+        expanded = false;
+        activeExpandableChild = -1;
 
         if (type == Type.STICK || type == Type.DYNAMIC_STICK) {
             bindings[0] = Binding.KEY_W;
@@ -234,6 +251,37 @@ public class ControlElement {
     public void setBindingCount(int bindingCount) {
         resizeBindingArrays(bindingCount, true);
     }
+
+    public int getExpandableChildCount() {
+        return type == Type.EXPANDABLE_BUTTON ? bindings.length : 0;
+    }
+
+    public void setExpandableChildCount(int childCount) {
+        if (type == Type.EXPANDABLE_BUTTON) {
+            resizeBindingArrays(clampExpandableChildCount(childCount), true);
+        }
+    }
+
+    static int clampExpandableChildCount(int childCount) {
+        return Math.max(1, Math.min(MAX_EXPANDABLE_CHILDREN, childCount));
+    }
+
+    static int calculateExpandableItemsPerLane(float available, float itemSize, float gap, int itemCount) {
+        if (itemCount <= 0) return 1;
+        int fit = (int)Math.floor((Math.max(0, available) + gap) / Math.max(1, itemSize + gap));
+        return Math.max(1, Math.min(itemCount, fit));
+    }
+
+    public ExpandableLayout getExpandableLayout() { return expandableLayout; }
+    public void setExpandableLayout(ExpandableLayout layout) {
+        expandableLayout = layout != null ? layout : ExpandableLayout.RADIAL;
+    }
+    public ExpandableDirection getExpandableDirection() { return expandableDirection; }
+    public void setExpandableDirection(ExpandableDirection direction) {
+        expandableDirection = direction != null ? direction : ExpandableDirection.UP;
+    }
+    public boolean isExpanded() { return expanded; }
+    public int getActiveExpandablePointerId() { return activeExpandableChild >= 0 ? currentPointerId : -1; }
 
     private void resetBindingArrays(int bindingCount) {
         resizeBindingArrays(bindingCount, false);
@@ -457,6 +505,11 @@ public class ControlElement {
 
     public Rect getBoundingBox() {
         if (boundingBoxNeedsUpdate) computeBoundingBox();
+        if (type == Type.EXPANDABLE_BUTTON && expanded) {
+            expandedBoundingBox.set(boundingBox);
+            expandedBoundingBox.offset(Math.round(expandedOffsetX), Math.round(expandedOffsetY));
+            return expandedBoundingBox;
+        }
         return boundingBox;
     }
 
@@ -467,6 +520,7 @@ public class ControlElement {
 
         switch (type) {
             case BUTTON:
+            case EXPANDABLE_BUTTON:
                 switch (shape) {
                     case RECT:
                     case ROUND_RECT:
@@ -537,6 +591,7 @@ public class ControlElement {
         if (text != null && !text.isEmpty()) {
             return text;
         }
+        else if (type == Type.EXPANDABLE_BUTTON) return expanded ? "X" : "+";
         else {
             Binding binding = getBindingAt(0);
             String text = binding.toString().replace("NUMPAD ", "NP").replace("BUTTON ", "");
@@ -596,12 +651,13 @@ public class ControlElement {
         boolean isShoulderButton = type == Type.BUTTON && (getBindingAt(0) == Binding.GAMEPAD_BUTTON_L1 || getBindingAt(0) == Binding.GAMEPAD_BUTTON_R1 || getBindingAt(0) == Binding.GAMEPAD_BUTTON_L2 || getBindingAt(0) == Binding.GAMEPAD_BUTTON_R2);
 
         switch (type) {
-            case BUTTON: {
+            case BUTTON:
+            case EXPANDABLE_BUTTON: {
                 float cx = boundingBox.centerX();
                 float cy = boundingBox.centerY();
                 int oldColor = paint.getColor();
                 Shape effectiveShape = isShoulderButton ? Shape.ROUND_RECT : shape;
-                boolean pressed = states[0];
+                boolean pressed = type == Type.EXPANDABLE_BUTTON ? expanded : states[0];
                 int activeColor = pressed ? inputControlsView.getAccentBrightColor() : inputControlsView.getAccentColor();
 
                 if (isL3R3) {
@@ -1056,7 +1112,7 @@ public class ControlElement {
     }
 
     private boolean isEngaged() {
-        return currentPointerId != -1 || (toggleSwitch && selected);
+        return expanded || currentPointerId != -1 || (toggleSwitch && selected);
     }
 
     private int resolveAccentColor() {
@@ -1125,7 +1181,8 @@ public class ControlElement {
         paint.setStrokeCap(Paint.Cap.ROUND);
 
         switch (type) {
-            case BUTTON: {
+            case BUTTON:
+            case EXPANDABLE_BUTTON: {
                 float cx = boundingBox.centerX();
                 float cy = boundingBox.centerY();
                 GameHubLayout.RenderShape triggerShape = gameHubTriggerShape();
@@ -1652,6 +1709,258 @@ public class ControlElement {
         paint.setColorFilter(null);
     }
 
+    public boolean shouldDrawExpandedChildren() {
+        return type == Type.EXPANDABLE_BUTTON
+                && (expanded || (inputControlsView.isEditMode() && selected));
+    }
+
+    public void drawExpandedChildren(Canvas canvas) {
+        if (!shouldDrawExpandedChildren()) return;
+        Paint paint = inputControlsView.getPaint();
+        int snappingSize = inputControlsView.getSnappingSize();
+        int primaryColor = inputControlsView.getPrimaryColor();
+        boolean gameHubStyle = inputControlsView.getVisualStyle() == VisualStyle.GAMEHUB;
+        int contentAlpha = gameHubStyle
+                ? Math.round(255 * inputControlsView.getOverlayOpacity())
+                : 255;
+        int fillAlpha = gameHubStyle
+                ? Math.round(90 * inputControlsView.getOverlayOpacity())
+                : Color.alpha(primaryColor);
+        int blackFill = Color.argb(fillAlpha, 0, 0, 0);
+        float strokeWidth = snappingSize * 0.25f;
+        Rect childBounds = new Rect();
+
+        for (int index = 0; index < bindings.length; index++) {
+            getExpandableChildBounds(index, childBounds);
+            int rawAccent = states[index]
+                    ? inputControlsView.getAccentBrightColor()
+                    : inputControlsView.getAccentColor();
+            int accent = Color.argb(contentAlpha,
+                    Color.red(rawAccent), Color.green(rawAccent), Color.blue(rawAccent));
+            drawExpandableShape(canvas, paint, childBounds, blackFill, true);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(strokeWidth);
+            paint.setColor(accent);
+            drawExpandableShape(canvas, paint, childBounds, accent, false);
+
+            String label = getGridCellLabel(index, 6);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(accent);
+            paint.setTextAlign(Paint.Align.CENTER);
+            paint.setTextSize(Math.min(
+                    getTextSizeForWidth(paint, label, childBounds.width() - strokeWidth * 2),
+                    snappingSize * 1.6f * scale));
+            canvas.drawText(label, childBounds.centerX(),
+                    childBounds.centerY() - ((paint.descent() + paint.ascent()) * 0.5f), paint);
+        }
+    }
+
+    private void drawExpandableShape(Canvas canvas, Paint paint, Rect bounds, int color, boolean fill) {
+        paint.setStyle(fill ? Paint.Style.FILL : Paint.Style.STROKE);
+        paint.setColor(color);
+        switch (shape) {
+            case CIRCLE:
+                canvas.drawCircle(bounds.centerX(), bounds.centerY(), bounds.width() * 0.5f, paint);
+                break;
+            case RECT:
+                canvas.drawRect(bounds, paint);
+                break;
+            case ROUND_RECT:
+            case SQUARE:
+                float radius = shape == Shape.ROUND_RECT
+                        ? bounds.height() * 0.25f
+                        : inputControlsView.getSnappingSize() * 0.75f * scale;
+                canvas.drawRoundRect(bounds.left, bounds.top, bounds.right, bounds.bottom, radius, radius, paint);
+                break;
+        }
+    }
+
+    public void getExpandableChildBounds(int index, Rect outBounds) {
+        Rect launcher = getBoundingBox();
+        int width = launcher.width();
+        int height = launcher.height();
+        int childWidth = Math.max(1, Math.round(width * expandedChildScale));
+        int childHeight = Math.max(1, Math.round(height * expandedChildScale));
+        float childCx;
+        float childCy;
+        if (expandableLayout == ExpandableLayout.RADIAL) {
+            float gap = inputControlsView.getSnappingSize() * 0.75f;
+            float radius = Math.max(
+                    (Math.max(width, height) + Math.max(childWidth, childHeight)) * 0.5f + gap,
+                    Math.max(childWidth, childHeight) * bindings.length / (float)(Math.PI * 2.0) + gap);
+            double angle = -Math.PI * 0.5 + Math.PI * 2.0 * index / Math.max(1, bindings.length);
+            childCx = launcher.centerX() + (float)Math.cos(angle) * radius;
+            childCy = launcher.centerY() + (float)Math.sin(angle) * radius;
+        } else {
+            float gap = inputControlsView.getSnappingSize() * 0.75f;
+            boolean vertical = expandableDirection == ExpandableDirection.UP
+                    || expandableDirection == ExpandableDirection.DOWN;
+            int available = vertical
+                    ? (expandableDirection == ExpandableDirection.UP
+                        ? launcher.top : inputControlsView.getMaxHeight() - launcher.bottom)
+                    : (expandableDirection == ExpandableDirection.LEFT
+                        ? launcher.left : inputControlsView.getMaxWidth() - launcher.right);
+            int primarySize = vertical ? childHeight : childWidth;
+            int perLane = expanded && expandedItemsPerLane > 0
+                    ? expandedItemsPerLane
+                    : calculateExpandableItemsPerLane(available, primarySize, gap, bindings.length);
+            int step = index % perLane + 1;
+            int lane = index / perLane;
+            int launcherPrimarySize = vertical ? height : width;
+            float distance = launcherPrimarySize * 0.5f + gap + primarySize * 0.5f
+                    + (primarySize + gap) * (step - 1);
+            childCx = launcher.centerX();
+            childCy = launcher.centerY();
+            switch (expandableDirection) {
+                case UP: childCy -= distance; break;
+                case RIGHT: childCx += distance; break;
+                case DOWN: childCy += distance; break;
+                case LEFT: childCx -= distance; break;
+            }
+            if (lane > 0) {
+                if (vertical) {
+                    int crossSign = launcher.centerX() < inputControlsView.getMaxWidth() / 2 ? 1 : -1;
+                    childCx += crossSign * lane * (childWidth + gap);
+                } else {
+                    int crossSign = launcher.centerY() < inputControlsView.getMaxHeight() / 2 ? 1 : -1;
+                    childCy += crossSign * lane * (childHeight + gap);
+                }
+            }
+        }
+        outBounds.set(
+                Math.round(childCx - childWidth * 0.5f),
+                Math.round(childCy - childHeight * 0.5f),
+                Math.round(childCx + childWidth * 0.5f),
+                Math.round(childCy + childHeight * 0.5f));
+    }
+
+    public int getExpandableChildIndex(float touchX, float touchY) {
+        if (type != Type.EXPANDABLE_BUTTON || !expanded) return -1;
+        Rect childBounds = new Rect();
+        for (int index = bindings.length - 1; index >= 0; index--) {
+            getExpandableChildBounds(index, childBounds);
+            if (containsShape(childBounds, touchX, touchY)) return index;
+        }
+        return -1;
+    }
+
+    public void setExpanded(boolean expanded) {
+        if (type != Type.EXPANDABLE_BUTTON || this.expanded == expanded) return;
+        if (!expanded) {
+            for (int index = 0; index < activeBindingSlots.length; index++) {
+                if (activeBindingSlots[index]) releaseBindingSlot(index);
+            }
+            Arrays.fill(states, false);
+            currentPointerId = -1;
+            activeExpandableChild = -1;
+            expandedOffsetX = 0;
+            expandedOffsetY = 0;
+            expandedItemsPerLane = 0;
+            expandedChildScale = 1.0f;
+        } else {
+            expandedOffsetX = 0;
+            expandedOffsetY = 0;
+            expandedChildScale = 1.0f;
+            if (expandableLayout == ExpandableLayout.LIST) {
+                Rect launcher = getBoundingBox();
+                boolean vertical = expandableDirection == ExpandableDirection.UP
+                        || expandableDirection == ExpandableDirection.DOWN;
+                int available = vertical
+                        ? (expandableDirection == ExpandableDirection.UP
+                            ? launcher.top : inputControlsView.getMaxHeight() - launcher.bottom)
+                        : (expandableDirection == ExpandableDirection.LEFT
+                            ? launcher.left : inputControlsView.getMaxWidth() - launcher.right);
+                int primarySize = vertical ? launcher.height() : launcher.width();
+                expandedItemsPerLane = calculateExpandableItemsPerLane(
+                        available, primarySize, inputControlsView.getSnappingSize() * 0.75f, bindings.length);
+            }
+            this.expanded = true;
+            Rect envelope = calculateExpandedEnvelope();
+            float fitScale = Math.min(
+                    (float)inputControlsView.getMaxWidth() / Math.max(1, envelope.width()),
+                    (float)inputControlsView.getMaxHeight() / Math.max(1, envelope.height()));
+            if (fitScale < 1.0f) {
+                expandedChildScale = Math.max(0.15f, fitScale * 0.95f);
+                if (expandableLayout == ExpandableLayout.LIST) {
+                    Rect launcher = getBoundingBox();
+                    boolean vertical = expandableDirection == ExpandableDirection.UP
+                            || expandableDirection == ExpandableDirection.DOWN;
+                    int available = vertical
+                            ? (expandableDirection == ExpandableDirection.UP
+                                ? launcher.top : inputControlsView.getMaxHeight() - launcher.bottom)
+                            : (expandableDirection == ExpandableDirection.LEFT
+                                ? launcher.left : inputControlsView.getMaxWidth() - launcher.right);
+                    float primarySize = (vertical ? launcher.height() : launcher.width()) * expandedChildScale;
+                    expandedItemsPerLane = calculateExpandableItemsPerLane(
+                            available, primarySize,
+                            inputControlsView.getSnappingSize() * 0.75f, bindings.length);
+                }
+            }
+            calculateExpandedOffset();
+        }
+        this.expanded = expanded;
+        inputControlsView.invalidate();
+    }
+
+    private void calculateExpandedOffset() {
+        Rect envelope = calculateExpandedEnvelope();
+        int minLeft = envelope.left;
+        int minTop = envelope.top;
+        int maxRight = envelope.right;
+        int maxBottom = envelope.bottom;
+        if (minLeft < 0) expandedOffsetX = -minLeft;
+        if (maxRight + expandedOffsetX > inputControlsView.getMaxWidth()) {
+            expandedOffsetX += inputControlsView.getMaxWidth() - (maxRight + expandedOffsetX);
+        }
+        if (minTop < 0) expandedOffsetY = -minTop;
+        if (maxBottom + expandedOffsetY > inputControlsView.getMaxHeight()) {
+            expandedOffsetY += inputControlsView.getMaxHeight() - (maxBottom + expandedOffsetY);
+        }
+    }
+
+    private Rect calculateExpandedEnvelope() {
+        Rect launcher = getBoundingBox();
+        int minLeft = launcher.left;
+        int minTop = launcher.top;
+        int maxRight = launcher.right;
+        int maxBottom = launcher.bottom;
+        Rect childBounds = new Rect();
+        for (int index = 0; index < bindings.length; index++) {
+            getExpandableChildBounds(index, childBounds);
+            minLeft = Math.min(minLeft, childBounds.left);
+            minTop = Math.min(minTop, childBounds.top);
+            maxRight = Math.max(maxRight, childBounds.right);
+            maxBottom = Math.max(maxBottom, childBounds.bottom);
+        }
+        return new Rect(minLeft, minTop, maxRight, maxBottom);
+    }
+
+    public boolean handleExpandableChildDown(int pointerId, float touchX, float touchY) {
+        if (currentPointerId != -1) return false;
+        int childIndex = getExpandableChildIndex(touchX, touchY);
+        if (childIndex < 0) return false;
+        currentPointerId = pointerId;
+        activeExpandableChild = childIndex;
+        states[childIndex] = true;
+        pressBindingSlot(childIndex);
+        inputControlsView.invalidate();
+        return true;
+    }
+
+    public boolean handleExpandableChildMove(int pointerId) {
+        return pointerId == currentPointerId && activeExpandableChild >= 0;
+    }
+
+    public boolean handleExpandableChildUp(int pointerId) {
+        if (pointerId != currentPointerId || activeExpandableChild < 0) return false;
+        releaseBindingSlot(activeExpandableChild);
+        states[activeExpandableChild] = false;
+        activeExpandableChild = -1;
+        currentPointerId = -1;
+        inputControlsView.invalidate();
+        return true;
+    }
+
     public JSONObject toJSONObject() {
         try {
             JSONObject elementJSONObject = copyForSerialization(sourceJSONObject);
@@ -1695,6 +2004,11 @@ public class ControlElement {
                     elementJSONObject.put("gridCellShape", gridCellShape.name());
                 }
             }
+            if (type == Type.EXPANDABLE_BUTTON) {
+                elementJSONObject.put("expandableChildCount", bindings.length);
+                elementJSONObject.put("expandableLayout", expandableLayout.name());
+                elementJSONObject.put("expandableDirection", expandableDirection.name());
+            }
             // Serialize combos if any
             if (comboBindings != null) {
                 JSONArray combosArr = new JSONArray();
@@ -1731,14 +2045,43 @@ public class ControlElement {
         String[] optionalKeys = {
                 "range", "orientation", "groupId", "areaWidthRatio", "areaHeightRatio",
                 "stickRadiusRatio", "areaWidth", "areaHeight", "stickRadius",
-                "mouseSensitivity", "gridRows", "gridCols", "gridCellShape", "combos", "holdKey"
+                "mouseSensitivity", "gridRows", "gridCols", "gridCellShape", "combos", "holdKey",
+                "expandableChildCount", "expandableLayout", "expandableDirection"
         };
         for (String key : optionalKeys) elementJSONObject.remove(key);
         return elementJSONObject;
     }
 
     public boolean containsPoint(float x, float y) {
-        return getBoundingBox().contains((int)(x + 0.5f), (int)(y + 0.5f));
+        Rect bounds = getBoundingBox();
+        return type == Type.EXPANDABLE_BUTTON
+                ? containsShape(bounds, x, y)
+                : bounds.contains((int)(x + 0.5f), (int)(y + 0.5f));
+    }
+
+    private boolean containsShape(Rect bounds, float touchX, float touchY) {
+        if (!bounds.contains(Math.round(touchX), Math.round(touchY))) return false;
+        if (shape == Shape.RECT) return true;
+        if (shape == Shape.CIRCLE) {
+            float radius = bounds.width() * 0.5f;
+            float dx = touchX - bounds.centerX();
+            float dy = touchY - bounds.centerY();
+            return dx * dx + dy * dy <= radius * radius;
+        }
+        float radius = shape == Shape.ROUND_RECT
+                ? bounds.height() * 0.25f
+                : inputControlsView.getSnappingSize() * 0.75f * scale;
+        float innerLeft = bounds.left + radius;
+        float innerRight = bounds.right - radius;
+        float innerTop = bounds.top + radius;
+        float innerBottom = bounds.bottom - radius;
+        if (touchX >= innerLeft && touchX <= innerRight) return true;
+        if (touchY >= innerTop && touchY <= innerBottom) return true;
+        float cornerX = touchX < innerLeft ? innerLeft : innerRight;
+        float cornerY = touchY < innerTop ? innerTop : innerBottom;
+        float dx = touchX - cornerX;
+        float dy = touchY - cornerY;
+        return dx * dx + dy * dy <= radius * radius;
     }
 
     private boolean isKeepButtonPressedAfterMinTime() {
@@ -1907,6 +2250,7 @@ public class ControlElement {
     }
 
     public void releaseActiveInputs() {
+        if (type == Type.EXPANDABLE_BUTTON) setExpanded(false);
         if (activeBindingSlots != null) {
             for (int i = 0; i < activeBindingSlots.length; i++) {
                 if (activeBindingSlots[i]) releaseBindingSlot(i);

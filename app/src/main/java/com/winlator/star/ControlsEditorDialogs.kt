@@ -119,6 +119,7 @@ private fun AddElementDialog(
             ControlTypeItem(ControlElement.Type.DYNAMIC_STICK, R.drawable.icon_gamepad, R.string.control_type_dynamic_stick),
             ControlTypeItem(ControlElement.Type.MOUSE_AREA, R.drawable.icon_mouse, R.string.control_type_mouse_area),
             ControlTypeItem(ControlElement.Type.BUTTON_GRID, R.drawable.icon_palette, R.string.control_type_button_grid),
+            ControlTypeItem(ControlElement.Type.EXPANDABLE_BUTTON, R.drawable.icon_gamepad, R.string.control_type_expandable_button),
         )
     }
 

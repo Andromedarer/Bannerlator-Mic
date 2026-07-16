@@ -16,6 +16,7 @@ import android.os.Handler;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.util.Log;
+import android.util.SparseBooleanArray;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.PointerIcon;
@@ -101,6 +102,8 @@ public class InputControlsView extends View {
     private final Map<Binding, Integer> activeVirtualBindings = new HashMap<>();
     private final Map<ControlElement, VirtualStickState> activeVirtualSticks = new HashMap<>();
     private final Map<VirtualMouseBindingKey, Float> activeVirtualMouseBindings = new HashMap<>();
+    private ControlElement expandedElement;
+    private final SparseBooleanArray swallowedExpandablePointers = new SparseBooleanArray();
 
     private static class VirtualStickState {
         final Binding binding;
@@ -258,6 +261,14 @@ public class InputControlsView extends View {
             for (ControlElement element : profile.getElements()) {
                 if (isElementHiddenByGroup(element)) continue;
                 element.draw(canvas);
+            }
+            if (expandedElement != null && isElementHiddenByGroup(expandedElement)) {
+                expandedElement.setExpanded(false);
+                expandedElement = null;
+            }
+            ControlElement expandedOverlay = expandedElement != null ? expandedElement : selectedElement;
+            if (expandedOverlay != null && !isElementHiddenByGroup(expandedOverlay)) {
+                expandedOverlay.drawExpandedChildren(canvas);
             }
         }
 
@@ -448,7 +459,7 @@ public class InputControlsView extends View {
         createMouseMoveTimer();
     }
 
-    private synchronized void releaseActiveControls() {
+    public synchronized void releaseActiveControls() {
         if (profile != null && profile.isElementsLoaded()) {
             for (ControlElement element : profile.getElements()) {
                 element.releaseActiveInputs();
@@ -457,6 +468,8 @@ public class InputControlsView extends View {
         activeVirtualBindings.clear();
         activeVirtualSticks.clear();
         activeVirtualMouseBindings.clear();
+        expandedElement = null;
+        swallowedExpandablePointers.clear();
         mouseMoveOffset.set(0, 0);
     }
 
@@ -465,7 +478,9 @@ public class InputControlsView extends View {
     }
 
     public void setShowTouchscreenControls(boolean showTouchscreenControls) {
+        if (this.showTouchscreenControls && !showTouchscreenControls) releaseActiveControls();
         this.showTouchscreenControls = showTouchscreenControls;
+        invalidate();
     }
 
     public int getPrimaryColor() {
@@ -695,6 +710,10 @@ public class InputControlsView extends View {
     public boolean onTouchEvent(MotionEvent event) {
         boolean hapticsEnabled = preferences.getBoolean("touchscreen_haptics_enabled", true);
         if (!editMode) resetTouchscreenTimeout();
+        if (!editMode && !showTouchscreenControls) {
+            if (touchpadView != null) touchpadView.onTouchEvent(event);
+            return true;
+        }
 
         if (editMode && readyToDraw) {
             switch (event.getAction()) {
@@ -775,7 +794,7 @@ public class InputControlsView extends View {
             }
         }
 
-        if (!editMode && profile != null) {
+        if (!editMode && profile != null && showTouchscreenControls) {
             int actionIndex = event.getActionIndex();
             int pointerId = event.getPointerId(actionIndex);
             int actionMasked = event.getActionMasked();
@@ -787,53 +806,105 @@ public class InputControlsView extends View {
                     float x = event.getX(actionIndex);
                     float y = event.getY(actionIndex);
                     if (touchpadView != null) touchpadView.setPointerButtonLeftEnabled(!hasVisibleMouseLeftButton());
-                    for (ControlElement element : profile.getElements()) {
-                        if (isElementHiddenByGroup(element)) continue;
-                        if (element.handleTouchDown(pointerId, x, y)) {
+                    if (expandedElement != null) {
+                        if (isElementHiddenByGroup(expandedElement)) {
+                            expandedElement.setExpanded(false);
+                            expandedElement = null;
+                        } else if (expandedElement.containsPoint(x, y)) {
+                            swallowActiveExpandablePointer();
+                            expandedElement.setExpanded(false);
+                            expandedElement = null;
+                            swallowedExpandablePointers.put(pointerId, true);
                             handled = true;
-                            if (hapticsEnabled) {
-                                Vibrator vibrator = (Vibrator) getContext().getSystemService(Context.VIBRATOR_SERVICE);
-                                if (vibrator != null && vibrator.hasVibrator()) {
-                                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                        } else {
+                            int childIndex = expandedElement.getExpandableChildIndex(x, y);
+                            if (childIndex >= 0) {
+                                handled = expandedElement.handleExpandableChildDown(pointerId, x, y);
+                                if (!handled) swallowedExpandablePointers.put(pointerId, true);
+                                handled = true;
+                            } else {
+                                swallowActiveExpandablePointer();
+                                expandedElement.setExpanded(false);
+                                expandedElement = null;
+                                swallowedExpandablePointers.put(pointerId, true);
+                                handled = true;
+                            }
+                        }
+                    }
+                    if (!handled) {
+                        List<ControlElement> elements = profile.getElements();
+                        for (int elementIndex = elements.size() - 1; elementIndex >= 0; elementIndex--) {
+                            ControlElement element = elements.get(elementIndex);
+                            if (isElementHiddenByGroup(element)) continue;
+                            if (element.getType() == ControlElement.Type.EXPANDABLE_BUTTON
+                                    && element.containsPoint(x, y)) {
+                                expandedElement = element;
+                                element.setExpanded(true);
+                                swallowedExpandablePointers.put(pointerId, true);
+                                handled = true;
+                            } else if (element.handleTouchDown(pointerId, x, y)) {
+                                handled = true;
+                            }
+                            if (handled) {
+                                if (hapticsEnabled) {
+                                    Vibrator vibrator = (Vibrator) getContext().getSystemService(Context.VIBRATOR_SERVICE);
+                                    if (vibrator != null && vibrator.hasVibrator()) {
                                         vibrator.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE));
-                                    } else {
-                                        vibrator.vibrate(50);
                                     }
                                 }
+                                break;
                             }
-                            break;
                         }
                     }
                     if (!handled && touchpadView != null) touchpadView.onTouchEvent(event);
                     break;
                 }
                 case MotionEvent.ACTION_MOVE: {
+                    boolean eventContainsSwallowedPointer = hasSwallowedExpandablePointer(event);
                     for (byte i = 0, count = (byte)event.getPointerCount(); i < count; i++) {
                         float x = event.getX(i);
                         float y = event.getY(i);
                         int pid = event.getPointerId(i);
-                        handled = false;
-                        for (ControlElement element : profile.getElements()) {
-                            if (isElementHiddenByGroup(element)) continue;
-                            if (element.handleTouchMove(pid, x, y)) {
-                                handled = true;
-                                break;
+                        handled = swallowedExpandablePointers.get(pid);
+                        if (!handled && expandedElement != null) {
+                            handled = expandedElement.handleExpandableChildMove(pid);
+                        }
+                        if (!handled) {
+                            for (ControlElement element : profile.getElements()) {
+                                if (isElementHiddenByGroup(element)) continue;
+                                if (element.handleTouchMove(pid, x, y)) {
+                                    handled = true;
+                                    break;
+                                }
                             }
                         }
-                        if (!handled && touchpadView != null) touchpadView.onTouchEvent(event);
+                        if (!handled && !eventContainsSwallowedPointer && touchpadView != null) {
+                            touchpadView.onTouchEvent(event);
+                        }
                     }
                     break;
                 }
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_POINTER_UP:
-                    for (ControlElement element : profile.getElements()) {
-                        if (isElementHiddenByGroup(element)) continue;
-                        if (element.handleTouchUp(pointerId)) {
-                            handled = true;
-                            break;
+                    boolean eventContainsSwallowedPointer = hasSwallowedExpandablePointer(event);
+                    if (swallowedExpandablePointers.get(pointerId)) {
+                        swallowedExpandablePointers.delete(pointerId);
+                        handled = true;
+                    } else if (expandedElement != null) {
+                        handled = expandedElement.handleExpandableChildUp(pointerId);
+                    }
+                    if (!handled) {
+                        for (ControlElement element : profile.getElements()) {
+                            if (isElementHiddenByGroup(element)) continue;
+                            if (element.handleTouchUp(pointerId)) {
+                                handled = true;
+                                break;
+                            }
                         }
                     }
-                    if (!handled && touchpadView != null) touchpadView.onTouchEvent(event);
+                    if (!handled && !eventContainsSwallowedPointer && touchpadView != null) {
+                        touchpadView.onTouchEvent(event);
+                    }
                     break;
                 case MotionEvent.ACTION_CANCEL:
                     releaseActiveControls();
@@ -842,6 +913,19 @@ public class InputControlsView extends View {
             }
         }
         return true;
+    }
+
+    private void swallowActiveExpandablePointer() {
+        if (expandedElement == null) return;
+        int pointerId = expandedElement.getActiveExpandablePointerId();
+        if (pointerId >= 0) swallowedExpandablePointers.put(pointerId, true);
+    }
+
+    private boolean hasSwallowedExpandablePointer(MotionEvent event) {
+        for (int index = 0; index < event.getPointerCount(); index++) {
+            if (swallowedExpandablePointers.get(event.getPointerId(index))) return true;
+        }
+        return false;
     }
 
     @Override
@@ -854,6 +938,7 @@ public class InputControlsView extends View {
         if (profile == null) return false;
         for (ControlElement element : profile.getElements()) {
             if (isElementHiddenByGroup(element)) continue;
+            if (element.getType() == ControlElement.Type.EXPANDABLE_BUTTON && !element.isExpanded()) continue;
             for (int index = 0; index < element.getBindingCount(); index++) {
                 if (element.getBindingAt(index) == Binding.MOUSE_LEFT_BUTTON) return true;
                 Binding[] combo = element.getCombo(index);

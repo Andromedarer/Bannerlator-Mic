@@ -466,6 +466,23 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
                     if (elementJSONObject.has("mouseSensitivity")) element.setMouseSensitivity((float)elementJSONObject.getDouble("mouseSensitivity"));
                     if (elementJSONObject.has("gridRows")) element.setGridRows(elementJSONObject.getInt("gridRows"));
                     if (elementJSONObject.has("gridCols")) element.setGridCols(elementJSONObject.getInt("gridCols"));
+                    if (element.getType() == ControlElement.Type.EXPANDABLE_BUTTON) {
+                        element.setExpandableChildCount(elementJSONObject.optInt("expandableChildCount", 4));
+                        if (elementJSONObject.has("expandableLayout")) {
+                            try {
+                                element.setExpandableLayout(ControlElement.ExpandableLayout.valueOf(
+                                        elementJSONObject.getString("expandableLayout")));
+                            }
+                            catch (IllegalArgumentException ignored) {}
+                        }
+                        if (elementJSONObject.has("expandableDirection")) {
+                            try {
+                                element.setExpandableDirection(ControlElement.ExpandableDirection.valueOf(
+                                        elementJSONObject.getString("expandableDirection")));
+                            }
+                            catch (IllegalArgumentException ignored) {}
+                        }
+                    }
                     if (elementJSONObject.has("gridCellShape")) {
                         try {
                             element.setGridCellShape(ControlElement.Shape.valueOf(elementJSONObject.getString("gridCellShape")));
@@ -485,6 +502,7 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
                     JSONArray bindingsJSONArray = elementJSONObject.optJSONArray("bindings");
                     if (bindingsJSONArray != null) {
                         int bindingLimit = element.getType() == ControlElement.Type.BUTTON_GRID
+                                || element.getType() == ControlElement.Type.EXPANDABLE_BUTTON
                             ? Math.min(bindingsJSONArray.length(), element.getBindingCount())
                             : bindingsJSONArray.length();
                         for (int j = 0; j < bindingLimit; j++) {
