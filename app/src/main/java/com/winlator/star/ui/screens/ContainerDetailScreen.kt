@@ -12,6 +12,8 @@ import android.view.View
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -32,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
@@ -2185,7 +2188,6 @@ internal fun WineD3DConfigDialog(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun FpsCounterConfigDialog(
     initialConfig: String,
@@ -2309,29 +2311,30 @@ internal fun FpsCounterConfigDialog(
                 // so ~13 metrics fit in a few rows instead of stacked Switch rows.
                 Text("Metrics", style = MaterialTheme.typography.bodySmall)
                 Spacer(Modifier.height(4.dp))
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    HudToggleChip("FPS", showFPS) { showFPS = it }
-                    if (rich) HudToggleChip("FPS graph", showGraph) { showGraph = it }
-                    HudToggleChip("CPU", showCPU) { showCPU = it }
-                    if (gameNative) HudToggleChip("CPU graph", showCpuGraph) { showCpuGraph = it }
-                    HudToggleChip("GPU", showGPU) { showGPU = it }
-                    if (gameNative) HudToggleChip("GPU graph", showGpuGraph) { showGpuGraph = it }
-                    HudToggleChip("RAM", showRAM) { showRAM = it }
-                    HudToggleChip("Power", showPower) { showPower = it }
-                    HudToggleChip("Temp", showTemp) { showTemp = it }
+                // Build the currently-VISIBLE chips first (respecting per-style gating), then chunk
+                // into an aligned 3-wide grid — so hidden chips never leave holes. Each stays an
+                // independent toggle writing the same state as before.
+                val metricChips = buildList<Triple<String, Boolean, () -> Unit>> {
+                    add(Triple("FPS", showFPS) { showFPS = !showFPS })
+                    if (rich) add(Triple("FPS graph", showGraph) { showGraph = !showGraph })
+                    add(Triple("CPU", showCPU) { showCPU = !showCPU })
+                    if (gameNative) add(Triple("CPU graph", showCpuGraph) { showCpuGraph = !showCpuGraph })
+                    add(Triple("GPU", showGPU) { showGPU = !showGPU })
+                    if (gameNative) add(Triple("GPU graph", showGpuGraph) { showGpuGraph = !showGpuGraph })
+                    add(Triple("RAM", showRAM) { showRAM = !showRAM })
+                    add(Triple("Power", showPower) { showPower = !showPower })
+                    add(Triple("Temp", showTemp) { showTemp = !showTemp })
                     if (gameNative) {
-                        HudToggleChip("GPU temp", showGpuTemp) { showGpuTemp = it }
-                        HudToggleChip("Battery", showBattery) { showBattery = it }
-                        HudToggleChip("Runtime", showRuntime) { showRuntime = it }
-                        HudToggleChip("Clock", showClock) { showClock = it }
+                        add(Triple("GPU temp", showGpuTemp) { showGpuTemp = !showGpuTemp })
+                        add(Triple("Battery", showBattery) { showBattery = !showBattery })
+                        add(Triple("Runtime", showRuntime) { showRuntime = !showRuntime })
+                        add(Triple("Clock", showClock) { showClock = !showClock })
                     }
-                    HudToggleChip("Engine", showEngine) { showEngine = it }
-                    if (rich) HudToggleChip("GPU model", showGpuModel) { showGpuModel = it }
-                    if (gameHub) HudToggleChip("Dual battery", dualBattery) { dualBattery = it }
+                    add(Triple("Engine", showEngine) { showEngine = !showEngine })
+                    if (rich) add(Triple("GPU model", showGpuModel) { showGpuModel = !showGpuModel })
+                    if (gameHub) add(Triple("Dual battery", dualBattery) { dualBattery = !dualBattery })
                 }
+                ModeChipGrid(metricChips, perRow = 3)
 
                 Spacer(Modifier.height(12.dp))
                 Text("HUD Scale: $hudScale%", style = MaterialTheme.typography.bodySmall)
@@ -2375,15 +2378,49 @@ internal fun FpsCounterConfigDialog(
     )
 }
 
-// Compact on/off metric chip — filled when on, outlined when off.
-// Uses the same FilterChip as HudThreeStop so the visual language stays identical.
+// Multi-select metric grid styled exactly like the in-game drawer's FullscreenModeButtons: each item
+// toggles independently, but shares the box style (accent fill + bold black text ON; black bg +
+// dimmed-accent 1dp border + accent medium text OFF) and the aligned equal-width grid (weight(1f),
+// short rows padded with Spacer so widths stay equal). Callers build the VISIBLE list first, then
+// this chunks per row so per-style gating never leaves holes. There's no LocalAccentDim in this
+// screen, so we derive the dim border from a 40%-alpha primary — reads the same as accentDim.
 @Composable
-private fun HudToggleChip(label: String, selected: Boolean, onToggle: (Boolean) -> Unit) {
-    FilterChip(
-        selected = selected,
-        onClick = { onToggle(!selected) },
-        label = { Text(label) }
-    )
+private fun ModeChipGrid(items: List<Triple<String, Boolean, () -> Unit>>, perRow: Int) {
+    val accent = MaterialTheme.colorScheme.primary
+    val accentDim = accent.copy(alpha = 0.4f)
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        items.chunked(perRow).forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                row.forEach { (label, isOn, onTap) ->
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isOn) accent else Color.Black)
+                            .border(
+                                width = 1.dp,
+                                color = if (isOn) accent else accentDim,
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .clickable { onTap() }
+                            .padding(vertical = 9.dp)
+                    ) {
+                        Text(
+                            label,
+                            color = if (isOn) Color.Black else accent,
+                            fontSize = 12.sp,
+                            fontWeight = if (isOn) FontWeight.Bold else FontWeight.Medium
+                        )
+                    }
+                }
+                repeat(perRow - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
 }
 
 @Composable
