@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -1554,7 +1556,7 @@ private fun SeShaderToggle(label: String, checked: Boolean, enabled: Boolean = t
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 // ───── HUD Tab ─────
 
 @Composable
@@ -1753,26 +1755,36 @@ private fun HudContent(state: XServerDrawerState) {
 
     HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
 
-    ToggleRow("Frame rate (FPS)", showFPS) { showFPS = !showFPS; apply() }
-    if (rich) ToggleRow("FPS graph", showGraph) { showGraph = !showGraph; apply() }
-    ToggleRow("CPU", showCPU) { showCPU = !showCPU; apply() }
-    if (gameNative) ToggleRow("CPU graph", showCpuGraph) { showCpuGraph = !showCpuGraph; apply() }
-    ToggleRow("GPU", showGPU) { showGPU = !showGPU; apply() }
-    if (gameNative) ToggleRow("GPU graph", showGpuGraph) { showGpuGraph = !showGpuGraph; apply() }
-    ToggleRow("Memory (RAM)", showRAM) { showRAM = !showRAM; apply() }
-    ToggleRow("Power", showPower) { showPower = !showPower; apply() }
-    ToggleRow("Temperature", showTemp) { showTemp = !showTemp; apply() }
-    if (gameNative) {
-        ToggleRow("GPU temperature", showGpuTemp) { showGpuTemp = !showGpuTemp; apply() }
-        ToggleRow("Battery %", showBattery) { showBattery = !showBattery; apply() }
-        ToggleRow("Battery runtime", showRuntime) { showRuntime = !showRuntime; apply() }
-        ToggleRow("Clock", showClock) { showClock = !showClock; apply() }
+    // Compact multi-select metric chips (filled = on) in a wrap layout, replacing the
+    // stacked Switch rows so ~13 metrics fit in a few rows. Each chip toggles the same
+    // config key and live-applies, exactly like the old ToggleRows.
+    Text("Metrics", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
+    Spacer(Modifier.height(4.dp))
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        HudToggleChip("FPS", showFPS) { showFPS = !showFPS; apply() }
+        if (rich) HudToggleChip("FPS graph", showGraph) { showGraph = !showGraph; apply() }
+        HudToggleChip("CPU", showCPU) { showCPU = !showCPU; apply() }
+        if (gameNative) HudToggleChip("CPU graph", showCpuGraph) { showCpuGraph = !showCpuGraph; apply() }
+        HudToggleChip("GPU", showGPU) { showGPU = !showGPU; apply() }
+        if (gameNative) HudToggleChip("GPU graph", showGpuGraph) { showGpuGraph = !showGpuGraph; apply() }
+        HudToggleChip("RAM", showRAM) { showRAM = !showRAM; apply() }
+        HudToggleChip("Power", showPower) { showPower = !showPower; apply() }
+        HudToggleChip("Temp", showTemp) { showTemp = !showTemp; apply() }
+        if (gameNative) {
+            HudToggleChip("GPU temp", showGpuTemp) { showGpuTemp = !showGpuTemp; apply() }
+            HudToggleChip("Battery", showBattery) { showBattery = !showBattery; apply() }
+            HudToggleChip("Runtime", showRuntime) { showRuntime = !showRuntime; apply() }
+            HudToggleChip("Clock", showClock) { showClock = !showClock; apply() }
+        }
+        HudToggleChip("Engine", showEngine) { showEngine = !showEngine; apply() }
+        if (rich) HudToggleChip("GPU model", showGpuModel) { showGpuModel = !showGpuModel; apply() }
+        if (gameHub) HudToggleChip("Dual battery", dualBattery) { dualBattery = !dualBattery; apply() }
     }
-    ToggleRow("Engine", showEngine) { showEngine = !showEngine; apply() }
-    if (rich) ToggleRow("GPU model", showGpuModel) { showGpuModel = !showGpuModel; apply() }
-    if (gameHub) {
-        ToggleRow("Dual-battery power fix", dualBattery) { dualBattery = !dualBattery; apply() }
 
+    if (gameHub) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
         HudChipRow("HUD skin", listOf("Classic", "Neon", "Mono"), skins.indexOf(skin)) { skin = skins[it]; apply() }
         HudChipRow("HUD color", listOf("Soft", "Mid", "Vivid"), colors.indexOf(color)) { color = colors[it]; apply() }
@@ -1815,6 +1827,29 @@ private fun HudChipRow(label: String, options: List<String>, selected: Int, onSe
                 }
             }
         }
+    }
+}
+
+// ───── Compact on/off metric chip (wrap-content, for FlowRow) ─────
+// Same accent-fill / surface visual language as HudChipRow: filled accent + black
+// text when on, surface + normal text when off. Sized to content so it wraps.
+@Composable
+private fun HudToggleChip(text: String, on: Boolean, onToggle: () -> Unit) {
+    val accent = MaterialTheme.colorScheme.primary
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (on) accent else MaterialTheme.colorScheme.surface)
+            .clickable { onToggle() }
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.bodySmall,
+            color = if (on) Color.Black else MaterialTheme.colorScheme.onSurface,
+            fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal
+        )
     }
 }
 
