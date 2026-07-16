@@ -2185,6 +2185,7 @@ internal fun WineD3DConfigDialog(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun FpsCounterConfigDialog(
     initialConfig: String,
@@ -2304,24 +2305,33 @@ internal fun FpsCounterConfigDialog(
                 )
                 Spacer(Modifier.height(12.dp))
 
-                HudToggleRow("Frame rate (FPS)", showFPS) { showFPS = it }
-                if (rich) HudToggleRow("FPS graph", showGraph) { showGraph = it }
-                HudToggleRow("CPU", showCPU) { showCPU = it }
-                if (gameNative) HudToggleRow("CPU graph", showCpuGraph) { showCpuGraph = it }
-                HudToggleRow("GPU", showGPU) { showGPU = it }
-                if (gameNative) HudToggleRow("GPU graph", showGpuGraph) { showGpuGraph = it }
-                HudToggleRow("Memory (RAM)", showRAM) { showRAM = it }
-                HudToggleRow("Power", showPower) { showPower = it }
-                HudToggleRow("Temperature", showTemp) { showTemp = it }
-                if (gameNative) {
-                    HudToggleRow("GPU temperature", showGpuTemp) { showGpuTemp = it }
-                    HudToggleRow("Battery %", showBattery) { showBattery = it }
-                    HudToggleRow("Battery runtime", showRuntime) { showRuntime = it }
-                    HudToggleRow("Clock", showClock) { showClock = it }
+                // Compact multi-select metric chips (filled = on) in a wrap layout,
+                // so ~13 metrics fit in a few rows instead of stacked Switch rows.
+                Text("Metrics", style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.height(4.dp))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    HudToggleChip("FPS", showFPS) { showFPS = it }
+                    if (rich) HudToggleChip("FPS graph", showGraph) { showGraph = it }
+                    HudToggleChip("CPU", showCPU) { showCPU = it }
+                    if (gameNative) HudToggleChip("CPU graph", showCpuGraph) { showCpuGraph = it }
+                    HudToggleChip("GPU", showGPU) { showGPU = it }
+                    if (gameNative) HudToggleChip("GPU graph", showGpuGraph) { showGpuGraph = it }
+                    HudToggleChip("RAM", showRAM) { showRAM = it }
+                    HudToggleChip("Power", showPower) { showPower = it }
+                    HudToggleChip("Temp", showTemp) { showTemp = it }
+                    if (gameNative) {
+                        HudToggleChip("GPU temp", showGpuTemp) { showGpuTemp = it }
+                        HudToggleChip("Battery", showBattery) { showBattery = it }
+                        HudToggleChip("Runtime", showRuntime) { showRuntime = it }
+                        HudToggleChip("Clock", showClock) { showClock = it }
+                    }
+                    HudToggleChip("Engine", showEngine) { showEngine = it }
+                    if (rich) HudToggleChip("GPU model", showGpuModel) { showGpuModel = it }
+                    if (gameHub) HudToggleChip("Dual battery", dualBattery) { dualBattery = it }
                 }
-                HudToggleRow("Engine", showEngine) { showEngine = it }
-                if (rich) HudToggleRow("GPU model", showGpuModel) { showGpuModel = it }
-                if (gameHub) HudToggleRow("Dual-battery power fix", dualBattery) { dualBattery = it }
 
                 Spacer(Modifier.height(12.dp))
                 Text("HUD Scale: $hudScale%", style = MaterialTheme.typography.bodySmall)
@@ -2365,13 +2375,15 @@ internal fun FpsCounterConfigDialog(
     )
 }
 
+// Compact on/off metric chip — filled when on, outlined when off.
+// Uses the same FilterChip as HudThreeStop so the visual language stays identical.
 @Composable
-private fun HudToggleRow(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
-        Spacer(Modifier.width(8.dp))
-        Text(label, modifier = Modifier.weight(1f))
-    }
+private fun HudToggleChip(label: String, selected: Boolean, onToggle: (Boolean) -> Unit) {
+    FilterChip(
+        selected = selected,
+        onClick = { onToggle(!selected) },
+        label = { Text(label) }
+    )
 }
 
 @Composable
