@@ -19,6 +19,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.winlator.star.core.KeyValueSet
+import com.winlator.star.widget.FpsCounter
 import com.winlator.star.widget.HudMetrics
 import java.util.ArrayDeque
 import java.util.Date
@@ -56,6 +57,19 @@ class PerformanceHudView(
     context: Context,
     private val fpsProvider: () -> Float,
 ) : FrameLayout(context) {
+
+    /**
+     * Java-friendly entry point, symmetric with PerfHudView/FrameRating: construct with just a
+     * Context and feed the FPS number via [setFpsCounter]. The [fpsProvider] path stays intact and
+     * is used only when no counter is attached.
+     */
+    constructor(context: Context) : this(context, { 0f })
+
+    // When set, this shared counter is the authoritative FPS source (single source of truth); the
+    // Kotlin [fpsProvider] lambda is the fallback for callers that use the primary constructor.
+    private var fpsCounter: FpsCounter? = null
+
+    fun setFpsCounter(counter: FpsCounter?) { fpsCounter = counter }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var updateJob: Job? = null
@@ -267,7 +281,7 @@ class PerformanceHudView(
         if (updateJob?.isActive == true) return
         updateJob = scope.launch {
             while (isActive) {
-                val rawFps = fpsProvider()
+                val rawFps = fpsCounter?.currentFPS ?: fpsProvider()
                 val currentFps = if (rawFps.isFinite()) rawFps.coerceAtLeast(0f) else 0f
                 val snapshot = withContext(Dispatchers.IO) { collectSnapshot(currentFps) }
                 renderSnapshot(snapshot)
