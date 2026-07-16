@@ -426,10 +426,12 @@ public class HudMetrics {
         } else {
             microAmps = readCurrentNowFallback();
         }
-        float watts = 0f;
-        if (microAmps < 0) {
-            watts = (Math.abs(microAmps) * (float) voltageMv) / 1_000_000_000.0f;
-        }
+        // current_now's SIGN convention is device-dependent — many OEMs (Xiaomi/Poco especially)
+        // report discharge as POSITIVE, the opposite of the AOSP convention. Gating wattage on the
+        // sign therefore reads 0W on battery on those devices (and only shows a value while charging).
+        // Use the magnitude for the power figure; the reliable charge DIRECTION is EXTRA_PLUGGED (the
+        // `charging` flag), which the HUD already uses for the PWR/CHG label.
+        float watts = (Math.abs(microAmps) * (float) voltageMv) / 1_000_000_000.0f;
         return new Battery(watts, charging);
     }
 

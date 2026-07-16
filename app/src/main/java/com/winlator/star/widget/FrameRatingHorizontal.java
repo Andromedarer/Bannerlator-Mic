@@ -178,7 +178,9 @@ public class FrameRatingHorizontal extends FrameLayout implements Runnable {
             BatteryManager bm = (BatteryManager) context.getSystemService(Context.BATTERY_SERVICE);
             long microAmps = bm.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW);
             int voltageMv = batteryStatus.getIntExtra(BatteryManager.EXTRA_VOLTAGE, 0);
-            batteryWattage = (microAmps < 0) ? (Math.abs(microAmps) * voltageMv) / 1000000000.0f : 0.0f;
+            // current_now sign is device-dependent (Xiaomi/Poco report discharge as POSITIVE) — use
+            // the magnitude so the power figure isn't 0W on battery on those devices.
+            batteryWattage = (Math.abs(microAmps) * voltageMv) / 1000000000.0f;
         }
 
         post(this);

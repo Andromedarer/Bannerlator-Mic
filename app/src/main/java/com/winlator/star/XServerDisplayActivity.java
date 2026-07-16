@@ -702,6 +702,18 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     if (frameRatingHorizontal != null) frameRatingHorizontal.applyConfig(newConfig);
                     if (perfHud != null) perfHud.applyConfig(newConfig);
                     if (gameNativeHud != null) gameNativeHud.applyConfig(newConfig);
+                    // Classic HUD: applyConfig()->updateParentVisibility() re-shows BOTH orientation
+                    // views whenever they have visible rows, clobbering the active-orientation choice
+                    // (toggling a metric made the inactive orientation pop in alongside the active one).
+                    // Re-assert: only the active orientation is visible, and only while the HUD window
+                    // is up.
+                    if (frameRating != null || frameRatingHorizontal != null) {
+                        boolean shown = frameRatingWindowId != -1;
+                        if (frameRatingHorizontal != null)
+                            frameRatingHorizontal.setVisibility(shown && fpsHudHorizontal ? View.VISIBLE : View.GONE);
+                        if (frameRating != null)
+                            frameRating.setVisibility(shown && !fpsHudHorizontal ? View.VISIBLE : View.GONE);
+                    }
                 }
             });
             if (container != null) {

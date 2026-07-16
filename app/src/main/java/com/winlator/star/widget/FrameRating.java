@@ -254,12 +254,10 @@ public class FrameRating extends FrameLayout implements Runnable {
             long microAmps = bm.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW);
             int voltageMv = batteryStatus.getIntExtra(BatteryManager.EXTRA_VOLTAGE, 0);
 
-            // Only show positive discharge wattage; if charging (microAmps > 0), show 0W
-            if (microAmps < 0) {
-                batteryWattage = (Math.abs(microAmps) * voltageMv) / 1000000000.0f;
-            } else {
-                batteryWattage = 0.0f;
-            }
+            // current_now's sign is device-dependent (Xiaomi/Poco report discharge as POSITIVE), so
+            // gating on the sign reads 0W on battery on those devices. Use the magnitude for the power
+            // figure regardless of sign.
+            batteryWattage = (Math.abs(microAmps) * voltageMv) / 1000000000.0f;
         }
 
         post(this);
