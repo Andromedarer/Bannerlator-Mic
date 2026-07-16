@@ -1593,6 +1593,17 @@ private fun HudContent(state: XServerDrawerState) {
             { limitVal = it.roundToInt() }, { applyLimiter() },
             format = { "${it.roundToInt()}" }
         )
+        // Quick presets: set the cap in one tap. Shares limitVal with the slider above, so the
+        // slider thumb snaps to the picked value (and the matching chip highlights on any value).
+        Spacer(Modifier.height(6.dp))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            listOf(30, 60, 90, 120).forEach { preset ->
+                HudToggleChip("$preset", limitVal == preset) { limitVal = preset; applyLimiter() }
+            }
+        }
         Text(
             "Caps on-screen FPS. Works with any frame-gen engine or none.",
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
