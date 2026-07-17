@@ -104,7 +104,7 @@
 
 **🔐 Run games as administrator.** New per-container **"Run as administrator"** toggle (on by default) for installers and games that need elevation.
 
-**🌐 Community — thank you.** The shared config catalog now holds **166 games** and **184 community configs** — and growing, with more accounts joining all the time. This project grows *only* because of the community's support and participation. 🙏 Browse: [config repo](https://github.com/The412Banner/bannerlator-game-configs) · [online](https://the412banner.github.io/bannerlator-game-configs/).
+**🌐 Community — thank you.** Contributed straight to Bannerlator's own config repo: **166 games**, **184 configs**, from **252 accounts** — and because the in-app browser also merges the **BannerHub** catalog, the total you can browse and apply *inside the app* is **2,257 games / 1,548 configs**. All growing. This project grows *only* because of the community's support and participation. 🙏 Browse: [Bannerlator repo](https://github.com/The412Banner/bannerlator-game-configs) · [BannerHub catalog](https://github.com/The412Banner/bannerhub-game-configs) · [online](https://the412banner.github.io/bannerlator-game-configs/).
 
 <details>
 <summary><b>Previously in 2.6.1</b> — Adreno BCn fix</summary>
