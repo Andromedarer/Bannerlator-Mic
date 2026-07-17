@@ -45,6 +45,8 @@ object PreloaderState {
     // The failure card's buttons route through these; the hosting activity registers them.
     @JvmStatic var onClose: Runnable? = null
     @JvmStatic var onOpenLog: Runnable? = null
+    // Cancel button on the launch screen (SETUP/GUEST) — aborts the launch and tears down the game.
+    @JvmStatic var onCancel: Runnable? = null
 
     /** Begin a game launch: title + shortcut icon + cover art, determinate SETUP phase. */
     @JvmStatic fun show(title: String?, icon: Bitmap?, coverArt: Bitmap?) {

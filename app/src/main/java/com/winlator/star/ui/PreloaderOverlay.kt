@@ -23,6 +23,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -157,6 +158,16 @@ fun PreloaderOverlay() {
                             color = HeroAccent,
                         )
                     }
+                }
+                // Cancel launch — aborts the launch and tears down the game/container so the user is
+                // never stuck on the launch screen.
+                Spacer(Modifier.height(18.dp))
+                OutlinedButton(
+                    onClick = { PreloaderState.onCancel?.run() },
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = HeroText),
+                    border = BorderStroke(1.dp, HeroText.copy(alpha = 0.45f)),
+                ) {
+                    Text("Cancel launch")
                 }
             }
         }

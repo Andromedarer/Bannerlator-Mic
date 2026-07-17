@@ -464,6 +464,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // Route the failure card's buttons back to this activity (cleared in onDestroy).
         com.winlator.star.core.PreloaderState.setOnClose(() -> runOnUiThread(this::finish));
         com.winlator.star.core.PreloaderState.setOnOpenLog(() -> runOnUiThread(this::openLogFolder));
+        com.winlator.star.core.PreloaderState.setOnCancel(() -> runOnUiThread(this::exit));
         preferences = PreferenceManager.getDefaultSharedPreferences(this);
 
         cursorLock = preferences.getBoolean("cursor_lock", false);
@@ -1832,6 +1833,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // Drop the failure-card callbacks so this activity isn't retained via the static holder.
         com.winlator.star.core.PreloaderState.setOnClose(null);
         com.winlator.star.core.PreloaderState.setOnOpenLog(null);
+        com.winlator.star.core.PreloaderState.setOnCancel(null);
         if (wineDebugLogCallback != null) {
             ProcessHelper.removeDebugCallback(wineDebugLogCallback);
             wineDebugLogCallback = null;
