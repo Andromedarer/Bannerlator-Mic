@@ -222,6 +222,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // Flipped true when the game first renders (the launch overlay is dismissed). Shared guard read
     // from the X11 window thread + the guest-termination thread, written on the UI thread.
     private volatile boolean winStarted = false;
+    // Hold the launch screen this long past the first rendered game frame, so the boot steps are
+    // actually seen instead of flashed away on a fast-booting game. The game renders behind it.
+    private static final long LAUNCH_OVERLAY_GRACE_MS = 5000L;
     // "Not-frozen" reassurance timers over the unmeasurable guest-boot tail. Neither kills the launch.
     private static final long LAUNCH_SLOW_HINT_MS = 15_000L;
     private static final long LAUNCH_STILL_WORKING_MS = 90_000L;
@@ -1017,10 +1020,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
             @Override
             public void onUpdateWindowContent(Window window) {
                 if (!winStarted && window.isApplicationWindow()) {
+                    winStarted = true;   // set first so this fires exactly once
                     xServerView.getRenderer().setCursorVisible(true);
                     cancelLaunchTimers();
-                    preloaderDialog.closeOnUiThread();
-                    winStarted = true;
+                    // First real game frame: hold the launch screen a few more seconds (the game
+                    // renders behind it) so the boot steps are actually seen, then close.
+                    new android.os.Handler(getMainLooper()).postDelayed(
+                        preloaderDialog::closeOnUiThread, LAUNCH_OVERLAY_GRACE_MS);
                 }
                     
                 if (frameRatingWindowId == window.id) {
