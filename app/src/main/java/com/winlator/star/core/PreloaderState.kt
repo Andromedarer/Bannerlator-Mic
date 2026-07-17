@@ -30,6 +30,7 @@ data class PreloaderUi(
     val tailLabel: String = "",        // shown in GUEST phase
     val hint: String? = null,          // not-frozen reassurance line
     val failure: Failure? = null,      // set when phase == FAILED
+    val cancellable: Boolean = false,  // true only during a game launch -> shows the Cancel button
 )
 
 /**
@@ -50,12 +51,12 @@ object PreloaderState {
 
     /** Begin a game launch: title + shortcut icon + cover art, determinate SETUP phase. */
     @JvmStatic fun show(title: String?, icon: Bitmap?, coverArt: Bitmap?) {
-        _ui.value = PreloaderUi(title = title ?: "", icon = icon, coverArt = coverArt)
+        _ui.value = PreloaderUi(title = title ?: "", icon = icon, coverArt = coverArt, cancellable = true)
     }
 
     /** Begin a launch with only a shortcut icon (no cover art). */
     @JvmStatic fun show(title: String?, icon: Bitmap?) {
-        _ui.value = PreloaderUi(title = title ?: "", icon = icon)
+        _ui.value = PreloaderUi(title = title ?: "", icon = icon, cancellable = true)
     }
 
     /** Simple indeterminate message with no step bar/heading (e.g. shutdown, create-container). */

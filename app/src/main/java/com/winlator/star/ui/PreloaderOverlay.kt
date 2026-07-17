@@ -160,7 +160,8 @@ fun PreloaderOverlay() {
                     }
                 }
                 // Cancel launch — aborts the launch and tears down the game/container so the user is
-                // never stuck on the launch screen.
+                // never stuck on the launch screen. Only during a real launch (not the shutdown message).
+                if (ui.cancellable) {
                 Spacer(Modifier.height(18.dp))
                 OutlinedButton(
                     onClick = { PreloaderState.onCancel?.run() },
@@ -168,6 +169,7 @@ fun PreloaderOverlay() {
                     border = BorderStroke(1.dp, HeroText.copy(alpha = 0.45f)),
                 ) {
                     Text("Cancel launch")
+                }
                 }
             }
         }
