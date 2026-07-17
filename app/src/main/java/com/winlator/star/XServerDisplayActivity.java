@@ -544,6 +544,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
         state.onNativeRenderingToggle   = () -> {
             boolean next = !XServerDrawerState.INSTANCE.getNativeRenderingEnabled();
             XServerDrawerState.INSTANCE.setNativeRenderingEnabled(next);
+            // Native (direct scanout) puts one opaque game SurfaceControl on top; secondary guest
+            // windows composite UNDER it and go invisible. It's a single-fullscreen-window mode, so
+            // warn (don't block — the count can be transiently >1 during splash/child popups) when
+            // the user enables it with more than one mapped application window on screen.
+            if (next && countMappedAppWindows() > 1)
+                showToast(this, "Native Rendering is best with a single fullscreen window — extra windows may be hidden");
             // Actually drive the renderer (this was previously only flipping the UI flag, so the
             // toggle had no effect and no "Native Rendering+ Enabled" toast). Native (direct
             // scanout) only exists on the Vulkan renderer.
@@ -2524,6 +2530,16 @@ public class XServerDisplayActivity extends AppCompatActivity {
             ((GLRenderer) r).setNativeMode(false); // GL direct scanout bypasses the EffectComposer too
         XServerDrawerState.INSTANCE.setNativeRenderingEnabled(false); // flips the toggle UI off
         showToast(this, "Native Rendering off — needed for post-processing");
+    }
+
+    /** Count mapped, real-sized top-level application windows. Native Rendering (direct scanout)
+     *  is a single-fullscreen-window mode — see the onNativeRenderingToggle warning. */
+    private int countMappedAppWindows() {
+        if (xServer == null || xServer.windowManager == null) return 0;
+        int n = 0;
+        for (com.winlator.star.xserver.Window w : xServer.windowManager.rootWindow.getChildren())
+            if (w.isApplicationWindow()) n++;
+        return n;
     }
 
     /** Direction B: Native Rendering was enabled, so reset every Vulkan preset to neutral so the

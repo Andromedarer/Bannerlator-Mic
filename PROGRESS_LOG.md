@@ -27,6 +27,20 @@
 >
 > **RELEASE-NOTES credits pending for next 2.7-preN/stable: #122/@kylinzang, #113/@GmoLargey, #111/@railexcatapangdiaz-ux** [[feedback_issue_fixes_in_release_notes]].
 
+## 2026-07-17 — 🧭 DIRECT-SCANOUT AUDIT: blast-radius scoping + 2-branch plan (still PARKED, ZERO code)
+
+> **Scoped the parked scanout backlog by blast radius (code re-verified). Full detail: [[project_bannerlator_direct_scanout_audit]] "🧭 BLAST-RADIUS SCOPING".**
+>
+> **Feature is walled off** — only runs when a container opts into Native Rendering; mutually exclusive with the compositor post-pass (FSR/CRT/FXAA/colour hard-reset, auto-off upscaler ≥3). Nothing changes for other renderers when native is OFF.
+>
+> **BRANCH A = `feat/scanout-hardening-safe`** (ZERO blast radius, all behind native flag/non-runtime): #1 fd-leak (the one real bug — TWO sinks: `ScanoutContext.cpp:174` + `directscanout_jni.cpp:63`), #2 stale docs, #4 GL fps→setFrameRate, #5 single-window gate, #10 gray inert dialog controls. Ship as one unit.
+> **BRANCH B = `feat/scanout-shared-render`** (crosses shared `GPUImage` JNI / both present loops — regression-test NON-native GL+Vulkan): #3 R/B auto-detect (do NOT touch shared `gpu_image.c:96` alloc — describe the guest pixmap instead), #6 setColorTransform Android-12+ fallback (scanout-only exec), #7 real fence hygiene (`gpu_image.c:139` + `VulkanRenderer.java:548` + `GLRenderer.java:729` — highest risk, do LAST isolated).
+> **DEFERRED:** #8 cursor dirty-skip, #9 colour-grade via SC.
+>
+> **✅ Resolved:** HUD renders fine under Native (`PerformanceHudView` is a ViewGroup overlay above the SurfaceView; `PresentExtension.java:315` "presentScanout drives the HUD"). **Suggested order:** Branch A first → Branch B, #7 last.
+>
+> **🚧 BRANCH A STARTED — all 5 items CODED (branch `feat/scanout-hardening-safe` off main `095e657d`), pushed to CI, device-verify pending.** #1 fd-leak (both sinks close fenceFd + `<unistd.h>` in JNI), #2 DORMANT→ACTIVE docs, #4 GL fps→setFrameRate VRR vote (real `fpsLimit` + `DirectScanout.setTargetFps` re-vote, mirrors Vulkan), #5 single-window soft-gate warning toast (`countMappedAppWindows()`), #10 grey inert presentMode dropdown under Native. All behind the native flag / dialog / docs — zero non-native blast radius. Full per-item file:line in [[project_bannerlator_direct_scanout_audit]] "🚧 BRANCH A".
+
 ## 2026-07-16 — 🔬 DIRECT-SCANOUT ("Native Rendering") AUDIT — PARKED backlog for a future date (NO code changes this session)
 
 > **Investigation only — nothing applied. The direct-scanout FEATURE already ships in 2.6.1; this is a deferred improvement backlog on it. Full detail + file:line anchors: [[project_bannerlator_direct_scanout_audit]].**

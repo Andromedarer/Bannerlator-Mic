@@ -31,6 +31,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -365,11 +366,15 @@ internal fun VulkanSettingsDialog(
                     stringResource(R.string.renderer_present_mode_immediate)
                 )
                 val selectedPresentIdx = presentModes.indexOf(presentMode).coerceAtLeast(0)
+                // Present mode is ignored under Native Rendering (direct scanout goes straight to
+                // SurfaceFlinger, bypassing the swapchain), so grey it out while native is on.
                 LabeledDropdown(
                     label = stringResource(R.string.renderer_present_mode),
                     options = presentModeLabels,
                     selectedOption = presentModeLabels[selectedPresentIdx],
-                    onSelect = { presentMode = presentModes[presentModeLabels.indexOf(it)] }
+                    onSelect = { presentMode = presentModes[presentModeLabels.indexOf(it)] },
+                    enabled = !nativeRender,
+                    modifier = if (nativeRender) Modifier.alpha(0.5f) else Modifier
                 )
 
                 val drivers = listOf("system", "turnip")

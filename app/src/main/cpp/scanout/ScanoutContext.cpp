@@ -175,6 +175,7 @@ void ScanoutContext::setBuffer(AHardwareBuffer* ahb, int x, int y, int w, int h,
     if (!scanoutActive.load() || !scanoutGameSC || !ahb || !scanoutGameTx) {
         SCO_RLOG("scanoutSetBuffer: SKIPPED active=%d sc=%p ahb=%p tx=%p",
             (int)scanoutActive.load(), scanoutGameSC, (void*)ahb, scanoutGameTx);
+        if (fenceFd >= 0) close(fenceFd);  // buffer not delivered -> close the acquire fence fd (else one fd/frame leaks during toggle/recreate races)
         return;
     }
 
