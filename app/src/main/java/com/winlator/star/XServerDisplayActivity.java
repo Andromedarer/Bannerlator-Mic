@@ -2222,7 +2222,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (useVulkan && renderer instanceof com.winlator.star.renderer.vulkan.VulkanRenderer) {
             com.winlator.star.renderer.vulkan.VulkanRenderer vkRenderer =
                 (com.winlator.star.renderer.vulkan.VulkanRenderer) renderer;
-            String pm = container.getRendererPresentMode();
+            String pm = resolvedRendererPresentMode();
             int pmInt = "immediate".equals(pm) ? 0 : "mailbox".equals(pm) ? 1 : 2; // VkPresentModeKHR
             vkRenderer.setVkPresentMode(pmInt);
             // Scaling mode owns the base sampler filter on Vulkan (modes 1/2 call setFilterMode
@@ -2260,7 +2260,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             XServerDialogState.INSTANCE.setVkToon(false);
             XServerDialogState.INSTANCE.setVkCrt(false);
             XServerDialogState.INSTANCE.setVkNtsc(false);
-            vkRenderer.setSwapRB(container.getRendererSwapRB());
+            vkRenderer.setSwapRB(resolvedRendererSwapRB());
             // Must run before the surface is created so onSurfaceCreated sets up the scanout path.
             // A restored preset scaling mode (>=3, e.g. FSR) lives in the compositor pass that native
             // direct-scanout bypasses, so it wins over the container's native flag on relaunch —
@@ -2269,13 +2269,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // in native mode (setColorTransform is blocked on Android 12+), so a container that needs the
             // swap runs through the normal compositor instead — where nativeSetSwapRB does it in-shader.
             // BGRA (no swap, the native DXVK buffer order) stays native.
-            boolean nativeOn = container.isRendererNative() && initialUpscaler < 3 && !container.getRendererSwapRB();
+            boolean nativeOn = resolvedRendererNative() && initialUpscaler < 3 && !resolvedRendererSwapRB();
             vkRenderer.setInitialNativeMode(nativeOn);
             XServerDrawerState.INSTANCE.setNativeRenderingEnabled(nativeOn); // keep the toggle in sync
             // Native is the supported path on Vulkan — EXCEPT when Colors=RGBA (R/B swap), which native
             // can't do (setColorTransform blocked on 12+). Such a container runs on the compositor, so
             // hide the in-game Native toggle too; otherwise forcing it on would re-break the colors.
-            XServerDrawerState.INSTANCE.setNativeRenderingSupported(!container.getRendererSwapRB());
+            XServerDrawerState.INSTANCE.setNativeRenderingSupported(!resolvedRendererSwapRB());
             // Tick the perf HUD per present (the Vulkan AHB path bypasses copyArea, which normally
             // drives it). Gate on the FPS window so we only count game frames.
             vkRenderer.setHudFrameTick(wid -> {
@@ -3843,6 +3843,29 @@ return true;
         return shortcut != null
                 ? shortcut.getExtra("sfCompatMode", container.getRendererSfCompatMode() ? "1" : "0").equals("1")
                 : container.getRendererSfCompatMode();
+    }
+
+    // Per-game overrides for the Vulkan-settings block (native / Colors=swapRB / present mode). Same
+    // discipline as resolvedRenderer()/resolvedSfCompatMode(): shortcut extra wins, container is the
+    // fallback, read-only (never written back). Lets a shortcut set e.g. Colors=RGBA without touching
+    // the container or its other games.
+    private boolean resolvedRendererNative() {
+        if (container == null) return false;
+        return shortcut != null
+                ? shortcut.getExtra("native", container.isRendererNative() ? "true" : "false").equals("true")
+                : container.isRendererNative();
+    }
+    private boolean resolvedRendererSwapRB() {
+        if (container == null) return false;
+        return shortcut != null
+                ? shortcut.getExtra("swapRB", container.getRendererSwapRB() ? "true" : "false").equals("true")
+                : container.getRendererSwapRB();
+    }
+    private String resolvedRendererPresentMode() {
+        if (container == null) return "fifo";
+        return shortcut != null
+                ? shortcut.getExtra("presentMode", container.getRendererPresentMode())
+                : container.getRendererPresentMode();
     }
 
     private String resolvedFrameGenEngine() {

@@ -131,6 +131,7 @@ import com.winlator.star.ui.AccountUiBus
 import com.winlator.star.ui.LocalTopBarActions
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -3784,6 +3785,21 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
             if (shortcut.container.getRendererSfCompatMode()) "1" else "0") == "1")
     }
 
+    // Vulkan renderer per-game overrides (native / Colors=swapRB / present mode) — default to the
+    // container's values; only shown + relevant when this shortcut runs on the Vulkan renderer.
+    // Stored via the same "native"/"swapRB"/"presentMode" extras the launch resolver reads.
+    var vkNative by remember {
+        mutableStateOf(shortcut.getExtra("native",
+            if (shortcut.container.isRendererNative()) "true" else "false") == "true")
+    }
+    var vkSwapRB by remember {
+        mutableStateOf(shortcut.getExtra("swapRB",
+            if (shortcut.container.getRendererSwapRB()) "true" else "false") == "true")
+    }
+    var vkPresentMode by remember {
+        mutableStateOf(shortcut.getExtra("presentMode", shortcut.container.getRendererPresentMode()))
+    }
+
     // Render scale (supersampling) — per-game override, defaults to the container's "renderScale"
     // extra. Stored via the shortcut "renderScale" extra. "1.0" = Off.
     var renderScale by remember {
@@ -4075,6 +4091,10 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
             putExtra("graphicsDriverConfig", graphicsDriverConfig)
             putExtra("renderer", StringUtils.parseIdentifier(selectedRenderer))
             putExtra("sfCompatMode", if (sfCompatMode) "1" else "0")
+            // Vulkan per-game overrides (read by resolvedRendererNative/SwapRB/PresentMode at launch).
+            putExtra("native", if (vkNative) "true" else "false")
+            putExtra("swapRB", if (vkSwapRB) "true" else "false")
+            putExtra("presentMode", vkPresentMode)
             putExtra("renderScale", if (renderScale == "1.0") null else renderScale)
             putExtra("frameGenEngine", frameGenEngine)
             putExtra("fpsLimiterEnabled", if (fpsLimiterEnabled) "1" else "0")
@@ -4271,6 +4291,40 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
                             }
                             Switch(checked = sfCompatMode, onCheckedChange = { sfCompatMode = it })
                         }
+                    }
+
+                    // Vulkan renderer per-game overrides — only relevant when this game runs on Vulkan.
+                    if (selectedRenderer == "Vulkan") {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(stringResource(R.string.renderer_native), Modifier.weight(1f))
+                            Switch(checked = vkNative, onCheckedChange = { vkNative = it })
+                        }
+                        // Colors = the game buffer's channel order. BGRA (default) presents as-is; RGBA
+                        // swaps R/B (routes through the compositor — native can't swap). Per-game so one
+                        // game can differ from the container / its siblings.
+                        val vkColorOrders = listOf("BGRA", "RGBA")
+                        LabeledDropdown(
+                            label = stringResource(R.string.renderer_colors),
+                            options = vkColorOrders,
+                            selectedOption = if (vkSwapRB) "RGBA" else "BGRA",
+                            onSelect = { vkSwapRB = (it == "RGBA") }
+                        )
+                        // Present mode is ignored under Native Rendering (direct scanout), so grey it out.
+                        val vkPmValues = listOf("fifo", "mailbox", "immediate")
+                        val vkPmLabels = listOf(
+                            stringResource(R.string.renderer_present_mode_fifo),
+                            stringResource(R.string.renderer_present_mode_mailbox),
+                            stringResource(R.string.renderer_present_mode_immediate)
+                        )
+                        val vkPmIdx = vkPmValues.indexOf(vkPresentMode).coerceAtLeast(0)
+                        LabeledDropdown(
+                            label = stringResource(R.string.renderer_present_mode),
+                            options = vkPmLabels,
+                            selectedOption = vkPmLabels[vkPmIdx],
+                            onSelect = { vkPresentMode = vkPmValues[vkPmLabels.indexOf(it)] },
+                            enabled = !vkNative,
+                            modifier = if (vkNative) Modifier.alpha(0.5f) else Modifier
+                        )
                     }
 
                     // Render scale (supersampling) — per-game override of the container default.
