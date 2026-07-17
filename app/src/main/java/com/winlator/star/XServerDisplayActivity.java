@@ -13,6 +13,7 @@ import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
+import android.net.Uri;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.os.Build;
@@ -26,6 +27,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
 import android.widget.CheckBox;
+import android.widget.Toast;
 import android.widget.FrameLayout;
 import android.widget.Spinner;
 import android.widget.TextView;
@@ -216,6 +218,18 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // onCreate (from the container/shortcut "renderScale" extra) and consumed in setupUI.
     private boolean hqDownscale = false;
     PreloaderDialog preloaderDialog = null;
+    // ---- Launch progress overlay ----
+    // Flipped true when the game first renders (the launch overlay is dismissed). Shared guard read
+    // from the X11 window thread + the guest-termination thread, written on the UI thread.
+    private volatile boolean winStarted = false;
+    // "Not-frozen" reassurance timers over the unmeasurable guest-boot tail. Neither kills the launch.
+    private static final long LAUNCH_SLOW_HINT_MS = 15_000L;
+    private static final long LAUNCH_STILL_WORKING_MS = 90_000L;
+    private final Handler launchTimerHandler = new Handler(Looper.getMainLooper());
+    private final Runnable launchSlowHintRunnable = () -> preloaderDialog.hint(
+            "Taking longer than usual — first launch can compile shaders. Not frozen, please wait.");
+    private final Runnable launchStillWorkingRunnable = () -> preloaderDialog.hint(
+            "Still working. If this seems stuck, check the log.");
     private Runnable configChangedCallback = null;
     private boolean isPaused = false;
     // ReShade "freeze-frame preview" (Live preview OFF): the guest is SIGSTOP'd while tuning and each
@@ -444,6 +458,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
         com.winlator.star.ui.PreloaderOverlayHelper.attach(this);
 
         preloaderDialog = new PreloaderDialog(this);
+        // Route the failure card's buttons back to this activity (cleared in onDestroy).
+        com.winlator.star.core.PreloaderState.setOnClose(() -> runOnUiThread(this::finish));
+        com.winlator.star.core.PreloaderState.setOnOpenLog(() -> runOnUiThread(this::openLogFolder));
         preferences = PreferenceManager.getDefaultSharedPreferences(this);
 
         cursorLock = preferences.getBoolean("cursor_lock", false);
@@ -950,10 +967,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
 
         if (shortcut == null)
-            preloaderDialog.show(container.getName(), null);
+            preloaderDialog.show(container.getName(), null, null);
         else {
-            preloaderDialog.show(shortcut.name, shortcut.icon);
+            preloaderDialog.show(shortcut.name, shortcut.icon, shortcut.getCoverArt());
         }
+        preloaderDialog.step(1, "Preparing container…");
 
         // Supersampling ("Render scale"): multiply the game's render resolution so it renders above
         // display res, then let the Vulkan compositor Lanczos-downscale it (see setHqDownscale below).
@@ -994,16 +1012,15 @@ public class XServerDisplayActivity extends AppCompatActivity {
         xServer = new XServer(new ScreenInfo(screenSize));
         xServer.setWinHandler(winHandler);
 
-        boolean[] winStarted = {false};
-
         // Add the OnWindowModificationListener for dynamic workarounds
         xServer.windowManager.addOnWindowModificationListener(new WindowManager.OnWindowModificationListener() {
             @Override
             public void onUpdateWindowContent(Window window) {
-                if (!winStarted[0] && window.isApplicationWindow()) {
+                if (!winStarted && window.isApplicationWindow()) {
                     xServerView.getRenderer().setCursorVisible(true);
+                    cancelLaunchTimers();
                     preloaderDialog.closeOnUiThread();
-                    winStarted[0] = true;
+                    winStarted = true;
                 }
                     
                 if (frameRatingWindowId == window.id) {
@@ -1018,6 +1035,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
             public void onMapWindow(Window window) {
                 // Log the class name of the mapped window
                 Log.d("XServerDisplayActivity", "onMapWindow: Detected window className: " + window.getClassName());
+                // A window mapped (before its content paints) — nudge the tail label so the user sees
+                // progress past the guest-boot spinner. The real dismiss is still onUpdateWindowContent.
+                if (!winStarted) preloaderDialog.enterGuest("Game window detected…");
                 assignTaskAffinity(window);
             }
 
@@ -1083,13 +1103,25 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 simulateConfirmInputControlsDialog();
             }
             Executors.newSingleThreadExecutor().execute(() -> {
-                setupWineSystemFiles();
-                extractGraphicsDriverFiles();
-                changeWineAudioDriver();
+                // Track which app-side stage is running so a failure surfaces on the right card.
+                final String[] stage = { "Preparing Wine & graphics driver" };
                 try {
+                    preloaderDialog.step(2, "Preparing Wine & graphics driver…");
+                    setupWineSystemFiles();
+                    extractGraphicsDriverFiles();
+                    changeWineAudioDriver();
+                    stage[0] = "Building environment";
                     setupXEnvironment();
-                } catch (PackageManager.NameNotFoundException e) {
-                    throw new RuntimeException(e);
+                } catch (Exception e) {
+                    Log.e("XServerDisplayActivity", "Launch setup failed at stage: " + stage[0], e);
+                    final String stageName = stage[0];
+                    final String detail = e.getMessage();
+                    final String logDir = com.winlator.star.core.LogLocation.resolveLogDir(this).getAbsolutePath();
+                    final boolean loggingEnabled = isLaunchLoggingEnabled();
+                    runOnUiThread(() -> {
+                        cancelLaunchTimers();
+                        preloaderDialog.fail(stageName, "Setup step failed", detail, logDir, loggingEnabled);
+                    });
                 }
             });
         };
@@ -1754,10 +1786,46 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }, 1000);
     }
 
+    // Whether Wine/box64 logging is on — the single source of truth for the failure card's guidance.
+    private boolean isLaunchLoggingEnabled() {
+        return preferences.getBoolean("enable_wine_debug", false)
+                || preferences.getBoolean("enable_box64_logs", false);
+    }
+
+    // Arm/cancel the two "not-frozen" reassurance timers.
+    private void startLaunchTimers() {
+        cancelLaunchTimers();
+        launchTimerHandler.postDelayed(launchSlowHintRunnable, LAUNCH_SLOW_HINT_MS);
+        launchTimerHandler.postDelayed(launchStillWorkingRunnable, LAUNCH_STILL_WORKING_MS);
+    }
+
+    private void cancelLaunchTimers() {
+        launchTimerHandler.removeCallbacks(launchSlowHintRunnable);
+        launchTimerHandler.removeCallbacks(launchStillWorkingRunnable);
+    }
+
+    // Best-effort "open the log folder" for the failure card. Folder-opening is unevenly supported
+    // across file managers, so fall back to showing the path if no handler is available.
+    private void openLogFolder() {
+        File dir = com.winlator.star.core.LogLocation.resolveLogDir(this);
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setDataAndType(Uri.parse(dir.getAbsolutePath()), "resource/folder");
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(Intent.createChooser(intent, "Open log folder"));
+        } catch (Exception e) {
+            Toast.makeText(this, "Log folder: " + dir.getAbsolutePath(), Toast.LENGTH_LONG).show();
+        }
+    }
+
     @Override
     protected void onDestroy() {
         super.onDestroy();
         stopDxApiDetection();
+        cancelLaunchTimers();
+        // Drop the failure-card callbacks so this activity isn't retained via the static holder.
+        com.winlator.star.core.PreloaderState.setOnClose(null);
+        com.winlator.star.core.PreloaderState.setOnOpenLog(null);
         if (wineDebugLogCallback != null) {
             ProcessHelper.removeDebugCallback(wineDebugLogCallback);
             wineDebugLogCallback = null;
@@ -2119,6 +2187,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
 
         // Create our overall XEnvironment with various components
+        preloaderDialog.step(3, "Building environment…");
         environment = new XEnvironment(this, imageFs);
         environment.addComponent(
                 new SysVSharedMemoryComponent(
@@ -2153,7 +2222,26 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         // Pass final envVars to the launcher
         guestProgramLauncherComponent.setEnvVars(envVars);
-        guestProgramLauncherComponent.setTerminationCallback((status) -> exit());
+        final boolean launchLoggingEnabled = isLaunchLoggingEnabled();
+        guestProgramLauncherComponent.setTerminationCallback((status) -> {
+            // The guest process died. If it never rendered a window, this is a launch failure — show
+            // the failure card and let the user read it (Close finishes). If it had already rendered,
+            // this is a normal exit / in-game crash: keep the existing exit-on-termination behaviour.
+            if (!winStarted) {
+                final String logDir = com.winlator.star.core.LogLocation.resolveLogDir(this).getAbsolutePath();
+                runOnUiThread(() -> {
+                    cancelLaunchTimers();
+                    preloaderDialog.fail(
+                            "Launching Windows",
+                            "The game exited before rendering",
+                            "exit code " + status,
+                            logDir,
+                            launchLoggingEnabled);
+                });
+            } else {
+                exit();
+            }
+        });
 
         // Add the launcher to our environment
         environment.addComponent(guestProgramLauncherComponent);
@@ -2166,7 +2254,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
 
         // Start all environment components (XServer, Audio, Wine, etc.)
+        preloaderDialog.step(4, "Launching Windows…");
         environment.startEnvironmentComponents();
+
+        // Guest is now booting — the tail is unmeasurable, so switch to the indeterminate spinner and
+        // arm the not-frozen reassurance timers (cancelled on first render or termination).
+        String preloaderGameName = (shortcut != null) ? shortcut.name : container.getName();
+        preloaderDialog.enterGuest("Waiting for " + preloaderGameName + " to render…");
+        runOnUiThread(this::startLaunchTimers);
 
         // Start the WinHandler (writes events to the file)
         winHandler.start();
