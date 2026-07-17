@@ -18,7 +18,9 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.winlator.star.container.Container
 import com.winlator.star.core.KeyValueSet
+import com.winlator.star.ui.theme.AppThemeState
 import com.winlator.star.widget.FpsCounter
 import com.winlator.star.widget.HudMetrics
 import java.util.ArrayDeque
@@ -94,7 +96,8 @@ class PerformanceHudView(
     private var showGpuUsageGraph = false
     private var backgroundOpacity = 0.72f
     private var colorIntensity = 1f
-    private var showTextOutline = true
+    private var outlineIntensity = 0.4f   // 0..1 (hudOutline 0..100 / 100); 0 = no border
+    private var outlineFollowAccent = true   // outline colour: theme accent (true) or light grey (false)
     private var size = HudSize.MEDIUM
 
     private var isCompactMode = false
@@ -247,9 +250,12 @@ class PerformanceHudView(
             "mid" -> 0.88f
             else -> 1.0f
         }
-        showTextOutline = cfg.get("hudOutline", "soft") != "off"
+        outlineIntensity = parseHudOutline(cfg.get("hudOutline", "40")) / 100f
+        outlineFollowAccent = cfg.get("hudOutlineAccent", "1") == "1"
         size = run {
-            val scale = try { Integer.parseInt(cfg.get("hudScale", "100")) } catch (e: Exception) { 100 }
+            val scale = try {
+                Integer.parseInt(cfg.get("hudScale", Container.DEFAULT_HUD_SCALE.toString()))
+            } catch (e: Exception) { Container.DEFAULT_HUD_SCALE }
             when {
                 scale < 85 -> HudSize.SMALL
                 scale <= 110 -> HudSize.MEDIUM
@@ -441,9 +447,11 @@ class PerformanceHudView(
 
         backgroundDrawable.cornerRadius = appearance.cornerRadiusDp.dp.toFloat()
         backgroundDrawable.setColor(Color.argb((opacity * 255f).roundToInt(), 0, 0, 0))
+        // HUD outline = an accent border around the box (game-card style), width from the outline
+        // slider. Accent = the live theme primary; width 0 (slider at 0) = no border.
         backgroundDrawable.setStroke(
-            appearance.strokeWidthDp.dp.coerceAtLeast(1),
-            Color.argb((opacity * 96f).roundToInt(), 255, 255, 255),
+            (outlineIntensity * OUTLINE_BORDER_MAX_DP * resources.displayMetrics.density).roundToInt(),
+            if (outlineFollowAccent) AppThemeState.getCurrentAccentArgb() else Color.rgb(200, 200, 200),
         )
 
         compactContainer.horizontalSpacing = appearance.columnSpacingDp.dp
@@ -453,13 +461,8 @@ class PerformanceHudView(
             textView.setTextSize(TypedValue.COMPLEX_UNIT_SP, appearance.textSizeSp)
             textView.maxLines = 1
             textView.ellipsize = TextUtils.TruncateAt.END
-            textView.setShadowLayer(
-                if (showTextOutline) {
-                    (textView.textSize * HUD_TEXT_SHADOW_RADIUS_RATIO)
-                        .coerceIn(MIN_HUD_TEXT_SHADOW_RADIUS_PX, MAX_HUD_TEXT_SHADOW_RADIUS_PX)
-                } else 0f,
-                0f, 0f, HUD_TEXT_SHADOW_COLOR,
-            )
+            // Outline is now the accent box border, not a text shadow.
+            textView.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
         }
 
         allMetrics.forEach(::applyMetricAppearance)
@@ -820,11 +823,23 @@ class PerformanceHudView(
 
     private companion object {
         const val UPDATE_INTERVAL_MS = 1_000L
+        const val OUTLINE_BORDER_MAX_DP = 4f
         const val GRAPH_SAMPLE_COUNT = 30
         const val GRAPH_FPS_MIN_SCALE = 60f
-        const val HUD_TEXT_SHADOW_RADIUS_RATIO = 0.18f
-        const val MIN_HUD_TEXT_SHADOW_RADIUS_PX = 1.5f
-        const val MAX_HUD_TEXT_SHADOW_RADIUS_PX = 4f
-        val HUD_TEXT_SHADOW_COLOR: Int = Color.argb(220, 0, 0, 0)
+        // Outline radius at intensity 1.0 (px); scaled down linearly by the hudOutline slider.
+        const val MAX_HUD_TEXT_SHADOW_RADIUS_PX = 5f
+        val HUD_TEXT_SHADOW_COLOR: Int = Color.BLACK   // fully opaque so the outline is actually visible
     }
+}
+
+/**
+ * hudOutline is now a 0..100 intensity. Legacy string values map for backward compatibility
+ * ("off"→0, "soft"→40, "strong"→70); a numeric string parses directly.
+ */
+internal fun parseHudOutline(v: String?): Int = when (v?.trim()?.lowercase()) {
+    null -> 40
+    "off" -> 0
+    "soft" -> 40
+    "strong" -> 70
+    else -> v.trim().toIntOrNull()?.coerceIn(0, 100) ?: 40
 }

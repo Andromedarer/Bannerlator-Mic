@@ -14,6 +14,8 @@ import android.view.ViewConfiguration;
 import android.widget.FrameLayout;
 import android.widget.TextView;
 
+import com.winlator.star.container.Container;
+
 import com.winlator.star.R;
 import com.winlator.star.core.GPUInformation;
 import com.winlator.star.core.KeyValueSet;
@@ -167,7 +169,7 @@ public class FrameRating extends FrameLayout implements Runnable {
         // Apply HUD Scaling and Transparency
         try {
             // Scale
-            int scaleInt = Integer.parseInt(config.get("hudScale", "100"));
+            int scaleInt = Integer.parseInt(config.get("hudScale", String.valueOf(Container.DEFAULT_HUD_SCALE)));
             float scaleFactor = Math.max(50, Math.min(150, scaleInt)) / 100.0f;
             this.setPivotX(0);
             this.setPivotY(0);
@@ -254,12 +256,10 @@ public class FrameRating extends FrameLayout implements Runnable {
             long microAmps = bm.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW);
             int voltageMv = batteryStatus.getIntExtra(BatteryManager.EXTRA_VOLTAGE, 0);
 
-            // Only show positive discharge wattage; if charging (microAmps > 0), show 0W
-            if (microAmps < 0) {
-                batteryWattage = (Math.abs(microAmps) * voltageMv) / 1000000000.0f;
-            } else {
-                batteryWattage = 0.0f;
-            }
+            // current_now's sign is device-dependent (Xiaomi/Poco report discharge as POSITIVE), so
+            // gating on the sign reads 0W on battery on those devices. Use the magnitude for the power
+            // figure regardless of sign.
+            batteryWattage = (Math.abs(microAmps) * voltageMv) / 1000000000.0f;
         }
 
         post(this);

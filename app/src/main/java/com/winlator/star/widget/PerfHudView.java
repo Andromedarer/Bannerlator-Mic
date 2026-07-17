@@ -13,6 +13,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
 
+import com.winlator.star.container.Container;
 import com.winlator.star.core.KeyValueSet;
 
 import java.util.ArrayDeque;
@@ -37,11 +38,8 @@ public class PerfHudView extends View {
         public final float factor;
         ColorIntensity(float f) { this.factor = f; }
     }
-    public enum Outline {
-        OFF(0f), SOFT(1.0f), STRONG(1.4f);
-        public final float widthDp;
-        Outline(float w) { this.widthDp = w; }
-    }
+    /** Stroke width (dp, before density/scale) drawn behind the text at outline intensity 1.0. */
+    private static final float OUTLINE_MAX_DP = 3.5f;
 
     // ---- Per-field base colors (Classic skin) -----------------------------
     private static final int C_ENGINE = Color.rgb(255, 80, 160);
@@ -55,7 +53,7 @@ public class PerfHudView extends View {
     private static final int C_CHG    = Color.rgb(0, 255, 0);
     private static final int C_VALUE  = Color.WHITE;
     private static final int C_GRAPH  = Color.rgb(0, 255, 0);
-    private static final int C_OUTLINE = Color.argb(132, 0, 0, 0);
+    private static final int C_OUTLINE_GRAY = Color.rgb(200, 200, 200);   // neutral light-grey outline (non-accent option)
     private static final int C_SEP    = Color.argb(120, 120, 220, 255);
 
     // Neon / Mono overrides
@@ -70,8 +68,9 @@ public class PerfHudView extends View {
     private boolean vertical = false;
     private Skin skin = Skin.CLASSIC;
     private ColorIntensity intensity = ColorIntensity.MID;
-    private Outline outline = Outline.SOFT;
-    private float scale = 0.92f;      // [0.6, 1.4]
+    private float outlineIntensity = 0.4f;   // 0..1 (hudOutline 0..100 / 100); 0 = no stroke
+    private boolean outlineFollowAccent = true;   // outline colour: theme accent (true) or light grey (false)
+    private float scale = Container.DEFAULT_HUD_SCALE / 100f;   // [0.6, 1.4]
     private float bgOpacity = 0.8f;   // [0, 1]
     private boolean dualBattery = false;
 
@@ -135,13 +134,13 @@ public class PerfHudView extends View {
         fillPaint.setLetterSpacing(0.04f);
         fillPaint.setStyle(Paint.Style.FILL);
 
+        // HUD outline = an accent-coloured border around the whole HUD box (game-card style), width
+        // driven by the outline slider. Accent = the live theme primary.
         strokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        strokePaint.setTypeface(mono);
-        strokePaint.setTextSize(textSizePx);
-        strokePaint.setLetterSpacing(0.04f);
         strokePaint.setStyle(Paint.Style.STROKE);
-        strokePaint.setColor(C_OUTLINE);
-        strokePaint.setStrokeWidth(outline.widthDp * density * scale);
+        strokePaint.setColor(outlineFollowAccent
+                ? com.winlator.star.ui.theme.AppThemeState.getCurrentAccentArgb() : C_OUTLINE_GRAY);
+        strokePaint.setStrokeWidth(outlineIntensity * OUTLINE_MAX_DP * density * scale);
 
         graphPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         graphPaint.setStyle(Paint.Style.STROKE);
@@ -259,6 +258,13 @@ public class PerfHudView extends View {
         float radius = 6f * density * scale;
         canvas.drawRoundRect(new RectF(0, 0, getWidth(), getHeight()), radius, radius, bgPaint);
 
+        // Accent border around the box (like a game card), thickness from the outline slider.
+        if (outlineIntensity > 0f) {
+            float half = strokePaint.getStrokeWidth() / 2f;
+            canvas.drawRoundRect(new RectF(half, half, getWidth() - half, getHeight() - half),
+                                 radius, radius, strokePaint);
+        }
+
         float baseline = padPx - fm.ascent;
         if (vertical) {
             float y = baseline;
@@ -291,16 +297,13 @@ public class PerfHudView extends View {
 
     /** Draws "LABEL value" at (x, baseline); returns the x cursor after the text. */
     private float drawCell(Canvas canvas, float x, float baseline, Cell c) {
-        boolean stroke = outline != Outline.OFF;
-        // label
+        // Outline is now the box border (see onDraw), not a per-glyph stroke.
         fillPaint.setColor(labelColorFor(c.labelColor));
-        if (stroke) canvas.drawText(c.label, x, baseline, strokePaint);
         canvas.drawText(c.label, x, baseline, fillPaint);
         float adv = fillPaint.measureText(c.label);
         if (!c.value.isEmpty()) {
             String v = " " + c.value;
             fillPaint.setColor(valueColorFor());
-            if (stroke) canvas.drawText(v, x + adv, baseline, strokePaint);
             canvas.drawText(v, x + adv, baseline, fillPaint);
             adv += fillPaint.measureText(v);
         }
@@ -366,6 +369,22 @@ public class PerfHudView extends View {
     public void setEngineLabel(String s) { this.engineLabel = s == null ? "" : s; }
     public void setGpuModel(String s) { this.gpuModel = s == null ? "" : s; }
 
+    /**
+     * hudOutline is now a 0..100 intensity. Legacy string values are mapped for backward
+     * compatibility ("off"→0, "soft"→40, "strong"→70); a numeric string parses directly.
+     */
+    private static int parseOutlineIntensity(String v) {
+        if (v == null) return 40;
+        switch (v.trim().toLowerCase(Locale.ENGLISH)) {
+            case "off":    return 0;
+            case "soft":   return 40;
+            case "strong": return 70;
+            default:
+                try { return Math.max(0, Math.min(100, Integer.parseInt(v.trim()))); }
+                catch (Exception e) { return 40; }
+        }
+    }
+
     // ---- Config parsing ----------------------------------------------------
     public void applyConfig(String configString) {
         if (configString == null || configString.isEmpty()) return;
@@ -392,15 +411,12 @@ public class PerfHudView extends View {
             case "vivid": intensity = ColorIntensity.VIVID; break;
             default:      intensity = ColorIntensity.MID;
         }
-        switch (cfg.get("hudOutline", "soft")) {
-            case "off":    outline = Outline.OFF; break;
-            case "strong": outline = Outline.STRONG; break;
-            default:       outline = Outline.SOFT;
-        }
+        outlineIntensity = parseOutlineIntensity(cfg.get("hudOutline", "40")) / 100f;
+        outlineFollowAccent = cfg.get("hudOutlineAccent", "1").equals("1");
         try {
-            int sc = Integer.parseInt(cfg.get("hudScale", "92"));
+            int sc = Integer.parseInt(cfg.get("hudScale", String.valueOf(Container.DEFAULT_HUD_SCALE)));
             scale = Math.max(60, Math.min(140, sc)) / 100f;
-        } catch (Exception e) { scale = 0.92f; }
+        } catch (Exception e) { scale = Container.DEFAULT_HUD_SCALE / 100f; }
         try {
             int op = Integer.parseInt(cfg.get("hudOpacity", "80"));
             bgOpacity = Math.max(0, Math.min(100, op)) / 100f;
