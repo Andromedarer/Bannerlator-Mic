@@ -108,8 +108,11 @@ fun PreloaderOverlay() {
         val insets = Modifier.windowInsetsPadding(WindowInsets.safeDrawing)
 
         // --- Small Bannerlator logo, top-start corner. ---
+        // NOTE: must be a raster/vector drawable — Compose painterResource cannot load the
+        // adaptive-icon mipmaps (ic_launcher*), which throws IllegalArgumentException. Use the
+        // Bannerlator splash logo (JPG) like the centered fallback above.
         Image(
-            painter = painterResource(R.mipmap.ic_launcher_round),
+            painter = painterResource(R.drawable.splash_logo),
             contentDescription = null,
             modifier = insets
                 .padding(start = 20.dp, top = 16.dp)
