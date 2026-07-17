@@ -179,6 +179,19 @@ void ScanoutContext::setBuffer(AHardwareBuffer* ahb, int x, int y, int w, int h,
         return;
     }
 
+    // One-shot: log the guest scanout buffer's real channel format so the "Colors" default label
+    // (RGBA vs BGRA) can be confirmed on real hardware. AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM = 1.
+    // Harmless single line per session; kept as a diagnostic.
+    static bool s_scanoutFmtLogged = false;
+    if (!s_scanoutFmtLogged) {
+        AHardwareBuffer_Desc d{};
+        AHardwareBuffer_describe(ahb, &d);
+        __android_log_print(ANDROID_LOG_INFO, "Winlator_Scanout",
+            "scanout guest buffer format=%d (R8G8B8A8_UNORM=%d) %ux%u",
+            (int)d.format, (int)AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM, d.width, d.height);
+        s_scanoutFmtLogged = true;
+    }
+
     AHardwareBuffer_acquire(ahb);
 
     void* t = scanoutGameTx;

@@ -397,10 +397,17 @@ internal fun VulkanSettingsDialog(
                 // still seeds the drawer's initial scaling mode at launch
                 // (XServerDisplayActivity: getRendererFilterMode -> initialUpscaler).
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(stringResource(R.string.renderer_swap_rb), Modifier.weight(1f))
-                    Switch(checked = swapRB, onCheckedChange = { swapRB = it })
-                }
+                // Colors = the game buffer's channel order. RGBA (default) presents as-is; BGRA swaps
+                // R/B for the rare title that comes out with red/blue reversed. Backed by the same
+                // `swapRB` boolean (RGBA=false, BGRA=true); BGRA routes the container through the
+                // compositor (native scanout can't swap channels — see the native-enable decision).
+                val colorOrders = listOf("RGBA", "BGRA")
+                LabeledDropdown(
+                    label = stringResource(R.string.renderer_colors),
+                    options = colorOrders,
+                    selectedOption = if (swapRB) "BGRA" else "RGBA",
+                    onSelect = { swapRB = (it == "BGRA") }
+                )
                 // NOTE: "Correct SurfaceFlinger colours" (sfCompatMode) is NOT shown here — this
                 // dialog only opens for the Vulkan renderer, and that toggle only affects
                 // SurfaceFlinger. It's surfaced inline under the Renderer dropdown instead (see

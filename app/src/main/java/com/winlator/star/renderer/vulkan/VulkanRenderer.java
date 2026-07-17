@@ -186,7 +186,6 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                                         .setVisibility(scanoutGameSC,   true)
                                         .setVisibility(scanoutCursorSC, true)
                                         .apply();
-                                    applyScanoutSwapTransform();
                                     synchronized (lock) {
                                         if (nativeHandle != 0) {
                                             nativeSetScanoutWindow(nativeHandle, scanoutGameSurface, scanoutCursorSurface);
@@ -280,27 +279,12 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
         if (scanoutCursorSC      != null) { scanoutCursorSC.release();      scanoutCursorSC      = null; }
     }
 
-    private void applyScanoutSwapTransform() {
-        if (scanoutGameSC == null || android.os.Build.VERSION.SDK_INT < 29) return;
-        try {
-            android.view.SurfaceControl.Transaction txn = new android.view.SurfaceControl.Transaction();
-            float[] matrix = pendingSwapRB
-                ? new float[]{0f, 0f, 1f, 0f, 1f, 0f, 1f, 0f, 0f}
-                : new float[]{1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f};
-            float[] translation = new float[]{0f, 0f, 0f};
-            java.lang.reflect.Method setColorTransform = android.view.SurfaceControl.Transaction.class.getMethod(
-                "setColorTransform",
-                android.view.SurfaceControl.class,
-                float[].class,
-                float[].class
-            );
-            setColorTransform.invoke(txn, scanoutGameSC, matrix, translation);
-            txn.apply();
-            txn.close();
-        } catch (Exception e) {
-            android.util.Log.w("VulkanRenderer", "Scanout color transform unavailable: " + e);
-        }
-    }
+    // NOTE: the old applyScanoutSwapTransform() (reflected SurfaceControl.Transaction.setColorTransform
+    // for an R/B swap on the game SurfaceControl) was removed — setColorTransform is greylist-blocked on
+    // Android 12+, so it only ever threw and no-op'd. Channel order can't be swapped on a composited AHB
+    // in native mode, so the "Colors: BGRA" (swap) choice makes the container scanout-INELIGIBLE and runs
+    // it through the normal compositor, where nativeSetSwapRB (the shader swizzle) does the swap. RGBA
+    // (default, no swap) stays fully native/zero-copy. See XServerDisplayActivity native-enable decision.
 
     private void updateTransform() {
         if (nativeHandle == 0) return;
@@ -687,7 +671,6 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                                 android.view.Surface.FRAME_RATE_COMPATIBILITY_DEFAULT);
                         }
                         scTxn.apply();
-                        applyScanoutSwapTransform();
                         synchronized (lock) {
                             if (nativeHandle != 0) {
                                 nativeSetScanoutWindow(nativeHandle,

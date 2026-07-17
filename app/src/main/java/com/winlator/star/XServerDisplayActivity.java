@@ -2265,7 +2265,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // A restored preset scaling mode (>=3, e.g. FSR) lives in the compositor pass that native
             // direct-scanout bypasses, so it wins over the container's native flag on relaunch —
             // mirroring the in-game mutual exclusion (picking a preset turns Native Rendering off).
-            boolean nativeOn = container.isRendererNative() && initialUpscaler < 3;
+            // "Colors: BGRA" (R/B swap) can't be done on a composited AHB in native mode (setColorTransform
+            // is blocked on Android 12+), so a container that needs the swap runs through the normal
+            // compositor instead — where nativeSetSwapRB does it in-shader. RGBA (no swap) stays native.
+            boolean nativeOn = container.isRendererNative() && initialUpscaler < 3 && !container.getRendererSwapRB();
             vkRenderer.setInitialNativeMode(nativeOn);
             XServerDrawerState.INSTANCE.setNativeRenderingEnabled(nativeOn); // keep the toggle in sync
             XServerDrawerState.INSTANCE.setNativeRenderingSupported(true);   // Vulkan is the supported native path
