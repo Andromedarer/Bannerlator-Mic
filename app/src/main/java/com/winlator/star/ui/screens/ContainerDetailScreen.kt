@@ -70,6 +70,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import java.util.concurrent.Executors
 import com.winlator.star.container.Container
+import com.winlator.star.widget.perfhud.parseHudOutline
 import com.winlator.star.widget.ColorPickerView
 import com.winlator.star.widget.CPUListView
 import com.winlator.star.widget.EnvVarsView
@@ -2242,10 +2243,10 @@ internal fun FpsCounterConfigDialog(
 
     val skins = listOf("classic", "neon", "mono")
     val colors = listOf("soft", "mid", "vivid")
-    val outlines = listOf("off", "soft", "strong")
     var skin by remember { mutableStateOf(cfg.getOrDefault("hudSkin", "classic")) }
     var color by remember { mutableStateOf(cfg.getOrDefault("hudColor", "mid")) }
-    var outline by remember { mutableStateOf(cfg.getOrDefault("hudOutline", "soft")) }
+    // hudOutline is a 0..100 intensity (legacy off/soft/strong strings map via parseHudOutline).
+    var outlineValue by remember { mutableStateOf(parseHudOutline(cfg.getOrDefault("hudOutline", "40"))) }
 
     fun i(v: Boolean) = if (v) "1" else "0"
     fun buildConfig(): String = listOf(
@@ -2272,7 +2273,7 @@ internal fun FpsCounterConfigDialog(
         "showGPUGraph=${i(showGpuGraph)}",
         "hudSkin=$skin",
         "hudColor=$color",
-        "hudOutline=$outline",
+        "hudOutline=$outlineValue",
         "hudScale=$hudScale",
         "hudOpacity=$hudOpacity",
         "hudTransparency=$hudTransparency"
@@ -2357,7 +2358,13 @@ internal fun FpsCounterConfigDialog(
                         HudThreeStop("HUD skin", listOf("Classic", "Neon", "Mono"), skins.indexOf(skin)) { skin = skins[it] }
                     }
                     HudThreeStop("HUD color", listOf("Soft", "Mid", "Vivid"), colors.indexOf(color)) { color = colors[it] }
-                    HudThreeStop("HUD outline", listOf("Off", "Soft", "Strong"), outlines.indexOf(outline)) { outline = outlines[it] }
+                    Spacer(Modifier.height(8.dp))
+                    Text("HUD outline: $outlineValue", style = MaterialTheme.typography.bodySmall)
+                    Slider(
+                        value = outlineValue.toFloat(),
+                        onValueChange = { outlineValue = it.toInt() },
+                        valueRange = 0f..100f, steps = 99
+                    )
                 } else {
                     Spacer(Modifier.height(4.dp))
                     Text("HUD Transparency: $hudTransparency", style = MaterialTheme.typography.bodySmall)

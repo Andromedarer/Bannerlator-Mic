@@ -99,6 +99,7 @@ import com.winlator.star.reshade.ReshadeManager
 import com.winlator.star.ui.components.ColorPicker
 import com.winlator.star.ui.theme.LocalAccentDim
 import com.winlator.star.ui.theme.WinlatorTheme
+import com.winlator.star.widget.perfhud.parseHudOutline
 
 // Accent colors route to the live MaterialTheme.colorScheme (primary/surface) so the drawer
 // follows the user's theme preset / custom accent. The dim accent (low-emphasis fills/borders/
@@ -1750,10 +1751,10 @@ private fun HudContent(state: XServerDrawerState) {
 
     val skins = listOf("classic", "neon", "mono")
     val colors = listOf("soft", "mid", "vivid")
-    val outlines = listOf("off", "soft", "strong")
     var skin by remember(cfg) { mutableStateOf(cfg.getOrDefault("hudSkin", "classic")) }
     var color by remember(cfg) { mutableStateOf(cfg.getOrDefault("hudColor", "mid")) }
-    var outline by remember(cfg) { mutableStateOf(cfg.getOrDefault("hudOutline", "soft")) }
+    // hudOutline is a 0..100 intensity (legacy off/soft/strong strings map via parseHudOutline).
+    var outlineValue by remember(cfg) { mutableFloatStateOf(parseHudOutline(cfg.getOrDefault("hudOutline", "40")).toFloat()) }
 
     fun i(v: Boolean) = if (v) "1" else "0"
     // Identical key set to ContainerDetailScreen.FpsCounterConfigDialog.buildConfig(),
@@ -1782,7 +1783,7 @@ private fun HudContent(state: XServerDrawerState) {
         "showGPUGraph=${i(showGpuGraph)}",
         "hudSkin=$skin",
         "hudColor=$color",
-        "hudOutline=$outline",
+        "hudOutline=${outlineValue.toInt()}",
         "hudScale=${scaleValue.toInt()}",
         "hudOpacity=${opacityValue.toInt()}",
         "hudTransparency=${transValue.toInt()}",
@@ -1842,11 +1843,11 @@ private fun HudContent(state: XServerDrawerState) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
         HudChipRow("HUD skin", listOf("Classic", "Neon", "Mono"), skins.indexOf(skin)) { skin = skins[it]; apply() }
         HudChipRow("HUD color", listOf("Soft", "Mid", "Vivid"), colors.indexOf(color)) { color = colors[it]; apply() }
-        HudChipRow("HUD outline", listOf("Off", "Soft", "Strong"), outlines.indexOf(outline)) { outline = outlines[it]; apply() }
+        LabeledSlider("HUD outline", outlineValue, 0f..100f, { outlineValue = it }, { apply() }, format = { "${it.toInt()}" })
     } else if (gameNative) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
         HudChipRow("HUD color", listOf("Soft", "Mid", "Vivid"), colors.indexOf(color)) { color = colors[it]; apply() }
-        HudChipRow("HUD outline", listOf("Off", "Soft", "Strong"), outlines.indexOf(outline)) { outline = outlines[it]; apply() }
+        LabeledSlider("HUD outline", outlineValue, 0f..100f, { outlineValue = it }, { apply() }, format = { "${it.toInt()}" })
     }
 }
 

@@ -95,7 +95,7 @@ class PerformanceHudView(
     private var showGpuUsageGraph = false
     private var backgroundOpacity = 0.72f
     private var colorIntensity = 1f
-    private var showTextOutline = true
+    private var outlineIntensity = 0.4f   // 0..1 (hudOutline 0..100 / 100); 0 = no shadow
     private var size = HudSize.MEDIUM
 
     private var isCompactMode = false
@@ -248,7 +248,7 @@ class PerformanceHudView(
             "mid" -> 0.88f
             else -> 1.0f
         }
-        showTextOutline = cfg.get("hudOutline", "soft") != "off"
+        outlineIntensity = parseHudOutline(cfg.get("hudOutline", "40")) / 100f
         size = run {
             val scale = try {
                 Integer.parseInt(cfg.get("hudScale", Container.DEFAULT_HUD_SCALE.toString()))
@@ -457,10 +457,7 @@ class PerformanceHudView(
             textView.maxLines = 1
             textView.ellipsize = TextUtils.TruncateAt.END
             textView.setShadowLayer(
-                if (showTextOutline) {
-                    (textView.textSize * HUD_TEXT_SHADOW_RADIUS_RATIO)
-                        .coerceIn(MIN_HUD_TEXT_SHADOW_RADIUS_PX, MAX_HUD_TEXT_SHADOW_RADIUS_PX)
-                } else 0f,
+                if (outlineIntensity > 0f) outlineIntensity * MAX_HUD_TEXT_SHADOW_RADIUS_PX else 0f,
                 0f, 0f, HUD_TEXT_SHADOW_COLOR,
             )
         }
@@ -825,9 +822,20 @@ class PerformanceHudView(
         const val UPDATE_INTERVAL_MS = 1_000L
         const val GRAPH_SAMPLE_COUNT = 30
         const val GRAPH_FPS_MIN_SCALE = 60f
-        const val HUD_TEXT_SHADOW_RADIUS_RATIO = 0.18f
-        const val MIN_HUD_TEXT_SHADOW_RADIUS_PX = 1.5f
-        const val MAX_HUD_TEXT_SHADOW_RADIUS_PX = 4f
-        val HUD_TEXT_SHADOW_COLOR: Int = Color.argb(220, 0, 0, 0)
+        // Outline radius at intensity 1.0 (px); scaled down linearly by the hudOutline slider.
+        const val MAX_HUD_TEXT_SHADOW_RADIUS_PX = 5f
+        val HUD_TEXT_SHADOW_COLOR: Int = Color.BLACK   // fully opaque so the outline is actually visible
     }
+}
+
+/**
+ * hudOutline is now a 0..100 intensity. Legacy string values map for backward compatibility
+ * ("off"→0, "soft"→40, "strong"→70); a numeric string parses directly.
+ */
+internal fun parseHudOutline(v: String?): Int = when (v?.trim()?.lowercase()) {
+    null -> 40
+    "off" -> 0
+    "soft" -> 40
+    "strong" -> 70
+    else -> v.trim().toIntOrNull()?.coerceIn(0, 100) ?: 40
 }
