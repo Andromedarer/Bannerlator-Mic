@@ -1,5 +1,34 @@
 # Star-Compose — Progress Log
 
+## 2026-07-16 (eve) — 🎛️ TRIPLE HUD OVERLAY + BACKGROUND DOWNLOADS + issue sweep (#111/#113/#114/#121/#122/#127) — all merged to `main` (2.7-preN)
+
+> **All app work on `main` (2.7-preN, NOT tagged; baseline stable = 2.6.1). Per-feature detail in the linked memory topic files. Main tip = `d725094f`.**
+>
+> **CI cleanup:** deleted the redundant compile-only workflow `main.yml` ("Any branch compilation") — `build-artifacts.yml` is now the branch build (compiles all 3 flavors + yields an APK), `release.yml` = stable only. Rule saved [[feedback_ci_workflows]].
+>
+> **✅ TRIPLE HUD OVERLAY — merged (`7592558e` feature, `18355daa` fixes batch).** [[project_bannerlator_hud_triple_overlay]]. Unified backend: single-source `FpsCounter` (all overlays read one number, ticked per present across GL/VK/ASR); hardened `HudMetrics` (device-complete GPU/CPU/thermal/battery discovery — fixes 0%-on-non-Adreno on ALL overlays); NEW 3rd overlay `PerformanceHudView` (GameNative-style, compact-pill/stacked-graphs). 3-way `hudStyle` selector (classic/gamehub/gamenative) in container dialog + in-game drawer; mode-button-style chips in an aligned grid. Then a device-tested fix batch: classic dual-orientation on live metric toggle, device-independent power reading (Xiaomi/Poco `current_now` sign), no-resize-on-toggle (unified `hudScale`=100 via `Container.DEFAULT_HUD_SCALE`), short GPU name via `GPUInformation.extractModelName` (no more "wrapper"/"zink"/"MESA_TURNIP"), outline redesigned to an accent box-border ("game-card style", `AppThemeState.getCurrentAccentArgb`, slider-scaled) + gray/accent color toggle. All DEVICE-PROVEN.
+>
+> **✅ BACKGROUND COMPONENT DOWNLOADS (#122, @kylinzang) — merged (`baaa34d2`).** [[project_bannerlator_content_download_background]]. Compat-layer downloads (Proton/DXVK/box64/FEX/rootfs) now continue when minimized/locked via the store foreground-service + shade notification (+ HTTP Range resume, process-lifetime scope). DEVICE-PROVEN (notification shows, download survives backgrounding).
+>
+> **✅ ISSUE SWEEP — 6 issues replied + closed:**
+> - **#113** (@GmoLargey) DXVK+VKD3D DX12 fail on non-2.x DXVK — FIXED (`ce9cb06e`): container DXVK dialog now filters to 2.x+ when VKD3D on (matches shortcut dialog). Proven by binary diff — `IDXGIVkInteropFactory1` present in DXVK 2.x `dxgi.dll`, ABSENT in 1.x → 1.x literally cannot back VKD3D-Proton.
+> - **#111** (@railexcatapangdiaz-ux) box64 "downloaded but not usable" — on-device repro (WOWBox64 0.3.6 install → landed correctly, showed in dropdown) DISPROVED the bot's 3-bug theory; real issue = shortcut editor labeled "Box64" not "WOWBox64" on arm64ec → FIXED (`d725094f`) + defensive missing `return` in `ContentsManager.finishInstallContent` (failed rename had also reported success). Cosmetic dropdown-name cleanup PARKED [[project_bannerlator_component_dropdown_display]].
+> - **#127** (relative-mouse cursor = by-design, use absolute), **#121** (D3D9-on-Mali / roadmap Q&A — WineD3D + `starengine.ini` config), **#114** (phone "blacklisting" = a `c0000005` game crash, reinstall + vcredist) — support/config answers, no code owed.
+>
+> **RELEASE-NOTES credits pending for next 2.7-preN/stable: #122/@kylinzang, #113/@GmoLargey, #111/@railexcatapangdiaz-ux** [[feedback_issue_fixes_in_release_notes]].
+
+## 2026-07-16 — 🔬 DIRECT-SCANOUT ("Native Rendering") AUDIT — PARKED backlog for a future date (NO code changes this session)
+
+> **Investigation only — nothing applied. The direct-scanout FEATURE already ships in 2.6.1; this is a deferred improvement backlog on it. Full detail + file:line anchors: [[project_bannerlator_direct_scanout_audit]].**
+>
+> **Context:** "Native Rendering" (per-container `rendererNative`) = renderer hands each window's `AHardwareBuffer` straight to SurfaceFlinger via child SurfaceControls (game z=1 opaque + cursor z=2), zero-copy; guest transport = DRI3 `PIXMAP_FROM_BUFFERS`+AHB (`DRI3Extension.pixmapFromHardwareBuffer`→`setDirectScanout(true)`), keeps X Present. **This is OUR OWN impl** (GameNative AHB-present lineage + our P1–P5 work) — **NOT** from Pipetto's DisplayX (unrelated, incomplete, zero code taken).
+>
+> **Confirmed shipped in 2.6.1** (tag `87422089`): flag + `renderer_native` string + all 4 native libs (`vulkan_renderer`/`direct_scanout`/`asurface_renderer`/`ahbimage`) + Vulkan native path + GL path. **BOTH user controls exist in 2.6.1:** persistent per-container Switch `ContainerDetailScreen.kt:353-354` (Compose) + in-game drawer toggle `XServerDisplayActivity.onNativeRenderingToggle:544-571`. Vulkan path mature/proven; **GL path fully wired (P3/P4 live) but UNVERIFIED on device + carries STALE "DORMANT" self-docs** (`DirectScanout.java:26-29`, `directscanout_jni.cpp:6-15` — false).
+>
+> **✅ Strategic finding: guest IdleNotify FPS limiter IS preserved on scanout** (structural — all `PresentExtension` branches call `emitIdleNotify`; first-frame `setRenderingEnabled(false)` pauses only host redraw, not epoll X thread). This is the payoff of keeping X Present vs a DisplayX-style bypass.
+>
+> **DEFERRED backlog (value÷effort), NONE applied — pick up later:** (1) **fd LEAK HIGH/LOW** — `ScanoutContext::setBuffer` early-returns without `close(fenceFd)` → fd exhaustion over long session; (2) fix stale DORMANT docs HIGH/trivial; (3) **auto-detect R/B via `AHardwareBuffer_describe` = GN #1622 port**; (4) **GL fps→`setFrameRate` VRR vote = GN #1612 GL half** (Vulkan done); (5) gate Native to single fullscreen window (opaque top SC + parent freeze occludes secondary guest windows); (6) blocked `setColorTransform` reflection on Android 12+ → swapRB silent no-op; (7) real fence hygiene / tearing (CPU-unlock fence ≠ guest GPU render fence + no release-fence back-pressure) HIGH/Med-High; (8) cursor per-frame memcpy dirty-skip; (9) color-grade via SurfaceControl coexisting w/ scanout; (10) gray inert controls (presentMode/scaling) under Native in dialog. **Suggested first branch = #1 (fd leak) or bundle #1–4 as "scanout hardening" (#3/#4 already on GN port backlog [[project_gamenative_render_sync_202607]]).**
+
 ## 2026-07-13 — 🍷 New Proton 10.0-4 (unixlib + fast-yield, stripped+zstd) shipped + in-app catalog; broken P11 x86-64 rows pulled
 
 > **Proton-layer work on `The412Banner/proton-wine` + `winlator-contents` (no Bannerlator app change). Full detail: [[project_fexcore_unixlib_transition]].**
