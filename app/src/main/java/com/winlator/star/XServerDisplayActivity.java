@@ -542,6 +542,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
             if (inputControlsView != null) inputControlsView.invalidate();
         };
         state.onNativeRenderingToggle   = () -> {
+            // GL Native Rendering is disabled for now (bespoke GL scanout path has an unresolved
+            // brightness issue; frame-pacing fix parked on fix/gl-native-frame-pacing). Vulkan only.
+            // The drawer toggle is hidden on GL, but guard here too so it can never engage on GL.
+            if (xServerView.getRenderer() instanceof GLRenderer) {
+                XServerDrawerState.INSTANCE.setNativeRenderingEnabled(false);
+                showToast(this, "Native Rendering isn't available on the OpenGL renderer yet — use the Vulkan renderer");
+                return;
+            }
             boolean next = !XServerDrawerState.INSTANCE.getNativeRenderingEnabled();
             XServerDrawerState.INSTANCE.setNativeRenderingEnabled(next);
             // Native (direct scanout) puts one opaque game SurfaceControl on top; secondary guest
@@ -2255,6 +2263,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             boolean nativeOn = container.isRendererNative() && initialUpscaler < 3;
             vkRenderer.setInitialNativeMode(nativeOn);
             XServerDrawerState.INSTANCE.setNativeRenderingEnabled(nativeOn); // keep the toggle in sync
+            XServerDrawerState.INSTANCE.setNativeRenderingSupported(true);   // Vulkan is the supported native path
             // Tick the perf HUD per present (the Vulkan AHB path bypasses copyArea, which normally
             // drives it). Gate on the FPS window so we only count game frames.
             vkRenderer.setHudFrameTick(wid -> {
@@ -2284,9 +2293,15 @@ public class XServerDisplayActivity extends AppCompatActivity {
             glr.setSwapRB(container.getRendererSwapRB());
             // A restored preset (>=3) lives in the composer pass native bypasses -> native off (parity
             // with the in-game preset<->native mutual exclusion), same as the Vulkan seed above.
-            boolean glNativeOn = container.isRendererNative() && glInitialMode < 3;
+            // GL Native Rendering (direct scanout) is DISABLED on the OpenGL renderer for now: the
+            // bespoke GL scanout path has an unresolved brightness/colorspace issue (the frame-pacing
+            // half is already fixed on the held branch fix/gl-native-frame-pacing). Vulkan is the
+            // supported native path. Force off so a GL container never launches into the broken mode,
+            // regardless of the saved container native flag. (was: container.isRendererNative() && glInitialMode < 3)
+            boolean glNativeOn = false;
             glr.setInitialNativeMode(glNativeOn);
             XServerDrawerState.INSTANCE.setNativeRenderingEnabled(glNativeOn); // keep the toggle in sync
+            XServerDrawerState.INSTANCE.setNativeRenderingSupported(false);    // hide the drawer toggle on GL
             // GL native (FLIP/scanout) bypasses both onDrawFrame and copyArea, so drive the perf HUD
             // per present here (same as the Vulkan/ASR ticks) — otherwise the HUD freezes in native mode.
             glr.setHudFrameTick(wid -> {
