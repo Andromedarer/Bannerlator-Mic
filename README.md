@@ -56,7 +56,7 @@
 |---|---|
 | **App label** | `Bannerlator Bionic` (standard) · `Bannerlator Bionic PuBG` (pubg) · `Bannerlator Bionic Ludashi` (ludashi) |
 | **Packages** | `com.winlator.banner` (standard) · `com.tencent.ig` (pubg) · `com.ludashi.benchmark` (ludashi) |
-| **Version** | Bannerlator **V 2.6.1** — built from Star **marcescence** (`versionName 2.6.1`, `versionCode 44`) |
+| **Version** | Bannerlator **V 2.6.2** — built from Star **marcescence** (`versionName 2.6.2`, `versionCode 45`) |
 | **Android SDK** | `compileSdk 34` · `targetSdk 28` · `minSdk 26` (Android 8.0+) |
 | **Lineage** | Winlator → cmod → Bionic Nightly → Star Bionic → **marcescence** → **Bannerlator** |
 
@@ -66,7 +66,7 @@
 
 - [📌 Project Notice](#-project-notice)
 - [ℹ️ Information](#ℹ️-information)
-- [🆕 What's New in 2.6.1](#-whats-new-in-261)
+- [🆕 What's New in 2.6.2](#-whats-new-in-262)
 - [✨ Full Features](#-full-features)
   - [🍷 Windows compatibility](#-windows-compatibility)
   - [🎨 Graphics & translation layers](#-graphics--translation-layers)
@@ -92,15 +92,26 @@
 
 ---
 
-## 🆕 What's New in 2.6.1
+## 🆕 What's New in 2.6.2
 
-2.6.1 is a **small hotfix-and-tweak** release on top of 2.6. The headline is an **Adreno graphics fix**: on 2.5 and later, some **Adreno (Qualcomm)** devices saw everything run slower and heavy titles like **Skyrim AE stop launching entirely** — a BC-texture (BCn) transcode meant only for **Mali / Xclipse** GPUs was being forced on Adreno too, where BCn is already supported in hardware, so it was pure wasted work. It's now switched **off on Adreno** (Mali / Xclipse are completely unchanged). Two small tweaks round it out. Like the last few releases it's an **app-side** update — **no ImageFS reinstall** — your containers, themes, custom accent and per-game settings carry over untouched; just install over 2.6.
+2.6.2 is a **fixes-and-hardening** update on top of 2.6.1 — no new subsystem, just sharpening what's already here. The **in-game performance HUD** got a ground-up pass, **component downloads** now keep going when you leave the app, and a batch of reported bugs are fixed. Like the last several releases it's **entirely app-side** — **no ImageFS reinstall** — your containers, themes, custom accent and per-game settings carry over untouched; just install over 2.6.
 
-**🟣 Adreno: BCn transcode no longer forced — fix.** The integrated-wrapper BCn emulation (`WRAPPER_EMULATE_BCN`) was being emitted for **every** GPU, but the BCn-aware wrapper builds shipped since 2.5 (Wrapper-leegao / Wrapper-gamenative) act on it — so on **Adreno 7xx** it forced a pointless per-texture transcode: global slowdown and BC-heavy DX11 games (e.g. *Skyrim AE*) failing to launch. It's now gated **off on Qualcomm (0x5143)**, mirroring the existing `bcn_layer` and compute-decode vendor guards. **Mali / Xclipse / PowerVR behaviour is untouched** — the entire point of the 2.5 Mali hardening work still stands. *(Diagnosed from an Adreno-750 / Snapdragon 8 Gen 3 report; if you're on Adreno and rolled back to 2.4, this is your fix.)*
+**🎛️ In-game HUD — hardened + a new overlay style.** Every overlay now reads **one shared FPS source** (they could drift before), and the metric readers (GPU load, CPU / GPU temp, RAM, battery / power) were rewritten with proper vendor discovery — so values that used to read **0% on many non-Adreno GPUs** now populate correctly. There's a new third overlay — a **GameNative-style HUD** with live graphs — alongside Classic and GameHub, switchable **live in-game**. Plus compact chip UI in an aligned grid, a **slider-controlled accent outline**, FPS-limiter presets (**30 / 60 / 90 / 120**), and a clean GPU-model name (e.g. `Adreno 750`).
 
-**🔗 "Add to Shortcuts" for `.exe` files — new.** The built-in **File Manager** gains an **Add to Shortcuts** action on any `.exe`, so you can turn an executable into a game shortcut without going through the container editor.
+**⬇️ Background component downloads.** Downloading a large layer (Proton / DXVK / box64 / FEXCore / rootfs) no longer stops when you **minimize or lock** the phone — it continues via a foreground service with a **shade notification**, and **resumes** if interrupted. *(Thanks [@kylinzang](https://github.com/kylinzang) — [#122](https://github.com/The412Banner/Bannerlator/issues/122).)*
 
-**🎮 Community-config XInput round-trips correctly — fix.** A shared config's **XInput** input setting is a bitmask, not a plain on/off flag — it was being written back as `1/0`, so applying certain shared configs could land the wrong controller mode. It now round-trips faithfully.
+**🔧 Fixes.** DXVK 1.x can no longer be paired with **VKD3D** (they're binary-incompatible — DXVK 1.x can't back VKD3D-Proton — so the DX12 path failed silently) *([@GmoLargey](https://github.com/GmoLargey), [#113](https://github.com/The412Banner/Bannerlator/issues/113))*; the per-game editor now labels the x86 backend **WOWBox64** on arm64ec instead of "Box64" *([@railexcatapangdiaz-ux](https://github.com/railexcatapangdiaz-ux), [#111](https://github.com/The412Banner/Bannerlator/issues/111))*; the Classic HUD no longer double-shows or resizes on a metric toggle; **power draw** reads correctly on inverted-battery-current devices (Xiaomi / Poco); and a failed component install no longer reports success.
+
+**🔐 Run games as administrator.** New per-container **"Run as administrator"** toggle (on by default) for installers and games that need elevation.
+
+**🌐 Community — thank you.** The shared config catalog now holds **166 games** and **184 community configs** — and growing, with more accounts joining all the time. This project grows *only* because of the community's support and participation. 🙏 Browse: [config repo](https://github.com/The412Banner/bannerlator-game-configs) · [online](https://the412banner.github.io/bannerlator-game-configs/).
+
+<details>
+<summary><b>Previously in 2.6.1</b> — Adreno BCn fix</summary>
+
+2.6.1 was a small hotfix on top of 2.6. The headline was an **Adreno graphics fix**: since 2.5, the integrated-wrapper BCn emulation (`WRAPPER_EMULATE_BCN`) was emitted for **every** GPU, but the BCn-aware wrapper builds act on it — so on **Adreno 7xx** it forced a pointless per-texture transcode: global slowdown and BC-heavy DX11 games (e.g. *Skyrim AE*) failing to launch. It's now gated **off on Qualcomm (0x5143)**; **Mali / Xclipse / PowerVR behaviour is untouched**. Rounded out by an **Add to Shortcuts** action on any `.exe` in the File Manager, and a **community-config XInput** round-trip fix (the setting is a bitmask, was being written back as `1/0`).
+
+</details>
 
 <details>
 <summary><b>Previously in 2.6</b> — Community Config <i>Sharing</i> + optional accounts</summary>
