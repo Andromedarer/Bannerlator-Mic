@@ -2247,6 +2247,7 @@ internal fun FpsCounterConfigDialog(
     var color by remember { mutableStateOf(cfg.getOrDefault("hudColor", "mid")) }
     // hudOutline is a 0..100 intensity (legacy off/soft/strong strings map via parseHudOutline).
     var outlineValue by remember { mutableStateOf(parseHudOutline(cfg.getOrDefault("hudOutline", "40"))) }
+    var outlineAccent by remember { mutableStateOf(cfg.getOrDefault("hudOutlineAccent", "1") == "1") }
 
     fun i(v: Boolean) = if (v) "1" else "0"
     fun buildConfig(): String = listOf(
@@ -2274,6 +2275,7 @@ internal fun FpsCounterConfigDialog(
         "hudSkin=$skin",
         "hudColor=$color",
         "hudOutline=$outlineValue",
+        "hudOutlineAccent=${if (outlineAccent) 1 else 0}",
         "hudScale=$hudScale",
         "hudOpacity=$hudOpacity",
         "hudTransparency=$hudTransparency"
@@ -2365,6 +2367,7 @@ internal fun FpsCounterConfigDialog(
                         onValueChange = { outlineValue = it.toInt() },
                         valueRange = 0f..100f, steps = 99
                     )
+                    HudThreeStop("Outline color", listOf("Gray", "Accent"), if (outlineAccent) 1 else 0) { outlineAccent = it == 1 }
                 } else {
                     Spacer(Modifier.height(4.dp))
                     Text("HUD Transparency: $hudTransparency", style = MaterialTheme.typography.bodySmall)

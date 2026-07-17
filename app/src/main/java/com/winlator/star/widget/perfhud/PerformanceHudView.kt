@@ -96,7 +96,8 @@ class PerformanceHudView(
     private var showGpuUsageGraph = false
     private var backgroundOpacity = 0.72f
     private var colorIntensity = 1f
-    private var outlineIntensity = 0.4f   // 0..1 (hudOutline 0..100 / 100); 0 = no shadow
+    private var outlineIntensity = 0.4f   // 0..1 (hudOutline 0..100 / 100); 0 = no border
+    private var outlineFollowAccent = true   // outline colour: theme accent (true) or light grey (false)
     private var size = HudSize.MEDIUM
 
     private var isCompactMode = false
@@ -250,6 +251,7 @@ class PerformanceHudView(
             else -> 1.0f
         }
         outlineIntensity = parseHudOutline(cfg.get("hudOutline", "40")) / 100f
+        outlineFollowAccent = cfg.get("hudOutlineAccent", "1") == "1"
         size = run {
             val scale = try {
                 Integer.parseInt(cfg.get("hudScale", Container.DEFAULT_HUD_SCALE.toString()))
@@ -449,7 +451,7 @@ class PerformanceHudView(
         // slider. Accent = the live theme primary; width 0 (slider at 0) = no border.
         backgroundDrawable.setStroke(
             (outlineIntensity * OUTLINE_BORDER_MAX_DP * resources.displayMetrics.density).roundToInt(),
-            AppThemeState.getCurrentAccentArgb(),
+            if (outlineFollowAccent) AppThemeState.getCurrentAccentArgb() else Color.rgb(200, 200, 200),
         )
 
         compactContainer.horizontalSpacing = appearance.columnSpacingDp.dp

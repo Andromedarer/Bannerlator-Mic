@@ -53,7 +53,7 @@ public class PerfHudView extends View {
     private static final int C_CHG    = Color.rgb(0, 255, 0);
     private static final int C_VALUE  = Color.WHITE;
     private static final int C_GRAPH  = Color.rgb(0, 255, 0);
-    private static final int C_OUTLINE = Color.rgb(0, 0, 0);   // fully opaque so the outline is actually visible
+    private static final int C_OUTLINE_GRAY = Color.rgb(200, 200, 200);   // neutral light-grey outline (non-accent option)
     private static final int C_SEP    = Color.argb(120, 120, 220, 255);
 
     // Neon / Mono overrides
@@ -69,6 +69,7 @@ public class PerfHudView extends View {
     private Skin skin = Skin.CLASSIC;
     private ColorIntensity intensity = ColorIntensity.MID;
     private float outlineIntensity = 0.4f;   // 0..1 (hudOutline 0..100 / 100); 0 = no stroke
+    private boolean outlineFollowAccent = true;   // outline colour: theme accent (true) or light grey (false)
     private float scale = Container.DEFAULT_HUD_SCALE / 100f;   // [0.6, 1.4]
     private float bgOpacity = 0.8f;   // [0, 1]
     private boolean dualBattery = false;
@@ -137,7 +138,8 @@ public class PerfHudView extends View {
         // driven by the outline slider. Accent = the live theme primary.
         strokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         strokePaint.setStyle(Paint.Style.STROKE);
-        strokePaint.setColor(com.winlator.star.ui.theme.AppThemeState.getCurrentAccentArgb());
+        strokePaint.setColor(outlineFollowAccent
+                ? com.winlator.star.ui.theme.AppThemeState.getCurrentAccentArgb() : C_OUTLINE_GRAY);
         strokePaint.setStrokeWidth(outlineIntensity * OUTLINE_MAX_DP * density * scale);
 
         graphPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -410,6 +412,7 @@ public class PerfHudView extends View {
             default:      intensity = ColorIntensity.MID;
         }
         outlineIntensity = parseOutlineIntensity(cfg.get("hudOutline", "40")) / 100f;
+        outlineFollowAccent = cfg.get("hudOutlineAccent", "1").equals("1");
         try {
             int sc = Integer.parseInt(cfg.get("hudScale", String.valueOf(Container.DEFAULT_HUD_SCALE)));
             scale = Math.max(60, Math.min(140, sc)) / 100f;

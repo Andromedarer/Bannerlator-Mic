@@ -1755,6 +1755,7 @@ private fun HudContent(state: XServerDrawerState) {
     var color by remember(cfg) { mutableStateOf(cfg.getOrDefault("hudColor", "mid")) }
     // hudOutline is a 0..100 intensity (legacy off/soft/strong strings map via parseHudOutline).
     var outlineValue by remember(cfg) { mutableFloatStateOf(parseHudOutline(cfg.getOrDefault("hudOutline", "40")).toFloat()) }
+    var outlineAccent by remember(cfg) { mutableStateOf(cfg.getOrDefault("hudOutlineAccent", "1") == "1") }
 
     fun i(v: Boolean) = if (v) "1" else "0"
     // Identical key set to ContainerDetailScreen.FpsCounterConfigDialog.buildConfig(),
@@ -1784,6 +1785,7 @@ private fun HudContent(state: XServerDrawerState) {
         "hudSkin=$skin",
         "hudColor=$color",
         "hudOutline=${outlineValue.toInt()}",
+        "hudOutlineAccent=${if (outlineAccent) 1 else 0}",
         "hudScale=${scaleValue.toInt()}",
         "hudOpacity=${opacityValue.toInt()}",
         "hudTransparency=${transValue.toInt()}",
@@ -1844,10 +1846,12 @@ private fun HudContent(state: XServerDrawerState) {
         HudChipRow("HUD skin", listOf("Classic", "Neon", "Mono"), skins.indexOf(skin)) { skin = skins[it]; apply() }
         HudChipRow("HUD color", listOf("Soft", "Mid", "Vivid"), colors.indexOf(color)) { color = colors[it]; apply() }
         LabeledSlider("HUD outline", outlineValue, 0f..100f, { outlineValue = it }, { apply() }, format = { "${it.toInt()}" })
+        HudChipRow("Outline color", listOf("Gray", "Accent"), if (outlineAccent) 1 else 0) { outlineAccent = it == 1; apply() }
     } else if (gameNative) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
         HudChipRow("HUD color", listOf("Soft", "Mid", "Vivid"), colors.indexOf(color)) { color = colors[it]; apply() }
         LabeledSlider("HUD outline", outlineValue, 0f..100f, { outlineValue = it }, { apply() }, format = { "${it.toInt()}" })
+        HudChipRow("Outline color", listOf("Gray", "Accent"), if (outlineAccent) 1 else 0) { outlineAccent = it == 1; apply() }
     }
 }
 
