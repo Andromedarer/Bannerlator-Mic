@@ -1939,9 +1939,21 @@ internal fun DxvkConfigDialog(
 
     var selectedVkd3d by remember { mutableStateOf(config.get("vkd3dVersion").ifEmpty { "None" }) }
 
-    var selectedDxvk by remember(allDxvkVersions.value) {
+    // VKD3D-Proton needs DXVK 2.x's DXGI; DXVK 1.x can't back it, so the DX12 test fails to start.
+    // Filter the DXVK list to 2.x+ (keeping unparseable names, e.g. VEGAS) when VKD3D is enabled —
+    // matches the shortcut-level dialog, which already enforces this. Fixes #113.
+    val filteredDxvk = remember(selectedVkd3d, allDxvkVersions.value) {
+        if (selectedVkd3d != "None") {
+            allDxvkVersions.value.filter { v ->
+                val major = DXVKConfigDialog.tryGetMajor(v)
+                major == null || major >= 2
+            }
+        } else allDxvkVersions.value
+    }
+
+    var selectedDxvk by remember(filteredDxvk) {
         val stored = config.get("version")
-        mutableStateOf(allDxvkVersions.value.firstOrNull { it == stored } ?: allDxvkVersions.value.firstOrNull() ?: stored)
+        mutableStateOf(filteredDxvk.firstOrNull { it == stored } ?: filteredDxvk.firstOrNull() ?: stored)
     }
 
     val dxvkType = remember(selectedDxvk) { DXVKConfigDialog.getDXVKType(selectedDxvk) }
@@ -2010,7 +2022,7 @@ internal fun DxvkConfigDialog(
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     LabeledDropdown(
                         if (isVegas) "Vegas Selector" else stringResource(R.string.dxvk_version),
-                        allDxvkVersions.value, selectedDxvk, { selectedDxvk = it },
+                        filteredDxvk, selectedDxvk, { selectedDxvk = it },
                         modifier = Modifier.weight(1f)
                     )
                     ContentInstallGear(
