@@ -246,6 +246,8 @@ public class ContentsManager {
 
         if (!getTmpDir(context).renameTo(installPath)) {
             callback.onFailed(InstallFailedReason.ERROR_UNKNOWN, null);
+            return; // was missing: without it a failed rename still reported onSucceed (install "succeeded"
+                    // but the files never landed -> "downloaded but not usable")
         }
 
         callback.onSucceed(profile);
