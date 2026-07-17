@@ -377,18 +377,10 @@ internal fun VulkanSettingsDialog(
                     modifier = if (nativeRender) Modifier.alpha(0.5f) else Modifier
                 )
 
-                val drivers = listOf("system", "turnip")
-                val driverLabels = listOf(
-                    stringResource(R.string.renderer_driver_system),
-                    stringResource(R.string.renderer_driver_turnip)
-                )
-                val selectedDriverIdx = drivers.indexOf(driverId).coerceAtLeast(0)
-                LabeledDropdown(
-                    label = stringResource(R.string.renderer_driver_id),
-                    options = driverLabels,
-                    selectedOption = driverLabels[selectedDriverIdx],
-                    onSelect = { driverId = drivers[driverLabels.indexOf(it)] }
-                )
+                // NOTE: the "Renderer Driver" (System/Turnip) dropdown was removed — it was vestigial:
+                // its value (driverId) was stored + round-tripped but NEVER read at runtime (the actual
+                // driver is the top-level "Graphics Driver" setting). The `driverId` config field is
+                // still preserved below so existing containers round-trip byte-identically.
 
                 // Filter mode (Nearest/Linear) is no longer edited here: the in-game
                 // drawer's "Scaling mode" picker is the single source of truth for
