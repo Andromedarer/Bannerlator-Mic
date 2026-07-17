@@ -18,6 +18,7 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.winlator.star.container.Container
 import com.winlator.star.core.KeyValueSet
 import com.winlator.star.widget.FpsCounter
 import com.winlator.star.widget.HudMetrics
@@ -249,7 +250,9 @@ class PerformanceHudView(
         }
         showTextOutline = cfg.get("hudOutline", "soft") != "off"
         size = run {
-            val scale = try { Integer.parseInt(cfg.get("hudScale", "100")) } catch (e: Exception) { 100 }
+            val scale = try {
+                Integer.parseInt(cfg.get("hudScale", Container.DEFAULT_HUD_SCALE.toString()))
+            } catch (e: Exception) { Container.DEFAULT_HUD_SCALE }
             when {
                 scale < 85 -> HudSize.SMALL
                 scale <= 110 -> HudSize.MEDIUM

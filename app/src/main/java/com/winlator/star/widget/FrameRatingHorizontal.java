@@ -14,6 +14,8 @@ import android.view.ViewConfiguration;
 import android.widget.FrameLayout;
 import android.widget.TextView;
 
+import com.winlator.star.container.Container;
+
 import com.winlator.star.R;
 import com.winlator.star.core.KeyValueSet;
 import com.winlator.star.core.StringUtils;
@@ -133,7 +135,7 @@ public class FrameRatingHorizontal extends FrameLayout implements Runnable {
             int trans = Integer.parseInt(config.get("hudTransparency", "0"));
             this.setAlpha(1.0f - (Math.max(0, Math.min(50, trans)) / 100.0f));
 
-            int scaleInt = Integer.parseInt(config.get("hudScale", "100"));
+            int scaleInt = Integer.parseInt(config.get("hudScale", String.valueOf(Container.DEFAULT_HUD_SCALE)));
             float scaleFactor = Math.max(50, Math.min(150, scaleInt)) / 100.0f;
             this.setScaleX(scaleFactor);
             this.setScaleY(scaleFactor);

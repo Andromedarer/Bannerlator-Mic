@@ -13,6 +13,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
 
+import com.winlator.star.container.Container;
 import com.winlator.star.core.KeyValueSet;
 
 import java.util.ArrayDeque;
@@ -71,7 +72,7 @@ public class PerfHudView extends View {
     private Skin skin = Skin.CLASSIC;
     private ColorIntensity intensity = ColorIntensity.MID;
     private Outline outline = Outline.SOFT;
-    private float scale = 0.92f;      // [0.6, 1.4]
+    private float scale = Container.DEFAULT_HUD_SCALE / 100f;   // [0.6, 1.4]
     private float bgOpacity = 0.8f;   // [0, 1]
     private boolean dualBattery = false;
 
@@ -398,9 +399,9 @@ public class PerfHudView extends View {
             default:       outline = Outline.SOFT;
         }
         try {
-            int sc = Integer.parseInt(cfg.get("hudScale", "92"));
+            int sc = Integer.parseInt(cfg.get("hudScale", String.valueOf(Container.DEFAULT_HUD_SCALE)));
             scale = Math.max(60, Math.min(140, sc)) / 100f;
-        } catch (Exception e) { scale = 0.92f; }
+        } catch (Exception e) { scale = Container.DEFAULT_HUD_SCALE / 100f; }
         try {
             int op = Integer.parseInt(cfg.get("hudOpacity", "80"));
             bgOpacity = Math.max(0, Math.min(100, op)) / 100f;

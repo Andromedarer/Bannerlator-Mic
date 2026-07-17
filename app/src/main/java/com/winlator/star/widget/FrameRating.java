@@ -14,6 +14,8 @@ import android.view.ViewConfiguration;
 import android.widget.FrameLayout;
 import android.widget.TextView;
 
+import com.winlator.star.container.Container;
+
 import com.winlator.star.R;
 import com.winlator.star.core.GPUInformation;
 import com.winlator.star.core.KeyValueSet;
@@ -167,7 +169,7 @@ public class FrameRating extends FrameLayout implements Runnable {
         // Apply HUD Scaling and Transparency
         try {
             // Scale
-            int scaleInt = Integer.parseInt(config.get("hudScale", "100"));
+            int scaleInt = Integer.parseInt(config.get("hudScale", String.valueOf(Container.DEFAULT_HUD_SCALE)));
             float scaleFactor = Math.max(50, Math.min(150, scaleInt)) / 100.0f;
             this.setPivotX(0);
             this.setPivotY(0);
