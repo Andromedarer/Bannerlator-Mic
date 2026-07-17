@@ -20,6 +20,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import com.winlator.star.container.Container
 import com.winlator.star.core.KeyValueSet
+import com.winlator.star.ui.theme.AppThemeState
 import com.winlator.star.widget.FpsCounter
 import com.winlator.star.widget.HudMetrics
 import java.util.ArrayDeque
@@ -444,9 +445,11 @@ class PerformanceHudView(
 
         backgroundDrawable.cornerRadius = appearance.cornerRadiusDp.dp.toFloat()
         backgroundDrawable.setColor(Color.argb((opacity * 255f).roundToInt(), 0, 0, 0))
+        // HUD outline = an accent border around the box (game-card style), width from the outline
+        // slider. Accent = the live theme primary; width 0 (slider at 0) = no border.
         backgroundDrawable.setStroke(
-            appearance.strokeWidthDp.dp.coerceAtLeast(1),
-            Color.argb((opacity * 96f).roundToInt(), 255, 255, 255),
+            (outlineIntensity * OUTLINE_BORDER_MAX_DP * resources.displayMetrics.density).roundToInt(),
+            AppThemeState.getCurrentAccentArgb(),
         )
 
         compactContainer.horizontalSpacing = appearance.columnSpacingDp.dp
@@ -456,10 +459,8 @@ class PerformanceHudView(
             textView.setTextSize(TypedValue.COMPLEX_UNIT_SP, appearance.textSizeSp)
             textView.maxLines = 1
             textView.ellipsize = TextUtils.TruncateAt.END
-            textView.setShadowLayer(
-                if (outlineIntensity > 0f) outlineIntensity * MAX_HUD_TEXT_SHADOW_RADIUS_PX else 0f,
-                0f, 0f, HUD_TEXT_SHADOW_COLOR,
-            )
+            // Outline is now the accent box border, not a text shadow.
+            textView.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
         }
 
         allMetrics.forEach(::applyMetricAppearance)
@@ -820,6 +821,7 @@ class PerformanceHudView(
 
     private companion object {
         const val UPDATE_INTERVAL_MS = 1_000L
+        const val OUTLINE_BORDER_MAX_DP = 4f
         const val GRAPH_SAMPLE_COUNT = 30
         const val GRAPH_FPS_MIN_SCALE = 60f
         // Outline radius at intensity 1.0 (px); scaled down linearly by the hudOutline slider.

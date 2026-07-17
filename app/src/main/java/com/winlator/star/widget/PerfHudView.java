@@ -133,12 +133,11 @@ public class PerfHudView extends View {
         fillPaint.setLetterSpacing(0.04f);
         fillPaint.setStyle(Paint.Style.FILL);
 
+        // HUD outline = an accent-coloured border around the whole HUD box (game-card style), width
+        // driven by the outline slider. Accent = the live theme primary.
         strokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        strokePaint.setTypeface(mono);
-        strokePaint.setTextSize(textSizePx);
-        strokePaint.setLetterSpacing(0.04f);
         strokePaint.setStyle(Paint.Style.STROKE);
-        strokePaint.setColor(C_OUTLINE);
+        strokePaint.setColor(com.winlator.star.ui.theme.AppThemeState.getCurrentAccentArgb());
         strokePaint.setStrokeWidth(outlineIntensity * OUTLINE_MAX_DP * density * scale);
 
         graphPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -257,6 +256,13 @@ public class PerfHudView extends View {
         float radius = 6f * density * scale;
         canvas.drawRoundRect(new RectF(0, 0, getWidth(), getHeight()), radius, radius, bgPaint);
 
+        // Accent border around the box (like a game card), thickness from the outline slider.
+        if (outlineIntensity > 0f) {
+            float half = strokePaint.getStrokeWidth() / 2f;
+            canvas.drawRoundRect(new RectF(half, half, getWidth() - half, getHeight() - half),
+                                 radius, radius, strokePaint);
+        }
+
         float baseline = padPx - fm.ascent;
         if (vertical) {
             float y = baseline;
@@ -289,16 +295,13 @@ public class PerfHudView extends View {
 
     /** Draws "LABEL value" at (x, baseline); returns the x cursor after the text. */
     private float drawCell(Canvas canvas, float x, float baseline, Cell c) {
-        boolean stroke = outlineIntensity > 0f;
-        // label
+        // Outline is now the box border (see onDraw), not a per-glyph stroke.
         fillPaint.setColor(labelColorFor(c.labelColor));
-        if (stroke) canvas.drawText(c.label, x, baseline, strokePaint);
         canvas.drawText(c.label, x, baseline, fillPaint);
         float adv = fillPaint.measureText(c.label);
         if (!c.value.isEmpty()) {
             String v = " " + c.value;
             fillPaint.setColor(valueColorFor());
-            if (stroke) canvas.drawText(v, x + adv, baseline, strokePaint);
             canvas.drawText(v, x + adv, baseline, fillPaint);
             adv += fillPaint.measureText(v);
         }
