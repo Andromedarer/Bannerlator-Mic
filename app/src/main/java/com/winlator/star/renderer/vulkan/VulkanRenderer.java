@@ -282,9 +282,10 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     // NOTE: the old applyScanoutSwapTransform() (reflected SurfaceControl.Transaction.setColorTransform
     // for an R/B swap on the game SurfaceControl) was removed — setColorTransform is greylist-blocked on
     // Android 12+, so it only ever threw and no-op'd. Channel order can't be swapped on a composited AHB
-    // in native mode, so the "Colors: BGRA" (swap) choice makes the container scanout-INELIGIBLE and runs
-    // it through the normal compositor, where nativeSetSwapRB (the shader swizzle) does the swap. RGBA
-    // (default, no swap) stays fully native/zero-copy. See XServerDisplayActivity native-enable decision.
+    // in native mode, so the "Colors: RGBA" (swap) choice makes the container scanout-INELIGIBLE and runs
+    // it through the normal compositor, where nativeSetSwapRB (the shader swizzle) does the swap. BGRA
+    // (default, no swap — DXVK's native buffer order, device-confirmed AHardwareBuffer format 5) stays
+    // fully native/zero-copy. See XServerDisplayActivity native-enable decision.
 
     private void updateTransform() {
         if (nativeHandle == 0) return;

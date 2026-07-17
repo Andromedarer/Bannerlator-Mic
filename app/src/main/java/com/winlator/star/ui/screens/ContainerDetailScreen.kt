@@ -397,16 +397,17 @@ internal fun VulkanSettingsDialog(
                 // still seeds the drawer's initial scaling mode at launch
                 // (XServerDisplayActivity: getRendererFilterMode -> initialUpscaler).
 
-                // Colors = the game buffer's channel order. RGBA (default) presents as-is; BGRA swaps
-                // R/B for the rare title that comes out with red/blue reversed. Backed by the same
-                // `swapRB` boolean (RGBA=false, BGRA=true); BGRA routes the container through the
-                // compositor (native scanout can't swap channels — see the native-enable decision).
-                val colorOrders = listOf("RGBA", "BGRA")
+                // Colors = the game buffer's channel order. Device-confirmed: DXVK's scanout buffer is
+                // BGRA_8888 (AHardwareBuffer format 5), so BGRA (default) presents as-is; RGBA swaps R/B
+                // for the rare title whose buffer is actually RGBA-ordered (red/blue reversed on default).
+                // Backed by the same `swapRB` boolean (BGRA=false, RGBA=true); RGBA (swap) routes the
+                // container through the compositor (native scanout can't swap channels).
+                val colorOrders = listOf("BGRA", "RGBA")
                 LabeledDropdown(
                     label = stringResource(R.string.renderer_colors),
                     options = colorOrders,
-                    selectedOption = if (swapRB) "BGRA" else "RGBA",
-                    onSelect = { swapRB = (it == "BGRA") }
+                    selectedOption = if (swapRB) "RGBA" else "BGRA",
+                    onSelect = { swapRB = (it == "RGBA") }
                 )
                 // NOTE: "Correct SurfaceFlinger colours" (sfCompatMode) is NOT shown here — this
                 // dialog only opens for the Vulkan renderer, and that toggle only affects
