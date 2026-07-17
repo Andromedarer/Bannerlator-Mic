@@ -4705,11 +4705,15 @@ private fun ScAdvancedTab(
             cpuListViewRef.value = null
         }
     }
+    // On arm64ec containers the x86 backend is WOWBox64, not Box64 — label it correctly (matching
+    // the container editor). The dropdown data already reads the right content type; only the label
+    // was hardcoded "Box64".
+    val emulatorLabel = if (isArm64EC) "WOWBox64" else "Box64"
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        SectionBox(title = "Box64") {
+        SectionBox(title = emulatorLabel) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 LabeledDropdown(
-                    label = stringResource(R.string.box64_version),
+                    label = "$emulatorLabel Version",
                     options = box64Versions,
                     selectedOption = box64Versions.firstOrNull { it == selectedBox64Version } ?: selectedBox64Version,
                     onSelect = onBox64VersionChange,
@@ -4728,7 +4732,7 @@ private fun ScAdvancedTab(
             Spacer(Modifier.height(8.dp))
             val presetNames = box64Presets.map { it.name }
             LabeledDropdown(
-                label = stringResource(R.string.box64_preset),
+                label = "$emulatorLabel Preset",
                 options = presetNames,
                 selectedOption = presetNames.getOrElse(selectedBox64PresetIndex) { "" },
                 onSelect = { opt -> onBox64PresetIndexChange(presetNames.indexOf(opt).coerceAtLeast(0)) }
