@@ -2272,7 +2272,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
             boolean nativeOn = container.isRendererNative() && initialUpscaler < 3 && !container.getRendererSwapRB();
             vkRenderer.setInitialNativeMode(nativeOn);
             XServerDrawerState.INSTANCE.setNativeRenderingEnabled(nativeOn); // keep the toggle in sync
-            XServerDrawerState.INSTANCE.setNativeRenderingSupported(true);   // Vulkan is the supported native path
+            // Native is the supported path on Vulkan — EXCEPT when Colors=RGBA (R/B swap), which native
+            // can't do (setColorTransform blocked on 12+). Such a container runs on the compositor, so
+            // hide the in-game Native toggle too; otherwise forcing it on would re-break the colors.
+            XServerDrawerState.INSTANCE.setNativeRenderingSupported(!container.getRendererSwapRB());
             // Tick the perf HUD per present (the Vulkan AHB path bypasses copyArea, which normally
             // drives it). Gate on the FPS window so we only count game frames.
             vkRenderer.setHudFrameTick(wid -> {
