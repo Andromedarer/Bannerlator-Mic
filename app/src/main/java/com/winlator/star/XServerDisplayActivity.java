@@ -199,6 +199,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private short taskAffinityMask = 0;
     private short taskAffinityMaskWoW64 = 0;
     private int frameRatingWindowId = -1;
+    // Windows that have published a _MESA_DRV property (GPU/render windows). The perf HUD binds to one
+    // of these (frameRatingWindowId); we keep the whole set so that when the bound window unmaps we can
+    // re-bind to another still-live one instead of hiding the HUD permanently — games like Dirt 3 /
+    // Dirt Showdown open an intro window then swap to the real render window.
+    private final java.util.LinkedHashSet<Integer> mesaDrvWindowIds = new java.util.LinkedHashSet<>();
     private boolean cursorLock; // Flag to track if pointer capture was requested
     private final float[] xform = XForm.getInstance();
     private ContentsManager contentsManager;
@@ -4320,6 +4325,7 @@ return true;
         if (perfHud == null && gameNativeHud == null && frameRating == null && frameRatingHorizontal == null) return;
 
         if (property != null) {
+            if (property.nameAsString().contains("_MESA_DRV")) mesaDrvWindowIds.add(window.id);
             if (frameRatingWindowId == -1 && property.nameAsString().contains("_MESA_DRV")) {
                 frameRatingWindowId = window.id;
                 Log.d("XServerDisplayActivity", "Showing hud for Window " + window.getName());
@@ -4350,22 +4356,35 @@ return true;
                 });
             }
         }
-        else if (frameRatingWindowId != -1) {
-            frameRatingWindowId = -1;
-            Log.d("XServerDisplayActivity", "Hiding hud for Window " + window.getName());
-            fpsCounter.reset();
-            runOnUiThread(() -> {
-                if (frameRating != null) {
-                    frameRating.setVisibility(View.GONE);
-                    frameRating.reset();
+        else {
+            mesaDrvWindowIds.remove(window.id);
+            // Only react when the HUD's OWN bound window unmapped — an unrelated window unmapping must
+            // not hide the HUD. And because games (Dirt 3 / Dirt Showdown) open an intro window then
+            // swap to the real render window, re-bind to another still-mapped _MESA_DRV window before
+            // giving up — otherwise the HUD vanishes permanently when the intro window closes.
+            if (frameRatingWindowId != -1 && window.id == frameRatingWindowId) {
+                Integer next = mesaDrvWindowIds.isEmpty() ? null : mesaDrvWindowIds.iterator().next();
+                if (next != null) {
+                    frameRatingWindowId = next;   // keep the HUD visible, now tracking the new window
+                    Log.d("XServerDisplayActivity", "Re-binding hud to Window id " + next);
+                } else {
+                    frameRatingWindowId = -1;
+                    Log.d("XServerDisplayActivity", "Hiding hud for Window " + window.getName());
+                    fpsCounter.reset();
+                    runOnUiThread(() -> {
+                        if (frameRating != null) {
+                            frameRating.setVisibility(View.GONE);
+                            frameRating.reset();
+                        }
+                        if (frameRatingHorizontal != null) {
+                            frameRatingHorizontal.setVisibility(View.GONE);
+                            frameRatingHorizontal.reset();
+                        }
+                        if (perfHud != null) perfHud.setVisibility(View.GONE);
+                        if (gameNativeHud != null) gameNativeHud.setVisibility(View.GONE);
+                    });
                 }
-                if (frameRatingHorizontal != null) {
-                    frameRatingHorizontal.setVisibility(View.GONE);
-                    frameRatingHorizontal.reset();
-                }
-                if (perfHud != null) perfHud.setVisibility(View.GONE);
-                if (gameNativeHud != null) gameNativeHud.setVisibility(View.GONE);
-            });
+            }
         }
     }
 
