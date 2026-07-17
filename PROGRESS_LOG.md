@@ -1,5 +1,15 @@
 # Star-Compose — Progress Log
 
+## 2026-07-16 (night) — ✅ RELEASE 2.6.2 SHIPPED = LATEST (fixes-and-hardening; user chose the 2.6.2 label over 2.7)
+
+> **Cut from current `main` = the eve-session accumulator below. vc**45**, tag `2.6.2` @ version-bump `380cc90a`, API-confirmed `latest=2.6.2`, prerelease=false. Release build run **29551084664** ✅. Assets = 3 flavor APKs + `update.json` (vc45/2.6.2 — in-app updater offers it). Styled body applied + README updated (`ef5b4eac`).**
+>
+> **Contents:** triple HUD overlay + hardened device-complete metrics + GameNative-style 3rd overlay + chip UI + accent-border outline + FPS presets; background component downloads (#122); #113 DXVK/VKD3D 2.x filter; #111 WOWBox64 label + install-guard; run-as-admin toggle; short GPU name.
+>
+> **Release body:** fixes-and-hardening framing + evergreen feature block + What's-New + **Community section** (live badges: **166 games / 184 configs** from `bannerlator-game-configs/stats.json`; accounts framed "growing" — exact count NOT obtained, worker KV, local copy stale — + thank-you + links [github.com/The412Banner/bannerlator-game-configs · the412banner.github.io/bannerlator-game-configs/]) + **Credits section (user-requested):** **GameNative** ([utkarshdalal/GameNative](https://github.com/utkarshdalal/GameNative)) front-and-center for the ported HUD (`PerformanceHudView`) + metric coverage + present-path/FPS-limiter/SurfaceFlinger-colour lineage; reporters @kylinzang/@GmoLargey/@railexcatapangdiaz-ux; wider Winlator→cmod→Star lineage + DXVK/VKD3D/Box64/FEXCore/JavaSteam/leegao.
+>
+> **Versioning:** NEXT stable = 2.6.3 or 2.7 (user's call); everything after 2.6.2 now = `preN` (vc46+) until told to cut ([[feedback_bannerlator_release_versioning_rule]]).
+
 ## 2026-07-16 (eve) — 🎛️ TRIPLE HUD OVERLAY + BACKGROUND DOWNLOADS + issue sweep (#111/#113/#114/#121/#122/#127) — all merged to `main` (2.7-preN)
 
 > **All app work on `main` (2.7-preN, NOT tagged; baseline stable = 2.6.1). Per-feature detail in the linked memory topic files. Main tip = `d725094f`.**
