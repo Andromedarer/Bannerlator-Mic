@@ -82,7 +82,23 @@
   ol.steps b{color:var(--ink)}
 
   .foot{margin-top:44px; padding-top:20px; border-top:1px solid var(--line); color:var(--faint); font:500 12.5px/1.6 var(--mono); letter-spacing:.02em}
-  @media (max-width:620px){ .grid2{grid-template-columns:1fr} }
+
+  .cta{border:1px solid var(--violet); background:linear-gradient(rgba(124,92,255,.16),rgba(255,79,163,.06)); border-radius:14px; padding:20px 22px; margin:20px 0}
+  .cta h3{margin:0 0 8px; font-size:17px; font-weight:800; color:var(--ink); letter-spacing:-.02em}
+  .cta p{margin:0 0 14px; color:var(--muted); font-size:14.5px}
+  .cta p b{color:var(--ink)}
+  .btn-row{display:flex; flex-wrap:wrap; gap:10px}
+  .btn{display:inline-flex; align-items:center; gap:8px; font:700 14.5px/1 var(--font); text-decoration:none; color:#fff; background:linear-gradient(100deg,var(--violet),var(--pink)); padding:13px 20px; border-radius:10px; border:1px solid transparent}
+  .btn.alt{color:var(--violet-2); background:transparent; border-color:var(--violet-dim)}
+
+  details.changes{border:1px solid var(--line); background:var(--panel); border-radius:12px; margin:16px 0}
+  details.changes>summary{cursor:pointer; padding:15px 18px; font-weight:700; color:var(--ink); font-size:14.5px; list-style:none; display:flex; align-items:center; gap:10px}
+  details.changes>summary::-webkit-details-marker{display:none}
+  details.changes>summary::before{content:"▸"; color:var(--violet-2); font-size:12px}
+  details.changes[open]>summary::before{content:"▾"}
+  details.changes .cbody{padding:2px 18px 16px}
+  details.changes .cbody .sub2{color:var(--faint); font-size:13px; margin:0 0 12px}
+  @media (max-width:620px){ .grid2{grid-template-columns:1fr} .btn{width:100%; justify-content:center} }
 </style>
 </head>
 <body>
@@ -102,6 +118,15 @@
 
   <div class="card tldr">
     <b>In one line:</b> select the new <b>“Wrapper + compat + bcn”</b> graphics driver on a Mali device and DirectX 12 games can now run through it, on top of the existing BCn texture decode. Nothing changes for the drivers you use today, and Adreno/Qualcomm devices are unaffected. It is experimental — some games or GPUs won’t work yet, and that’s what this test is for.</div>
+
+  <div class="cta">
+    <h3>🐛 Hit a bug? Please report it — <u>with a log</u></h3>
+    <p>Your reports are the only thing that make this build shippable. If a game crashes, glitches, or won’t launch, open an issue on the repo — and <b>please, please include a log.</b> A report without one is very hard to act on. It takes 30 seconds to turn logging on (steps below).</p>
+    <div class="btn-row">
+      <a class="btn" href="https://github.com/The412Banner/Bannerlator/issues/new?title=%5Bmali-compat-test1%5D%20Bug%3A%20&amp;body=%2A%2ADevice%2A%2A%3A%20%0A%2A%2AMali%20GPU%20%2B%20driver%2A%2A%20(e.g.%20Mali-G57%2C%20r32p1)%3A%20%0A%2A%2AGame%2A%2A%3A%20%0A%2A%2AWhat%20happened%2A%2A%3A%20%0A%2A%2ALog%20attached%2A%2A%3A%20(please%20attach%20wine_debug.log)%0A">Report a bug on GitHub →</a>
+      <a class="btn alt" href="#report">How to enable &amp; attach logs ↓</a>
+    </div>
+  </div>
 
   <hr class="rule">
 
@@ -184,17 +209,56 @@
     </ul>
   </section>
 
-  <section>
-    <h2><span class="num">5</span> How to test &amp; what to report</h2>
+  <section id="report">
+    <h2><span class="num">5</span> How to test, enable logs &amp; report</h2>
     <p class="sub">This is the whole point of the build — your results decide whether it ships.</p>
     <ul>
       <li><span class="m dot-v">1.</span><span>Note your <b>device, Mali GPU model, and driver version</b> (e.g. “Mali-G57, r32p1”).</span></li>
       <li><span class="m dot-v">2.</span><span>Test a <b>DX12 game</b> (the new capability) <em>and</em> a <b>BCn DX11 game</b> (confirm it still works).</span></li>
       <li><span class="m dot-v">3.</span><span>For each: does it <b>launch</b>? Do <b>textures</b> look right? Roughly what <b>FPS</b>? Any crash or glitch?</span></li>
-      <li><span class="m dot-v">4.</span><span>If something fails, enable the <b>Debug log</b> option + <b>Wine Debug</b> and attach the log.</span></li>
-      <li><span class="m dot-v">5.</span><span>Compare against <b>“Wrapper + bcn_layer”</b> on the same game where relevant, so we can see the difference.</span></li>
+      <li><span class="m dot-v">4.</span><span>Compare against <b>“Wrapper + bcn_layer”</b> on the same game where relevant, so we can see the difference.</span></li>
     </ul>
-    <div class="note warn"><b>Heads-up:</b> this stacks two emulation layers (BCn + DX12) that both adjust what the game sees. It’s new and unproven on real hardware — some combinations may conflict, run slowly, or not start. None of that is unexpected in a test build; clear reports of <em>what game, what GPU, what happened</em> are exactly what we need.</div>
+
+    <div class="card">
+      <h3 style="margin:0 0 10px; font-size:15px; font-weight:700; color:var(--violet-2)">📋 Please include a log — here’s how (≈30 seconds)</h3>
+      <p style="margin:0 0 10px; color:var(--muted); font-size:14px">A log turns “it didn’t work” into something fixable. <b style="color:var(--ink)">Please attach one with every bug report.</b></p>
+      <ol class="steps">
+        <li>Go to <b>Settings → Logs</b> and turn <b>ON</b> “<b>Enable Wine Debug</b>”.</li>
+        <li>Still in <b>Settings → Logs</b>, set <b>Log location</b> to <b>Download</b> — logs then save to <code>/sdcard/Download/bannerlator/</code> where they’re easy to find.</li>
+        <li>On the game, open <b>Graphics Driver → BCn Layer Settings</b> and turn <b>ON</b> the <b>Debug log</b> option.</li>
+        <li><b>Launch the game and reproduce the problem</b>, then close it.</li>
+        <li>Grab <code>wine_debug.log</code> (plus <code>&lt;game&gt;_d3d11.log</code> / <code>_dxgi.log</code> for DX11/DX12 titles) from your log folder. Tip: the in-game <b>Debug Logs</b> drawer also has a <b>Copy</b> button.</li>
+        <li><b>Attach or paste the log</b> into your GitHub issue.</li>
+      </ol>
+    </div>
+
+    <div class="cta">
+      <h3>🐛 Report it on the repo</h3>
+      <p>Include your <b>device</b>, <b>Mali GPU + driver version</b>, the <b>game</b>, what happened — and <b>the log</b>. The button pre-fills a template and tags the report to this build.</p>
+      <div class="btn-row">
+        <a class="btn" href="https://github.com/The412Banner/Bannerlator/issues/new?title=%5Bmali-compat-test1%5D%20Bug%3A%20&amp;body=%2A%2ADevice%2A%2A%3A%20%0A%2A%2AMali%20GPU%20%2B%20driver%2A%2A%20(e.g.%20Mali-G57%2C%20r32p1)%3A%20%0A%2A%2AGame%2A%2A%3A%20%0A%2A%2AWhat%20happened%2A%2A%3A%20%0A%2A%2ALog%20attached%2A%2A%3A%20(please%20attach%20wine_debug.log)%0A">Report a bug on GitHub →</a>
+        <a class="btn alt" href="https://github.com/The412Banner/Bannerlator/issues">Browse existing reports</a>
+      </div>
+    </div>
+
+    <div class="note warn"><b>Heads-up:</b> this stacks two emulation layers (BCn + DX12) that both adjust what the game sees. It’s new and unproven on real hardware — some combinations may conflict, run slowly, or not start. None of that is unexpected in a test build; clear reports of <em>what game, what GPU, what happened — with a log</em> are exactly what we need.</div>
+  </section>
+
+  <section>
+    <details class="changes">
+      <summary>🆕 A preview of what’s coming in the next stable — new since 2.6.2 (aside from the Mali driver)</summary>
+      <div class="cbody">
+        <p class="sub2">A sample — <b>not the full list</b> — of the work already lined up for the upcoming stable release. These landed after 2.6.2 and are unrelated to the Mali driver; this test build is simply based on that work.</p>
+        <ul>
+          <li><span class="m dot-v">•</span><span><b>Polished launch &amp; shutdown experience</b> — a cold-start splash and a game-hero loading overlay (with a Cancel-launch button), plus a proper neon shutdown screen.</span></li>
+          <li><span class="m dot-v">•</span><span><b>Per-game Vulkan settings</b> — Native Rendering, Colors (RGBA/BGRA) and present mode can now be set per game (shortcut), overriding the container default.</span></li>
+          <li><span class="m dot-v">•</span><span><b>Community-config sharing for those Vulkan settings</b> — native / Colors / present mode now travel with shared and imported game configs.</span></li>
+          <li><span class="m dot-v">•</span><span><b>Native Rendering (direct-scanout) hardening</b> — a file-descriptor leak fixed, a single-window guard, and the inert present-mode dropdown greyed while Native is on. GL (OpenGL) Native Rendering is disabled for now (Vulkan-only) as it was unstable.</span></li>
+          <li><span class="m dot-v">•</span><span><b>Perf HUD fix</b> — the in-game performance HUD no longer disappears when a game swaps render windows.</span></li>
+          <li><span class="m dot-v">•</span><span><b>Cleanup</b> — removed the vestigial “Renderer Driver” dropdown from Vulkan Settings.</span></li>
+        </ul>
+      </div>
+    </details>
   </section>
 
   <section>
@@ -208,7 +272,7 @@
   </section>
 
   <div class="foot">
-    Bannerlator · Mali DX12 + BCn tester guide · v0.3 — test build ready (2c20cfa)<br>
+    Bannerlator · Mali DX12 + BCn tester guide · v0.4 — build ready · report + logs guide (2c20cfa)<br>
     Experimental / opt-in · existing drivers unaffected · Adreno unaffected · not a stable release
   </div>
 
