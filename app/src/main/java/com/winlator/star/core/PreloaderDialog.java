@@ -27,6 +27,11 @@ public class PreloaderDialog {
         PreloaderState.show(text, icon, coverArt);
     }
 
+    // Game launch with a renderer/driver subtitle under the title.
+    public synchronized void show(String text, Bitmap icon, Bitmap coverArt, String subtitle) {
+        PreloaderState.show(text, icon, coverArt, subtitle);
+    }
+
     public void showOnUiThread(final int textResId) {
         activity.runOnUiThread(() -> show(textResId));
     }

@@ -1,6 +1,11 @@
 package com.winlator.star.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -43,6 +48,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.winlator.star.R
 import com.winlator.star.core.Failure
 import com.winlator.star.core.Phase
@@ -64,6 +70,12 @@ private val HeroAccent = Color(0xFF4C8DFF)
 fun PreloaderOverlay() {
     val state by PreloaderState.ui.collectAsState()
     val ui = state ?: return
+
+    // Centered status/shutdown screen — calm logo + message + slim indeterminate bar.
+    if (ui.centered) {
+        CenteredStatus(ui.tailLabel.ifEmpty { ui.title })
+        return
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         // --- Background: cover art, or a branded dark fallback with the logo centered. ---
@@ -138,6 +150,18 @@ fun PreloaderOverlay() {
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (!ui.subtitle.isNullOrEmpty()) {
+                    Spacer(Modifier.height(5.dp))
+                    Text(
+                        text = ui.subtitle.uppercase(),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontFamily = FontFamily.Monospace,
+                        letterSpacing = 1.6.sp,
+                        color = HeroTextDim,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 Spacer(Modifier.height(18.dp))
             }
 
@@ -178,33 +202,115 @@ fun PreloaderOverlay() {
 
 @Composable
 private fun SetupProgress(stepIndex: Int, stepTotal: Int, stepLabel: String) {
-    if (stepLabel.isNotEmpty()) {
-        Text(
-            text = stepLabel,
-            style = MaterialTheme.typography.bodyMedium,
-            color = HeroTextDim,
-        )
-        Spacer(Modifier.height(10.dp))
+    // Stage row: uppercase mono label on the left, "N / M" counter on the right.
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (stepLabel.isNotEmpty()) {
+            Text(
+                text = stepLabel.trimEnd('…', '.', ' ').uppercase(),
+                style = MaterialTheme.typography.labelMedium,
+                fontFamily = FontFamily.Monospace,
+                letterSpacing = 1.4.sp,
+                color = HeroText.copy(alpha = 0.9f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+        }
+        if (stepTotal > 0 && stepIndex > 0) {
+            Spacer(Modifier.width(12.dp))
+            Text(
+                text = "$stepIndex / $stepTotal",
+                style = MaterialTheme.typography.labelMedium,
+                fontFamily = FontFamily.Monospace,
+                color = HeroAccent,
+            )
+        }
     }
-    LinearProgressIndicator(
-        progress = {
-            if (stepTotal <= 0) 0f
-            else (stepIndex.toFloat() / stepTotal).coerceIn(0f, 1f)
-        },
-        color = HeroAccent,
-        trackColor = Color.White.copy(alpha = 0.18f),
-        strokeCap = StrokeCap.Round,
+    Spacer(Modifier.height(11.dp))
+    StepPips(stepIndex, stepTotal)
+}
+
+/** Discrete step segments: done = solid accent, current = pulsing accent, pending = faint. */
+@Composable
+private fun StepPips(stepIndex: Int, stepTotal: Int) {
+    val transition = rememberInfiniteTransition(label = "pips")
+    val pulse by transition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 0.9f,
+        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
+        label = "pipPulse",
+    )
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        for (i in 1..stepTotal) {
+            val color = when {
+                i < stepIndex -> HeroAccent
+                i == stepIndex -> HeroAccent.copy(alpha = pulse)
+                else -> Color.White.copy(alpha = 0.14f)
+            }
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(color),
+            )
+        }
+    }
+}
+
+/**
+ * Centered "working…" screen for shutdown and other indeterminate operations (backup, restore,
+ * install, create-container). Deliberately quiet and distinct from the cover-art launch hero.
+ */
+@Composable
+private fun CenteredStatus(message: String) {
+    Box(
         modifier = Modifier
-            .fillMaxWidth()
-            .height(5.dp)
-            .clip(RoundedCornerShape(4.dp)),
-    )
-    Spacer(Modifier.height(8.dp))
-    Text(
-        text = "Step $stepIndex of $stepTotal",
-        style = MaterialTheme.typography.labelMedium,
-        color = HeroTextDim,
-    )
+            .fillMaxSize()
+            .background(Color(0xFF0A0B0D)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(32.dp),
+        ) {
+            Image(
+                painter = painterResource(R.drawable.splash_logo),
+                contentDescription = null,
+                modifier = Modifier
+                    .size(84.dp)
+                    .clip(RoundedCornerShape(18.dp)),
+            )
+            if (message.isNotEmpty()) {
+                Spacer(Modifier.height(26.dp))
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = HeroText,
+                )
+            }
+            Spacer(Modifier.height(20.dp))
+            LinearProgressIndicator(
+                color = HeroAccent,
+                trackColor = Color.White.copy(alpha = 0.14f),
+                strokeCap = StrokeCap.Round,
+                modifier = Modifier
+                    .width(150.dp)
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(4.dp)),
+            )
+        }
+    }
 }
 
 @Composable

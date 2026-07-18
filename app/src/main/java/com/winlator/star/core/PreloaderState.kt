@@ -23,6 +23,7 @@ data class PreloaderUi(
     val title: String,
     val icon: Bitmap? = null,          // small shortcut icon (fallback art / corner)
     val coverArt: Bitmap? = null,      // full-bleed hero background when available
+    val subtitle: String? = null,      // renderer/driver line under the title (e.g. "VULKAN · TURNIP")
     val stepIndex: Int = 0,            // 0 = none yet; 1..stepTotal for the determinate bar
     val stepTotal: Int = 4,
     val stepLabel: String = "",
@@ -31,6 +32,7 @@ data class PreloaderUi(
     val hint: String? = null,          // not-frozen reassurance line
     val failure: Failure? = null,      // set when phase == FAILED
     val cancellable: Boolean = false,  // true only during a game launch -> shows the Cancel button
+    val centered: Boolean = false,     // true for the centered status/shutdown screen (no cover hero)
 )
 
 /**
@@ -54,14 +56,23 @@ object PreloaderState {
         _ui.value = PreloaderUi(title = title ?: "", icon = icon, coverArt = coverArt, cancellable = true)
     }
 
+    /** Begin a game launch with a renderer/driver subtitle under the title. */
+    @JvmStatic fun show(title: String?, icon: Bitmap?, coverArt: Bitmap?, subtitle: String?) {
+        _ui.value = PreloaderUi(title = title ?: "", icon = icon, coverArt = coverArt,
+            subtitle = subtitle, cancellable = true)
+    }
+
     /** Begin a launch with only a shortcut icon (no cover art). */
     @JvmStatic fun show(title: String?, icon: Bitmap?) {
         _ui.value = PreloaderUi(title = title ?: "", icon = icon, cancellable = true)
     }
 
-    /** Simple indeterminate message with no step bar/heading (e.g. shutdown, create-container). */
+    /**
+     * Centered indeterminate status screen (shutdown, create-container, install, backup/restore…).
+     * Distinct from the launch hero: a calm logo + message + slim bar on a plain dark ground.
+     */
     @JvmStatic fun show(title: String?) {
-        _ui.value = PreloaderUi(title = "", tailLabel = title ?: "", phase = Phase.GUEST)
+        _ui.value = PreloaderUi(title = "", tailLabel = title ?: "", phase = Phase.GUEST, centered = true)
     }
 
     /** Advance the determinate bar to [index]/stepTotal with [label]. */
