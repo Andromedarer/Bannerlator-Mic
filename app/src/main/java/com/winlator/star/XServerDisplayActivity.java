@@ -267,7 +267,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // of silently keeping the stale one. Read the persisted marker at
     // imageFs.getLibDir()/.extra_libs_version; a mismatch (or missing marker => -1) triggers a
     // re-extract. Value 2 = the 2.2.1 patched Tier-1 libvkbasalt.so (md5 3129127c…).
-    private static final int EXTRA_LIBS_VERSION = 2;
+    private static final int EXTRA_LIBS_VERSION = 3;
 
     private Handler  timeoutHandler = new Handler(Looper.getMainLooper());
     private Runnable hideControlsRunnable;
