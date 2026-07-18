@@ -3287,6 +3287,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
         Log.d("GraphicsDriverExtraction", "Extracting: graphics_driver/wrapper-leegao.tzst (base for wrapper-bcn_layer)");
         TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/wrapper-leegao.tzst", rootDir);
     }
+    else if (graphicsDriver.startsWith("wrapper-compat-bcn")) {
+        // Wrapper + compat + bcn == the wrapper-leegao ICD base, PLUS leegao's bcn_layer AND
+        // compat_layer implicit Vulkan layers (their .so + manifest ship in extra_libs.tzst and are
+        // picked up via the already-set VK_LAYER_PATH). Extract the SAME base wrapper as Wrapper-leegao;
+        // the BCn env block below activates bcn_layer and the compat env block activates compat_layer.
+        Log.d("GraphicsDriverExtraction", "Extracting: graphics_driver/wrapper-leegao.tzst (base for wrapper-compat-bcn)");
+        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/wrapper-leegao.tzst", rootDir);
+    }
 
     // Original logic for DXWrapper and environment variables
     if (dxwrapper.contains("dxvk")) {
@@ -3419,7 +3427,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // the two paths can't emit contradictory values. The layer is gated by a hardcoded vendor
     // check (below): activated on non-Qualcomm GPUs (Mali/Xclipse/PowerVR) which lack native BCn,
     // and skipped on Adreno/Qualcomm which has native BCn.
-    boolean isBcnLayerDriver = graphicsDriver != null && graphicsDriver.startsWith("wrapper-bcn_layer");
+    // "Wrapper + compat + bcn" is a bcn-family driver: it reuses the entire bcn_layer / vendor-gate
+    // infrastructure below (same transcode half as "Wrapper + bcn_layer") and additionally activates
+    // leegao's compat_layer for DX12 feature emulation on Valhall Mali (see isCompatDriver block).
+    boolean isBcnLayerDriver = graphicsDriver != null
+            && (graphicsDriver.startsWith("wrapper-bcn_layer") || graphicsDriver.startsWith("wrapper-compat-bcn"));
+    boolean isCompatDriver = graphicsDriver != null && graphicsDriver.startsWith("wrapper-compat-bcn");
 
     if (!isBcnLayerDriver) {
         String bcnEmulation = graphicsDriverConfig.get("bcnEmulation");
@@ -3500,6 +3513,31 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if ("1".equals(debugLog)) {
             envVars.put("BCN_LAYER_LOG_LEVEL", "info,error");
             envVars.put("BCN_PROFILE_TRANSFERS", "1");
+        }
+
+        // === compat_layer activation (Wrapper + compat + bcn only) ===
+        // leegao's compat_layer emulates DX12/VKD3D feature levels down to D3D 12.0, but needs a
+        // Valhall Mali (r32p1+). The != 0x5143 vendor gate above is necessary but NOT sufficient — a
+        // Bifrost G52/G76 or sub-r32p1 part passes it yet fails compat's floor. Runtime driver-version
+        // isn't probeable, so gate on the GPU MODEL allowlist (GPUInformation.isCompatLayerSupportedGpu).
+        // On a supported GPU: enable the layer (+ optional sparse-binding). On a borderline non-Valhall
+        // Mali (or any other non-Qualcomm GPU): leave the compat enable-var OFF — the bcn transcode half
+        // above still runs exactly like "Wrapper + bcn_layer" — and warn the tester.
+        if (isCompatDriver) {
+            String renderer = GPUInformation.getRenderer(null, null);
+            if (GPUInformation.isCompatLayerSupportedGpu(renderer)) {
+                envVars.put("ENABLE_DXVK_MALI_COMPAT_LAYER", "1");
+                // Auto-detect handles push/null descriptors; only sparse binding is a user opt-in.
+                if ("1".equals(graphicsDriverConfig.get("bcnCompatSparse")))
+                    envVars.put("COMPAT_EMULATE_SPARSE_BINDING", "1");
+            }
+            else {
+                showToast(this, "Wrapper + compat + bcn: the DX12 compat layer needs a Valhall Mali (r32p1+)"
+                        + " GPU — it is disabled on this device (" + GPUInformation.extractModelName(renderer)
+                        + "). BCn texture transcode is still active.");
+                Log.w("GraphicsDriverExtraction", "compat_layer disabled: GPU '" + renderer
+                        + "' is not on the Valhall (r32p1+) allowlist");
+            }
         }
         } // activateBcnLayer
     }

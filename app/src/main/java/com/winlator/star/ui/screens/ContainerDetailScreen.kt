@@ -1599,8 +1599,11 @@ internal fun GraphicsDriverConfigDialog(
     var disablePresentWait by remember { mutableStateOf(cfg["disablePresentWait"] == "1") }
     var fdDevFeatures    by remember { mutableStateOf(cfg["fdDevFeatures"] == "1") }
 
-    // --- BCn Layer (leegao bcn_layer) settings; only meaningful when driver == wrapper-bcn_layer ---
-    val isBcnLayer = graphicsDriver == "wrapper-bcn_layer"
+    // --- BCn Layer (leegao bcn_layer) settings; meaningful for both the bcn_layer driver and the
+    // "Wrapper + compat + bcn" driver, which reuses the same BCn transcode panel. ---
+    val isBcnLayer = graphicsDriver == "wrapper-bcn_layer" || graphicsDriver == "wrapper-compat-bcn"
+    // compat_layer (DX12 feature emulation) is exclusive to "Wrapper + compat + bcn".
+    val isCompatDriver = graphicsDriver == "wrapper-compat-bcn"
     // The integrated-BCn wrapper (Wrapper-gamenative) is the only wrapper ICD that actually honors
     // WRAPPER_BCN_ASTC (see XServerDisplayActivity BCn env block). The older wrappers
     // (original/leegao/legacy) ignore it, and Wrapper + bcn_layer has its own ASTC control
@@ -1614,6 +1617,9 @@ internal fun GraphicsDriverConfigDialog(
     // Storage image path -> BCN_COMPUTE_IMAGE_VIEW=1. Default ON.
     var bcnImageView      by remember { mutableStateOf(cfg["bcnImageView"]?.let { it == "1" } ?: true) }
     var bcnDebugLog       by remember { mutableStateOf(cfg["bcnDebugLog"] == "1") }
+    // compat_layer: emulate D3D12 tiled/sparse resources (COMPAT_EMULATE_SPARSE_BINDING). Opt-in,
+    // only honored by the "Wrapper + compat + bcn" driver on a Valhall Mali. Default OFF.
+    var bcnCompatSparse   by remember { mutableStateOf(cfg["bcnCompatSparse"] == "1") }
 
     val deviceMemoryEntries = remember { context.resources.getStringArray(R.array.device_memory_entries).toList() }
     var selectedMemoryEntry by remember {
@@ -1820,6 +1826,19 @@ internal fun GraphicsDriverConfigDialog(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        // compat_layer DX12 sparse-binding emulation — only for Wrapper + compat + bcn.
+                        if (isCompatDriver) {
+                            Spacer(Modifier.height(8.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(checked = bcnCompatSparse, onCheckedChange = { bcnCompatSparse = it })
+                                Text(stringResource(R.string.bcn_compat_sparse))
+                            }
+                            Text(
+                                stringResource(R.string.bcn_compat_sparse_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }
@@ -1843,6 +1862,7 @@ internal fun GraphicsDriverConfigDialog(
                     "bcnTranscodeAstc=${if (bcnTranscodeAstc) "1" else "0"};" +
                     "bcnImageView=${if (bcnImageView) "1" else "0"};" +
                     "bcnDebugLog=${if (bcnDebugLog) "1" else "0"};" +
+                    "bcnCompatSparse=${if (bcnCompatSparse) "1" else "0"};" +
                     "gpuName=$gpuName" +
                     ";fdDevFeatures=${if (fdDevFeatures) "1" else "0"}"
                 onConfirm(config)

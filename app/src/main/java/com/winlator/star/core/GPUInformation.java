@@ -69,6 +69,29 @@ public abstract class GPUInformation {
         return s;
     }
 
+    /**
+     * Whether {@code renderer} names a Mali GPU on leegao compat_layer's Valhall floor (r32p1+). The
+     * DX12/VKD3D feature-emulation layer used by the "Wrapper + compat + bcn" driver needs a Valhall
+     * Mali; Bifrost/Midgard Mali and sub-r32p1 parts pass the {@code != 0x5143} vendor gate but fail
+     * the layer's own floor. Runtime driver-version isn't detectable, so we gate on the GPU MODEL name,
+     * normalized through the same {@link #extractModelName} used by the perf HUD. Allowlist (Valhall):
+     * Mali-G57/G68/G77/G78/G310/G610/G710/G615/G715/G720/G925 and Immortalis-G715/G720/G925.
+     */
+    public static boolean isCompatLayerSupportedGpu(String renderer) {
+        String model = extractModelName(renderer);
+        if (model == null) return false;
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("(?i)\\b(Mali|Immortalis)-G(\\d+)").matcher(model);
+        if (!m.find()) return false;
+        switch (m.group(2)) {
+            case "57": case "68": case "77": case "78": case "310":
+            case "610": case "710": case "615": case "715": case "720": case "925":
+                return true;
+            default:
+                return false;
+        }
+    }
+
     public native static String getVulkanVersion(String driverName, Context context);
     public native static int getVendorID(String driverName, Context context);
     public native static String getRenderer(String driverName, Context context);
