@@ -11,6 +11,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -129,8 +130,8 @@ fun PreloaderOverlay() {
             contentDescription = null,
             modifier = insets
                 .padding(end = 22.dp, bottom = 22.dp)
-                .size(48.dp)
-                .clip(RoundedCornerShape(10.dp))
+                .size(96.dp)
+                .clip(RoundedCornerShape(12.dp))
                 .align(Alignment.BottomEnd),
         )
 
@@ -266,9 +267,9 @@ private fun StepPips(stepIndex: Int, stepTotal: Int) {
 }
 
 /**
- * Full-bleed "working…" screen for shutdown and other indeterminate operations (backup, restore,
- * install, create-container). The branded Bannerlator neon art fills the screen behind a scrim; the
- * message + slim indeterminate bar sit low so they clear the centered logo art above.
+ * Centered "working…" screen for shutdown and other indeterminate operations (backup, restore,
+ * install, create-container). The branded Bannerlator neon art is shown shrunk and centered as the
+ * mark on a plain dark ground, with the message + slim indeterminate bar beneath it.
  */
 @Composable
 private fun CenteredStatus(message: String) {
@@ -276,43 +277,33 @@ private fun CenteredStatus(message: String) {
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFF07070B)),
+        contentAlignment = Alignment.Center,
     ) {
-        Image(
-            painter = painterResource(R.drawable.shutdown_bg),
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize(),
-        )
-        // Darken overall a touch and heavily at the bottom so the status text stays legible.
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        0.0f to Color.Black.copy(alpha = 0.30f),
-                        0.45f to Color.Black.copy(alpha = 0.28f),
-                        0.78f to Color.Black.copy(alpha = 0.62f),
-                        1.0f to Color.Black.copy(alpha = 0.90f),
-                    )
-                ),
-        )
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
-                .align(Alignment.BottomCenter)
                 .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(horizontal = 28.dp)
-                .padding(bottom = 46.dp),
+                .padding(32.dp),
         ) {
+            Image(
+                painter = painterResource(R.drawable.shutdown_bg),
+                contentDescription = null,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .width(360.dp)
+                    .aspectRatio(1408f / 768f)
+                    .clip(RoundedCornerShape(16.dp)),
+            )
             if (message.isNotEmpty()) {
+                Spacer(Modifier.height(28.dp))
                 Text(
                     text = message,
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
                     color = HeroText,
                 )
-                Spacer(Modifier.height(20.dp))
             }
+            Spacer(Modifier.height(22.dp))
             LinearProgressIndicator(
                 color = HeroAccent,
                 trackColor = Color.White.copy(alpha = 0.16f),
