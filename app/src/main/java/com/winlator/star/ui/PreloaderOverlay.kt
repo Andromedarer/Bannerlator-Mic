@@ -266,47 +266,60 @@ private fun StepPips(stepIndex: Int, stepTotal: Int) {
 }
 
 /**
- * Centered "working…" screen for shutdown and other indeterminate operations (backup, restore,
- * install, create-container). Deliberately quiet and distinct from the cover-art launch hero.
+ * Full-bleed "working…" screen for shutdown and other indeterminate operations (backup, restore,
+ * install, create-container). The branded Bannerlator neon art fills the screen behind a scrim; the
+ * message + slim indeterminate bar sit low so they clear the centered logo art above.
  */
 @Composable
 private fun CenteredStatus(message: String) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0A0B0D)),
-        contentAlignment = Alignment.Center,
+            .background(Color(0xFF07070B)),
     ) {
+        Image(
+            painter = painterResource(R.drawable.shutdown_bg),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
+        )
+        // Darken overall a touch and heavily at the bottom so the status text stays legible.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0.0f to Color.Black.copy(alpha = 0.30f),
+                        0.45f to Color.Black.copy(alpha = 0.28f),
+                        0.78f to Color.Black.copy(alpha = 0.62f),
+                        1.0f to Color.Black.copy(alpha = 0.90f),
+                    )
+                ),
+        )
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
+                .align(Alignment.BottomCenter)
                 .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(32.dp),
+                .padding(horizontal = 28.dp)
+                .padding(bottom = 46.dp),
         ) {
-            Image(
-                painter = painterResource(R.drawable.splash_logo),
-                contentDescription = null,
-                modifier = Modifier
-                    .size(84.dp)
-                    .clip(RoundedCornerShape(18.dp)),
-            )
             if (message.isNotEmpty()) {
-                Spacer(Modifier.height(26.dp))
                 Text(
                     text = message,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
                     color = HeroText,
                 )
+                Spacer(Modifier.height(20.dp))
             }
-            Spacer(Modifier.height(20.dp))
             LinearProgressIndicator(
                 color = HeroAccent,
-                trackColor = Color.White.copy(alpha = 0.14f),
+                trackColor = Color.White.copy(alpha = 0.16f),
                 strokeCap = StrokeCap.Round,
                 modifier = Modifier
-                    .width(150.dp)
-                    .height(4.dp)
+                    .width(190.dp)
+                    .height(5.dp)
                     .clip(RoundedCornerShape(4.dp)),
             )
         }
