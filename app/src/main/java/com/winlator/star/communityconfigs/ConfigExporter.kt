@@ -131,6 +131,14 @@ object ConfigExporter {
             effective[key].nonBlank()?.let { blExt.put(key, it) }
         }
         dxwCfg.nonBlank()?.let { blExt.put("dxwrapperConfig", it) }
+        // bcnCompatSparse — the "Emulate sparse binding (DX12)" toggle for the "Wrapper + compat + bcn"
+        // driver. It lives INSIDE graphicsDriverConfig (which is otherwise deliberately NOT carried), but
+        // unlike the rest of that string (device gpuName + BCn format tuning) it is a GAME property — does
+        // THIS DX12 title use tiled/sparse resources — so it IS portable. Lift just this one sub-key out
+        // into bl_ext when the user opted in ("1"); it is re-injected into graphicsDriverConfig on import
+        // (NOT overlaid as a scalar). The rest of graphicsDriverConfig still never travels.
+        subValue(effective["graphicsDriverConfig"].orEmpty(), ";", "bcnCompatSparse")
+            ?.takeIf { it == "1" }?.let { blExt.put("bcnCompatSparse", it) }
         if (blExt.length() > 0) settings.put("bl_ext", blExt)
 
         val metaObj = JSONObject()
