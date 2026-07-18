@@ -1,5 +1,17 @@
 # Star-Compose — Progress Log
 
+## 2026-07-17 — 🟢 SCOPED (not built): "Wrapper + compat + bcn" ultimate Mali DX12 + BCn driver
+
+> **Branch `feat/mali-ultimate-driver`** off main `2db8d25c`; scoping docs at **`03c1daf7`**: `docs/MALI_COMPAT_BCN_BUILD_PLAN.md` + `docs/Bannerlator-Mali-DX12-BCn-Tester.html` (distributable tester report; also copied to `/sdcard/Download/`). **Read-only scoping only — nothing built.**
+>
+> **What:** a new, opt-in 6th graphics-driver entry for Mali = **all-leegao modular stack** (wrapper-leegao ICD + leegao `bcn_layer` [BCn transcode] + leegao `compat_layer` [DX12/VKD3D feature emulation → D3D FL 12.0]). Gives Mali **DX12 on top of BCn** in one dropdown choice. Existing "Wrapper + bcn_layer" **kept unchanged** (both selectable; keep-both-then-graduate — consolidate later via id-alias only if proven).
+>
+> **Verdict 🟢 GREEN, 2 caveats.** Key findings (2 subagents): compat_layer = implicit layer, enable via `ENABLE_DXVK_MALI_COMPAT_LAYER=1` (push/null-descriptor auto-detect; only opt-in knob `COMPAT_EMULATE_SPARSE_BINDING`); **no runtime profile assets** (spoof compiled into `.so`) → package just `.so`+manifest like bcn; layers **compose safely** (only overlap `Features2`, idempotent-additive; compat doesn't hook FormatProperties); GPU floor **r32p1+ Valhall**; both `.so`s **build-from-source** (NDK 27.0.12077973, no releases). Identifier `wrapper-compat-bcn`; ~10 exact-anchor edits + `extra_libs.tzst` repack + `EXTRA_LIBS_VERSION` 2→3.
+>
+> **Also found:** Telegram "Leegao Bcn Update.zip" = **Fcharan/WinMali-Dev FORK** (not leegao); its only delta over our shader-v3 (`GetPhysicalDeviceFormatProperties2` hook) is **already in leegao Jul-10 upstream** → rejected, use upstream. Our `wrapper-gamenative` July-5 binary **already has full DX12 machinery** + is NOT Adreno-gated (the "Adreno-only" note was stale) — it's the GN monolithic alternative (Path 3); we don't emit `WRAPPER_DRIVER_ID`/`WRAPPER_SAFE_CREATE_DEVICE`.
+>
+> **⏭️ OPEN DECISIONS before build:** (1) bump bundled `bcn_layer` to leegao Jul-10 `c4755eef` (Hades/DXVK2 FormatProperties2/3 fix — but shared binary → re-test the proven "Wrapper + bcn_layer" too); (2) GPU-floor gating (vendor `!=0x5143` gate insufficient — detect Mali arch/driver-version or rely on compat list); (3) keep-both vs graduate (default keep-both). Then wine-compat + graphics implement → pinned build → CI → stage `mali` APK → @kylinzang (G57) + Valhall testers. Full detail: memory [[project_bannerlator_mali_compat_bcn_driver]].
+
 ## 2026-07-16 (night) — ✅ RELEASE 2.6.2 SHIPPED = LATEST (fixes-and-hardening; user chose the 2.6.2 label over 2.7)
 
 > **Cut from current `main` = the eve-session accumulator below. vc**45**, tag `2.6.2` @ version-bump `380cc90a`, API-confirmed `latest=2.6.2`, prerelease=false. Release build run **29551084664** ✅. Assets = 3 flavor APKs + `update.json` (vc45/2.6.2 — in-app updater offers it). Styled body applied + README updated (`ef5b4eac`).**
