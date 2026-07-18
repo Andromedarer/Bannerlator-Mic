@@ -1,5 +1,23 @@
 # Star-Compose — Progress Log
 
+## 2026-07-18 — ✅ "Wrapper + compat + bcn" Mali DX12+BCn driver BUILT + prerelease `mali-compat-test1` PUBLISHED (community test)
+
+> **Branch `feat/mali-ultimate-driver` (base main `2db8d25c`), tip `68f2a4c6`. Scoped → built → prereleased this session. NOT merged to main; verification is community-tester-proven (user has no device — releases the test build themselves).**
+>
+> **Driver (`c89a72f1`):** new opt-in 6th graphics driver `wrapper-compat-bcn` = leegao all-modular stack (wrapper-leegao ICD + `bcn_layer` + `compat_layer`) → Mali **DX12 on top of BCn** in one dropdown pick. Valhall model-allowlist gate `GPUInformation.isCompatLayerSupportedGpu` (G57/68/77/78/310/610/710/615/715/720/925 + Immortalis); off-list warns + still runs BCn. **Adreno triple-gated off** (opt-in + `getVendorID!=0x5143` on the real host + implicit-layer enable-env). Existing "Wrapper + bcn_layer" unchanged; both selectable.
+>
+> **Binaries:** both pulled from leegao's OWN GitHub CI artifacts (no fork) — compat_layer @ `a32f0852` (run 29555337147), bcn_layer bumped to `c4755eef` (run 29110875609; Jul-10 FormatProperties2/3 fix DXVK2/3 need). Repacked `extra_libs.tzst` 8→10 members + `EXTRA_LIBS_VERSION` 2→3 (`2c20cfa6`); tzst 29.8→23.6 MB (zstd-19), so the APK doesn't grow. bcn is a SHARED binary → the proven path re-tests on Mali too.
+>
+> **Community-config carry (`4ea74a5f`):** the driver's one new per-game setting `bcnCompatSparse` ("Emulate sparse binding (DX12)") now round-trips through community configs. It's a `graphicsDriverConfig` SUB-KEY (an excluded string), not a scalar → can't ride `BL_EXT_KEYS`; narrow carve-out instead: ConfigExporter lift→`bl_ext`, ConfigTranslator route→`gdc`, CommunityConfigApply accumulate-merge (single commit, avoids the version/sparse double-commit clobber). Rest of `graphicsDriverConfig` (gpuName + BCn tuning) stays device-local. +2 round-trip tests (run in the JVM test task, not the APK CI).
+>
+> **CI 29629135064 GREEN (3 flavors) → 3 APKs staged to `/sdcard/Download/bannerlator-mali-compat-2c20cfa-{standard,ludashi,pubg}.apk` (~591 MB, host==device sha).** versionName `2.6.2`/vc45 (no bump; filename distinguishes).
+>
+> **Prerelease `mali-compat-test1` PUBLISHED** via `gh release create` (hand-written body, `--prerelease --latest=false --target feat/mali-ultimate-driver`, 3 APKs uploaded from Downloads, **NO `update.json` asset** so the in-app updater ignores it on BOTH channels — verified `/releases/latest`=2.6.2 untouched; `UpdateManager.checkViaApi` only picks releases carrying update.json). Body: prominent **bug-report CTA** (prefilled new-issue link tagged `[mali-compat-test1]`) + **"PLEASE include logs" + how-to-enable-logs** steps + tester-guide link + a `<details>` **partial preview of the next stable** (launch/shutdown UX, per-game Vulkan settings + their config-sharing, direct-scanout hardening, HUD-vanish fix, cleanup).
+>
+> **Tester report `docs/Bannerlator-Mali-DX12-BCn-Tester.html` → v0.4** (`68f2a4c6`, `7d85cbca`): matching bug-report CTA + logs how-to + the changelog dropdown; copied to `/sdcard/Download/`; hosted via the htmlpreview proxy (user's choice — branch-based, keep the branch alive). Full detail in memory [[project_bannerlator_mali_compat_bcn_driver]].
+>
+> **NEXT (after user's sleep):** await community tester results (@kylinzang G57 + Valhall Mali) — DX12 title launches, BCn DX11 no-regression, A/B vs "Wrapper + bcn_layer", Adreno unaffected. If good → distinct versionName + fold into next stable + merge to main. If bugs → iterate on the branch from their logs.
+
 ## 2026-07-17 — 🟢 SCOPED (not built): "Wrapper + compat + bcn" ultimate Mali DX12 + BCn driver
 
 > **Branch `feat/mali-ultimate-driver`** off main `2db8d25c`; scoping docs at **`03c1daf7`**: `docs/MALI_COMPAT_BCN_BUILD_PLAN.md` + `docs/Bannerlator-Mali-DX12-BCn-Tester.html` (distributable tester report; also copied to `/sdcard/Download/`). **Read-only scoping only — nothing built.**
