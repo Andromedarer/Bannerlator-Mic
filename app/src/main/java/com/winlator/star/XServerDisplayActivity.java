@@ -973,7 +973,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (shortcut == null)
             preloaderDialog.show(container.getName(), null, null);
         else {
-            preloaderDialog.show(shortcut.name, shortcut.icon, shortcut.getCoverArt(), launchSubtitle());
+            preloaderDialog.show(shortcut.name, shortcut.icon, shortcut.getCoverArt(),
+                com.winlator.star.ui.screens.LaunchSpecBuilderKt.buildLaunchSpec(shortcut, getResources()));
         }
         preloaderDialog.step(1, "Preparing container…");
 
@@ -1754,28 +1755,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
         int playCount = playtimePrefs.getInt(playCountKey, 0) + 1;
         editor.putInt(playCountKey, playCount);
         editor.apply();
-    }
-
-    // Compact "renderer · driver" line for the launch hero subtitle. Both fields are populated from
-    // the container/shortcut above before this runs. Returns null when nothing meaningful is known.
-    private String launchSubtitle() {
-        java.util.ArrayList<String> parts = new java.util.ArrayList<>();
-        String wrap = dxwrapper == null ? "" : dxwrapper.toLowerCase();
-        if (wrap.contains("dxvk") || wrap.contains("vkd3d")) parts.add("Vulkan");
-        else if (wrap.contains("wined3d")) parts.add("OpenGL");
-        else if (!wrap.isEmpty()) parts.add(dxwrapper.toUpperCase());
-        if (graphicsDriver != null && !graphicsDriver.isEmpty()) {
-            String d = graphicsDriver.toLowerCase();
-            String pretty;
-            if (d.contains("turnip")) pretty = "Turnip";
-            else if (d.contains("virgl")) pretty = "VirGL";
-            else if (d.contains("vortek")) pretty = "Vortek";
-            else if (d.contains("llvmpipe")) pretty = "LLVMpipe";
-            else if (d.contains("zink")) pretty = "Zink";
-            else pretty = graphicsDriver.substring(0, 1).toUpperCase() + graphicsDriver.substring(1);
-            parts.add(pretty);
-        }
-        return parts.isEmpty() ? null : android.text.TextUtils.join(" · ", parts);
     }
 
     private void exit() {

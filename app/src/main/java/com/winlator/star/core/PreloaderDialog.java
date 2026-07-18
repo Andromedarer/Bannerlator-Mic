@@ -27,9 +27,9 @@ public class PreloaderDialog {
         PreloaderState.show(text, icon, coverArt);
     }
 
-    // Game launch with a renderer/driver subtitle under the title.
-    public synchronized void show(String text, Bitmap icon, Bitmap coverArt, String subtitle) {
-        PreloaderState.show(text, icon, coverArt, subtitle);
+    // Game launch with the card-mirrored component spec under the title.
+    public synchronized void show(String text, Bitmap icon, Bitmap coverArt, PreloaderSpec spec) {
+        PreloaderState.show(text, icon, coverArt, spec);
     }
 
     public void showOnUiThread(final int textResId) {

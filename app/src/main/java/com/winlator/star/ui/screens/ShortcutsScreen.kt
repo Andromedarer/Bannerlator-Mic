@@ -3424,27 +3424,18 @@ private fun ShortcutItemLayoutL(
     onScrapeCover: () -> Unit,
     onCommunityConfigs: () -> Unit,
 ) {
-    val container = shortcut.container
     val res = LocalContext.current.resources
 
-    // Resolved component metadata (shortcut override → container default).
-    val resolution = shortcut.getExtra("screenSize", container?.getScreenSize() ?: "")
-    val driverCfg = shortcut.getExtra("graphicsDriverConfig", container?.getGraphicsDriverConfig() ?: "")
-    val driverLabel = if (driverCfg.isNotEmpty()) GraphicsDriverConfigDialog.getVersion(driverCfg) else ""
-    val dxwrapperCfg = shortcut.getExtra("dxwrapperConfig", container?.getDXWrapperConfig() ?: "")
-    val (dxvkVersion, vkd3dVersion) = parseDxwrapperConfig(dxwrapperCfg)
-
-    val rendererLabel = rendererLabelOf(shortcut.getExtra("renderer", container?.renderer ?: ""))
-    val frameGenLabel = frameGenLabelOf(shortcut.getExtra("frameGenEngine", container?.frameGenEngine ?: "off"))
-    // x86 backend (FEXCore / Box64). Preset suffix (e.g. "· TSO") deferred — it needs
-    // the async Box64/FEXCore preset managers, too heavy to resolve per list-card.
-    val backendLabel = run {
-        val id = shortcut.getExtra("emulator", container?.emulator ?: "")
-        res.getStringArray(R.array.emulator_entries)
-            .firstOrNull { StringUtils.parseIdentifier(it) == id } ?: ""
-    }
-
-    val subtitle = listOf(container?.name ?: "", resolution).filter { it.isNotEmpty() }.joinToString(" · ")
+    // Resolved component metadata (shortcut override → container default). Shared with the launch
+    // overlay via buildLaunchSpec() so the card and the launch screen can never drift.
+    val spec = buildLaunchSpec(shortcut, res)
+    val rendererLabel = spec.rendererLabel
+    val dxvkVersion = spec.dxvkVersion
+    val vkd3dVersion = spec.vkd3dVersion
+    val driverLabel = spec.driverLabel
+    val frameGenLabel = spec.frameGenLabel
+    val backendLabel = spec.backendLabel
+    val subtitle = spec.meta
 
     // Floating card to match the Containers list (rounded surfaceVariant panel + outline
     // border + side margins) instead of a flat edge-to-edge row.

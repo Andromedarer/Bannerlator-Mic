@@ -54,6 +54,7 @@ import com.winlator.star.R
 import com.winlator.star.core.Failure
 import com.winlator.star.core.Phase
 import com.winlator.star.core.PreloaderState
+import com.winlator.star.ui.screens.SpecChipRows
 
 // The hero surface is always laid over a dark scrim, so text/accents use fixed light-on-dark
 // values that read over any cover art rather than the ambient theme's surface colours.
@@ -150,16 +151,28 @@ fun PreloaderOverlay() {
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                if (!ui.subtitle.isNullOrEmpty()) {
-                    Spacer(Modifier.height(5.dp))
-                    Text(
-                        text = ui.subtitle.uppercase(),
-                        style = MaterialTheme.typography.labelMedium,
-                        fontFamily = FontFamily.Monospace,
-                        letterSpacing = 1.6.sp,
-                        color = HeroTextDim,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                // Component spec, mirrored 1:1 from the game card: the "container · resolution" meta
+                // line, then the same two chip rows (renderer · DXVK · frame-gen / driver · VKD3D ·
+                // backend) via the shared SpecChipRows.
+                val spec = ui.spec
+                if (spec != null) {
+                    if (spec.meta.isNotEmpty()) {
+                        Spacer(Modifier.height(5.dp))
+                        Text(
+                            text = spec.meta,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = HeroTextDim,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    SpecChipRows(
+                        rendererLabel = spec.rendererLabel,
+                        dxvkVersion = spec.dxvkVersion,
+                        frameGenLabel = spec.frameGenLabel,
+                        driverLabel = spec.driverLabel,
+                        vkd3dVersion = spec.vkd3dVersion,
+                        backendLabel = spec.backendLabel,
                     )
                 }
                 Spacer(Modifier.height(18.dp))

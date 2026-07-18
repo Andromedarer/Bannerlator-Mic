@@ -23,7 +23,7 @@ data class PreloaderUi(
     val title: String,
     val icon: Bitmap? = null,          // small shortcut icon (fallback art / corner)
     val coverArt: Bitmap? = null,      // full-bleed hero background when available
-    val subtitle: String? = null,      // renderer/driver line under the title (e.g. "VULKAN · TURNIP")
+    val spec: PreloaderSpec? = null,   // card-mirrored component spec shown under the title
     val stepIndex: Int = 0,            // 0 = none yet; 1..stepTotal for the determinate bar
     val stepTotal: Int = 4,
     val stepLabel: String = "",
@@ -56,10 +56,10 @@ object PreloaderState {
         _ui.value = PreloaderUi(title = title ?: "", icon = icon, coverArt = coverArt, cancellable = true)
     }
 
-    /** Begin a game launch with a renderer/driver subtitle under the title. */
-    @JvmStatic fun show(title: String?, icon: Bitmap?, coverArt: Bitmap?, subtitle: String?) {
+    /** Begin a game launch with the card-mirrored component spec under the title. */
+    @JvmStatic fun show(title: String?, icon: Bitmap?, coverArt: Bitmap?, spec: PreloaderSpec?) {
         _ui.value = PreloaderUi(title = title ?: "", icon = icon, coverArt = coverArt,
-            subtitle = subtitle, cancellable = true)
+            spec = spec, cancellable = true)
     }
 
     /** Begin a launch with only a shortcut icon (no cover art). */
