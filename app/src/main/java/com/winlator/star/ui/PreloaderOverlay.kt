@@ -128,9 +128,9 @@ fun PreloaderOverlay() {
             contentScale = ContentScale.Fit,
             modifier = insets
                 .padding(end = 20.dp, bottom = 20.dp)
-                .width(170.dp)
+                .width(130.dp)
                 .aspectRatio(1408f / 768f)
-                .clip(RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(10.dp))
                 .align(Alignment.BottomEnd),
         )
 
@@ -277,10 +277,11 @@ private fun CenteredStatus(message: String) {
             .fillMaxSize()
             .background(Color(0xFF07070B)),
     ) {
+        // Fit (not Crop) so the artwork's outline border is fully visible, letterboxed on the ground.
         Image(
             painter = painterResource(R.drawable.shutdown_bg),
             contentDescription = null,
-            contentScale = ContentScale.Crop,
+            contentScale = ContentScale.Fit,
             modifier = Modifier.fillMaxSize(),
         )
         // Darken overall a touch and heavily at the bottom so the status text stays legible.
