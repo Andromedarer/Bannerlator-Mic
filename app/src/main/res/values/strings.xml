@@ -755,6 +755,8 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="wrapper_updated_toast">Wrapper updated</string>
     <string name="wrapper_reset_toast">Reverted to the built-in wrapper</string>
     <string name="wrapper_invalid_toast">That file isn\'t a valid wrapper (.tzst)</string>
+    <string name="wrapper_manager_open">Manage wrappers</string>
+    <string name="wrapper_manager_close">Close</string>
 </resources>
 
 

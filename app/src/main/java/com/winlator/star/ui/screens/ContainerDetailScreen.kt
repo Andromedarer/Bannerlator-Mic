@@ -487,7 +487,8 @@ private fun TopLevelFields(
         }
         Spacer(Modifier.height(8.dp))
 
-        // Graphics Driver + config button
+        // Graphics Driver + wrapper manager (cloud) + config button
+        var showWrapperManager by remember { mutableStateOf(false) }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             LabeledDropdown(
                 label = stringResource(R.string.graphics_driver),
@@ -496,10 +497,14 @@ private fun TopLevelFields(
                 onSelect = { viewModel.selectedGraphicsDriver = it },
                 modifier = Modifier.weight(1f)
             )
+            IconButton(onClick = { showWrapperManager = true }) {
+                Icon(Icons.Default.CloudDownload, contentDescription = stringResource(R.string.wrapper_manager_open))
+            }
             IconButton(onClick = onShowGfxConfig) {
                 Icon(Icons.Default.Settings, contentDescription = null)
             }
         }
+        if (showWrapperManager) WrapperManagerDialog(onDismiss = { showWrapperManager = false })
         Spacer(Modifier.height(8.dp))
 
         // DX Wrapper + config button

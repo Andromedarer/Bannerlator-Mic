@@ -15,8 +15,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Layers
@@ -49,8 +49,52 @@ import com.winlator.star.util.InAppFilePicker
  * Reset button (revert to the built-in). Overrides live at filesDir/graphics_driver/<name> and win
  * at game launch. No dynamic dropdown / free-form import — that's Step 2.
  */
+/** Full-screen entry point (reached from the app drawer via Screen.Wrappers). Chrome + scroll only;
+ *  the actual slot list / actions live in [WrapperManagerBody] so the inline dialog can reuse them. */
 @Composable
 fun WrapperManagerScreen() {
+    val cs = MaterialTheme.colorScheme
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(cs.surface)
+            .verticalScroll(rememberScrollState())
+    ) {
+        WrapperManagerBody()
+    }
+}
+
+/**
+ * Inline dialog entry point: the same wrapper manager surfaced from the Graphics Driver row's cloud
+ * button in the Container editor and the Game/Shortcut editor. Reuses [WrapperManagerBody] verbatim
+ * (including its file-picker launcher and toasts) so there is a single install implementation.
+ */
+@Composable
+fun WrapperManagerDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    OutlinedAlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(context.getString(R.string.wrapper_manager_title)) },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                WrapperManagerBody()
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(context.getString(R.string.wrapper_manager_close))
+            }
+        },
+    )
+}
+
+/**
+ * The wrapper-manager content, minus any Scaffold/top-bar/scroll chrome: the header + Reset-all
+ * action, the slot rows (Update/Reset per slot), the file-picker launcher and the confirm dialogs.
+ * Callers wrap it in their own scroll container (full screen or dialog).
+ */
+@Composable
+fun WrapperManagerBody(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val activity = context as Activity
     val manager = remember { WrapperManager(activity) }
@@ -82,11 +126,7 @@ fun WrapperManagerScreen() {
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(cs.surface)
-    ) {
+    Column(modifier = modifier.fillMaxWidth()) {
         // Header + Reset all
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
             Text(
@@ -104,22 +144,20 @@ fun WrapperManagerScreen() {
 
         Divider(color = cs.outline.copy(alpha = 0.4f))
 
-        LazyColumn(modifier = Modifier.fillMaxSize()) {
-            itemsIndexed(slots) { _, slot ->
-                WrapperItem(
-                    slot = slot,
-                    onUpdate = {
-                        pendingFileName = slot.fileName
-                        confirmInstallPrompt = true
-                    },
-                    onReset = {
-                        manager.removeOverride(slot.fileName)
-                        Toast.makeText(context, R.string.wrapper_reset_toast, Toast.LENGTH_SHORT).show()
-                        refresh()
-                    },
-                )
-                Divider(color = cs.outline.copy(alpha = 0.25f))
-            }
+        slots.forEach { slot ->
+            WrapperItem(
+                slot = slot,
+                onUpdate = {
+                    pendingFileName = slot.fileName
+                    confirmInstallPrompt = true
+                },
+                onReset = {
+                    manager.removeOverride(slot.fileName)
+                    Toast.makeText(context, R.string.wrapper_reset_toast, Toast.LENGTH_SHORT).show()
+                    refresh()
+                },
+            )
+            Divider(color = cs.outline.copy(alpha = 0.25f))
         }
     }
 

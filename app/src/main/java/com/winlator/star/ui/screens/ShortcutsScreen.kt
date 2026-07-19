@@ -65,6 +65,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.ViewList
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
@@ -4222,13 +4223,21 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
                         }
                     }
 
-                    // Graphics Driver
-                    LabeledDropdown(
-                        label = stringResource(R.string.graphics_driver),
-                        options = graphicsDriverEntries,
-                        selectedOption = selectedGfxDriver,
-                        onSelect = { selectedGfxDriver = it }
-                    )
+                    // Graphics Driver + wrapper manager (cloud)
+                    var showWrapperManager by remember { mutableStateOf(false) }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        LabeledDropdown(
+                            label = stringResource(R.string.graphics_driver),
+                            options = graphicsDriverEntries,
+                            selectedOption = selectedGfxDriver,
+                            onSelect = { selectedGfxDriver = it },
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(onClick = { showWrapperManager = true }) {
+                            Icon(Icons.Default.CloudDownload, contentDescription = stringResource(R.string.wrapper_manager_open))
+                        }
+                    }
+                    if (showWrapperManager) WrapperManagerDialog(onDismiss = { showWrapperManager = false })
                     OutlinedButton(onClick = { showGfxConfig = true }, modifier = Modifier.fillMaxWidth()) {
                         Text("${stringResource(R.string.graphics_driver)}: ${GraphicsDriverConfigDialog.getVersion(graphicsDriverConfig)}")
                     }
