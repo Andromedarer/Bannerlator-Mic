@@ -23,6 +23,7 @@ object InAppFilePicker {
     val IMAGES = arrayOf("png", "jpg", "jpeg", "webp", "bmp", "gif") // wallpapers / custom icons
     val DLL = arrayOf("dll")                                        // e.g. Lossless.dll (frame gen)
     val DRIVER = arrayOf("zip", "adpkg")                            // AdrenoTools driver packages
+    val WRAPPER = arrayOf("tzst")                                   // graphics wrapper overrides (issue #132)
     val SAVE = arrayOf("zip", "tzst", "zst", "xz", "tar")           // exported save archives
     val SF2 = arrayOf("sf2")                                        // MIDI sound fonts
     val SHORTCUT = arrayOf("exe", "desktop", "lnk")                 // shortcut import sources

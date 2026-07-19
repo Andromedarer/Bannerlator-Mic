@@ -246,6 +246,87 @@ public abstract class TarCompressorUtils {
         }
     }
 
+    /**
+     * Read a single small UTF-8 text entry (exact [entryName]) out of a compressed tar without
+     * extracting anything. Returns null when the archive is missing/unreadable or the entry is
+     * absent. Never throws — used by the wrapper manager to surface an optional version.txt.
+     */
+    public static String readTextFile(Type type, File source, String entryName) {
+        if (source == null || !source.isFile() || entryName == null) return null;
+        try {
+            return readTextFile(type, new BufferedInputStream(new FileInputStream(source), StreamUtils.BUFFER_SIZE), entryName);
+        }
+        catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Asset overload: read a small UTF-8 text entry from a bundled .tzst without extracting it. */
+    public static String readTextFile(Type type, Context context, String assetFile, String entryName) {
+        if (context == null || assetFile == null || entryName == null) return null;
+        try {
+            return readTextFile(type, context.getAssets().open(assetFile), entryName);
+        }
+        catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Stream core: reads [entryName] from a raw (uncompressed) input stream and closes it. */
+    private static String readTextFile(Type type, InputStream source, String entryName) {
+        if (source == null || entryName == null) return null;
+        try (InputStream inStream = getCompressorInputStream(type, source);
+             ArchiveInputStream tar = new TarArchiveInputStream(inStream)) {
+            TarArchiveEntry entry;
+            while ((entry = (TarArchiveEntry) tar.getNextEntry()) != null) {
+                if (entry.isDirectory() || !tar.canReadEntryData(entry)) continue;
+                if (entryName.equals(entry.getName())) {
+                    java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+                    StreamUtils.copy(tar, bos);
+                    return bos.toString("UTF-8");
+                }
+            }
+        }
+        catch (Exception e) {
+            return null;
+        }
+        return null;
+    }
+
+    /**
+     * True iff [source] opens as a valid compressed tar (its first entry can be read without
+     * error). Used to reject a corrupt/non-tzst file before accepting it as an override. Never throws.
+     */
+    public static boolean isValidArchive(Type type, File source) {
+        if (source == null || !source.isFile()) return false;
+        try (InputStream inStream = getCompressorInputStream(type, new BufferedInputStream(new FileInputStream(source), StreamUtils.BUFFER_SIZE));
+             ArchiveInputStream tar = new TarArchiveInputStream(inStream)) {
+            return tar.getNextEntry() != null;
+        }
+        catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * True iff the compressed tar contains an entry whose name equals [entryName]. Used to validate
+     * a user-supplied wrapper archive before accepting it. Never throws.
+     */
+    public static boolean containsEntry(Type type, File source, String entryName) {
+        if (source == null || !source.isFile() || entryName == null) return false;
+        try (InputStream inStream = getCompressorInputStream(type, new BufferedInputStream(new FileInputStream(source), StreamUtils.BUFFER_SIZE));
+             ArchiveInputStream tar = new TarArchiveInputStream(inStream)) {
+            TarArchiveEntry entry;
+            while ((entry = (TarArchiveEntry) tar.getNextEntry()) != null) {
+                if (entryName.equals(entry.getName())) return true;
+            }
+        }
+        catch (Exception e) {
+            return false;
+        }
+        return false;
+    }
+
     private static InputStream getCompressorInputStream(Type type, InputStream source) throws IOException {
         if (type == Type.XZ) {
             return new XZCompressorInputStream(source);

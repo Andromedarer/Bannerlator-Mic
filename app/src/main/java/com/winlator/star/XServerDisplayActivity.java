@@ -3250,6 +3250,19 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
     }
 
+    // Wrapper Version Manager (Step 1, issue #132): extract a bundled graphics_driver asset, but
+    // prefer a user-installed override at filesDir/graphics_driver/<assetFileName> when present.
+    // Byte-for-byte identical to the old bundled-asset extract when no override exists.
+    private void extractGraphicsAsset(String assetFileName, File rootDir) {
+        File override = new File(getFilesDir(), "graphics_driver/" + assetFileName);
+        if (override.isFile()) {
+            Log.d("GraphicsDriverExtraction", "using user override for " + assetFileName + " (" + override.getAbsolutePath() + ")");
+            TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, override, rootDir);
+        } else {
+            TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/" + assetFileName, rootDir);
+        }
+    }
+
     private void extractGraphicsDriverFiles() {
     // 1. Retrieve the selected driver name from the config
     String selectedDriver = graphicsDriverConfig.get("graphicsDriver");
@@ -3265,19 +3278,19 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // Perform wrapper extraction based on selected version
     if (graphicsDriver.startsWith("wrapper-original")) {
         Log.d("GraphicsDriverExtraction", "Extracting: graphics_driver/wrapper-original.tzst");
-        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/wrapper-original.tzst", rootDir);
-    } 
+        extractGraphicsAsset("wrapper-original.tzst", rootDir);
+    }
     else if (graphicsDriver.startsWith("wrapper-leegao")) {
         Log.d("GraphicsDriverExtraction", "Extracting: graphics_driver/wrapper-leegao.tzst");
-        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/wrapper-leegao.tzst", rootDir);
-    } 
+        extractGraphicsAsset("wrapper-leegao.tzst", rootDir);
+    }
     else if (graphicsDriver.startsWith("wrapper-legacy")) {
         Log.d("GraphicsDriverExtraction", "Extracting: graphics_driver/wrapper-legacy.tzst");
-        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/wrapper-legacy.tzst", rootDir);
+        extractGraphicsAsset("wrapper-legacy.tzst", rootDir);
     }
     else if (graphicsDriver.startsWith("wrapper-gamenative")) {
         Log.d("GraphicsDriverExtraction", "Extracting: graphics_driver/wrapper-gamenative.tzst");
-        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/wrapper-gamenative.tzst", rootDir);
+        extractGraphicsAsset("wrapper-gamenative.tzst", rootDir);
     }
     else if (graphicsDriver.startsWith("wrapper-bcn_layer")) {
         // Wrapper + bcn_layer == the wrapper-leegao ICD as its base, PLUS leegao's bcn_layer
@@ -3285,7 +3298,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // via the already-set VK_LAYER_PATH). Extract the SAME base wrapper as Wrapper-leegao;
         // the BCn env block below activates the layer.
         Log.d("GraphicsDriverExtraction", "Extracting: graphics_driver/wrapper-leegao.tzst (base for wrapper-bcn_layer)");
-        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/wrapper-leegao.tzst", rootDir);
+        extractGraphicsAsset("wrapper-leegao.tzst", rootDir);
     }
 
     // Original logic for DXWrapper and environment variables
@@ -3332,7 +3345,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     if (firstTimeBoot) {
         Log.d("XServerDisplayActivity", "First time container boot, re-extracting layers and extra_libs");
         TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "layers" + ".tzst", rootDir);
-        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/extra_libs.tzst", rootDir);
+        extractGraphicsAsset("extra_libs.tzst", rootDir);
         writeExtraLibsVersion(extraLibsVersionFile, EXTRA_LIBS_VERSION);
     }
     else if (!vkBasaltSo.exists() || installedExtraLibsVer != EXTRA_LIBS_VERSION) {
@@ -3340,7 +3353,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             Log.d("XServerDisplayActivity", "vkBasalt layer absent (pre-existing container) — re-extracting extra_libs");
         else
             Log.d("XServerDisplayActivity", "extra_libs outdated (installed=" + installedExtraLibsVer + " bundled=" + EXTRA_LIBS_VERSION + ") — re-extracting extra_libs");
-        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/extra_libs.tzst", rootDir);
+        extractGraphicsAsset("extra_libs.tzst", rootDir);
         writeExtraLibsVersion(extraLibsVersionFile, EXTRA_LIBS_VERSION);
     }
 

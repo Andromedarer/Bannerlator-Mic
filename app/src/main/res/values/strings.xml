@@ -740,6 +740,21 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="save_backup_format_winlator">Winlator-native .zip</string>
     <string name="save_backup_format_winlator_sub">Sibling Winlator / WinNative builds</string>
     <string name="save_backup_next">Next</string>
+
+    <!-- Wrapper Version Manager (Step 1, issue #132) -->
+    <string name="wrapper_manager_title">Manage Wrappers</string>
+    <string name="wrapper_manager_header">Replace a bundled graphics wrapper with a newer file; updates are stored on-device and used instead of the built-in one.</string>
+    <string name="wrapper_update">Update</string>
+    <string name="wrapper_reset">Reset</string>
+    <string name="wrapper_reset_all">Reset all</string>
+    <string name="wrapper_reset_all_confirm_title">Reset all wrappers?</string>
+    <string name="wrapper_reset_all_confirm_message">Remove every wrapper update and go back to the built-in versions?</string>
+    <string name="wrapper_select_title">Select wrapper .tzst</string>
+    <string name="wrapper_bundled">Bundled</string>
+    <string name="wrapper_updated_label">Updated</string>
+    <string name="wrapper_updated_toast">Wrapper updated</string>
+    <string name="wrapper_reset_toast">Reverted to the built-in wrapper</string>
+    <string name="wrapper_invalid_toast">That file isn\'t a valid wrapper (.tzst)</string>
 </resources>
 
 

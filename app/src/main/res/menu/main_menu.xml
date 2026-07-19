@@ -38,6 +38,10 @@
                     android:icon="@drawable/icon_open"
                     android:title="@string/adrenotools_gpu_drivers" />
                 <item
+                    android:id="@+id/main_menu_wrapper_manager"
+                    android:icon="@drawable/icon_open"
+                    android:title="@string/wrapper_manager_title" />
+                <item
                     android:id="@+id/main_menu_saves"
                     android:icon="@drawable/icon_save"
                     android:title="@string/saves" />
