@@ -5,11 +5,17 @@ import android.content.res.AssetManager;
 import android.net.Uri;
 import android.util.Log;
 
+import com.winlator.star.container.Container;
+import com.winlator.star.container.ContainerManager;
+import com.winlator.star.container.Shortcut;
 import com.winlator.star.core.StreamUtils;
+import com.winlator.star.core.StringUtils;
 import com.winlator.star.core.TarCompressorUtils;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -26,9 +32,11 @@ import java.util.List;
  * {@code XServerDisplayActivity.extractGraphicsDriverFiles()} prefers that file over the bundled
  * asset (per extracted asset file).
  *
- * This class is deliberately additive: it does NOT touch the graphics-driver dropdown,
- * parseIdentifier, Container/Shortcut persistence, or any cascade. Free-form import / rename /
- * delete-cascade and manifest-driven settings are Steps 2/3.
+ * Step 2 (issue #132) adds free-form IMPORTED wrappers on top of the fixed slots: import / delete
+ * arbitrary wrappers ({@link #importWrapper} / {@link #deleteImported}), enumerate them
+ * ({@link #enumerateImported}), feed them into the Graphics Driver dropdown ({@link #driverEntries},
+ * shared by both read sites), and cascade a delete so no Container/Shortcut is left pointing at a
+ * removed wrapper. Manifest-driven per-wrapper settings remain Step 3.
  */
 public class WrapperManager {
 
@@ -241,6 +249,219 @@ public class WrapperManager {
     private static Slot slotFor(String fileName) {
         for (Slot slot : SLOTS) if (slot.fileName.equals(fileName)) return slot;
         return null;
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Step 2 (issue #132): free-form imported wrappers.
+    //
+    // An imported wrapper lives alongside the fixed-slot overrides in filesDir/graphics_driver/:
+    //   <identifier>.tzst  — the wrapper archive (extracted at launch when a container's
+    //                        graphicsDriver == identifier; see XServerDisplayActivity).
+    //   <identifier>.meta  — a tiny sidecar (label / identifier / imported flag) that makes imports
+    //                        enumerable and distinct from bundled-slot overrides (which have NO meta).
+    // The identifier is StringUtils.parseIdentifier(displayName) so the display<->identifier round
+    // trip used by the Graphics Driver dropdown holds. Reserved ids (anything colliding with a slot
+    // file name) are refused so an import can never clobber a bundled-slot override.
+    // ---------------------------------------------------------------------------------------------
+
+    /** A user-imported wrapper: canonical identifier (persisted in Container.graphicsDriver) + label. */
+    public static final class Imported {
+        public final String identifier;
+        public final String label;
+        Imported(String identifier, String label) {
+            this.identifier = identifier;
+            this.label = label;
+        }
+    }
+
+    /** The imported wrapper archive for an identifier (may or may not exist). */
+    public File importedFileFor(String identifier) {
+        return new File(overrideDir, identifier + ".tzst");
+    }
+
+    private File metaFileFor(String identifier) {
+        return new File(overrideDir, identifier + ".meta");
+    }
+
+    /**
+     * True when {@code <identifier>.tzst} would collide with one of the bundled fixed slots
+     * (wrapper, wrapper-original, wrapper-legacy, wrapper-leegao, wrapper-gamenative, leegao_bcn,
+     * extra_libs). Also treats empty as reserved. Imports with a reserved id are refused so they
+     * cannot overwrite a slot override file.
+     */
+    public boolean isReservedIdentifier(String identifier) {
+        if (identifier == null || identifier.isEmpty()) return true;
+        String asFile = identifier + ".tzst";
+        for (Slot slot : SLOTS) if (slot.fileName.equals(asFile)) return true;
+        return false;
+    }
+
+    /** Enumerate imported wrappers (each has a .meta sidecar AND a .tzst payload). Never throws. */
+    public List<Imported> enumerateImported() {
+        ArrayList<Imported> out = new ArrayList<>();
+        File[] files = overrideDir.listFiles();
+        if (files == null) return out;
+        for (File f : files) {
+            String n = f.getName();
+            if (!n.endsWith(".meta")) continue;
+            String identifier = n.substring(0, n.length() - ".meta".length());
+            if (isReservedIdentifier(identifier)) continue;   // defensive: never surface a slot as an import
+            if (!importedFileFor(identifier).isFile()) continue; // orphaned meta (payload gone) -> skip
+            Imported imp = readMeta(f, identifier);
+            if (imp != null) out.add(imp);
+        }
+        return out;
+    }
+
+    private Imported readMeta(File metaFile, String fallbackId) {
+        String label = null;
+        String identifier = fallbackId;
+        try (BufferedReader r = new BufferedReader(new FileReader(metaFile))) {
+            String line;
+            while ((line = r.readLine()) != null) {
+                int eq = line.indexOf('=');
+                if (eq < 0) continue;
+                String k = line.substring(0, eq).trim();
+                String v = line.substring(eq + 1).trim();
+                if (k.equals("label")) label = v;
+                else if (k.equals("identifier")) identifier = v;
+            }
+        }
+        catch (IOException e) {
+            return null;
+        }
+        if (label == null || label.isEmpty()) label = identifier;
+        return new Imported(identifier, label);
+    }
+
+    private boolean writeMeta(String identifier, String label) {
+        File meta = metaFileFor(identifier);
+        try (OutputStream out = new FileOutputStream(meta)) {
+            String content = "label=" + label + "\nidentifier=" + identifier + "\nimported=true\n";
+            out.write(content.getBytes());
+            return true;
+        }
+        catch (IOException e) {
+            Log.d(TAG, "writeMeta failed for " + identifier + " — " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Import a free-form wrapper. Derives the identifier from {@code displayName} via
+     * {@link StringUtils#parseIdentifier}; validates the source is a zstd tar carrying the vulkan
+     * wrapper marker; stores {@code <identifier>.tzst} + {@code <identifier>.meta}. Collisions with an
+     * existing import are resolved by suffixing the LABEL (" 2", " 3", …) — suffixing the label (not
+     * just the id) keeps the display<->identifier round trip intact. A reserved id (bundled slot
+     * collision) or an unreadable/invalid archive returns null. Returns the stored identifier.
+     */
+    public String importWrapper(Uri src, String displayName) {
+        if (src == null || displayName == null) return null;
+        String baseLabel = displayName.trim();
+        if (baseLabel.isEmpty()) return null;
+
+        String label = baseLabel;
+        String identifier = StringUtils.parseIdentifier(label);
+        if (identifier.isEmpty()) return null;
+        if (isReservedIdentifier(identifier)) {
+            Log.d(TAG, "importWrapper: refused reserved identifier " + identifier);
+            return null;
+        }
+        // Suffix the label until the derived identifier is free among existing imports.
+        int n = 2;
+        while (importedFileFor(identifier).isFile() || metaFileFor(identifier).isFile()) {
+            label = baseLabel + " " + n;
+            identifier = StringUtils.parseIdentifier(label);
+            n++;
+            if (isReservedIdentifier(identifier)) return null; // extremely defensive
+        }
+
+        if (!overrideDir.exists()) overrideDir.mkdirs();
+        File tmp = new File(overrideDir, identifier + ".tzst.tmp");
+        if (tmp.exists()) tmp.delete();
+
+        // 1. Copy bytes to a temp file.
+        try (InputStream in = mContext.getContentResolver().openInputStream(src);
+             OutputStream out = new FileOutputStream(tmp)) {
+            if (in == null || !StreamUtils.copy(in, out)) {
+                tmp.delete();
+                return null;
+            }
+        }
+        catch (IOException | SecurityException e) {
+            Log.d(TAG, "importWrapper: copy error — " + e.getMessage());
+            tmp.delete();
+            return null;
+        }
+
+        // 2. Must be a readable zstd tar carrying the wrapper ICD marker (lenient match).
+        if (!TarCompressorUtils.isValidArchive(TarCompressorUtils.Type.ZSTD, tmp)
+                || !TarCompressorUtils.containsEntry(TarCompressorUtils.Type.ZSTD, tmp, WRAPPER_MARKER_ENTRY)) {
+            Log.d(TAG, "importWrapper: not a valid wrapper archive");
+            tmp.delete();
+            return null;
+        }
+
+        // 3. Move into place + write the sidecar.
+        File dst = importedFileFor(identifier);
+        if (dst.exists()) dst.delete();
+        if (!tmp.renameTo(dst)) {
+            tmp.delete();
+            return null;
+        }
+        if (!writeMeta(identifier, label)) {
+            dst.delete();
+            return null;
+        }
+        Log.d(TAG, "importWrapper: imported '" + label + "' as " + identifier);
+        return identifier;
+    }
+
+    /**
+     * Delete an imported wrapper AND run the reference cascade: any Container or Shortcut whose
+     * {@code graphicsDriver} still points at this identifier is reset to
+     * {@link Container#DEFAULT_GRAPHICS_DRIVER} so no dangling reference survives the delete. Mirrors
+     * {@link AdrenotoolsManager} reloadContainers, but rewrites the graphicsDriver FIELD (not the
+     * config version key). Never throws.
+     */
+    public void deleteImported(String identifier) {
+        if (identifier == null || identifier.isEmpty()) return;
+        try {
+            ContainerManager cm = new ContainerManager(mContext);
+            for (Container c : cm.getContainers()) {
+                if (identifier.equals(c.getGraphicsDriver())) {
+                    c.setGraphicsDriver(Container.DEFAULT_GRAPHICS_DRIVER);
+                    c.saveData();
+                }
+            }
+            for (Shortcut s : cm.loadShortcuts()) {
+                if (identifier.equals(s.getExtra("graphicsDriver", ""))) {
+                    s.putExtra("graphicsDriver", Container.DEFAULT_GRAPHICS_DRIVER);
+                    s.saveData();
+                }
+            }
+        }
+        catch (Exception e) {
+            Log.d(TAG, "deleteImported: cascade error — " + e.getMessage());
+        }
+        File tzst = importedFileFor(identifier);
+        File meta = metaFileFor(identifier);
+        if (tzst.exists()) tzst.delete();
+        if (meta.exists()) meta.delete();
+        Log.d(TAG, "deleteImported: removed " + identifier);
+    }
+
+    /**
+     * The combined Graphics Driver dropdown entries = the bundled string-array entries PLUS every
+     * imported wrapper's label. SHARED by both dropdown read sites (ContainerDetailViewModel and
+     * ShortcutsScreen) so they can never drift — see issue #132's top-ranked risk. Order: bundled
+     * first (index 0 stays the default), imports appended.
+     */
+    public static List<String> driverEntries(Context context, String[] bundled) {
+        ArrayList<String> out = new ArrayList<>();
+        if (bundled != null) for (String b : bundled) out.add(b);
+        for (Imported imp : new WrapperManager(context).enumerateImported()) out.add(imp.label);
+        return out;
     }
 
     /** Whether a bundled asset exists for the slot (defensive; the 6 are always shipped). */

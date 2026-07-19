@@ -757,6 +757,18 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="wrapper_invalid_toast">That file isn\'t a valid wrapper (.tzst)</string>
     <string name="wrapper_manager_open">Manage wrappers</string>
     <string name="wrapper_manager_close">Close</string>
+    <!-- Step 2: free-form imported wrappers -->
+    <string name="wrapper_imported_label">Imported</string>
+    <string name="wrapper_import_title">Import wrapper…</string>
+    <string name="wrapper_import_subtitle">Add your own wrapper (.tzst). It appears in the Graphics Driver menu.</string>
+    <string name="wrapper_import_name_title">Name this wrapper</string>
+    <string name="wrapper_import_name_message">This name shows up in the Graphics Driver menu.</string>
+    <string name="wrapper_import_name_empty_toast">Enter a name for the wrapper</string>
+    <string name="wrapper_import_reserved_toast">That name is reserved for a built-in wrapper — pick another</string>
+    <string name="wrapper_imported_toast">Wrapper imported</string>
+    <string name="wrapper_delete">Delete</string>
+    <string name="wrapper_delete_confirm_title">Delete this wrapper?</string>
+    <string name="wrapper_delete_confirm_message">Remove this imported wrapper. Any container or game using it goes back to the default wrapper.</string>
 </resources>
 
 

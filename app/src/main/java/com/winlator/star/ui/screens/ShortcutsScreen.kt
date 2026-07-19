@@ -168,6 +168,7 @@ import com.winlator.star.container.Shortcut
 import com.winlator.star.reshade.ReshadeManager
 import com.winlator.star.contentdialog.GraphicsDriverConfigDialog
 import com.winlator.star.contents.AdrenotoolsManager
+import com.winlator.star.contents.WrapperManager
 import com.winlator.star.contents.ContentProfile
 import com.winlator.star.contents.ContentsManager
 import com.winlator.star.contents.Downloader
@@ -3736,8 +3737,12 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
         mutableStateOf(if (rawScreenSize.contains("x")) rawScreenSize.substringAfter("x") else "600")
     }
 
-    // Graphics driver
-    val graphicsDriverEntries = remember { res.getStringArray(R.array.graphics_driver_entries).toList() }
+    // Graphics driver — bundled entries + user-imported wrappers (issue #132 Step 2), built via the
+    // SHARED WrapperManager.driverEntries helper so this list matches ContainerDetailViewModel's
+    // exactly (dynamic-dropdown drift is the feature's top-ranked risk).
+    val graphicsDriverEntries = remember {
+        WrapperManager.driverEntries(context, res.getStringArray(R.array.graphics_driver_entries))
+    }
     var selectedGfxDriver by remember {
         val id = shortcut.getExtra("graphicsDriver", shortcut.container.graphicsDriver)
         mutableStateOf(graphicsDriverEntries.firstOrNull { StringUtils.parseIdentifier(it) == id }

@@ -3275,8 +3275,21 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     File rootDir = imageFs.getRootDir();
 
+    // Wrapper Version Manager Step 2 (issue #132): an EXACT-name override at
+    // filesDir/graphics_driver/<graphicsDriver>.tzst wins over the bundled chain. This single check
+    // resolves (a) the default "wrapper" slot override (which the startsWith chain below never
+    // handled), (b) any bundled-slot override whose graphicsDriver == its file base name, and
+    // (c) free-form IMPORTED wrappers (identifier == graphicsDriver). Bundled drivers with NO
+    // matching file — including bcn/compat (graphicsDriver "wrapper-bcn_layer", whose base archive
+    // is leegao_bcn.tzst / wrapper-leegao.tzst, not "wrapper-bcn_layer.tzst") — fall through
+    // unchanged to the per-branch chain below.
+    File userWrapper = new File(getFilesDir(), "graphics_driver/" + graphicsDriver + ".tzst");
+    if (userWrapper.isFile()) {
+        Log.d("GraphicsDriverExtraction", "Extracting user wrapper (override/import): " + userWrapper.getAbsolutePath());
+        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, userWrapper, rootDir);
+    }
     // Perform wrapper extraction based on selected version
-    if (graphicsDriver.startsWith("wrapper-original")) {
+    else if (graphicsDriver.startsWith("wrapper-original")) {
         Log.d("GraphicsDriverExtraction", "Extracting: graphics_driver/wrapper-original.tzst");
         extractGraphicsAsset("wrapper-original.tzst", rootDir);
     }
