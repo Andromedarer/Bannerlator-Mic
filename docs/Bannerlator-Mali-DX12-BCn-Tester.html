@@ -112,7 +112,7 @@
       <span class="pill exp">⚗ EXPERIMENTAL — test build</span>
       <span class="pill">Driver: <b>Wrapper + compat + bcn</b></span>
       <span class="pill">For <b>Mali</b> devices</span>
-      <span class="pill">Build <b>2c20cfa</b> · standard · v <b>2.6.2</b></span>
+      <span class="pill">Build <b>6018c3c8</b> · GameNative-engine · v <b>2.6.2</b></span>
     </div>
   </header>
 
@@ -188,13 +188,24 @@
       <li>Choose <b>“Wrapper + compat + bcn”</b> from the dropdown.</li>
       <li>Adjust the options below if needed, save, and launch.</li>
     </ol>
-    <p>The existing <b>BCn Layer Settings</b> panel appears for this driver (same as the current BCn driver), plus one DX12 option:</p>
+    <div class="card" style="border-color:var(--violet-2)">
+      <h3 style="margin:0 0 8px; font-size:15px; font-weight:700; color:var(--violet-2)">🎮 To run DX12 games — turn on the new engine switch</h3>
+      <p style="margin:0 0 10px">Your logs showed the original engine reported <b>Vulkan 1.1</b> and didn’t provide the functions DX12 games need, so they were rejected before anything else. This build adds a <b>second engine</b> (the GameNative wrapper) that reports <b>Vulkan 1.3</b> and provides those functions — and does its own BCn.</p>
+      <ol class="steps" style="margin:0 0 10px">
+        <li>Graphics Driver → select <b>“Wrapper + compat + bcn”</b>.</li>
+        <li>Turn <b>ON</b> the new switch: <b>“Use GameNative engine (DX12)”</b>.</li>
+        <li>Launch a DX12 game.</li>
+      </ol>
+      <p style="margin:0"><b>Off</b> (default) = the original behaviour (BCn textures, no DX12) — safe to leave off. <b>On</b> = the DX12 engine (Valhall Mali r32p1+ only; it warns and does nothing on other GPUs).</p>
+    </div>
+    <p>The existing <b>BCn Layer Settings</b> panel also appears for this driver. Its options:</p>
     <ul>
-      <li><span class="m dot-v">•</span><span><b>Force decode on all GPUs</b> — forces BCn texture decoding (recommended default for Mali).</span></li>
+      <li><span class="m dot-v">•</span><span><b>Use GameNative engine (DX12)</b> — <b>the switch above.</b> Required for DX12 games. Off = BCn textures only (leegao layers, unchanged). On = GameNative engine (Vulkan 1.3 + its own BCn).</span></li>
+      <li><span class="m dot-v">•</span><span><b>Force decode on all GPUs</b> — forces BCn texture decoding (recommended default for Mali; applies when the engine switch is <em>off</em>).</span></li>
       <li><span class="m dot-v">•</span><span><b>Transcode to ETC2 / Transcode to ASTC</b> — target format for decoded textures; leave default unless a game misbehaves.</span></li>
       <li><span class="m dot-v">•</span><span><b>Storage image path</b> — internal BCn transfer method; default is fine.</span></li>
       <li><span class="m dot-v">•</span><span><b>Emulate sparse binding (DX12)</b> — <b>off by default.</b> Turn on only for DX12 games that use tiled/reserved resources and otherwise glitch or crash. It’s not free, so don’t leave it on globally.</span></li>
-      <li><span class="m dot-v">•</span><span><b>Debug log</b> — writes BCn/DX12 diagnostics to the Wine debug log (enable <em>Settings → Logs → Wine Debug</em> to capture it). Use this when reporting a problem.</span></li>
+      <li><span class="m dot-v">•</span><span><b>Debug log</b> — writes BCn diagnostics to the Wine debug log (enable <em>Settings → Logs → Wine Debug</em> to capture it). Use this when reporting a problem.</span></li>
     </ul>
   </section>
 
@@ -230,6 +241,7 @@
         <li>Grab <code>wine_debug.log</code> (plus <code>&lt;game&gt;_d3d11.log</code> / <code>_dxgi.log</code> for DX11/DX12 titles) from your log folder. Tip: the in-game <b>Debug Logs</b> drawer also has a <b>Copy</b> button.</li>
         <li><b>Attach or paste the log</b> into your GitHub issue.</li>
       </ol>
+      <div class="note" style="margin-top:12px"><b>🎮 Testing the DX12 engine?</b> With <b>“Use GameNative engine (DX12)”</b> turned on, the engine prints exactly what it advertised into <code>wine_debug.log</code> — look for lines beginning <code>[WRAPPER_DIAG]</code> (they show the Vulkan version and driver it reported). <b>That line is the single most important thing to send</b> — it tells us whether the Vulkan 1.3 switch actually took. Just <em>Enable Wine Debug</em> (step 1) is enough to capture it.</div>
     </div>
 
     <div class="cta">
@@ -267,12 +279,12 @@
     <ul>
       <li><span class="m dot-v">•</span><span><b>leegao</b> — the <code>bcn_layer</code> (BCn texture decode), the <code>compat_layer</code> (DX12/VKD3D feature emulation for Mali), and the <code>bionic-vulkan-wrapper</code> base. This driver is assembled from his latest work.</span></li>
       <li><span class="m dot-v">•</span><span><b>GameNative</b> — pioneering the DX12-on-Mali wrapper approach that informed this path; Bannerlator also ships their integrated wrapper as a separate option.</span></li>
-      <li><span class="m dot-v">•</span><span><b>Mali testers</b> (the Bannerlator community) — the only reason any of this is provable on real hardware.</span></li>
+      <li><span class="m dot-v">•</span><span><b>Mali testers</b> — kylinzang, Noysz, OmarGuerguab, and everyone reporting. Your logs diagnosed the DX12 wall (the engine reporting Vulkan 1.1) and are the only reason any of this is provable on real hardware.</span></li>
     </ul>
   </section>
 
   <div class="foot">
-    Bannerlator · Mali DX12 + BCn tester guide · v0.4 — build ready · report + logs guide (2c20cfa)<br>
+    Bannerlator · Mali DX12 + BCn tester guide · v0.5 — GameNative DX12 engine toggle (6018c3c8)<br>
     Experimental / opt-in · existing drivers unaffected · Adreno unaffected · not a stable release
   </div>
 
