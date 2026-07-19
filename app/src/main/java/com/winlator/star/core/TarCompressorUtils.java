@@ -312,13 +312,23 @@ public abstract class TarCompressorUtils {
      * True iff the compressed tar contains an entry whose name equals [entryName]. Used to validate
      * a user-supplied wrapper archive before accepting it. Never throws.
      */
+    // Lenient membership check: real-world wrapper tarballs vary in layout — a leading "./",
+    // a top-level directory, etc. — so we match on the normalized path OR the bare file name,
+    // and skip macOS AppleDouble "._" sidecar entries. Exact-matching the full path here was
+    // too brittle and rejected valid third-party wrappers (issue #132 device test).
     public static boolean containsEntry(Type type, File source, String entryName) {
         if (source == null || !source.isFile() || entryName == null) return false;
+        String wantPath = entryName.replaceFirst("^\\./", "").replaceFirst("^/", "");
+        String wantBase = wantPath.substring(wantPath.lastIndexOf('/') + 1);
         try (InputStream inStream = getCompressorInputStream(type, new BufferedInputStream(new FileInputStream(source), StreamUtils.BUFFER_SIZE));
              ArchiveInputStream tar = new TarArchiveInputStream(inStream)) {
             TarArchiveEntry entry;
             while ((entry = (TarArchiveEntry) tar.getNextEntry()) != null) {
-                if (entryName.equals(entry.getName())) return true;
+                String name = entry.getName().replaceFirst("^\\./", "").replaceFirst("^/", "");
+                String base = name.substring(name.lastIndexOf('/') + 1);
+                if (base.startsWith("._")) continue; // AppleDouble sidecar
+                if (name.equals(wantPath) || name.endsWith("/" + wantPath) || base.equals(wantBase))
+                    return true;
             }
         }
         catch (Exception e) {
