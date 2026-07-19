@@ -206,10 +206,15 @@ fun ContainerDetailScreen(
         )
     }
     val isVegasWrapper = StringUtils.parseIdentifier(viewModel.selectedDXWrapper ?: "").contains("vegas")
+    // Mali compat/bcn testers need DXVK 1.x reachable even with VKD3D selected, to try the
+    // 1.10.3 adapter-accept workaround (#137). Relax the #113 DXVK-2.x-only filter ONLY for the
+    // "Wrapper + compat + bcn" driver; every other driver keeps the guard unchanged.
+    val relaxDxvkFilter = StringUtils.parseIdentifier(viewModel.selectedGraphicsDriver) == "wrapper-compat-bcn"
     if (showDxvkConfig) {
         DxvkConfigDialog(
             isArm64EC = viewModel.isArm64EC,
             isVegas = isVegasWrapper,
+            relaxDxvkFilter = relaxDxvkFilter,
             refreshKey = dxvkRefreshKey,
             initialConfig = viewModel.dxWrapperConfig,
             onConfirm = { newConfig -> viewModel.dxWrapperConfig = newConfig; showDxvkConfig = false },
@@ -1927,6 +1932,7 @@ internal fun ExtensionPickerDialog(
 internal fun DxvkConfigDialog(
     isArm64EC: Boolean,
     isVegas: Boolean = false,
+    relaxDxvkFilter: Boolean = false,
     refreshKey: Int = 0,
     initialConfig: String,
     onConfirm: (String) -> Unit,
@@ -1967,8 +1973,10 @@ internal fun DxvkConfigDialog(
     // VKD3D-Proton needs DXVK 2.x's DXGI; DXVK 1.x can't back it, so the DX12 test fails to start.
     // Filter the DXVK list to 2.x+ (keeping unparseable names, e.g. VEGAS) when VKD3D is enabled —
     // matches the shortcut-level dialog, which already enforces this. Fixes #113.
-    val filteredDxvk = remember(selectedVkd3d, allDxvkVersions.value) {
-        if (selectedVkd3d != "None") {
+    // Exception: the Mali "Wrapper + compat + bcn" driver (relaxDxvkFilter) shows all DXVK versions
+    // so testers can try the DXVK 1.10.3 adapter-accept workaround with VKD3D on (#137).
+    val filteredDxvk = remember(selectedVkd3d, allDxvkVersions.value, relaxDxvkFilter) {
+        if (selectedVkd3d != "None" && !relaxDxvkFilter) {
             allDxvkVersions.value.filter { v ->
                 val major = DXVKConfigDialog.tryGetMajor(v)
                 major == null || major >= 2
