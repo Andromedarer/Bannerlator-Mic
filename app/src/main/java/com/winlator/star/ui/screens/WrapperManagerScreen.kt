@@ -47,6 +47,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
 import com.winlator.star.R
 import com.winlator.star.contents.WrapperManager
 import com.winlator.star.core.StringUtils
@@ -84,6 +85,10 @@ fun WrapperManagerDialog(onDismiss: () -> Unit) {
     val context = LocalContext.current
     OutlinedAlertDialog(
         onDismissRequest = onDismiss,
+        // Use (almost) the full screen width — the default AlertDialog width squeezes the wrapper
+        // cards so their labels truncate. usePlatformDefaultWidth=false lets the modifier size it.
+        modifier = Modifier.fillMaxWidth(0.96f),
+        properties = DialogProperties(usePlatformDefaultWidth = false),
         title = { Text(context.getString(R.string.wrapper_manager_title)) },
         text = {
             Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
@@ -399,7 +404,7 @@ private fun WrapperCardFrame(
                     text = title,
                     style = MaterialTheme.typography.bodyLarge,
                     color = cs.onSurface,
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
