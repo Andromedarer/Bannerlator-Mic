@@ -96,8 +96,10 @@ fun WrapperManagerDialog(onDismiss: () -> Unit) {
 @Composable
 fun WrapperManagerBody(modifier: Modifier = Modifier) {
     val context = LocalContext.current
-    val activity = context as Activity
-    val manager = remember { WrapperManager(activity) }
+    // WrapperManager only needs a Context (it calls getApplicationContext). Do NOT cast to Activity:
+    // when this body is hosted inside a dialog, LocalContext is a ContextThemeWrapper, not an
+    // Activity, and the cast crashes (device-verified). Pass the context straight through.
+    val manager = remember { WrapperManager(context) }
     val cs = MaterialTheme.colorScheme
 
     var slots by remember { mutableStateOf(manager.listSlots().toList()) }
