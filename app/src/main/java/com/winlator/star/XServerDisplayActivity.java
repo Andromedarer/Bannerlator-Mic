@@ -3292,8 +3292,20 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // compat_layer implicit Vulkan layers (their .so + manifest ship in extra_libs.tzst and are
         // picked up via the already-set VK_LAYER_PATH). Extract the SAME base wrapper as Wrapper-leegao;
         // the BCn env block below activates bcn_layer and the compat env block activates compat_layer.
-        Log.d("GraphicsDriverExtraction", "Extracting: graphics_driver/wrapper-leegao.tzst (base for wrapper-compat-bcn)");
-        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/wrapper-leegao.tzst", rootDir);
+        //
+        // Per-game engine swap (config key compatUseGamenative=1): the leegao ICD reports Vulkan 1.1 on
+        // old Mali blobs and lacks the promoted 1.3 entrypoints, so DXVK/VKD3D reject the adapter (no
+        // DX12). When the tester opts in, swap the ICD base to the GameNative wrapper (Mesa-vk-runtime
+        // ICD) which reports 1.3, emulates the entrypoints and has its own integrated BCn. In that mode
+        // the leegao bcn_layer / compat_layer are left DORMANT (their enable-envs are NOT set below), so
+        // BCn is handled by the GameNative wrapper itself (WRAPPER_EMULATE_BCN).
+        if ("1".equals(graphicsDriverConfig.get("compatUseGamenative"))) {
+            Log.d("GraphicsDriverExtraction", "Extracting: graphics_driver/wrapper-gamenative.tzst (GameNative engine base for wrapper-compat-bcn; compatUseGamenative=1)");
+            TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/wrapper-gamenative.tzst", rootDir);
+        } else {
+            Log.d("GraphicsDriverExtraction", "Extracting: graphics_driver/wrapper-leegao.tzst (leegao base for wrapper-compat-bcn; compatUseGamenative off)");
+            TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/wrapper-leegao.tzst", rootDir);
+        }
     }
 
     // Original logic for DXWrapper and environment variables
@@ -3433,6 +3445,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
     boolean isBcnLayerDriver = graphicsDriver != null
             && (graphicsDriver.startsWith("wrapper-bcn_layer") || graphicsDriver.startsWith("wrapper-compat-bcn"));
     boolean isCompatDriver = graphicsDriver != null && graphicsDriver.startsWith("wrapper-compat-bcn");
+    // Per-game engine swap: run "Wrapper + compat + bcn" on the GameNative wrapper ICD (extracted
+    // above) instead of the leegao ICD, to unlock DX12. When set we take the GameNative activation
+    // path below and DO NOT activate the leegao bcn_layer / compat_layer implicit layers.
+    boolean useGamenativeEngine = isCompatDriver && "1".equals(graphicsDriverConfig.get("compatUseGamenative"));
 
     if (!isBcnLayerDriver) {
         String bcnEmulation = graphicsDriverConfig.get("bcnEmulation");
@@ -3483,6 +3499,46 @@ public class XServerDisplayActivity extends AppCompatActivity {
         boolean activateBcnLayer = GPUInformation.getVendorID(null, null) != 0x5143;
 
         if (activateBcnLayer) {
+        if (useGamenativeEngine) {
+        // === GameNative engine (DX12) activation — Wrapper + compat + bcn, compatUseGamenative=1 ===
+        // The extraction step already swapped the ICD base to wrapper-gamenative.tzst. Here we drive
+        // that wrapper's env-var interface INSTEAD of the leegao bcn_layer/compat_layer: we deliberately
+        // do NOT set ENABLE_BCN_COMPUTE / BCN_* / ENABLE_DXVK_MALI_COMPAT_LAYER, so the leegao implicit
+        // layers (still shipping in extra_libs.tzst) stay dormant. BCn is handled by the GameNative
+        // wrapper itself via WRAPPER_EMULATE_BCN.
+        //
+        // Still gated by the Valhall Mali (r32p1+) model allowlist — same floor as leegao's compat_layer.
+        // The vendor gate (!= 0x5143, above) already excluded Adreno. On a borderline non-Valhall Mali (or
+        // other non-Qualcomm GPU) fall back with a warning and emit NO DX12 override envs.
+        String gnRenderer = GPUInformation.getRenderer(null, null);
+        if (GPUInformation.isCompatLayerSupportedGpu(gnRenderer)) {
+            // WRAPPER_VK_VERSION (=1.3.<patch>) is already set above and the GameNative wrapper reads it.
+            // WRAPPER_SAFE_CREATE_DEVICE=1 — tolerate vkCreateDevice with features the old Mali blob under
+            //   the wrapper doesn't natively expose (the wrapper emulates/masks them) so DXVK/VKD3D proceed.
+            envVars.put("WRAPPER_SAFE_CREATE_DEVICE", "1");
+            // WRAPPER_DRIVER_ID — parsed by atoi() in the shipped libvulkan_wrapper.so (getenv ->
+            //   cbz-if-null -> atoi -> store int; verified by disassembly at .text 0xf400c). It is the
+            //   NUMERIC VkDriverId enum value, NOT the name string. 24 = VK_DRIVER_ID_ARM_PROPRIETARY, so
+            //   the wrapper advertises an ARM proprietary driverID to the D3D layer.
+            envVars.put("WRAPPER_DRIVER_ID", "24");
+            // WRAPPER_EMULATE_BCN=3 — GameNative's own auto BCn transcode (non-Qualcomm auto), replacing
+            //   the leegao bcn_layer for texture decode. Values: 3=auto 2=full 1=default 0=off.
+            envVars.put("WRAPPER_EMULATE_BCN", "3");
+            // WRAPPER_DIAG=1 — the wrapper prints what it actually advertised (version/driverID/apiVersion)
+            //   to the Wine debug log. Essential for our no-Mali-device iteration: it confirms the 1.3 +
+            //   ARM_PROPRIETARY override took. Format: "[WRAPPER_DIAG] driver=%s (driverID=%u) ...".
+            envVars.put("WRAPPER_DIAG", "1");
+            Log.d("GraphicsDriverExtraction", "Wrapper + compat + bcn: GameNative engine (DX12) active on '"
+                    + gnRenderer + "' — WRAPPER_SAFE_CREATE_DEVICE=1 WRAPPER_DRIVER_ID=24(ARM_PROPRIETARY)"
+                    + " WRAPPER_EMULATE_BCN=3 WRAPPER_DIAG=1 (leegao bcn_layer/compat_layer left dormant)");
+        } else {
+            showToast(this, "Wrapper + compat + bcn: GameNative DX12 engine needs a Valhall Mali (r32p1+)"
+                    + " GPU — it is disabled on this device (" + GPUInformation.extractModelName(gnRenderer)
+                    + "). No DX12 overrides applied.");
+            Log.w("GraphicsDriverExtraction", "GameNative DX12 engine disabled: GPU '" + gnRenderer
+                    + "' is not on the Valhall (r32p1+) allowlist — no DX12 envs emitted");
+        }
+        } else {
         // ENABLE_BCN_COMPUTE is both the master switch and the loader enable-gate — always 1.
         envVars.put("ENABLE_BCN_COMPUTE", "1");
 
@@ -3539,6 +3595,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                         + "' is not on the Valhall (r32p1+) allowlist");
             }
         }
+        } // useGamenativeEngine ? GameNative DX12 path : leegao bcn_layer/compat_layer path
         } // activateBcnLayer
     }
 

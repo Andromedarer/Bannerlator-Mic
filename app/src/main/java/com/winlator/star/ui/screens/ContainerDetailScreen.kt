@@ -1625,6 +1625,12 @@ internal fun GraphicsDriverConfigDialog(
     // compat_layer: emulate D3D12 tiled/sparse resources (COMPAT_EMULATE_SPARSE_BINDING). Opt-in,
     // only honored by the "Wrapper + compat + bcn" driver on a Valhall Mali. Default OFF.
     var bcnCompatSparse   by remember { mutableStateOf(cfg["bcnCompatSparse"] == "1") }
+    // compat engine selection: OFF (default) = leegao bcn_layer + compat_layer (BCn textures only,
+    // no DX12). ON = swap the ICD base to the GameNative wrapper (wrapper-gamenative.tzst), which
+    // reports Vulkan 1.3 + emulates the promoted entrypoints so DXVK/VKD3D accept the adapter (DX12),
+    // and uses its own integrated BCn. Only for "Wrapper + compat + bcn"; a Valhall Mali (r32p1+) is
+    // required at activation time (XServerDisplayActivity gates it and falls back with a warning).
+    var compatUseGamenative by remember { mutableStateOf(cfg["compatUseGamenative"] == "1") }
 
     val deviceMemoryEntries = remember { context.resources.getStringArray(R.array.device_memory_entries).toList() }
     var selectedMemoryEntry by remember {
@@ -1833,6 +1839,18 @@ internal fun GraphicsDriverConfigDialog(
                         )
                         // compat_layer DX12 sparse-binding emulation — only for Wrapper + compat + bcn.
                         if (isCompatDriver) {
+                            // Engine selector: swap the ICD base from leegao to the GameNative wrapper
+                            // for real DX12 support. Primary switch, shown above the sparse opt-in.
+                            Spacer(Modifier.height(8.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(checked = compatUseGamenative, onCheckedChange = { compatUseGamenative = it })
+                                Text(stringResource(R.string.compat_use_gamenative))
+                            }
+                            Text(
+                                stringResource(R.string.compat_use_gamenative_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                             Spacer(Modifier.height(8.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Checkbox(checked = bcnCompatSparse, onCheckedChange = { bcnCompatSparse = it })
@@ -1868,6 +1886,7 @@ internal fun GraphicsDriverConfigDialog(
                     "bcnImageView=${if (bcnImageView) "1" else "0"};" +
                     "bcnDebugLog=${if (bcnDebugLog) "1" else "0"};" +
                     "bcnCompatSparse=${if (bcnCompatSparse) "1" else "0"};" +
+                    "compatUseGamenative=${if (compatUseGamenative) "1" else "0"};" +
                     "gpuName=$gpuName" +
                     ";fdDevFeatures=${if (fdDevFeatures) "1" else "0"}"
                 onConfirm(config)
