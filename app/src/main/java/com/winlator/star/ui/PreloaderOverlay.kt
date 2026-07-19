@@ -11,7 +11,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -121,19 +120,6 @@ fun PreloaderOverlay() {
         )
 
         val insets = Modifier.windowInsetsPadding(WindowInsets.safeDrawing)
-
-        // --- Bannerlator neon banner mark, bottom-end corner (clear of the bottom-start content). ---
-        Image(
-            painter = painterResource(R.drawable.shutdown_bg),
-            contentDescription = null,
-            contentScale = ContentScale.Fit,
-            modifier = insets
-                .padding(end = 20.dp, bottom = 20.dp)
-                .width(130.dp)
-                .aspectRatio(1408f / 768f)
-                .clip(RoundedCornerShape(10.dp))
-                .align(Alignment.BottomEnd),
-        )
 
         // --- Hero content: game name + stepped progress, anchored low. ---
         Column(
