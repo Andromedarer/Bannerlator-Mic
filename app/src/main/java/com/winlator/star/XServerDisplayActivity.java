@@ -3357,6 +3357,16 @@ public class XServerDisplayActivity extends AppCompatActivity {
         writeExtraLibsVersion(extraLibsVersionFile, EXTRA_LIBS_VERSION);
     }
 
+    // Wrapper Version Manager (#132): the leegao BCn layer (libbcn_layer.so + manifest) normally
+    // ships inside extra_libs.tzst. A user-installed "BCn layer" override (leegao_bcn.tzst) overlays
+    // a newer copy on top — extract it AFTER extra_libs so it wins, and every launch when present
+    // (small file) so it applies regardless of the extra_libs version gate above.
+    File bcnLayerOverride = new File(getFilesDir(), "graphics_driver/leegao_bcn.tzst");
+    if (bcnLayerOverride.isFile()) {
+        Log.d("GraphicsDriverExtraction", "applying user BCn layer override (leegao_bcn.tzst)");
+        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, bcnLayerOverride, rootDir);
+    }
+
     // 3. Driver integration.
     //
     // Two mutually-exclusive turnip delivery modes share the "version" slot:

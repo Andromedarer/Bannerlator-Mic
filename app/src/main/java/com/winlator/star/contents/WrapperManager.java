@@ -39,28 +39,35 @@ public class WrapperManager {
     private static final String ASSET_DIR = "graphics_driver/";
     /** Wrapper archives must ship this entry; validated before an override is accepted. */
     private static final String WRAPPER_MARKER_ENTRY = "usr/lib/libvulkan_wrapper.so";
+    private static final String BCN_MARKER_ENTRY     = "usr/lib/libbcn_layer.so";
 
-    /** The 6 updatable slots, in display order. extra_libs is a shared-libs payload, not a wrapper. */
+    /** The updatable slots, in display order. Each may require a marker entry to validate an import.
+     *  extra_libs is a shared-libs payload (no marker). leegao_bcn is the BCn transcode layer (its own
+     *  marker) — it overlays the bcn_layer.so that otherwise ships inside extra_libs. */
     public static final Slot[] SLOTS = new Slot[] {
-        new Slot("wrapper.tzst",            "Wrapper (default)",   true),
-        new Slot("wrapper-original.tzst",   "Wrapper (original)",  true),
-        new Slot("wrapper-legacy.tzst",     "Wrapper (legacy)",    true),
-        new Slot("wrapper-leegao.tzst",     "Wrapper (leegao)",    true),
-        new Slot("wrapper-gamenative.tzst", "Wrapper (GameNative)", true),
-        new Slot("extra_libs.tzst",         "Extra libraries",     false),
+        new Slot("wrapper.tzst",            "Wrapper (default)",    true,  WRAPPER_MARKER_ENTRY),
+        new Slot("wrapper-original.tzst",   "Wrapper (original)",   true,  WRAPPER_MARKER_ENTRY),
+        new Slot("wrapper-legacy.tzst",     "Wrapper (legacy)",     true,  WRAPPER_MARKER_ENTRY),
+        new Slot("wrapper-leegao.tzst",     "Wrapper (leegao)",     true,  WRAPPER_MARKER_ENTRY),
+        new Slot("wrapper-gamenative.tzst", "Wrapper (GameNative)", true,  WRAPPER_MARKER_ENTRY),
+        new Slot("leegao_bcn.tzst",         "BCn layer (leegao)",   false, BCN_MARKER_ENTRY),
+        new Slot("extra_libs.tzst",         "Extra libraries",      false, null),
     };
 
-    /** Static definition of a slot (file name + friendly label + whether it's a wrapper archive). */
+    /** Static definition of a slot (file name + friendly label + display flag + required marker entry). */
     public static final class Slot {
         public final String fileName;
         public final String label;
-        /** True for the wrapper-* archives (validated for the vulkan wrapper marker), false for extra_libs. */
+        /** True for the wrapper-* ICD archives (affects display); false for layers/shared-libs. */
         public final boolean isWrapper;
+        /** Archive entry an import must contain to be accepted, or null to skip the content check. */
+        public final String markerEntry;
 
-        Slot(String fileName, String label, boolean isWrapper) {
+        Slot(String fileName, String label, boolean isWrapper, String markerEntry) {
             this.fileName = fileName;
             this.label = label;
             this.isWrapper = isWrapper;
+            this.markerEntry = markerEntry;
         }
     }
 
@@ -163,10 +170,10 @@ public class WrapperManager {
             return false;
         }
 
-        // 3. Wrapper slots must contain the vulkan wrapper marker.
-        if (slot.isWrapper
-                && !TarCompressorUtils.containsEntry(TarCompressorUtils.Type.ZSTD, tmp, WRAPPER_MARKER_ENTRY)) {
-            Log.d(TAG, "installOverride: missing " + WRAPPER_MARKER_ENTRY + " — " + fileName);
+        // 3. Slots with a marker entry must contain it (wrapper ICD or bcn layer).
+        if (slot.markerEntry != null
+                && !TarCompressorUtils.containsEntry(TarCompressorUtils.Type.ZSTD, tmp, slot.markerEntry)) {
+            Log.d(TAG, "installOverride: missing " + slot.markerEntry + " — " + fileName);
             tmp.delete();
             return false;
         }
