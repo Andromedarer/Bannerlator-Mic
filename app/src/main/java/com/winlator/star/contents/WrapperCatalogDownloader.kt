@@ -59,7 +59,11 @@ object WrapperCatalogDownloader {
             // ContentResolver.openInputStream, which accepts a file:// Uri (in-process, no
             // FileUriExposedException), and returns the stored identifier (or null if the archive
             // isn't a valid wrapper). This is where capability detection + env-scan + smart settings run.
-            val identifier = WrapperManager(context).importWrapper(Uri.fromFile(archive), entry.name)
+            // Pass the catalog id + version so the import records its provenance (#132): the manager then
+            // shows an "update available" badge / offers an in-place update when the catalog ships a newer
+            // version, and a re-download of the same entry updates the wrapper in place.
+            val identifier = WrapperManager(context)
+                .importWrapper(Uri.fromFile(archive), entry.name, entry.id, entry.version)
             if (identifier == null) Log.w(TAG, "import failed for ${entry.id}")
             identifier
         } catch (t: Throwable) {

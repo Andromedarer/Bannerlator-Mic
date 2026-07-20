@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -56,6 +57,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -66,12 +68,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import com.winlator.star.R
+import com.winlator.star.contents.WrapperCatalog
+import com.winlator.star.contents.WrapperCatalogDownloader
+import com.winlator.star.contents.WrapperCatalogEntry
 import com.winlator.star.contents.WrapperManager
 import com.winlator.star.contents.WrapperSettingsDictionary
 import com.winlator.star.core.GPUInformation
 import com.winlator.star.core.StringUtils
+import com.winlator.star.ui.findActivity
 import com.winlator.star.util.InAppFilePicker
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -170,10 +177,46 @@ fun WrapperManagerBody(modifier: Modifier = Modifier) {
     var updateChooserSlot by remember { mutableStateOf<WrapperManager.WrapperSlot?>(null) }
     // When non-null, the catalog browser is open in "replace this slot" mode (installs as an override).
     var catalogTargetSlot by remember { mutableStateOf<WrapperManager.WrapperSlot?>(null) }
+    // #132: the live catalog entries (loaded once, off-main). Used to detect when a catalog-installed
+    // wrapper has a newer version than what's on device -> an "Update available" badge + one-tap update.
+    // Empty/offline/bad-JSON simply yields no badges (WrapperCatalog.loadCached never throws).
+    var catalogEntries by remember { mutableStateOf<List<WrapperCatalogEntry>>(emptyList()) }
+    // The imported wrapper currently being updated from the catalog (null = none) + its 0..100 progress.
+    var updatingId by remember { mutableStateOf<String?>(null) }
+    var updateProgress by remember { mutableStateOf(0) }
+    // findActivity() safely walks the ContextWrapper chain (returns null in a raw dialog context — do NOT
+    // cast, see the note above); used only to marshal download-progress ticks onto the UI thread.
+    val activity = remember(context) { context.findActivity() }
+    val scope = rememberCoroutineScope()
+
+    // Load the catalog once (network-first, then cache) so imported cards can flag available updates.
+    LaunchedEffect(Unit) {
+        catalogEntries = withContext(Dispatchers.IO) { WrapperCatalog.loadCached(context).entries }
+    }
 
     fun refresh() {
         slots = manager.listSlots().toList()
         imported = manager.enumerateImported().toList()
+    }
+
+    // Re-download the matched catalog entry through the SAME install pipeline. Because the entry carries
+    // its catalogId, importWrapper updates the wrapper IN PLACE (rewriting catalogVersion), so refresh()
+    // then clears the badge. Progress mirrors the catalog picker (activity.runOnUiThread ticks).
+    fun startUpdate(identifier: String, entry: WrapperCatalogEntry) {
+        updatingId = identifier
+        updateProgress = 0
+        scope.launch {
+            val ok = WrapperCatalogDownloader.install(context, entry) { pct ->
+                activity?.runOnUiThread { updateProgress = pct }
+            } != null
+            updatingId = null
+            if (ok) {
+                Toast.makeText(context, R.string.wrapper_updated_toast, Toast.LENGTH_SHORT).show()
+                refresh()
+            } else {
+                Toast.makeText(context, R.string.wrapper_invalid_toast, Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
     // Single file picker, shared by slot-Update and free-form Import (importMode disambiguates).
@@ -263,10 +306,21 @@ fun WrapperManagerBody(modifier: Modifier = Modifier) {
 
         // Imported (free-form) wrappers.
         imported.forEach { imp ->
+            // #132: does the live catalog carry a newer version than this catalog-installed wrapper?
+            // Read provenance inline (not remember-cached) so an in-place update re-reads fresh and the
+            // badge clears once refresh() reruns. A file import (no catalogId) never matches -> no badge.
+            val catId = manager.catalogIdFor(imp.identifier)
+            val matchedEntry = catId?.let { id -> catalogEntries.firstOrNull { it.id == id } }
+            val updateAvailable = matchedEntry != null &&
+                matchedEntry.version > manager.catalogVersionFor(imp.identifier)
             ImportedWrapperCard(
                 imported = imp,
                 manager = manager,
                 gpu = gpu,
+                updateAvailable = updateAvailable,
+                updating = updatingId == imp.identifier,
+                updateProgress = updateProgress,
+                onUpdate = { matchedEntry?.let { startUpdate(imp.identifier, it) } },
                 onDelete = { deleteTarget = imp },
                 onEditSettings = { editSettingsTarget = imp },
             )
@@ -990,6 +1044,10 @@ private fun ImportedWrapperCard(
     imported: WrapperManager.Imported,
     manager: WrapperManager,
     gpu: GpuInfo,
+    updateAvailable: Boolean = false,
+    updating: Boolean = false,
+    updateProgress: Int = 0,
+    onUpdate: () -> Unit = {},
     onDelete: () -> Unit,
     onEditSettings: () -> Unit,
 ) {
@@ -1010,6 +1068,35 @@ private fun ImportedWrapperCard(
         expandable = true,
         expanded = expanded,
         onToggleExpand = { expanded = !expanded },
+        titleBadge = {
+            // #132: catalog-installed wrapper with a newer version available -> a small chip; while the
+            // in-place update downloads, the chip shows live progress instead.
+            when {
+                updating -> {
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        context.getString(R.string.wrapper_updating_progress, updateProgress),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = cs.primary,
+                    )
+                }
+                updateAvailable -> {
+                    Spacer(Modifier.height(3.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(cs.tertiaryContainer)
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    ) {
+                        Text(
+                            context.getString(R.string.wrapper_update_available),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = cs.onTertiaryContainer,
+                        )
+                    }
+                }
+            }
+        },
         details = {
             WrapperDetailBox(
                 fileName = "${imported.identifier}.tzst",
@@ -1035,6 +1122,14 @@ private fun ImportedWrapperCard(
                     )
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    // #132: in-place update from the catalog, only when a newer version is available.
+                    if (updateAvailable && !updating) {
+                        DropdownMenuItem(
+                            text = { Text(context.getString(R.string.wrapper_update), color = cs.primary) },
+                            leadingIcon = { Icon(Icons.Filled.CloudDownload, contentDescription = null, tint = cs.primary, modifier = Modifier.size(20.dp)) },
+                            onClick = { menuOpen = false; onUpdate() },
+                        )
+                    }
                     DropdownMenuItem(
                         text = { Text(context.getString(R.string.wrapper_edit_settings)) },
                         leadingIcon = { Icon(Icons.Filled.Settings, contentDescription = null, modifier = Modifier.size(20.dp)) },

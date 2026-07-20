@@ -782,6 +782,10 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="wrapper_edit_settings_title">Edit detected settings</string>
     <string name="wrapper_edit_settings_message">Choose which detected settings appear in this wrapper\'s Graphics Driver options. Unchecked settings are hidden.</string>
     <string name="wrapper_edit_settings_empty">No detected settings to configure.</string>
+    <!-- #132: a catalog-installed wrapper has a newer version available in the catalog -->
+    <string name="wrapper_update_available">Update available</string>
+    <!-- #132: shown on a wrapper card while its in-place catalog update downloads (%1$d = percent) -->
+    <string name="wrapper_updating_progress">Updating… %1$d%%</string>
 
     <!-- Step 5 (#132): curated, downloadable wrapper catalog -->
     <string name="wrapper_catalog_title">Download wrappers…</string>

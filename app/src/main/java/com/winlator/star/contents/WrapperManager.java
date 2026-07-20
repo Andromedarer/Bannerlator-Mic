@@ -773,8 +773,16 @@ public class WrapperManager {
         return writeMeta(identifier, label, caps, envKeys, hiddenKeys(identifier));
     }
 
+    /** Rewrite a .meta preserving any already-stored catalog provenance ({@code catalogId} /
+     *  {@code catalogVersion}) — a caps/env/hidden backfill must never drop where an import came from. */
     private boolean writeMeta(String identifier, String label, WrapperCaps caps, List<String> envKeys,
                               Set<String> hidden) {
+        return writeMeta(identifier, label, caps, envKeys, hidden,
+            catalogIdFor(identifier), catalogVersionFor(identifier));
+    }
+
+    private boolean writeMeta(String identifier, String label, WrapperCaps caps, List<String> envKeys,
+                              Set<String> hidden, String catalogId, int catalogVersion) {
         File meta = metaFileFor(identifier);
         try (OutputStream out = new FileOutputStream(meta)) {
             StringBuilder content = new StringBuilder()
@@ -790,6 +798,12 @@ public class WrapperManager {
             // hiddenKeys line only when non-empty — a missing line means "nothing hidden".
             if (hidden != null && !hidden.isEmpty())
                 content.append("hiddenKeys=").append(TextUtils.join(",", hidden)).append("\n");
+            // Catalog provenance (#132): written only for catalog-installed wrappers, so the manager can
+            // offer an in-place update when a newer catalog version appears. Absent for file imports.
+            if (catalogId != null && !catalogId.isEmpty()) {
+                content.append("catalogId=").append(catalogId).append("\n");
+                content.append("catalogVersion=").append(catalogVersion).append("\n");
+            }
             out.write(content.toString().getBytes());
             return true;
         }
@@ -844,14 +858,31 @@ public class WrapperManager {
     }
 
     /**
-     * Import a free-form wrapper. Derives the identifier from {@code displayName} via
-     * {@link StringUtils#parseIdentifier}; validates the source is a zstd tar carrying the vulkan
-     * wrapper marker; stores {@code <identifier>.tzst} + {@code <identifier>.meta}. Collisions with an
-     * existing import are resolved by suffixing the LABEL (" 2", " 3", …) — suffixing the label (not
-     * just the id) keeps the display<->identifier round trip intact. A reserved id (bundled slot
-     * collision) or an unreadable/invalid archive returns null. Returns the stored identifier.
+     * Import a free-form wrapper with NO catalog provenance (a hand-picked file). Delegates to
+     * {@link #importWrapper(Uri, String, String, int)} with {@code catalogId=null, catalogVersion=0}.
      */
     public String importWrapper(Uri src, String displayName) {
+        return importWrapper(src, displayName, null, 0);
+    }
+
+    /**
+     * Import a wrapper, optionally recording where it came from. Derives the identifier from
+     * {@code displayName} via {@link StringUtils#parseIdentifier}; validates the source is a zstd tar
+     * carrying the vulkan wrapper marker; stores {@code <identifier>.tzst} + {@code <identifier>.meta}.
+     *
+     * When {@code catalogId} is non-blank, the provenance ({@code catalogId} + {@code catalogVersion})
+     * is written into the {@code .meta} so the Wrapper Manager can offer an in-place UPDATE when the
+     * catalog later ships a newer version (issue #132). If an existing import already carries the SAME
+     * {@code catalogId}, this OVERWRITES it in place (reusing its identifier + label) instead of
+     * suffixing a duplicate — so re-downloading a newer version updates the wrapper and clears its
+     * "update available" badge. For a hand-picked file (blank {@code catalogId}) the classic behaviour
+     * holds: collisions with an existing import are resolved by suffixing the LABEL (" 2", " 3", …),
+     * which keeps the display<->identifier round trip intact.
+     *
+     * A reserved id (bundled slot collision) or an unreadable/invalid archive returns null. Returns the
+     * stored identifier.
+     */
+    public String importWrapper(Uri src, String displayName, String catalogId, int catalogVersion) {
         if (src == null || displayName == null) return null;
         String baseLabel = displayName.trim();
         if (baseLabel.isEmpty()) return null;
@@ -863,13 +894,24 @@ public class WrapperManager {
             Log.d(TAG, "importWrapper: refused reserved identifier " + identifier);
             return null;
         }
-        // Suffix the label until the derived identifier is free among existing imports.
-        int n = 2;
-        while (importedFileFor(identifier).isFile() || metaFileFor(identifier).isFile()) {
-            label = baseLabel + " " + n;
-            identifier = StringUtils.parseIdentifier(label);
-            n++;
-            if (isReservedIdentifier(identifier)) return null; // extremely defensive
+
+        // Catalog UPDATE-in-place: if an existing import already came from this catalog entry, overwrite
+        // it (same identifier + label) rather than suffixing a duplicate. Keeps a single card per catalog
+        // wrapper and lets the "update available" badge clear once the newer version lands.
+        String existing = (catalogId != null && !catalogId.isEmpty()) ? findImportByCatalogId(catalogId) : null;
+        if (existing != null) {
+            identifier = existing;
+            Imported imp = readMeta(metaFileFor(existing), existing);
+            if (imp != null && imp.label != null && !imp.label.isEmpty()) label = imp.label;
+        } else {
+            // Suffix the label until the derived identifier is free among existing imports.
+            int n = 2;
+            while (importedFileFor(identifier).isFile() || metaFileFor(identifier).isFile()) {
+                label = baseLabel + " " + n;
+                identifier = StringUtils.parseIdentifier(label);
+                n++;
+                if (isReservedIdentifier(identifier)) return null; // extremely defensive
+            }
         }
 
         if (!overrideDir.exists()) overrideDir.mkdirs();
@@ -911,12 +953,72 @@ public class WrapperManager {
         // Layer 1 (#132): auto-detect the env-var names this wrapper's binaries reference, once at
         // import (this runs on the import worker), and persist them in the sidecar for the dialog.
         List<String> envKeys = scanEnvKeys(dst);
-        if (!writeMeta(identifier, label, caps, envKeys)) {
+        // Preserve any prior hide/show choices on an in-place update; record catalog provenance (if any).
+        if (!writeMeta(identifier, label, caps, envKeys, hiddenKeys(identifier), catalogId, catalogVersion)) {
             dst.delete();
             return null;
         }
-        Log.d(TAG, "importWrapper: imported '" + label + "' as " + identifier);
+        Log.d(TAG, "importWrapper: imported '" + label + "' as " + identifier
+                + (catalogId != null && !catalogId.isEmpty() ? " (catalog " + catalogId + " v" + catalogVersion + ")" : ""));
         return identifier;
+    }
+
+    /** The identifier of the imported wrapper that came from catalog entry {@code catalogId}, or null
+     *  when no import carries that provenance. Never throws. */
+    private String findImportByCatalogId(String catalogId) {
+        if (catalogId == null || catalogId.isEmpty()) return null;
+        for (Imported imp : enumerateImported()) {
+            if (catalogId.equals(catalogIdFor(imp.identifier))) return imp.identifier;
+        }
+        return null;
+    }
+
+    /** The catalog id an IMPORTED wrapper was installed from ({@code catalogId=} in its {@code .meta}),
+     *  or null when absent (a hand-picked file import, or an older import predating provenance). Never
+     *  throws. */
+    public String catalogIdFor(String identifier) {
+        if (identifier == null || identifier.isEmpty()) return null;
+        File meta = metaFileFor(identifier);
+        try (BufferedReader r = new BufferedReader(new FileReader(meta))) {
+            String line;
+            while ((line = r.readLine()) != null) {
+                int eq = line.indexOf('=');
+                if (eq < 0) continue;
+                if (!line.substring(0, eq).trim().equals("catalogId")) continue;
+                String v = line.substring(eq + 1).trim();
+                return v.isEmpty() ? null : v;
+            }
+        }
+        catch (IOException e) {
+            return null;
+        }
+        return null;
+    }
+
+    /** The catalog version an IMPORTED wrapper was installed at ({@code catalogVersion=} in its
+     *  {@code .meta}), or 0 when absent/unparseable. Compared against the live catalog's version to
+     *  detect an available update. Never throws. */
+    public int catalogVersionFor(String identifier) {
+        if (identifier == null || identifier.isEmpty()) return 0;
+        File meta = metaFileFor(identifier);
+        try (BufferedReader r = new BufferedReader(new FileReader(meta))) {
+            String line;
+            while ((line = r.readLine()) != null) {
+                int eq = line.indexOf('=');
+                if (eq < 0) continue;
+                if (!line.substring(0, eq).trim().equals("catalogVersion")) continue;
+                try {
+                    return Integer.parseInt(line.substring(eq + 1).trim());
+                }
+                catch (NumberFormatException e) {
+                    return 0;
+                }
+            }
+        }
+        catch (IOException e) {
+            return 0;
+        }
+        return 0;
     }
 
     /**
