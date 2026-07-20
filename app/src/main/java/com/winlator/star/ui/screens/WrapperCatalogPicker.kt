@@ -26,7 +26,9 @@ import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -122,6 +124,10 @@ fun WrapperCatalogPicker(
 
     OutlinedAlertDialog(
         onDismissRequest = onDismiss,
+        // Use (almost) the full screen width — the default AlertDialog width squeezes the catalog
+        // cards so their names truncate to a couple of characters. Matches the manager dialog.
+        modifier = Modifier.fillMaxWidth(0.96f),
+        properties = DialogProperties(usePlatformDefaultWidth = false),
         title = { Text(context.getString(R.string.wrapper_catalog_dialog_title)) },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
@@ -231,20 +237,15 @@ private fun WrapperCatalogRow(
                 )
             },
             trailing = {
-                // Download affordance / progress stays in the collapsed row (accessible without expanding).
+                // Compact icon only, so the name column stays readable. The full Download button
+                // (with progress) lives in the expanded detail box below.
                 when {
                     installed -> Icon(Icons.Filled.CheckCircle, contentDescription = "Downloaded",
                         tint = cs.primary, modifier = Modifier.size(22.dp))
-                    busy -> Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                        Spacer(Modifier.width(6.dp))
-                        Text("$progress%", style = MaterialTheme.typography.labelSmall,
-                            color = cs.onSurfaceVariant)
-                    }
-                    else -> OutlinedButton(enabled = !anyBusy && !offline, onClick = onDownload) {
-                        Icon(Icons.Filled.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(LocalContextString(R.string.wrapper_catalog_download))
+                    busy -> CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    else -> IconButton(enabled = !anyBusy && !offline, onClick = onDownload) {
+                        Icon(Icons.Filled.CloudDownload, contentDescription =
+                            LocalContextString(R.string.wrapper_catalog_download), tint = cs.primary)
                     }
                 }
             },
