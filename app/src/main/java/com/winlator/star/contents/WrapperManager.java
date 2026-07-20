@@ -430,15 +430,13 @@ public class WrapperManager {
     // throws. Cleared for a slot when its override is reset/removed so a reverted slot stops reading as
     // catalog-installed. ---------------------------------------------------------------------------------
     private static final String SLOT_CATALOG_FILE = "slot_catalog.json";
-    /** Parsed slot_catalog.json, loaded once per instance. Always a (possibly empty) object once loaded so
-     *  callers can upsert; null only before the first {@link #slotCatalog()} call. */
-    private JSONObject slotCatalog;
-    private boolean slotCatalogLoaded;
-
-    private JSONObject slotCatalog() {
-        if (slotCatalogLoaded) return slotCatalog;
-        slotCatalogLoaded = true;
-        slotCatalog = new JSONObject();
+    // slot_catalog.json is read FRESH on every access (it's a tiny one-object file) — NOT cached per
+    // instance. The manager and the catalog downloader are SEPARATE WrapperManager instances that both
+    // read/write this file; a per-instance cache goes stale (the manager wouldn't see a slot download the
+    // downloader instance just wrote), so a slot reset would find nothing to clear via a stale cache and
+    // leave the provenance — and the catalog's "Installed" checkmark — behind. Read-modify-write on disk.
+    private JSONObject readSlotCatalog() {
+        JSONObject obj = new JSONObject();
         File f = new File(overrideDir, SLOT_CATALOG_FILE);
         if (f.isFile()) {
             StringBuilder sb = new StringBuilder();
@@ -447,24 +445,24 @@ public class WrapperManager {
                 while ((line = r.readLine()) != null) sb.append(line);
             }
             catch (IOException e) {
-                Log.d(TAG, "slotCatalog: read error — " + e.getMessage());
+                Log.d(TAG, "readSlotCatalog: read error — " + e.getMessage());
             }
             if (sb.length() > 0) {
-                try { slotCatalog = new JSONObject(sb.toString()); }
-                catch (Exception e) { slotCatalog = new JSONObject(); } // malformed -> start clean
+                try { obj = new JSONObject(sb.toString()); }
+                catch (Exception e) { obj = new JSONObject(); } // malformed -> start clean
             }
         }
-        return slotCatalog;
+        return obj;
     }
 
-    private void persistSlotCatalog() {
+    private void writeSlotCatalog(JSONObject obj) {
         if (!overrideDir.exists()) overrideDir.mkdirs();
         File f = new File(overrideDir, SLOT_CATALOG_FILE);
         try (OutputStream out = new FileOutputStream(f)) {
-            out.write(slotCatalog().toString().getBytes());
+            out.write(obj.toString().getBytes());
         }
         catch (IOException e) {
-            Log.d(TAG, "persistSlotCatalog: write error — " + e.getMessage());
+            Log.d(TAG, "writeSlotCatalog: write error — " + e.getMessage());
         }
     }
 
@@ -473,7 +471,7 @@ public class WrapperManager {
      *  throws. */
     public void recordSlotCatalog(String slotFileName, String catalogId, int catalogVersion, String catalogName) {
         if (slotFileName == null || slotFileName.isEmpty() || catalogId == null || catalogId.isEmpty()) return;
-        JSONObject obj = slotCatalog();
+        JSONObject obj = readSlotCatalog();
         try {
             JSONObject e = new JSONObject();
             e.put("catalogId", catalogId);
@@ -487,17 +485,17 @@ public class WrapperManager {
             Log.d(TAG, "recordSlotCatalog: " + ex.getMessage());
             return;
         }
-        persistSlotCatalog();
+        writeSlotCatalog(obj);
     }
 
     /** Drop a slot's recorded catalog provenance (+ persist). Called from {@link #removeOverride} /
      *  {@link #resetAll} so a slot reverted to bundled stops reading as catalog-installed. Never throws. */
     public void clearSlotCatalog(String slotFileName) {
         if (slotFileName == null || slotFileName.isEmpty()) return;
-        JSONObject obj = slotCatalog();
+        JSONObject obj = readSlotCatalog();
         if (obj.has(slotFileName)) {
             obj.remove(slotFileName);
-            persistSlotCatalog();
+            writeSlotCatalog(obj);
         }
     }
 
@@ -505,7 +503,7 @@ public class WrapperManager {
      *  Never throws. */
     public String slotCatalogId(String slotFileName) {
         if (slotFileName == null || slotFileName.isEmpty()) return null;
-        JSONObject e = slotCatalog().optJSONObject(slotFileName);
+        JSONObject e = readSlotCatalog().optJSONObject(slotFileName);
         if (e == null) return null;
         String id = e.optString("catalogId", "");
         return id.isEmpty() ? null : id;
@@ -514,7 +512,7 @@ public class WrapperManager {
     /** The catalog version a slot OVERRIDE was installed at, or 0 when unmapped. Never throws. */
     public int slotCatalogVersion(String slotFileName) {
         if (slotFileName == null || slotFileName.isEmpty()) return 0;
-        JSONObject e = slotCatalog().optJSONObject(slotFileName);
+        JSONObject e = readSlotCatalog().optJSONObject(slotFileName);
         return (e != null) ? e.optInt("catalogVersion", 0) : 0;
     }
 
@@ -522,7 +520,7 @@ public class WrapperManager {
      *  label when the override .tzst carries no version.txt. Never throws. */
     public String slotCatalogName(String slotFileName) {
         if (slotFileName == null || slotFileName.isEmpty()) return null;
-        JSONObject e = slotCatalog().optJSONObject(slotFileName);
+        JSONObject e = readSlotCatalog().optJSONObject(slotFileName);
         if (e == null) return null;
         String n = e.optString("catalogName", "");
         return n.isEmpty() ? null : n;
