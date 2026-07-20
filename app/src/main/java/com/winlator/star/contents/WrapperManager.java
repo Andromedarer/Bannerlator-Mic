@@ -335,6 +335,61 @@ public class WrapperManager {
         return new WrapperCaps(true, false, false);
     }
 
+    /**
+     * Result of inspecting a picked file WITHOUT installing it (pre-import preview). {@code valid} is
+     * true only for a readable zstd tar carrying the wrapper ICD marker (same bar as
+     * {@link #importWrapper}); when false the caps/version are placeholders and the caller should abort
+     * with the usual "not a valid wrapper" toast. Never throws.
+     */
+    public static final class Inspection {
+        public final boolean valid;
+        public final WrapperCaps caps;
+        public final String version;
+        public final String notes;
+        Inspection(boolean valid, WrapperCaps caps, String version, String notes) {
+            this.valid = valid;
+            this.caps = caps;
+            this.version = version;
+            this.notes = notes;
+        }
+    }
+
+    /**
+     * Copy a picked file to a scratch temp, run the SAME validation as {@link #importWrapper} (readable
+     * zstd tar + wrapper ICD marker) and the SAME capability scan / version read used at import — then
+     * delete the temp. Nothing is installed; this only feeds the pre-import inspection UI. Returns an
+     * {@link Inspection} whose {@code valid=false} means the file should be rejected. Never throws.
+     */
+    public Inspection inspectUri(Uri src) {
+        WrapperCaps none = new WrapperCaps(false, false, false);
+        if (src == null) return new Inspection(false, none, "Unknown", "");
+        if (!overrideDir.exists()) overrideDir.mkdirs();
+        File tmp = new File(overrideDir, ".inspect.tzst.tmp");
+        if (tmp.exists()) tmp.delete();
+        try (InputStream in = mContext.getContentResolver().openInputStream(src);
+             OutputStream out = new FileOutputStream(tmp)) {
+            if (in == null || !StreamUtils.copy(in, out)) {
+                tmp.delete();
+                return new Inspection(false, none, "Unknown", "");
+            }
+        }
+        catch (IOException | SecurityException e) {
+            Log.d(TAG, "inspectUri: copy error — " + e.getMessage());
+            tmp.delete();
+            return new Inspection(false, none, "Unknown", "");
+        }
+        boolean ok = TarCompressorUtils.isValidArchive(TarCompressorUtils.Type.ZSTD, tmp)
+                && TarCompressorUtils.containsEntry(TarCompressorUtils.Type.ZSTD, tmp, WRAPPER_MARKER_ENTRY);
+        if (!ok) {
+            tmp.delete();
+            return new Inspection(false, none, "Unknown", "");
+        }
+        WrapperCaps caps = scanCaps(tmp);
+        String[] info = readVersionInfo(tmp);
+        tmp.delete();
+        return new Inspection(true, caps, info[0], info[1]);
+    }
+
     /** Scan a wrapper .tzst for the ICD / BCn / compat marker entries (lenient membership match). */
     private WrapperCaps scanCaps(File tzst) {
         boolean icd = TarCompressorUtils.containsEntry(TarCompressorUtils.Type.ZSTD, tzst, WRAPPER_MARKER_ENTRY);

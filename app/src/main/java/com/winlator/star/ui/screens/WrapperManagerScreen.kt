@@ -9,8 +9,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -24,6 +27,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.RestartAlt
@@ -50,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import com.winlator.star.R
 import com.winlator.star.contents.WrapperManager
+import com.winlator.star.core.GPUInformation
 import com.winlator.star.core.StringUtils
 import com.winlator.star.util.InAppFilePicker
 
@@ -117,6 +123,15 @@ fun WrapperManagerBody(modifier: Modifier = Modifier) {
     val manager = remember { WrapperManager(context) }
     val cs = MaterialTheme.colorScheme
 
+    // Resolve the real GPU once (native probe): vendor 0x5143 = Qualcomm/Adreno, plus a friendly model
+    // name for the applicability lines. Wrapped defensively so a probe hiccup never crashes the screen.
+    val gpu = remember {
+        val vendor = runCatching { GPUInformation.getVendorID(null, null) }.getOrDefault(0)
+        val model = runCatching { GPUInformation.extractModelName(GPUInformation.getRenderer(null, null)) }
+            .getOrNull()?.takeIf { it.isNotBlank() } ?: "this GPU"
+        GpuInfo(isQualcomm = vendor == 0x5143, model = model)
+    }
+
     var slots by remember { mutableStateOf(manager.listSlots().toList()) }
     var imported by remember { mutableStateOf(manager.enumerateImported().toList()) }
     // The slot awaiting a picked file (set before the picker launches so the result knows its target).
@@ -125,8 +140,9 @@ fun WrapperManagerBody(modifier: Modifier = Modifier) {
     var importMode by remember { mutableStateOf(false) }
     var confirmInstallPrompt by remember { mutableStateOf(false) }
     var confirmResetAll by remember { mutableStateOf(false) }
-    // Import naming: set after an import file is picked; drives the name dialog.
+    // Import naming: set after an import file is picked AND inspected; drives the inspection+name dialog.
     var pendingImportUri by remember { mutableStateOf<Uri?>(null) }
+    var pendingInspection by remember { mutableStateOf<WrapperManager.Inspection?>(null) }
     var importNameDraft by remember { mutableStateOf("") }
     // Imported wrapper queued for deletion (confirm dialog).
     var deleteTarget by remember { mutableStateOf<WrapperManager.Imported?>(null) }
@@ -150,13 +166,22 @@ fun WrapperManagerBody(modifier: Modifier = Modifier) {
             val uri = result.data?.data ?: path?.let { InAppFilePicker.asUri(it) }
             if (uri != null) {
                 if (wasImport) {
-                    // Default the display name to the file's base name.
-                    val base = (path?.substringAfterLast('/') ?: uri.lastPathSegment?.substringAfterLast('/'))
-                        ?.substringBeforeLast('.')
-                        ?.takeIf { it.isNotBlank() }
-                        ?: "Imported wrapper"
-                    importNameDraft = base
-                    pendingImportUri = uri
+                    // Pre-import INSPECT: validate + scan the picked file WITHOUT installing. Invalid
+                    // archives abort here with the usual toast; valid ones open the inspection+name
+                    // dialog so the user decides with full capability info before Add.
+                    val inspection = manager.inspectUri(uri)
+                    if (!inspection.valid) {
+                        Toast.makeText(context, R.string.wrapper_invalid_toast, Toast.LENGTH_LONG).show()
+                    } else {
+                        // Default the display name to the file's base name.
+                        val base = (path?.substringAfterLast('/') ?: uri.lastPathSegment?.substringAfterLast('/'))
+                            ?.substringBeforeLast('.')
+                            ?.takeIf { it.isNotBlank() }
+                            ?: "Imported wrapper"
+                        importNameDraft = base
+                        pendingInspection = inspection
+                        pendingImportUri = uri
+                    }
                 } else if (target != null) {
                     if (manager.installOverride(target, uri)) {
                         Toast.makeText(context, R.string.wrapper_updated_toast, Toast.LENGTH_SHORT).show()
@@ -197,6 +222,8 @@ fun WrapperManagerBody(modifier: Modifier = Modifier) {
         slots.forEach { slot ->
             WrapperSlotCard(
                 slot = slot,
+                caps = manager.capsFor(slot.fileName.removeSuffix(".tzst")),
+                gpu = gpu,
                 onUpdate = {
                     pendingFileName = slot.fileName
                     importMode = false
@@ -214,6 +241,8 @@ fun WrapperManagerBody(modifier: Modifier = Modifier) {
         imported.forEach { imp ->
             ImportedWrapperCard(
                 imported = imp,
+                manager = manager,
+                gpu = gpu,
                 onDelete = { deleteTarget = imp },
             )
         }
@@ -262,20 +291,58 @@ fun WrapperManagerBody(modifier: Modifier = Modifier) {
         )
     }
 
-    // Name an imported wrapper (shown after its file is picked).
+    // Pre-import INSPECTION + name (shown after a valid file is picked+inspected). Shows what the
+    // wrapper is, its detected capabilities, what it will add / needs to work, then the Name field.
     val importUri = pendingImportUri
-    if (importUri != null) {
+    val inspection = pendingInspection
+    if (importUri != null && inspection != null) {
+        fun closeInspect() { pendingImportUri = null; pendingInspection = null }
         OutlinedAlertDialog(
-            onDismissRequest = { pendingImportUri = null },
-            title = { Text(context.getString(R.string.wrapper_import_name_title)) },
+            onDismissRequest = { closeInspect() },
+            title = { Text(context.getString(R.string.wrapper_import_title).removeSuffix("…")) },
             text = {
-                Column(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                    // What it is.
+                    DetailRow("What it is", importDescription(inspection.caps))
+                    DetailRow(
+                        "Version",
+                        if (inspection.notes.isNotBlank()) "${inspection.version} · ${inspection.notes}"
+                        else inspection.version,
+                    )
+                    val labels = capLabels(inspection.caps)
+                    if (labels.isNotEmpty()) {
+                        Spacer(Modifier.size(8.dp))
+                        Text(
+                            "Detected capabilities",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = cs.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.size(4.dp))
+                        CapabilityChips(labels)
+                    }
+                    // What will be added / needs to work.
+                    Spacer(Modifier.size(10.dp))
+                    Text(
+                        "What will be added",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = cs.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.size(2.dp))
+                    importNeeds(inspection.caps, gpu, inspection.version).forEach { line ->
+                        Text(
+                            "• $line",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = cs.onSurfaceVariant,
+                        )
+                    }
+                    // Name field.
+                    Spacer(Modifier.size(12.dp))
                     Text(
                         text = context.getString(R.string.wrapper_import_name_message),
                         style = MaterialTheme.typography.bodySmall,
                         color = cs.onSurfaceVariant,
                     )
-                    Spacer(Modifier.size(10.dp))
+                    Spacer(Modifier.size(6.dp))
                     OutlinedTextField(
                         value = importNameDraft,
                         onValueChange = { importNameDraft = it },
@@ -294,7 +361,7 @@ fun WrapperManagerBody(modifier: Modifier = Modifier) {
                         manager.isReservedIdentifier(id) ->
                             Toast.makeText(context, R.string.wrapper_import_reserved_toast, Toast.LENGTH_LONG).show()
                         else -> {
-                            pendingImportUri = null
+                            closeInspect()
                             if (manager.importWrapper(importUri, name) != null) {
                                 Toast.makeText(context, R.string.wrapper_imported_toast, Toast.LENGTH_SHORT).show()
                                 refresh()
@@ -306,7 +373,7 @@ fun WrapperManagerBody(modifier: Modifier = Modifier) {
                 }) { Text(context.getString(android.R.string.ok)) }
             },
             dismissButton = {
-                TextButton(onClick = { pendingImportUri = null }) {
+                TextButton(onClick = { closeInspect() }) {
                     Text(context.getString(android.R.string.cancel))
                 }
             },
@@ -371,63 +438,222 @@ private fun WrapperCardFrame(
     subtitle: String,
     highlightSubtitle: Boolean = false,
     onClick: (() -> Unit)? = null,
+    // Expandable detail (Part 1): when expandable, tapping the card toggles [expanded] and a chevron
+    // is shown; [details] renders inside the card below a divider while expanded.
+    expandable: Boolean = false,
+    expanded: Boolean = false,
+    onToggleExpand: (() -> Unit)? = null,
+    details: @Composable () -> Unit = {},
     trailing: @Composable () -> Unit = {},
 ) {
     val cs = MaterialTheme.colorScheme
     val base = Modifier
         .fillMaxWidth()
         .padding(horizontal = 16.dp, vertical = 4.dp)
+    // A card is either a plain click affordance (import card) or an expandable detail card; both map
+    // to a single clickable action here.
+    val clickAction: (() -> Unit)? = onClick ?: (if (expandable) onToggleExpand else null)
     Card(
-        modifier = if (onClick != null) base.clickable(onClick = onClick) else base,
+        modifier = if (clickAction != null) base.clickable(onClick = clickAction) else base,
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = cs.surfaceVariant),
         border = BorderStroke(1.dp, cs.outline),
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 10.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
-        ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 10.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(cs.surface),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(icon, contentDescription = null, tint = cs.primary, modifier = Modifier.size(22.dp))
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = cs.onSurface,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (highlightSubtitle) cs.primary else cs.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                trailing()
+                if (expandable) {
+                    Icon(
+                        if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                        contentDescription = null,
+                        tint = cs.onSurfaceVariant,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+            }
+            if (expandable && expanded) {
+                Divider(color = cs.outline.copy(alpha = 0.4f))
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp)) {
+                    details()
+                }
+            }
+        }
+    }
+}
+
+/** GPU probe result used by the applicability lines. */
+private data class GpuInfo(val isQualcomm: Boolean, val model: String)
+
+/** Chip labels for the true capabilities of a wrapper (in a stable order). */
+private fun capLabels(caps: WrapperManager.WrapperCaps): List<String> {
+    val out = ArrayList<String>()
+    if (caps.hasIcd) out.add("Vulkan ICD")
+    if (caps.hasBcnLayer) out.add("BCn layer")
+    if (caps.hasCompatLayer) out.add("DX12/compat layer")
+    return out
+}
+
+/** One-line "what is this" summary for the inspection page (a valid import always carries an ICD). */
+private fun importDescription(caps: WrapperManager.WrapperCaps): String = when {
+    caps.hasIcd && (caps.hasBcnLayer || caps.hasCompatLayer) -> "Vulkan ICD wrapper with extra layers"
+    caps.hasIcd -> "Vulkan ICD wrapper"
+    caps.hasBcnLayer -> "BCn layer"
+    caps.hasCompatLayer -> "DX12 compat layer"
+    else -> "Wrapper"
+}
+
+/** GPU-applicability one-liner for the detail view; null when there are no GPU-gated layers. */
+private fun gpuApplicability(caps: WrapperManager.WrapperCaps, gpu: GpuInfo): String? {
+    val layerish = caps.hasBcnLayer || caps.hasCompatLayer
+    return when {
+        layerish && gpu.isQualcomm ->
+            "BCn/compat layers apply to Mali/non-Qualcomm GPUs — inert on this Adreno (${gpu.model})"
+        layerish -> "Applies to this GPU (${gpu.model})"
+        else -> null
+    }
+}
+
+/** Plain "what will be added / needs to work" lines for the inspection page. */
+private fun importNeeds(caps: WrapperManager.WrapperCaps, gpu: GpuInfo, version: String): List<String> {
+    val out = ArrayList<String>()
+    if (caps.hasBcnLayer) {
+        out.add(
+            "Contains a BCn layer → the BCn Layer Settings become available; requires a Mali/non-Qualcomm GPU to take effect" +
+                if (gpu.isQualcomm) " (this device is Adreno — inert)." else "."
+        )
+    }
+    if (caps.hasCompatLayer) {
+        out.add("Contains a DX12/compat layer → compat options (Mali-branch feature).")
+    }
+    if (!caps.hasBcnLayer && !caps.hasCompatLayer) {
+        out.add("Plain Vulkan ICD wrapper — no extra layer settings.")
+    }
+    if (version == "Unknown") {
+        out.add("No version.txt — version will show Unknown.")
+    }
+    return out
+}
+
+/** A label · value line in the container-card idiom (dimmed label, on-surface value). */
+@Composable
+private fun DetailRow(label: String, value: String) {
+    val cs = MaterialTheme.colorScheme
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp)) {
+        Text(
+            text = "$label: ",
+            style = MaterialTheme.typography.bodySmall,
+            color = cs.onSurfaceVariant,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall,
+            color = cs.onSurface,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+/** Small rounded chips for detected capabilities. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CapabilityChips(labels: List<String>) {
+    val cs = MaterialTheme.colorScheme
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        labels.forEach { label ->
             Box(
                 modifier = Modifier
-                    .size(40.dp)
                     .clip(RoundedCornerShape(8.dp))
-                    .background(cs.surface),
-                contentAlignment = Alignment.Center,
+                    .background(cs.secondaryContainer)
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
             ) {
-                Icon(icon, contentDescription = null, tint = cs.primary, modifier = Modifier.size(22.dp))
-            }
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = title,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = cs.onSurface,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (highlightSubtitle) cs.primary else cs.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = cs.onSecondaryContainer,
                 )
             }
-            Spacer(Modifier.width(8.dp))
-            trailing()
         }
+    }
+}
+
+/** The shared per-wrapper detail box (Part 1) rendered inside an expanded card. */
+@Composable
+private fun WrapperDetailBox(
+    fileName: String,
+    stateLabel: String,
+    version: String,
+    notes: String,
+    caps: WrapperManager.WrapperCaps,
+    gpu: GpuInfo,
+) {
+    val cs = MaterialTheme.colorScheme
+    DetailRow("File", fileName)
+    DetailRow("State", stateLabel)
+    DetailRow("Version", version)
+    if (notes.isNotBlank()) DetailRow("Notes", notes)
+    val labels = capLabels(caps)
+    if (labels.isNotEmpty()) {
+        Spacer(Modifier.size(8.dp))
+        Text(
+            "Detected capabilities",
+            style = MaterialTheme.typography.labelMedium,
+            color = cs.onSurfaceVariant,
+        )
+        Spacer(Modifier.size(4.dp))
+        CapabilityChips(labels)
+    }
+    gpuApplicability(caps, gpu)?.let {
+        Spacer(Modifier.size(8.dp))
+        Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
     }
 }
 
 @Composable
 private fun WrapperSlotCard(
     slot: WrapperManager.WrapperSlot,
+    caps: WrapperManager.WrapperCaps,
+    gpu: GpuInfo,
     onUpdate: () -> Unit,
     onReset: () -> Unit,
 ) {
     val context = LocalContext.current
+    var expanded by remember { mutableStateOf(false) }
     val stateLabel = context.getString(
         if (slot.isOverridden) R.string.wrapper_updated_label else R.string.wrapper_bundled
     )
@@ -441,6 +667,19 @@ private fun WrapperSlotCard(
         title = slot.label,
         subtitle = subtitle,
         highlightSubtitle = slot.isOverridden,
+        expandable = true,
+        expanded = expanded,
+        onToggleExpand = { expanded = !expanded },
+        details = {
+            WrapperDetailBox(
+                fileName = slot.fileName,
+                stateLabel = stateLabel,
+                version = slot.version,
+                notes = slot.notes,
+                caps = caps,
+                gpu = gpu,
+            )
+        },
         trailing = {
             Column(horizontalAlignment = Alignment.End) {
                 TextButton(onClick = onUpdate) {
@@ -461,16 +700,37 @@ private fun WrapperSlotCard(
 @Composable
 private fun ImportedWrapperCard(
     imported: WrapperManager.Imported,
+    manager: WrapperManager,
+    gpu: GpuInfo,
     onDelete: () -> Unit,
 ) {
     val context = LocalContext.current
     val cs = MaterialTheme.colorScheme
+    var expanded by remember { mutableStateOf(false) }
     val subtitle = "${imported.identifier}.tzst · " + context.getString(R.string.wrapper_imported_label)
+    // Detected caps + version.txt for this import — read once per card (off the launch path).
+    val caps = remember(imported.identifier) { manager.capsFor(imported.identifier) }
+    val versionInfo = remember(imported.identifier) {
+        manager.readVersionInfo(manager.importedFileFor(imported.identifier))
+    }
     WrapperCardFrame(
         icon = Icons.Filled.Layers,
         title = imported.label,
         subtitle = subtitle,
         highlightSubtitle = true,
+        expandable = true,
+        expanded = expanded,
+        onToggleExpand = { expanded = !expanded },
+        details = {
+            WrapperDetailBox(
+                fileName = "${imported.identifier}.tzst",
+                stateLabel = context.getString(R.string.wrapper_imported_label),
+                version = versionInfo[0],
+                notes = versionInfo[1],
+                caps = caps,
+                gpu = gpu,
+            )
+        },
         trailing = {
             TextButton(onClick = onDelete) {
                 Icon(
