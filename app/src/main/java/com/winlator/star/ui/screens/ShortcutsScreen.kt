@@ -131,6 +131,7 @@ import com.winlator.star.ui.AccountUiBus
 import com.winlator.star.ui.LocalTopBarActions
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -673,7 +674,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     // Import container picker
     if (showImportContainerPicker) {
         val containers = vm.containers()
-        AlertDialog(
+        OutlinedAlertDialog(
             onDismissRequest = { showImportContainerPicker = false },
             title = { Text("Select container") },
             text = {
@@ -713,7 +714,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     // Rename after import
     if (showRenameDialog) {
         var newName by remember { mutableStateOf(renameDialogName) }
-        AlertDialog(
+        OutlinedAlertDialog(
             onDismissRequest = { showRenameDialog = false },
             title = { Text("Rename Shortcut") },
             text = {
@@ -746,7 +747,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
 
     // Remove confirmation
     confirmRemove?.let { s ->
-        AlertDialog(
+        OutlinedAlertDialog(
             onDismissRequest = { confirmRemove = null },
             title = { Text("Remove shortcut?") },
             text = { Text("Remove \"${s.name}\"?") },
@@ -768,7 +769,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     // Clone-to-container dialog
     cloneTarget?.let { s ->
         val containers = vm.containers()
-        AlertDialog(
+        OutlinedAlertDialog(
             onDismissRequest = { cloneTarget = null },
             title = { Text("Select container") },
             text = {
@@ -812,7 +813,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
         val days    = (totalMs / (1000 * 60 * 60 * 24))
         val formatted = String.format("%dd %02dh %02dm %02ds", days, hours, minutes, seconds)
         var didReset by remember { mutableStateOf(false) }
-        AlertDialog(
+        OutlinedAlertDialog(
             onDismissRequest = { propertiesShortcut = null },
             title = { Text("Properties") },
             text = {
@@ -835,7 +836,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     // Scrape cover dialog
     val sc = scrapeTarget
     if (sc != null) {
-        AlertDialog(
+        OutlinedAlertDialog(
             onDismissRequest = { scrapeTarget = null },
             title = { Text("Scrape cover for \"${sc.name}\"") },
             text = {
@@ -903,7 +904,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     if (!communityDialogsGated) communityTarget?.let { s ->
         val dismiss = { communityTarget = null; communityResult = null }
         val communityDialogShape = RoundedCornerShape(28.dp)
-        AlertDialog(
+        OutlinedAlertDialog(
             onDismissRequest = dismiss,
             // Drop the dialog surface a notch below the cards' surfaceContainer fill so the config
             // cards + their 1dp outline separate from the background the same way the game/container
@@ -1175,7 +1176,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                 uploadStarted = false
                 cancel()
             }
-            AlertDialog(
+            OutlinedAlertDialog(
                 onDismissRequest = dismissReplace,
                 title = { Text("Replace your shared config?") },
                 text = {
@@ -1213,7 +1214,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     if (showMyUploads) {
         val myUploadsShape = RoundedCornerShape(28.dp)
         val closeMyUploads = { showMyUploads = false; expandedUploadSha = null }
-        AlertDialog(
+        OutlinedAlertDialog(
             onDismissRequest = closeMyUploads,
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
             shape = myUploadsShape,
@@ -1335,7 +1336,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
 
     // Delete-confirm for one of the user's uploads.
     deleteUploadRow?.let { row ->
-        AlertDialog(
+        OutlinedAlertDialog(
             onDismissRequest = { deleteUploadRow = null },
             title = { Text("Delete shared config?") },
             text = { Text("Delete your shared config for \"${row.record.game}\"?", color = OnSurface) },
@@ -1393,7 +1394,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
             is CommunityPick.File -> "Config from ${pick.entry.device.ifBlank { pick.entry.soc.ifBlank { "that device" } }}."
             is CommunityPick.Device -> "Config from ${pick.device.model.ifBlank { "that device" }}."
         }
-        AlertDialog(
+        OutlinedAlertDialog(
             onDismissRequest = { configAction = null },
             title = { Text(pick.game.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
             text = {
@@ -1462,7 +1463,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
             is CommunityPick.File -> pick.entry.device.ifBlank { pick.entry.soc.ifBlank { "a device" } }
             is CommunityPick.Device -> pick.device.model.ifBlank { "a device" }
         }
-        AlertDialog(
+        OutlinedAlertDialog(
             onDismissRequest = { applyPicker = null },
             title = { Text("Apply to game…") },
             text = {
@@ -1498,7 +1499,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
 
     // Mismatch confirmation — target shortcut's game doesn't match the config's game.
     applyMismatch?.let { (sc, pick) ->
-        AlertDialog(
+        OutlinedAlertDialog(
             onDismissRequest = { applyMismatch = null },
             title = { Text("Different game") },
             text = { Text("This config is for \"${pick.game.name}\" — apply to \"${sc.name}\" anyway?") },
@@ -1515,7 +1516,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     // Phase 3 step 2 — EXPORT hand-off. After a config artifact is generated, offer the two local
     // sinks: Share (ACTION_SEND via the app FileProvider) or Save to the public Downloads folder.
     exportResult?.let { res ->
-        AlertDialog(
+        OutlinedAlertDialog(
             onDismissRequest = { exportResult = null },
             title = { Text("Share this game's config") },
             text = {
@@ -1546,7 +1547,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     // shortcut): mirrors the apply-target picker — pick which shortcut the imported file applies to.
     importedConfigUri?.let { uri ->
         val shortcutList = vm.currentShortcuts()
-        AlertDialog(
+        OutlinedAlertDialog(
             onDismissRequest = { importedConfigUri = null },
             title = { Text("Apply imported config to…") },
             text = {
@@ -1579,7 +1580,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
 
     // Applying spinner (blocking) while the config is fetched + merged.
     if (applyBusy) {
-        AlertDialog(
+        OutlinedAlertDialog(
             onDismissRequest = {},
             title = { Text("Applying config") },
             text = {
@@ -1613,7 +1614,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                 }
             }
         }
-        AlertDialog(
+        OutlinedAlertDialog(
             onDismissRequest = { applyResult = null },
             title = { Text(if (res.ok) "Config applied" else "Couldn't apply") },
             text = {
@@ -1896,7 +1897,7 @@ private fun MyAccountDialog(
         }
     }
 
-    AlertDialog(
+    OutlinedAlertDialog(
         onDismissRequest = { if (!busy) onDismiss() },
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         shape = shape,
@@ -2324,7 +2325,7 @@ private fun SmartComponentInstallRow(
 
     // Exact-match confirm dialog (stacks over the result dialog).
     confirmProfile?.let { p ->
-        AlertDialog(
+        OutlinedAlertDialog(
             onDismissRequest = { confirmProfile = null },
             title = { Text("Install ${p.verName}?") },
             text = { Text("Download and install ${mc.type} ${p.verName}, then apply it to this shortcut?") },
@@ -2499,7 +2500,7 @@ private fun SmartDriverInstallRow(
 
     // Per-variant confirm dialog (stacks over the result dialog).
     confirmEntry?.let { e ->
-        AlertDialog(
+        OutlinedAlertDialog(
             onDismissRequest = { confirmEntry = null },
             title = { Text("Quick install ${e.displayName}?") },
             text = { Text("Download and install this Turnip driver from ${e.source}, then apply it to this shortcut?") },
@@ -3423,27 +3424,18 @@ private fun ShortcutItemLayoutL(
     onScrapeCover: () -> Unit,
     onCommunityConfigs: () -> Unit,
 ) {
-    val container = shortcut.container
     val res = LocalContext.current.resources
 
-    // Resolved component metadata (shortcut override → container default).
-    val resolution = shortcut.getExtra("screenSize", container?.getScreenSize() ?: "")
-    val driverCfg = shortcut.getExtra("graphicsDriverConfig", container?.getGraphicsDriverConfig() ?: "")
-    val driverLabel = if (driverCfg.isNotEmpty()) GraphicsDriverConfigDialog.getVersion(driverCfg) else ""
-    val dxwrapperCfg = shortcut.getExtra("dxwrapperConfig", container?.getDXWrapperConfig() ?: "")
-    val (dxvkVersion, vkd3dVersion) = parseDxwrapperConfig(dxwrapperCfg)
-
-    val rendererLabel = rendererLabelOf(shortcut.getExtra("renderer", container?.renderer ?: ""))
-    val frameGenLabel = frameGenLabelOf(shortcut.getExtra("frameGenEngine", container?.frameGenEngine ?: "off"))
-    // x86 backend (FEXCore / Box64). Preset suffix (e.g. "· TSO") deferred — it needs
-    // the async Box64/FEXCore preset managers, too heavy to resolve per list-card.
-    val backendLabel = run {
-        val id = shortcut.getExtra("emulator", container?.emulator ?: "")
-        res.getStringArray(R.array.emulator_entries)
-            .firstOrNull { StringUtils.parseIdentifier(it) == id } ?: ""
-    }
-
-    val subtitle = listOf(container?.name ?: "", resolution).filter { it.isNotEmpty() }.joinToString(" · ")
+    // Resolved component metadata (shortcut override → container default). Shared with the launch
+    // overlay via buildLaunchSpec() so the card and the launch screen can never drift.
+    val spec = buildLaunchSpec(shortcut, res)
+    val rendererLabel = spec.rendererLabel
+    val dxvkVersion = spec.dxvkVersion
+    val vkd3dVersion = spec.vkd3dVersion
+    val driverLabel = spec.driverLabel
+    val frameGenLabel = spec.frameGenLabel
+    val backendLabel = spec.backendLabel
+    val subtitle = spec.meta
 
     // Floating card to match the Containers list (rounded surfaceVariant panel + outline
     // border + side margins) instead of a flat edge-to-edge row.
@@ -3688,14 +3680,25 @@ private fun ShortcutGridItem(
         }
 
         // Long-press context menu
-        DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+        DropdownMenu(
+            expanded = menuExpanded,
+            onDismissRequest = { menuExpanded = false },
+            modifier = Modifier.outlinedMenuCard(),
+        ) {
             DropdownMenuItem(text = { Text("Settings") }, leadingIcon = { Icon(Icons.Filled.Settings, null) }, onClick = { menuExpanded = false; onSettings() })
+            MenuItemDivider()
             DropdownMenuItem(text = { Text("Remove") }, leadingIcon = { Icon(Icons.Filled.Delete, null) }, onClick = { menuExpanded = false; onRemove() })
+            MenuItemDivider()
             DropdownMenuItem(text = { Text("Clone to container") }, leadingIcon = { Icon(Icons.Filled.ContentCopy, null) }, onClick = { menuExpanded = false; onClone() })
+            MenuItemDivider()
             DropdownMenuItem(text = { Text("Add to home screen") }, leadingIcon = { Icon(Icons.Filled.AddToHomeScreen, null) }, onClick = { menuExpanded = false; onAddToHome() })
+            MenuItemDivider()
             DropdownMenuItem(text = { Text("Export") }, leadingIcon = { Icon(Icons.Filled.Upload, null) }, onClick = { menuExpanded = false; onExport() })
+            MenuItemDivider()
             DropdownMenuItem(text = { Text("Scrape cover") }, leadingIcon = { Icon(Icons.Filled.Search, null, tint = MaterialTheme.colorScheme.primary) }, onClick = { menuExpanded = false; onScrapeCover() })
+            MenuItemDivider()
             DropdownMenuItem(text = { Text("Community configs") }, leadingIcon = { Icon(Icons.Filled.Public, null, tint = MaterialTheme.colorScheme.primary) }, onClick = { menuExpanded = false; onCommunityConfigs() })
+            MenuItemDivider()
             DropdownMenuItem(text = { Text("Properties") }, leadingIcon = { Icon(Icons.Filled.Info, null) }, onClick = { menuExpanded = false; onProperties() })
         }
     }
@@ -3771,6 +3774,21 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
     var sfCompatMode by remember {
         mutableStateOf(shortcut.getExtra("sfCompatMode",
             if (shortcut.container.getRendererSfCompatMode()) "1" else "0") == "1")
+    }
+
+    // Vulkan renderer per-game overrides (native / Colors=swapRB / present mode) — default to the
+    // container's values; only shown + relevant when this shortcut runs on the Vulkan renderer.
+    // Stored via the same "native"/"swapRB"/"presentMode" extras the launch resolver reads.
+    var vkNative by remember {
+        mutableStateOf(shortcut.getExtra("native",
+            if (shortcut.container.isRendererNative()) "true" else "false") == "true")
+    }
+    var vkSwapRB by remember {
+        mutableStateOf(shortcut.getExtra("swapRB",
+            if (shortcut.container.getRendererSwapRB()) "true" else "false") == "true")
+    }
+    var vkPresentMode by remember {
+        mutableStateOf(shortcut.getExtra("presentMode", shortcut.container.getRendererPresentMode()))
     }
 
     // Render scale (supersampling) — per-game override, defaults to the container's "renderScale"
@@ -4064,6 +4082,10 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
             putExtra("graphicsDriverConfig", graphicsDriverConfig)
             putExtra("renderer", StringUtils.parseIdentifier(selectedRenderer))
             putExtra("sfCompatMode", if (sfCompatMode) "1" else "0")
+            // Vulkan per-game overrides (read by resolvedRendererNative/SwapRB/PresentMode at launch).
+            putExtra("native", if (vkNative) "true" else "false")
+            putExtra("swapRB", if (vkSwapRB) "true" else "false")
+            putExtra("presentMode", vkPresentMode)
             putExtra("renderScale", if (renderScale == "1.0") null else renderScale)
             putExtra("frameGenEngine", frameGenEngine)
             putExtra("fpsLimiterEnabled", if (fpsLimiterEnabled) "1" else "0")
@@ -4260,6 +4282,40 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
                             }
                             Switch(checked = sfCompatMode, onCheckedChange = { sfCompatMode = it })
                         }
+                    }
+
+                    // Vulkan renderer per-game overrides — only relevant when this game runs on Vulkan.
+                    if (selectedRenderer == "Vulkan") {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(stringResource(R.string.renderer_native), Modifier.weight(1f))
+                            Switch(checked = vkNative, onCheckedChange = { vkNative = it })
+                        }
+                        // Colors = the game buffer's channel order. BGRA (default) presents as-is; RGBA
+                        // swaps R/B (routes through the compositor — native can't swap). Per-game so one
+                        // game can differ from the container / its siblings.
+                        val vkColorOrders = listOf("BGRA", "RGBA")
+                        LabeledDropdown(
+                            label = stringResource(R.string.renderer_colors),
+                            options = vkColorOrders,
+                            selectedOption = if (vkSwapRB) "RGBA" else "BGRA",
+                            onSelect = { vkSwapRB = (it == "RGBA") }
+                        )
+                        // Present mode is ignored under Native Rendering (direct scanout), so grey it out.
+                        val vkPmValues = listOf("fifo", "mailbox", "immediate")
+                        val vkPmLabels = listOf(
+                            stringResource(R.string.renderer_present_mode_fifo),
+                            stringResource(R.string.renderer_present_mode_mailbox),
+                            stringResource(R.string.renderer_present_mode_immediate)
+                        )
+                        val vkPmIdx = vkPmValues.indexOf(vkPresentMode).coerceAtLeast(0)
+                        LabeledDropdown(
+                            label = stringResource(R.string.renderer_present_mode),
+                            options = vkPmLabels,
+                            selectedOption = vkPmLabels[vkPmIdx],
+                            onSelect = { vkPresentMode = vkPmValues[vkPmLabels.indexOf(it)] },
+                            enabled = !vkNative,
+                            modifier = if (vkNative) Modifier.alpha(0.5f) else Modifier
+                        )
                     }
 
                     // Render scale (supersampling) — per-game override of the container default.
@@ -4694,11 +4750,15 @@ private fun ScAdvancedTab(
             cpuListViewRef.value = null
         }
     }
+    // On arm64ec containers the x86 backend is WOWBox64, not Box64 — label it correctly (matching
+    // the container editor). The dropdown data already reads the right content type; only the label
+    // was hardcoded "Box64".
+    val emulatorLabel = if (isArm64EC) "WOWBox64" else "Box64"
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        SectionBox(title = "Box64") {
+        SectionBox(title = emulatorLabel) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 LabeledDropdown(
-                    label = stringResource(R.string.box64_version),
+                    label = "$emulatorLabel Version",
                     options = box64Versions,
                     selectedOption = box64Versions.firstOrNull { it == selectedBox64Version } ?: selectedBox64Version,
                     onSelect = onBox64VersionChange,
@@ -4717,7 +4777,7 @@ private fun ScAdvancedTab(
             Spacer(Modifier.height(8.dp))
             val presetNames = box64Presets.map { it.name }
             LabeledDropdown(
-                label = stringResource(R.string.box64_preset),
+                label = "$emulatorLabel Preset",
                 options = presetNames,
                 selectedOption = presetNames.getOrElse(selectedBox64PresetIndex) { "" },
                 onSelect = { opt -> onBox64PresetIndexChange(presetNames.indexOf(opt).coerceAtLeast(0)) }

@@ -11,6 +11,7 @@ import android.os.Environment
 import android.provider.Settings
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.foundation.layout.Box
@@ -31,6 +32,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import com.winlator.star.ui.screens.OutlinedAlertDialog
 import androidx.compose.material3.Divider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.DrawerValue
@@ -114,6 +116,11 @@ class MainActivity : AppCompatActivity() {
     private var selectedProfileId: Int = 0
     private var editInputControls: Boolean = false
 
+    // Holds the OS cold-start splash on screen only until the Compose UI is about to draw its first
+    // frame. Not held for the imagefs install — that has its own in-app SplashScreen surface.
+    @Volatile
+    private var contentReady = false
+
     private val showAllFilesDialog = mutableStateOf(false)
     private val showAboutDialog = mutableStateOf(false)
 
@@ -135,7 +142,11 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         AppCompatDelegate.setCompatVectorFromResourcesEnabled(true)
+        // Wire the AndroidX cold-start splash BEFORE super.onCreate so the OS splash bridges the gap
+        // to our first Compose frame; hold it only until the UI is ready to draw (set just below).
+        val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
+        splashScreen.setKeepOnScreenCondition { !contentReady }
 
         PACKAGE_NAME = applicationContext.packageName
         AppThemeState.init(this)
@@ -185,6 +196,9 @@ class MainActivity : AppCompatActivity() {
             }
             // If willInstall == true: permissions are requested after user taps Proceed
         }
+
+        // First-run/install decision is made; let the OS splash hand off to the Compose UI.
+        contentReady = true
 
         setContent {
             WinlatorTheme {
@@ -487,7 +501,7 @@ private fun AppShell(
 
 @Composable
 private fun AllFilesAccessDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(
+    OutlinedAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("All Files Access Required") },
         text = {

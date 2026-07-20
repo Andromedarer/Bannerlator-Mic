@@ -517,7 +517,7 @@ fun FileManagerScreen(
 
     if (showNewFolderDialog) {
         var folderName by remember { mutableStateOf("") }
-        AlertDialog(
+        OutlinedAlertDialog(
             onDismissRequest = { showNewFolderDialog = false },
             title = { Text("New Folder") },
             text = {
@@ -540,7 +540,7 @@ fun FileManagerScreen(
 
     if (renameTarget != null) {
         var newName by remember(renameTarget) { mutableStateOf(renameTarget?.name ?: "") }
-        AlertDialog(
+        OutlinedAlertDialog(
             onDismissRequest = { renameTarget = null },
             title = { Text("Rename") },
             text = {
@@ -564,7 +564,7 @@ fun FileManagerScreen(
 
     if (selectedEntry != null && selectedEntry != showMenuFor) {
         val file = selectedEntry ?: return
-        AlertDialog(
+        OutlinedAlertDialog(
             onDismissRequest = { selectedEntry = null },
             title = { Text("Delete?") },
             text = { Text("Delete \"${file.name}\" permanently?") },
@@ -579,7 +579,7 @@ fun FileManagerScreen(
     }
 
     if (showContainerPicker) {
-        AlertDialog(
+        OutlinedAlertDialog(
             onDismissRequest = { showContainerPicker = false },
             title = { Text("Choose container") },
             text = {
@@ -606,7 +606,7 @@ fun FileManagerScreen(
 
     if (pendingRun != null) {
         val file = pendingRun
-        AlertDialog(
+        OutlinedAlertDialog(
             onDismissRequest = { pendingRun = null },
             title = { Text("Run in which container?") },
             text = {
@@ -634,7 +634,7 @@ fun FileManagerScreen(
 
     if (pendingAddShortcut != null) {
         val file = pendingAddShortcut
-        AlertDialog(
+        OutlinedAlertDialog(
             onDismissRequest = { pendingAddShortcut = null },
             title = { Text("Add to which container?") },
             text = {
@@ -1074,7 +1074,11 @@ private fun FileItemRow(
                 IconButton(onClick = onMenu) {
                     Icon(Icons.Filled.MoreVert, "Actions", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                 }
-                DropdownMenu(expanded = menuExpanded, onDismissRequest = onDismissMenu) {
+                DropdownMenu(
+                    expanded = menuExpanded,
+                    onDismissRequest = onDismissMenu,
+                    modifier = Modifier.outlinedMenuCard(),
+                ) {
                     // Favorites are directories — only folders get the pin toggle.
                     if (isDir) {
                         DropdownMenuItem(
@@ -1088,6 +1092,7 @@ private fun FileItemRow(
                             },
                             onClick = { onToggleFavorite() },
                         )
+                        MenuItemDivider()
                     }
                     if (canRun) {
                         DropdownMenuItem(
@@ -1095,6 +1100,7 @@ private fun FileItemRow(
                             leadingIcon = { Icon(Icons.Filled.PlayArrow, null, tint = MaterialTheme.colorScheme.primary) },
                             onClick = { onDismissMenu(); onRun() },
                         )
+                        MenuItemDivider()
                     }
                     // Only real PE executables can become a permanent Games tile — this reuses the
                     // same importer the Games-tab "+" button uses (Exec=wine <path>), which is only
@@ -1105,22 +1111,26 @@ private fun FileItemRow(
                             leadingIcon = { Icon(Icons.Filled.Add, null, tint = MaterialTheme.colorScheme.primary) },
                             onClick = { onDismissMenu(); onAddToShortcuts() },
                         )
+                        MenuItemDivider()
                     }
                     DropdownMenuItem(
                         text = { Text("Rename") },
                         leadingIcon = { Icon(Icons.Filled.Edit, null, tint = MaterialTheme.colorScheme.primary) },
                         onClick = { onDismissMenu(); onRename() },
                     )
+                    MenuItemDivider()
                     DropdownMenuItem(
                         text = { Text("Copy") },
                         leadingIcon = { Icon(Icons.Filled.FileCopy, null, tint = MaterialTheme.colorScheme.primary) },
                         onClick = { onDismissMenu(); onCopy() },
                     )
+                    MenuItemDivider()
                     DropdownMenuItem(
                         text = { Text("Cut") },
                         leadingIcon = { Icon(Icons.Filled.ContentCut, null, tint = MaterialTheme.colorScheme.primary) },
                         onClick = { onDismissMenu(); onCut() },
                     )
+                    MenuItemDivider()
                     DropdownMenuItem(
                         text = { Text("Delete") },
                         leadingIcon = { Icon(Icons.Filled.Delete, null, tint = MaterialTheme.colorScheme.primary) },

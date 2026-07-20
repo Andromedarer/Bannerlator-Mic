@@ -139,6 +139,12 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     var enableDInput by mutableStateOf(false)
     var exclusiveXInput by mutableStateOf(true)
 
+    // "Run as administrator" (default ON): ON -> EnableLUA=0 (UAC off / full admin),
+    // OFF -> EnableLUA=1. Stored in the container's .wine/system.reg (source of truth); on
+    // create it's threaded through the createContainerAsync data flag, on edit it's read/written
+    // here directly (mirrors saveMouseWarp, but against system.reg).
+    var runAsAdmin by mutableStateOf(true)
+
     // ── Box64 ─────────────────────────────────────────────────────────────────
     var box64VersionEntries by mutableStateOf(emptyList<String>()); private set
     var selectedBox64Version by mutableStateOf("")
@@ -406,6 +412,20 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             } catch (_: Exception) {}
         }
 
+        // Run as administrator (from registry, only in edit mode). EnableLUA=0 -> admin (toggle ON),
+        // anything else -> UAC on (toggle OFF). Default ON when the value is missing/unreadable.
+        if (c != null) {
+            val systemRegFile = File(c.rootDir, ".wine/system.reg")
+            try {
+                WineRegistryEditor(systemRegFile).use { reg ->
+                    val enableLUA = reg.getDwordValue(
+                        "Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System", "EnableLUA", 0
+                    )
+                    runAsAdmin = enableLUA == 0
+                }
+            } catch (_: Exception) {}
+        }
+
         // Win Components
         loadWinComponents(c?.winComponents ?: Container.DEFAULT_WINCOMPONENTS)
 
@@ -640,6 +660,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             c.setControllerMapping(controllerMapping)
             c.saveData()
             saveMouseWarp(c)
+            saveRunAsAdmin(c)
             onComplete()
         } else {
             // Create mode
@@ -669,6 +690,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
                 put("rendererSwapRB", rendererSwapRB)
                 put("rendererSfCompatMode", rendererSfCompatMode)
                 put("inputType", inputType)
+                put("runAsAdmin", runAsAdmin)
                 put("startupSelection", selectedStartupSelection)
                 put("box64Version", selectedBox64Version)
                 put("box64Preset", box64Preset)
@@ -766,6 +788,23 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
                     else -> "disable"
                 }
                 reg.setStringValue("Software\\Wine\\DirectInput", "MouseWarpOverride", value)
+            }
+        } catch (_: Exception) {}
+    }
+
+    // Run as administrator: ON -> EnableLUA=0 (UAC off / full admin), OFF -> EnableLUA=1. Written
+    // to the container's system.reg (source of truth). Mirrors saveMouseWarp; only used on edit —
+    // the create path stamps EnableLUA via the createContainerAsync "runAsAdmin" data flag.
+    private fun saveRunAsAdmin(c: Container) {
+        val systemRegFile = File(c.rootDir, ".wine/system.reg")
+        if (!systemRegFile.exists()) return
+        try {
+            WineRegistryEditor(systemRegFile).use { reg ->
+                reg.setCreateKeyIfNotExist(true)
+                reg.setDwordValue(
+                    "Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System",
+                    "EnableLUA", if (runAsAdmin) 0 else 1
+                )
             }
         } catch (_: Exception) {}
     }

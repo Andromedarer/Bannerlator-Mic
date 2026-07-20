@@ -154,7 +154,7 @@ fun InputControlsScreen(selectedProfileId: Int = 0) {
 
     if (promptCreateName) {
         var name by remember { mutableStateOf("") }
-        AlertDialog(
+        OutlinedAlertDialog(
             onDismissRequest = { promptCreateName = false },
             title = { Text("Profile Name") },
             text = {
@@ -182,7 +182,7 @@ fun InputControlsScreen(selectedProfileId: Int = 0) {
 
     if (promptRenameOldName != null) {
         var name by remember { mutableStateOf(promptRenameOldName ?: "") }
-        AlertDialog(
+        OutlinedAlertDialog(
             onDismissRequest = { promptRenameOldName = null },
             title = { Text("Profile Name") },
             text = {
@@ -225,7 +225,7 @@ fun InputControlsScreen(selectedProfileId: Int = 0) {
         }
 
         if (isLoadingList) {
-            AlertDialog(
+            OutlinedAlertDialog(
                 onDismissRequest = { showDownloadDialog = false },
                 title = { Text("Profiles") },
                 text = { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) { CircularProgressIndicator() } },
@@ -233,7 +233,7 @@ fun InputControlsScreen(selectedProfileId: Int = 0) {
                 dismissButton = { TextButton(onClick = { showDownloadDialog = false }) { Text("Cancel") } }
             )
         } else {
-            AlertDialog(
+            OutlinedAlertDialog(
                 onDismissRequest = { showDownloadDialog = false },
                 title = { Text("Download Profiles") },
                 text = {

@@ -56,6 +56,12 @@ object ShortcutExporter {
         // (emulator is already resolved above for the FEX gate; ConfigExporter picks it up from there.)
         put(effective, "screenSize", orDefault(shortcut, "screenSize", container?.getScreenSize()))
         put(effective, "renderer", orDefault(shortcut, "renderer", container?.getRenderer()))
+        // Vulkan renderer settings (added 2026-07: per-game native / Colors=swapRB / present mode).
+        // Effective value: shortcut override, else the container default. Applied generically on import
+        // by the bl_ext loop in ShortcutConfig -> resolvedRendererNative/SwapRB/PresentMode read them.
+        put(effective, "native", orDefault(shortcut, "native", container?.let { if (it.isRendererNative()) "true" else "false" }))
+        put(effective, "swapRB", orDefault(shortcut, "swapRB", container?.let { if (it.getRendererSwapRB()) "true" else "false" }))
+        put(effective, "presentMode", orDefault(shortcut, "presentMode", container?.getRendererPresentMode()))
         put(effective, "fullscreenMode", orDefault(shortcut, "fullscreenMode", container?.getFullscreenMode()?.toString()))
         put(effective, "frameGenEngine", orDefault(shortcut, "frameGenEngine", container?.getFrameGenEngine()))
         put(effective, "box64Version", orDefault(shortcut, "box64Version", container?.getBox64Version()))

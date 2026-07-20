@@ -146,6 +146,14 @@ object XServerDrawerState {
     @JvmField var onRelativeMouseMovement:  Runnable? = null
     @JvmField var onDisableMouse:           Runnable? = null
     @JvmField var onNativeRenderingToggle: Runnable? = null
+
+    // Whether the active renderer supports Native Rendering (direct scanout). True for Vulkan;
+    // false for OpenGL (GL scanout is disabled for now — bespoke path, unresolved brightness).
+    // Set once at launch from the renderer type; drives whether the drawer shows the toggle.
+    private val _nativeRenderingSupported = MutableStateFlow(true)
+    @get:JvmName("getNativeRenderingSupportedState")
+    val nativeRenderingSupported: StateFlow<Boolean> = _nativeRenderingSupported
+    fun setNativeRenderingSupported(v: Boolean) { _nativeRenderingSupported.value = v }
     @JvmField var onFpsConfigApply: XServerDialogState.FpsConfigCallback? = null
 
     // Fired after any bionic-fg control changes; the handler reads the StateFlows above and
@@ -227,6 +235,7 @@ object XServerDrawerState {
         _showLogs.value = false
         _showMagnifier.value = true
         _nativeRenderingEnabled.value = false
+        _nativeRenderingSupported.value = true
         _runtimeBackend.value = RuntimeBackend()
         _bionicFgActive.value = false
         _frameGenEnabled.value = false

@@ -13,6 +13,7 @@ import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
+import android.net.Uri;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.os.Build;
@@ -26,6 +27,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
 import android.widget.CheckBox;
+import android.widget.Toast;
 import android.widget.FrameLayout;
 import android.widget.Spinner;
 
@@ -95,6 +97,7 @@ import com.winlator.star.renderer.effects.FXAAEffect;
 import com.winlator.star.renderer.effects.NTSCCombinedEffect;
 import com.winlator.star.renderer.effects.ToonEffect;
 import com.winlator.star.renderer.effects.HDREffect;
+import com.winlator.star.widget.FpsCounter;
 import com.winlator.star.widget.FrameRating;
 import com.winlator.star.widget.FrameRatingHorizontal;
 import com.winlator.star.widget.InputControlsView;
@@ -166,6 +169,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private FrameRating frameRating = null;
     private FrameRatingHorizontal frameRatingHorizontal = null;
     private PerfHudView perfHud = null;          // GameHub-style HUD (used when hudStyle=gamehub instead of the two above)
+    private com.winlator.star.widget.perfhud.PerformanceHudView gameNativeHud = null; // GameNative-style HUD (hudStyle=gamenative)
+    // Single authoritative FPS source: ticked once per present, read by every overlay so they all
+    // show the identical number (there is one place per renderer to feed).
+    private final FpsCounter fpsCounter = new FpsCounter();
     private boolean fpsHudHorizontal = false;   // active FPS-overlay orientation (tap to toggle in-game)
     // Async-arriving HUD labels are cached so a HUD built live (style swapped mid-game) is populated too.
     private String hudRendererLabel = null;     // full "Vulkan | DXVK" label for classic FrameRating.setRenderer
@@ -194,6 +201,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private short taskAffinityMask = 0;
     private short taskAffinityMaskWoW64 = 0;
     private int frameRatingWindowId = -1;
+    // Windows that have published a _MESA_DRV property (GPU/render windows). The perf HUD binds to one
+    // of these (frameRatingWindowId); we keep the whole set so that when the bound window unmaps we can
+    // re-bind to another still-live one instead of hiding the HUD permanently — games like Dirt 3 /
+    // Dirt Showdown open an intro window then swap to the real render window.
+    private final java.util.LinkedHashSet<Integer> mesaDrvWindowIds = new java.util.LinkedHashSet<>();
     private boolean cursorLock; // Flag to track if pointer capture was requested
     private final float[] xform = XForm.getInstance();
     private ContentsManager contentsManager;
@@ -206,6 +218,21 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // onCreate (from the container/shortcut "renderScale" extra) and consumed in setupUI.
     private boolean hqDownscale = false;
     PreloaderDialog preloaderDialog = null;
+    // ---- Launch progress overlay ----
+    // Flipped true when the game first renders (the launch overlay is dismissed). Shared guard read
+    // from the X11 window thread + the guest-termination thread, written on the UI thread.
+    private volatile boolean winStarted = false;
+    // Hold the launch screen this long past the first rendered game frame, so the boot steps are
+    // actually seen instead of flashed away on a fast-booting game. The game renders behind it.
+    private static final long LAUNCH_OVERLAY_GRACE_MS = 5000L;
+    // "Not-frozen" reassurance timers over the unmeasurable guest-boot tail. Neither kills the launch.
+    private static final long LAUNCH_SLOW_HINT_MS = 15_000L;
+    private static final long LAUNCH_STILL_WORKING_MS = 90_000L;
+    private final Handler launchTimerHandler = new Handler(Looper.getMainLooper());
+    private final Runnable launchSlowHintRunnable = () -> preloaderDialog.hint(
+            "Taking longer than usual — first launch can compile shaders. Not frozen, please wait.");
+    private final Runnable launchStillWorkingRunnable = () -> preloaderDialog.hint(
+            "Still working. If this seems stuck, check the log.");
     private Runnable configChangedCallback = null;
     private boolean isPaused = false;
     // ReShade "freeze-frame preview" (Live preview OFF): the guest is SIGSTOP'd while tuning and each
@@ -363,6 +390,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                         if (frameRatingHorizontal != null) frameRatingHorizontal.setRenderer(label);
                         if (frameRating != null) frameRating.setRenderer(label);
                         if (perfHud != null) perfHud.setEngineLabel(api);
+                        if (gameNativeHud != null) gameNativeHud.setEngineLabel(api);
                     });
                     return;
                 }
@@ -437,6 +465,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
         com.winlator.star.ui.PreloaderOverlayHelper.attach(this);
 
         preloaderDialog = new PreloaderDialog(this);
+        // Route the failure card's buttons back to this activity (cleared in onDestroy).
+        com.winlator.star.core.PreloaderState.setOnClose(() -> runOnUiThread(this::finish));
+        com.winlator.star.core.PreloaderState.setOnOpenLog(() -> runOnUiThread(this::openLogFolder));
+        com.winlator.star.core.PreloaderState.setOnCancel(() -> runOnUiThread(this::exit));
         preferences = PreferenceManager.getDefaultSharedPreferences(this);
 
         cursorLock = preferences.getBoolean("cursor_lock", false);
@@ -541,8 +573,22 @@ public class XServerDisplayActivity extends AppCompatActivity {
             if (inputControlsView != null) inputControlsView.invalidate();
         };
         state.onNativeRenderingToggle   = () -> {
+            // GL Native Rendering is disabled for now (bespoke GL scanout path has an unresolved
+            // brightness issue; frame-pacing fix parked on fix/gl-native-frame-pacing). Vulkan only.
+            // The drawer toggle is hidden on GL, but guard here too so it can never engage on GL.
+            if (xServerView.getRenderer() instanceof GLRenderer) {
+                XServerDrawerState.INSTANCE.setNativeRenderingEnabled(false);
+                showToast(this, "Native Rendering isn't available on the OpenGL renderer yet — use the Vulkan renderer");
+                return;
+            }
             boolean next = !XServerDrawerState.INSTANCE.getNativeRenderingEnabled();
             XServerDrawerState.INSTANCE.setNativeRenderingEnabled(next);
+            // Native (direct scanout) puts one opaque game SurfaceControl on top; secondary guest
+            // windows composite UNDER it and go invisible. It's a single-fullscreen-window mode, so
+            // warn (don't block — the count can be transiently >1 during splash/child popups) when
+            // the user enables it with more than one mapped application window on screen.
+            if (next && countMappedAppWindows() > 1)
+                showToast(this, "Native Rendering is best with a single fullscreen window — extra windows may be hidden");
             // Actually drive the renderer (this was previously only flipping the UI flag, so the
             // toggle had no effect and no "Native Rendering+ Enabled" toast). Native (direct
             // scanout) only exists on the Vulkan renderer.
@@ -680,21 +726,39 @@ public class XServerDisplayActivity extends AppCompatActivity {
             if (newConfig == null) return;
             state.setFpsConfig(newConfig);
             runOnUiThread(() -> {
-                boolean wantGameHub = new com.winlator.star.core.KeyValueSet(newConfig)
-                    .get("hudStyle", "classic").equals("gamehub");
-                boolean haveGameHub = perfHud != null;
-                boolean haveAnyHud = perfHud != null || frameRating != null || frameRatingHorizontal != null;
-                // Live style swap: build the requested HUD and tear down the other, but only if a HUD
-                // is already on screen (FPS was enabled for this launch). View mutation is safe here —
-                // this callback runs on the UI thread.
-                if (haveAnyHud && wantGameHub != haveGameHub) {
-                    if (wantGameHub) { removeClassicHud(); buildPerfHud(newConfig); }
-                    else { removePerfHud(); buildClassicHud(newConfig); }
+                String wantStyle = new com.winlator.star.core.KeyValueSet(newConfig)
+                    .get("hudStyle", "classic");
+                String haveStyle = perfHud != null ? "gamehub"
+                    : gameNativeHud != null ? "gamenative"
+                    : (frameRating != null || frameRatingHorizontal != null) ? "classic" : null;
+                // Live style swap: build the requested HUD and tear down the other two, but only if a
+                // HUD is already on screen (FPS was enabled for this launch). View mutation is safe
+                // here — this callback runs on the UI thread.
+                if (haveStyle != null && !wantStyle.equals(haveStyle)) {
+                    removePerfHud();
+                    removeClassicHud();
+                    removeGameNativeHud();
+                    if (wantStyle.equals("gamehub")) buildPerfHud(newConfig);
+                    else if (wantStyle.equals("gamenative")) buildGameNativeHud(newConfig);
+                    else buildClassicHud(newConfig);
                 } else {
                     // Same style (or no HUD built): just push the new config to whatever exists.
                     if (frameRating != null) frameRating.applyConfig(newConfig);
                     if (frameRatingHorizontal != null) frameRatingHorizontal.applyConfig(newConfig);
                     if (perfHud != null) perfHud.applyConfig(newConfig);
+                    if (gameNativeHud != null) gameNativeHud.applyConfig(newConfig);
+                    // Classic HUD: applyConfig()->updateParentVisibility() re-shows BOTH orientation
+                    // views whenever they have visible rows, clobbering the active-orientation choice
+                    // (toggling a metric made the inactive orientation pop in alongside the active one).
+                    // Re-assert: only the active orientation is visible, and only while the HUD window
+                    // is up.
+                    if (frameRating != null || frameRatingHorizontal != null) {
+                        boolean shown = frameRatingWindowId != -1;
+                        if (frameRatingHorizontal != null)
+                            frameRatingHorizontal.setVisibility(shown && fpsHudHorizontal ? View.VISIBLE : View.GONE);
+                        if (frameRating != null)
+                            frameRating.setVisibility(shown && !fpsHudHorizontal ? View.VISIBLE : View.GONE);
+                    }
                 }
             });
             if (container != null) {
@@ -912,10 +976,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
 
         if (shortcut == null)
-            preloaderDialog.show(container.getName(), null);
+            preloaderDialog.show(container.getName(), null, null);
         else {
-            preloaderDialog.show(shortcut.name, shortcut.icon);
+            preloaderDialog.show(shortcut.name, shortcut.icon, shortcut.getCoverArt(),
+                com.winlator.star.ui.screens.LaunchSpecBuilderKt.buildLaunchSpec(shortcut, getResources()));
         }
+        preloaderDialog.step(1, "Preparing container…");
 
         // Supersampling ("Render scale"): multiply the game's render resolution so it renders above
         // display res, then let the Vulkan compositor Lanczos-downscale it (see setHqDownscale below).
@@ -956,29 +1022,35 @@ public class XServerDisplayActivity extends AppCompatActivity {
         xServer = new XServer(new ScreenInfo(screenSize));
         xServer.setWinHandler(winHandler);
 
-        boolean[] winStarted = {false};
-
         // Add the OnWindowModificationListener for dynamic workarounds
         xServer.windowManager.addOnWindowModificationListener(new WindowManager.OnWindowModificationListener() {
             @Override
             public void onUpdateWindowContent(Window window) {
-                if (!winStarted[0] && window.isApplicationWindow()) {
+                if (!winStarted && window.isApplicationWindow()) {
+                    winStarted = true;   // set first so this fires exactly once
                     xServerView.getRenderer().setCursorVisible(true);
-                    preloaderDialog.closeOnUiThread();
-                    winStarted[0] = true;
+                    cancelLaunchTimers();
+                    // First real game frame: hold the launch screen a few more seconds (the game
+                    // renders behind it) so the boot steps are actually seen, then close.
+                    new android.os.Handler(getMainLooper()).postDelayed(
+                        preloaderDialog::closeOnUiThread, LAUNCH_OVERLAY_GRACE_MS);
                 }
                     
                 if (frameRatingWindowId == window.id) {
+                    fpsCounter.tick();
                     if (frameRating != null) frameRating.update();
                     if (frameRatingHorizontal != null) frameRatingHorizontal.update();
                     if (perfHud != null) perfHud.update();
                 }
             }
-           
+
             @Override
             public void onMapWindow(Window window) {
                 // Log the class name of the mapped window
                 Log.d("XServerDisplayActivity", "onMapWindow: Detected window className: " + window.getClassName());
+                // A window mapped (before its content paints) — nudge the tail label so the user sees
+                // progress past the guest-boot spinner. The real dismiss is still onUpdateWindowContent.
+                if (!winStarted) preloaderDialog.enterGuest("Game window detected…");
                 assignTaskAffinity(window);
             }
 
@@ -1044,13 +1116,25 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 simulateConfirmInputControlsDialog();
             }
             Executors.newSingleThreadExecutor().execute(() -> {
-                setupWineSystemFiles();
-                extractGraphicsDriverFiles();
-                changeWineAudioDriver();
+                // Track which app-side stage is running so a failure surfaces on the right card.
+                final String[] stage = { "Preparing Wine & graphics driver" };
                 try {
+                    preloaderDialog.step(2, "Preparing Wine & graphics driver…");
+                    setupWineSystemFiles();
+                    extractGraphicsDriverFiles();
+                    changeWineAudioDriver();
+                    stage[0] = "Building environment";
                     setupXEnvironment();
-                } catch (PackageManager.NameNotFoundException e) {
-                    throw new RuntimeException(e);
+                } catch (Exception e) {
+                    Log.e("XServerDisplayActivity", "Launch setup failed at stage: " + stage[0], e);
+                    final String stageName = stage[0];
+                    final String detail = e.getMessage();
+                    final String logDir = com.winlator.star.core.LogLocation.resolveLogDir(this).getAbsolutePath();
+                    final boolean loggingEnabled = isLaunchLoggingEnabled();
+                    runOnUiThread(() -> {
+                        cancelLaunchTimers();
+                        preloaderDialog.fail(stageName, "Setup step failed", detail, logDir, loggingEnabled);
+                    });
                 }
             });
         };
@@ -1706,6 +1790,38 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }, 1000);
     }
 
+    // Whether Wine/box64 logging is on — the single source of truth for the failure card's guidance.
+    private boolean isLaunchLoggingEnabled() {
+        return preferences.getBoolean("enable_wine_debug", false)
+                || preferences.getBoolean("enable_box64_logs", false);
+    }
+
+    // Arm/cancel the two "not-frozen" reassurance timers.
+    private void startLaunchTimers() {
+        cancelLaunchTimers();
+        launchTimerHandler.postDelayed(launchSlowHintRunnable, LAUNCH_SLOW_HINT_MS);
+        launchTimerHandler.postDelayed(launchStillWorkingRunnable, LAUNCH_STILL_WORKING_MS);
+    }
+
+    private void cancelLaunchTimers() {
+        launchTimerHandler.removeCallbacks(launchSlowHintRunnable);
+        launchTimerHandler.removeCallbacks(launchStillWorkingRunnable);
+    }
+
+    // Best-effort "open the log folder" for the failure card. Folder-opening is unevenly supported
+    // across file managers, so fall back to showing the path if no handler is available.
+    private void openLogFolder() {
+        File dir = com.winlator.star.core.LogLocation.resolveLogDir(this);
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setDataAndType(Uri.parse(dir.getAbsolutePath()), "resource/folder");
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(Intent.createChooser(intent, "Open log folder"));
+        } catch (Exception e) {
+            Toast.makeText(this, "Log folder: " + dir.getAbsolutePath(), Toast.LENGTH_LONG).show();
+        }
+    }
+
     @Override
     protected void onDestroy() {
         if (inGameControlsEditor != null) {
@@ -1714,6 +1830,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
         super.onDestroy();
         stopDxApiDetection();
+        cancelLaunchTimers();
+        // Drop the failure-card callbacks so this activity isn't retained via the static holder.
+        com.winlator.star.core.PreloaderState.setOnClose(null);
+        com.winlator.star.core.PreloaderState.setOnOpenLog(null);
+        com.winlator.star.core.PreloaderState.setOnCancel(null);
         if (wineDebugLogCallback != null) {
             ProcessHelper.removeDebugCallback(wineDebugLogCallback);
             wineDebugLogCallback = null;
@@ -2082,6 +2203,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
 
         // Create our overall XEnvironment with various components
+        preloaderDialog.step(3, "Building environment…");
         environment = new XEnvironment(this, imageFs);
         environment.addComponent(
                 new SysVSharedMemoryComponent(
@@ -2116,7 +2238,26 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         // Pass final envVars to the launcher
         guestProgramLauncherComponent.setEnvVars(envVars);
-        guestProgramLauncherComponent.setTerminationCallback((status) -> exit());
+        final boolean launchLoggingEnabled = isLaunchLoggingEnabled();
+        guestProgramLauncherComponent.setTerminationCallback((status) -> {
+            // The guest process died. If it never rendered a window, this is a launch failure — show
+            // the failure card and let the user read it (Close finishes). If it had already rendered,
+            // this is a normal exit / in-game crash: keep the existing exit-on-termination behaviour.
+            if (!winStarted) {
+                final String logDir = com.winlator.star.core.LogLocation.resolveLogDir(this).getAbsolutePath();
+                runOnUiThread(() -> {
+                    cancelLaunchTimers();
+                    preloaderDialog.fail(
+                            "Launching Windows",
+                            "The game exited before rendering",
+                            "exit code " + status,
+                            logDir,
+                            launchLoggingEnabled);
+                });
+            } else {
+                exit();
+            }
+        });
 
         // Add the launcher to our environment
         environment.addComponent(guestProgramLauncherComponent);
@@ -2129,7 +2270,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
 
         // Start all environment components (XServer, Audio, Wine, etc.)
+        preloaderDialog.step(4, "Launching Windows…");
         environment.startEnvironmentComponents();
+
+        // Guest is now booting — the tail is unmeasurable, so switch to the indeterminate spinner and
+        // arm the not-frozen reassurance timers (cancelled on first render or termination).
+        String preloaderGameName = (shortcut != null) ? shortcut.name : container.getName();
+        preloaderDialog.enterGuest("Waiting for " + preloaderGameName + " to render…");
+        runOnUiThread(this::startLaunchTimers);
 
         // Start the WinHandler (writes events to the file)
         winHandler.start();
@@ -2185,7 +2333,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (useVulkan && renderer instanceof com.winlator.star.renderer.vulkan.VulkanRenderer) {
             com.winlator.star.renderer.vulkan.VulkanRenderer vkRenderer =
                 (com.winlator.star.renderer.vulkan.VulkanRenderer) renderer;
-            String pm = container.getRendererPresentMode();
+            String pm = resolvedRendererPresentMode();
             int pmInt = "immediate".equals(pm) ? 0 : "mailbox".equals(pm) ? 1 : 2; // VkPresentModeKHR
             vkRenderer.setVkPresentMode(pmInt);
             // Scaling mode owns the base sampler filter on Vulkan (modes 1/2 call setFilterMode
@@ -2223,18 +2371,27 @@ public class XServerDisplayActivity extends AppCompatActivity {
             XServerDialogState.INSTANCE.setVkToon(false);
             XServerDialogState.INSTANCE.setVkCrt(false);
             XServerDialogState.INSTANCE.setVkNtsc(false);
-            vkRenderer.setSwapRB(container.getRendererSwapRB());
+            vkRenderer.setSwapRB(resolvedRendererSwapRB());
             // Must run before the surface is created so onSurfaceCreated sets up the scanout path.
             // A restored preset scaling mode (>=3, e.g. FSR) lives in the compositor pass that native
             // direct-scanout bypasses, so it wins over the container's native flag on relaunch —
             // mirroring the in-game mutual exclusion (picking a preset turns Native Rendering off).
-            boolean nativeOn = container.isRendererNative() && initialUpscaler < 3;
+            // "Colors: RGBA" (R/B swap — buffers are BGRA by default) can't be done on a composited AHB
+            // in native mode (setColorTransform is blocked on Android 12+), so a container that needs the
+            // swap runs through the normal compositor instead — where nativeSetSwapRB does it in-shader.
+            // BGRA (no swap, the native DXVK buffer order) stays native.
+            boolean nativeOn = resolvedRendererNative() && initialUpscaler < 3 && !resolvedRendererSwapRB();
             vkRenderer.setInitialNativeMode(nativeOn);
             XServerDrawerState.INSTANCE.setNativeRenderingEnabled(nativeOn); // keep the toggle in sync
+            // Native is the supported path on Vulkan — EXCEPT when Colors=RGBA (R/B swap), which native
+            // can't do (setColorTransform blocked on 12+). Such a container runs on the compositor, so
+            // hide the in-game Native toggle too; otherwise forcing it on would re-break the colors.
+            XServerDrawerState.INSTANCE.setNativeRenderingSupported(!resolvedRendererSwapRB());
             // Tick the perf HUD per present (the Vulkan AHB path bypasses copyArea, which normally
             // drives it). Gate on the FPS window so we only count game frames.
             vkRenderer.setHudFrameTick(wid -> {
                 if (wid == frameRatingWindowId) {
+                    fpsCounter.tick();
                     if (frameRating != null) frameRating.update();
                     if (frameRatingHorizontal != null) frameRatingHorizontal.update();
                     if (perfHud != null) perfHud.update();
@@ -2259,13 +2416,20 @@ public class XServerDisplayActivity extends AppCompatActivity {
             glr.setSwapRB(container.getRendererSwapRB());
             // A restored preset (>=3) lives in the composer pass native bypasses -> native off (parity
             // with the in-game preset<->native mutual exclusion), same as the Vulkan seed above.
-            boolean glNativeOn = container.isRendererNative() && glInitialMode < 3;
+            // GL Native Rendering (direct scanout) is DISABLED on the OpenGL renderer for now: the
+            // bespoke GL scanout path has an unresolved brightness/colorspace issue (the frame-pacing
+            // half is already fixed on the held branch fix/gl-native-frame-pacing). Vulkan is the
+            // supported native path. Force off so a GL container never launches into the broken mode,
+            // regardless of the saved container native flag. (was: container.isRendererNative() && glInitialMode < 3)
+            boolean glNativeOn = false;
             glr.setInitialNativeMode(glNativeOn);
             XServerDrawerState.INSTANCE.setNativeRenderingEnabled(glNativeOn); // keep the toggle in sync
+            XServerDrawerState.INSTANCE.setNativeRenderingSupported(false);    // hide the drawer toggle on GL
             // GL native (FLIP/scanout) bypasses both onDrawFrame and copyArea, so drive the perf HUD
             // per present here (same as the Vulkan/ASR ticks) — otherwise the HUD freezes in native mode.
             glr.setHudFrameTick(wid -> {
                 if (wid == frameRatingWindowId) {
+                    fpsCounter.tick();
                     if (frameRating != null) frameRating.update();
                     if (frameRatingHorizontal != null) frameRatingHorizontal.update();
                     if (perfHud != null) perfHud.update();
@@ -2284,6 +2448,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             asr.setSfCompatMode(resolvedSfCompatMode());
             asr.setHudFrameTick(wid -> {
                 if (wid == frameRatingWindowId) {
+                    fpsCounter.tick();
                     if (frameRating != null) frameRating.update();
                     if (frameRatingHorizontal != null) frameRatingHorizontal.update();
                     if (perfHud != null) perfHud.update();
@@ -2338,7 +2503,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             String fpsConfigString = container.getFPSCounterConfig();
             com.winlator.star.core.KeyValueSet fpsConfig = new com.winlator.star.core.KeyValueSet(fpsConfigString);
             fpsHudHorizontal = fpsConfig.get("hudMode", "vertical").equals("horizontal");
-            boolean gameHubHud = fpsConfig.get("hudStyle", "classic").equals("gamehub");
+            String hudStyle = fpsConfig.get("hudStyle", "classic");
 
             String resolvedR = resolvedRenderer();
             String rendererMode = "vulkan".equals(resolvedR) ? "Vulkan"
@@ -2347,9 +2512,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
             hudRendererLabel = rendererMode + " | " + dxName;
             hudEngineShort = dxName;
 
-            // Build whichever HUD the container selected. The other style is created on demand
-            // if the user swaps hudStyle in the in-game drawer (see buildPerfHud/buildClassicHud).
-            if (gameHubHud) buildPerfHud(fpsConfigString);
+            // Build whichever HUD the container selected. The other styles are created on demand
+            // if the user swaps hudStyle in the in-game drawer (see buildPerfHud/buildClassicHud/
+            // buildGameNativeHud).
+            if (hudStyle.equals("gamehub")) buildPerfHud(fpsConfigString);
+            else if (hudStyle.equals("gamenative")) buildGameNativeHud(fpsConfigString);
             else buildClassicHud(fpsConfigString);
 
             // The label above is the configured D3D9/10/11 wrapper; probe what the game actually
@@ -2502,6 +2669,16 @@ public class XServerDisplayActivity extends AppCompatActivity {
             ((GLRenderer) r).setNativeMode(false); // GL direct scanout bypasses the EffectComposer too
         XServerDrawerState.INSTANCE.setNativeRenderingEnabled(false); // flips the toggle UI off
         showToast(this, "Native Rendering off — needed for post-processing");
+    }
+
+    /** Count mapped, real-sized top-level application windows. Native Rendering (direct scanout)
+     *  is a single-fullscreen-window mode — see the onNativeRenderingToggle warning. */
+    private int countMappedAppWindows() {
+        if (xServer == null || xServer.windowManager == null) return 0;
+        int n = 0;
+        for (com.winlator.star.xserver.Window w : xServer.windowManager.rootWindow.getChildren())
+            if (w.isApplicationWindow()) n++;
+        return n;
     }
 
     /** Direction B: Native Rendering was enabled, so reset every Vulkan preset to neutral so the
@@ -3806,6 +3983,29 @@ return true;
                 : container.getRendererSfCompatMode();
     }
 
+    // Per-game overrides for the Vulkan-settings block (native / Colors=swapRB / present mode). Same
+    // discipline as resolvedRenderer()/resolvedSfCompatMode(): shortcut extra wins, container is the
+    // fallback, read-only (never written back). Lets a shortcut set e.g. Colors=RGBA without touching
+    // the container or its other games.
+    private boolean resolvedRendererNative() {
+        if (container == null) return false;
+        return shortcut != null
+                ? shortcut.getExtra("native", container.isRendererNative() ? "true" : "false").equals("true")
+                : container.isRendererNative();
+    }
+    private boolean resolvedRendererSwapRB() {
+        if (container == null) return false;
+        return shortcut != null
+                ? shortcut.getExtra("swapRB", container.getRendererSwapRB() ? "true" : "false").equals("true")
+                : container.getRendererSwapRB();
+    }
+    private String resolvedRendererPresentMode() {
+        if (container == null) return "fifo";
+        return shortcut != null
+                ? shortcut.getExtra("presentMode", container.getRendererPresentMode())
+                : container.getRendererPresentMode();
+    }
+
     private String resolvedFrameGenEngine() {
         return shortcut != null ? shortcut.getExtra("frameGenEngine", container.getFrameGenEngine()) : container.getFrameGenEngine();
     }
@@ -4137,6 +4337,7 @@ return true;
     private void buildPerfHud(String fpsConfigString) {
         FrameLayout rootView = findViewById(R.id.FLXServerDisplay);
         perfHud = new PerfHudView(this);
+        perfHud.setFpsCounter(fpsCounter);
         FrameLayout.LayoutParams plp = new FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT,
             ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -4166,6 +4367,7 @@ return true;
         // Create BOTH orientations up front so the user can flip between them in-game with a tap;
         // only the active one is ever made visible.
         frameRatingHorizontal = new FrameRatingHorizontal(this);
+        frameRatingHorizontal.setFpsCounter(fpsCounter);
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT,
             ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -4183,6 +4385,7 @@ return true;
         rootView.addView(frameRatingHorizontal);
 
         frameRating = new FrameRating(this, graphicsDriverConfig);
+        frameRating.setFpsCounter(fpsCounter);
         // Explicit WRAP_CONTENT params: without them, FrameLayout's default params are
         // MATCH_PARENT x MATCH_PARENT, so the vertical HUD's view (and thus its tap-to-toggle
         // hit area) covered the WHOLE screen — a tap far from the overlay flipped orientation.
@@ -4214,6 +4417,40 @@ return true;
         }
     }
 
+    /** Build the GameNative-style HUD and add it to the overlay. Safe to call live (UI thread). */
+    private void buildGameNativeHud(String fpsConfigString) {
+        FrameLayout rootView = findViewById(R.id.FLXServerDisplay);
+        gameNativeHud = new com.winlator.star.widget.perfhud.PerformanceHudView(this);
+        gameNativeHud.setFpsCounter(fpsCounter);
+        FrameLayout.LayoutParams plp = new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            android.view.Gravity.TOP | android.view.Gravity.START
+        );
+        plp.topMargin = 10;
+        plp.leftMargin = 10;
+        gameNativeHud.setLayoutParams(plp);
+        gameNativeHud.applyConfig(fpsConfigString);
+        gameNativeHud.setOnTapListener(this::toggleFpsHudOrientation);
+        if (hudEngineShort != null) gameNativeHud.setEngineLabel(hudEngineShort);
+        if (hudGpuName != null) gameNativeHud.setGpuModel(hudGpuName);
+        gameNativeHud.setVertical(!fpsHudHorizontal);
+        gameNativeHud.setOnMovedListener((x, y) -> persistHudPosition("hudPosGN", x, y));
+        restoreHudPosition(gameNativeHud, "hudPosGN");
+        // Visible immediately if the game window is already mapped (live swap); otherwise it is
+        // revealed by changeFrameRatingVisibility once the window appears (launch path).
+        gameNativeHud.setVisibility(frameRatingWindowId != -1 ? View.VISIBLE : View.GONE);
+        rootView.addView(gameNativeHud);
+    }
+
+    private void removeGameNativeHud() {
+        if (gameNativeHud != null) {
+            FrameLayout rootView = findViewById(R.id.FLXServerDisplay);
+            rootView.removeView(gameNativeHud);
+            gameNativeHud = null;
+        }
+    }
+
     private void removeClassicHud() {
         FrameLayout rootView = findViewById(R.id.FLXServerDisplay);
         if (frameRating != null) { rootView.removeView(frameRating); frameRating = null; }
@@ -4221,11 +4458,14 @@ return true;
     }
 
     private void toggleFpsHudOrientation() {
-        if (perfHud == null && frameRating == null && frameRatingHorizontal == null) return;
+        if (perfHud == null && gameNativeHud == null && frameRating == null && frameRatingHorizontal == null) return;
         fpsHudHorizontal = !fpsHudHorizontal;
         if (perfHud != null) {
             // One view draws both layouts; vertical = !horizontal.
             perfHud.setVertical(!fpsHudHorizontal);
+        } else if (gameNativeHud != null) {
+            // One view draws both layouts; vertical = !horizontal.
+            gameNativeHud.setVertical(!fpsHudHorizontal);
         } else {
             boolean wasShown =
                 (frameRatingHorizontal != null && frameRatingHorizontal.getVisibility() == View.VISIBLE)
@@ -4250,9 +4490,10 @@ return true;
     }
 
     private void changeFrameRatingVisibility(Window window, Property property) {
-        if (perfHud == null && frameRating == null && frameRatingHorizontal == null) return;
+        if (perfHud == null && gameNativeHud == null && frameRating == null && frameRatingHorizontal == null) return;
 
         if (property != null) {
+            if (property.nameAsString().contains("_MESA_DRV")) mesaDrvWindowIds.add(window.id);
             if (frameRatingWindowId == -1 && property.nameAsString().contains("_MESA_DRV")) {
                 frameRatingWindowId = window.id;
                 Log.d("XServerDisplayActivity", "Showing hud for Window " + window.getName());
@@ -4260,6 +4501,7 @@ return true;
                 runOnUiThread(() -> {
                     // Show only the active orientation (both widgets exist for tap-toggle).
                     if (perfHud != null) perfHud.setVisibility(View.VISIBLE);
+                    if (gameNativeHud != null) gameNativeHud.setVisibility(View.VISIBLE);
                     if (fpsHudHorizontal) {
                         if (frameRatingHorizontal != null) frameRatingHorizontal.setVisibility(View.VISIBLE);
                     } else {
@@ -4272,27 +4514,45 @@ return true;
                 if (perfHud != null) perfHud.update();
             }
             if (property.nameAsString().contains("_MESA_DRV_GPU_NAME")) {
-                hudGpuName = property.toString();
+                // Reduce the raw renderer string (e.g. "zink Vulkan 1.4(Wrapper(Adreno (TM) 750)
+                // (MESA_TURNIP))") to just the chip ("Adreno 750") for the HUD GPU-model row.
+                hudGpuName = com.winlator.star.core.GPUInformation.extractModelName(property.toString());
                 runOnUiThread(() -> {
                     if (frameRating != null) frameRating.setGpuName(hudGpuName);
                     if (perfHud != null) perfHud.setGpuModel(hudGpuName);
+                    if (gameNativeHud != null) gameNativeHud.setGpuModel(hudGpuName);
                 });
             }
         }
-        else if (frameRatingWindowId != -1) {
-            frameRatingWindowId = -1;
-            Log.d("XServerDisplayActivity", "Hiding hud for Window " + window.getName());
-            runOnUiThread(() -> {
-                if (frameRating != null) {
-                    frameRating.setVisibility(View.GONE);
-                    frameRating.reset();
+        else {
+            mesaDrvWindowIds.remove(window.id);
+            // Only react when the HUD's OWN bound window unmapped — an unrelated window unmapping must
+            // not hide the HUD. And because games (Dirt 3 / Dirt Showdown) open an intro window then
+            // swap to the real render window, re-bind to another still-mapped _MESA_DRV window before
+            // giving up — otherwise the HUD vanishes permanently when the intro window closes.
+            if (frameRatingWindowId != -1 && window.id == frameRatingWindowId) {
+                Integer next = mesaDrvWindowIds.isEmpty() ? null : mesaDrvWindowIds.iterator().next();
+                if (next != null) {
+                    frameRatingWindowId = next;   // keep the HUD visible, now tracking the new window
+                    Log.d("XServerDisplayActivity", "Re-binding hud to Window id " + next);
+                } else {
+                    frameRatingWindowId = -1;
+                    Log.d("XServerDisplayActivity", "Hiding hud for Window " + window.getName());
+                    fpsCounter.reset();
+                    runOnUiThread(() -> {
+                        if (frameRating != null) {
+                            frameRating.setVisibility(View.GONE);
+                            frameRating.reset();
+                        }
+                        if (frameRatingHorizontal != null) {
+                            frameRatingHorizontal.setVisibility(View.GONE);
+                            frameRatingHorizontal.reset();
+                        }
+                        if (perfHud != null) perfHud.setVisibility(View.GONE);
+                        if (gameNativeHud != null) gameNativeHud.setVisibility(View.GONE);
+                    });
                 }
-                if (frameRatingHorizontal != null) {
-                    frameRatingHorizontal.setVisibility(View.GONE);
-                    frameRatingHorizontal.reset();
-                }
-                if (perfHud != null) perfHud.setVisibility(View.GONE);
-            });
+            }
         }
     }
 

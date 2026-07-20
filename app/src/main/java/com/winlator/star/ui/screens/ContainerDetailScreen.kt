@@ -12,6 +12,8 @@ import android.view.View
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -29,9 +31,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
@@ -67,6 +71,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import java.util.concurrent.Executors
 import com.winlator.star.container.Container
+import com.winlator.star.widget.perfhud.parseHudOutline
 import com.winlator.star.widget.ColorPickerView
 import com.winlator.star.widget.CPUListView
 import com.winlator.star.widget.EnvVarsView
@@ -334,7 +339,7 @@ internal fun VulkanSettingsDialog(
     // (old config) resolves to true. ASR-only; independent of swapRB (Vulkan/GL).
     var sfCompatMode by remember { mutableStateOf(cfg["sfCompatMode"] != "false") }
 
-    AlertDialog(
+    OutlinedAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.vulkan_settings)) },
         text = {
@@ -361,25 +366,21 @@ internal fun VulkanSettingsDialog(
                     stringResource(R.string.renderer_present_mode_immediate)
                 )
                 val selectedPresentIdx = presentModes.indexOf(presentMode).coerceAtLeast(0)
+                // Present mode is ignored under Native Rendering (direct scanout goes straight to
+                // SurfaceFlinger, bypassing the swapchain), so grey it out while native is on.
                 LabeledDropdown(
                     label = stringResource(R.string.renderer_present_mode),
                     options = presentModeLabels,
                     selectedOption = presentModeLabels[selectedPresentIdx],
-                    onSelect = { presentMode = presentModes[presentModeLabels.indexOf(it)] }
+                    onSelect = { presentMode = presentModes[presentModeLabels.indexOf(it)] },
+                    enabled = !nativeRender,
+                    modifier = if (nativeRender) Modifier.alpha(0.5f) else Modifier
                 )
 
-                val drivers = listOf("system", "turnip")
-                val driverLabels = listOf(
-                    stringResource(R.string.renderer_driver_system),
-                    stringResource(R.string.renderer_driver_turnip)
-                )
-                val selectedDriverIdx = drivers.indexOf(driverId).coerceAtLeast(0)
-                LabeledDropdown(
-                    label = stringResource(R.string.renderer_driver_id),
-                    options = driverLabels,
-                    selectedOption = driverLabels[selectedDriverIdx],
-                    onSelect = { driverId = drivers[driverLabels.indexOf(it)] }
-                )
+                // NOTE: the "Renderer Driver" (System/Turnip) dropdown was removed — it was vestigial:
+                // its value (driverId) was stored + round-tripped but NEVER read at runtime (the actual
+                // driver is the top-level "Graphics Driver" setting). The `driverId` config field is
+                // still preserved below so existing containers round-trip byte-identically.
 
                 // Filter mode (Nearest/Linear) is no longer edited here: the in-game
                 // drawer's "Scaling mode" picker is the single source of truth for
@@ -388,10 +389,18 @@ internal fun VulkanSettingsDialog(
                 // still seeds the drawer's initial scaling mode at launch
                 // (XServerDisplayActivity: getRendererFilterMode -> initialUpscaler).
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(stringResource(R.string.renderer_swap_rb), Modifier.weight(1f))
-                    Switch(checked = swapRB, onCheckedChange = { swapRB = it })
-                }
+                // Colors = the game buffer's channel order. Device-confirmed: DXVK's scanout buffer is
+                // BGRA_8888 (AHardwareBuffer format 5), so BGRA (default) presents as-is; RGBA swaps R/B
+                // for the rare title whose buffer is actually RGBA-ordered (red/blue reversed on default).
+                // Backed by the same `swapRB` boolean (BGRA=false, RGBA=true); RGBA (swap) routes the
+                // container through the compositor (native scanout can't swap channels).
+                val colorOrders = listOf("BGRA", "RGBA")
+                LabeledDropdown(
+                    label = stringResource(R.string.renderer_colors),
+                    options = colorOrders,
+                    selectedOption = if (swapRB) "RGBA" else "BGRA",
+                    onSelect = { swapRB = (it == "RGBA") }
+                )
                 // NOTE: "Correct SurfaceFlinger colours" (sfCompatMode) is NOT shown here — this
                 // dialog only opens for the Vulkan renderer, and that toggle only affects
                 // SurfaceFlinger. It's surfaced inline under the Renderer dropdown instead (see
@@ -963,6 +972,26 @@ private fun WineConfigTab(
                 onSelect = { opt -> viewModel.selectedMouseWarpIndex = viewModel.mouseWarpEntries.indexOf(opt).coerceAtLeast(0) }
             )
         }
+
+        // System section — "Run as administrator" (default ON) toggles UAC in the prefix. Backed by
+        // EnableLUA in .wine/system.reg (source of truth): the VM reads it on load and writes it on
+        // save/create (mirrors the DirectInput mouse-warp registry idiom above).
+        SectionBox(title = "System") {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Run as administrator")
+                    Text(
+                        "Disables UAC so everything runs elevated (helps installers/tools that require admin)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = viewModel.runAsAdmin,
+                    onCheckedChange = { viewModel.runAsAdmin = it }
+                )
+            }
+        }
     }
 }
 
@@ -1374,7 +1403,7 @@ internal fun AddEnvVarComposable(
 
     val knownNames = remember { EnvVarsView.knownEnvVars.map { it[0] } }
 
-    AlertDialog(
+    OutlinedAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.new_environment_variable)) },
         text = {
@@ -1657,7 +1686,7 @@ internal fun GraphicsDriverConfigDialog(
     val bcnTypeEntries      = remember { context.resources.getStringArray(R.array.bcn_emulation_type_entries).toList() }
     val bcnCacheEntries     = remember { context.resources.getStringArray(R.array.bcn_emulation_cache_entries).toList() }
 
-    AlertDialog(
+    OutlinedAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.graphics_driver_configuration)) },
         text = {
@@ -1836,7 +1865,7 @@ internal fun ExtensionPickerDialog(
         mutableStateOf(extensions.associateWith { !blacklisted.contains(it) })
     }
 
-    AlertDialog(
+    OutlinedAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.graphics_driver_available_extensions)) },
         text = {
@@ -1915,9 +1944,21 @@ internal fun DxvkConfigDialog(
 
     var selectedVkd3d by remember { mutableStateOf(config.get("vkd3dVersion").ifEmpty { "None" }) }
 
-    var selectedDxvk by remember(allDxvkVersions.value) {
+    // VKD3D-Proton needs DXVK 2.x's DXGI; DXVK 1.x can't back it, so the DX12 test fails to start.
+    // Filter the DXVK list to 2.x+ (keeping unparseable names, e.g. VEGAS) when VKD3D is enabled —
+    // matches the shortcut-level dialog, which already enforces this. Fixes #113.
+    val filteredDxvk = remember(selectedVkd3d, allDxvkVersions.value) {
+        if (selectedVkd3d != "None") {
+            allDxvkVersions.value.filter { v ->
+                val major = DXVKConfigDialog.tryGetMajor(v)
+                major == null || major >= 2
+            }
+        } else allDxvkVersions.value
+    }
+
+    var selectedDxvk by remember(filteredDxvk) {
         val stored = config.get("version")
-        mutableStateOf(allDxvkVersions.value.firstOrNull { it == stored } ?: allDxvkVersions.value.firstOrNull() ?: stored)
+        mutableStateOf(filteredDxvk.firstOrNull { it == stored } ?: filteredDxvk.firstOrNull() ?: stored)
     }
 
     val dxvkType = remember(selectedDxvk) { DXVKConfigDialog.getDXVKType(selectedDxvk) }
@@ -1970,7 +2011,7 @@ internal fun DxvkConfigDialog(
         }
     }
 
-    AlertDialog(
+    OutlinedAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (isVegas) "VEGAS ${stringResource(R.string.configuration)}" else "DXVK ${stringResource(R.string.configuration)}") },
         text = {
@@ -1986,7 +2027,7 @@ internal fun DxvkConfigDialog(
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     LabeledDropdown(
                         if (isVegas) "Vegas Selector" else stringResource(R.string.dxvk_version),
-                        allDxvkVersions.value, selectedDxvk, { selectedDxvk = it },
+                        filteredDxvk, selectedDxvk, { selectedDxvk = it },
                         modifier = Modifier.weight(1f)
                     )
                     ContentInstallGear(
@@ -2127,7 +2168,7 @@ internal fun WineD3DConfigDialog(
     var orm       by remember { mutableStateOf(config.get("OffscreenRenderingMode").ifEmpty { "fbo" }) }
     var renderer  by remember { mutableStateOf(config.get("renderer").ifEmpty { "gl" }) }
 
-    AlertDialog(
+    OutlinedAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("WineD3D ${stringResource(R.string.configuration)}") },
         text = {
@@ -2187,7 +2228,12 @@ internal fun FpsCounterConfigDialog(
 
     // Orientation (vertical/horizontal) is toggled live by tapping the HUD in-game; preserve it.
     val hudMode = remember { cfg.getOrDefault("hudMode", "vertical") }
-    var gameHub by remember { mutableStateOf(cfg.getOrDefault("hudStyle", "classic") == "gamehub") }
+    // 3-way HUD style: classic | gamehub | gamenative.
+    val styles = listOf("classic", "gamehub", "gamenative")
+    var hudStyle by remember { mutableStateOf(cfg.getOrDefault("hudStyle", "classic")) }
+    val gameHub = hudStyle == "gamehub"
+    val gameNative = hudStyle == "gamenative"
+    val rich = gameHub || gameNative   // both styles share opacity + FPS graph + GPU model + color/outline
 
     // Unified metric toggles (emitted under both classic + gamehub key names so either HUD honors them).
     var showFPS      by remember { mutableStateOf(bool("showFPS", "showFPS", "1")) }
@@ -2200,21 +2246,29 @@ internal fun FpsCounterConfigDialog(
     var showEngine   by remember { mutableStateOf(bool("showEngine", "showRenderer", "1")) }
     var showGpuModel by remember { mutableStateOf(bool("showGpuModel", "showGpuModel", "0")) }
     var dualBattery  by remember { mutableStateOf(bool("hudDualBattery", "hudDualBattery", "0")) }
+    // GameNative-only extra metrics (absent = off is the intended default).
+    var showGpuTemp  by remember { mutableStateOf(bool("showGpuTemp", "showGpuTemp", "0")) }
+    var showBattery  by remember { mutableStateOf(bool("showBattery", "showBattery", "0")) }
+    var showRuntime  by remember { mutableStateOf(bool("showRuntime", "showRuntime", "0")) }
+    var showClock    by remember { mutableStateOf(bool("showClock", "showClock", "0")) }
+    var showCpuGraph by remember { mutableStateOf(bool("showCPUGraph", "showCPUGraph", "0")) }
+    var showGpuGraph by remember { mutableStateOf(bool("showGPUGraph", "showGPUGraph", "0")) }
 
-    var hudScale by remember { mutableStateOf(cfg.getOrDefault("hudScale", "92").toIntOrNull() ?: 92) }
+    var hudScale by remember { mutableStateOf(cfg.getOrDefault("hudScale", Container.DEFAULT_HUD_SCALE.toString()).toIntOrNull() ?: Container.DEFAULT_HUD_SCALE) }
     var hudOpacity by remember { mutableStateOf(cfg.getOrDefault("hudOpacity", "80").toIntOrNull() ?: 80) }
     var hudTransparency by remember { mutableStateOf(cfg.getOrDefault("hudTransparency", "0").toIntOrNull() ?: 0) }
 
     val skins = listOf("classic", "neon", "mono")
     val colors = listOf("soft", "mid", "vivid")
-    val outlines = listOf("off", "soft", "strong")
     var skin by remember { mutableStateOf(cfg.getOrDefault("hudSkin", "classic")) }
     var color by remember { mutableStateOf(cfg.getOrDefault("hudColor", "mid")) }
-    var outline by remember { mutableStateOf(cfg.getOrDefault("hudOutline", "soft")) }
+    // hudOutline is a 0..100 intensity (legacy off/soft/strong strings map via parseHudOutline).
+    var outlineValue by remember { mutableStateOf(parseHudOutline(cfg.getOrDefault("hudOutline", "40"))) }
+    var outlineAccent by remember { mutableStateOf(cfg.getOrDefault("hudOutlineAccent", "1") == "1") }
 
     fun i(v: Boolean) = if (v) "1" else "0"
     fun buildConfig(): String = listOf(
-        "hudStyle=${if (gameHub) "gamehub" else "classic"}",
+        "hudStyle=$hudStyle",
         "hudMode=$hudMode",
         "showFPS=${i(showFPS)}",
         "showFPSGraph=${i(showGraph)}",
@@ -2229,15 +2283,22 @@ internal fun FpsCounterConfigDialog(
         "showRenderer=${i(showEngine)}",
         "showGpuModel=${i(showGpuModel)}",
         "hudDualBattery=${i(dualBattery)}",
+        "showGpuTemp=${i(showGpuTemp)}",
+        "showBattery=${i(showBattery)}",
+        "showRuntime=${i(showRuntime)}",
+        "showClock=${i(showClock)}",
+        "showCPUGraph=${i(showCpuGraph)}",
+        "showGPUGraph=${i(showGpuGraph)}",
         "hudSkin=$skin",
         "hudColor=$color",
-        "hudOutline=$outline",
+        "hudOutline=$outlineValue",
+        "hudOutlineAccent=${if (outlineAccent) 1 else 0}",
         "hudScale=$hudScale",
         "hudOpacity=$hudOpacity",
         "hudTransparency=$hudTransparency"
     ).joinToString(",")
 
-    AlertDialog(
+    OutlinedAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("FPS Counter Settings") },
         text = {
@@ -2246,14 +2307,17 @@ internal fun FpsCounterConfigDialog(
                     .heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.7f).dp)
                     .verticalScroll(rememberScrollState())
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Switch(checked = gameHub, onCheckedChange = { gameHub = it })
-                    Spacer(Modifier.width(8.dp))
-                    Text("GameHub-style HUD", modifier = Modifier.weight(1f))
-                }
+                HudThreeStop(
+                    "HUD style",
+                    listOf("Classic", "GameHub", "GameNative"),
+                    styles.indexOf(hudStyle).coerceAtLeast(0)
+                ) { hudStyle = styles[it] }
                 Text(
-                    if (gameHub) "Rich overlay: skins, colored fields, live FPS graph."
-                    else "Classic Bannerlator overlay.",
+                    when (hudStyle) {
+                        "gamehub" -> "Rich overlay: skins, colored fields, live FPS graph."
+                        "gamenative" -> "GameNative-style overlay: compact pill or stacked list with live graphs."
+                        else -> "Classic Bannerlator overlay."
+                    },
                     style = MaterialTheme.typography.bodySmall
                 )
                 Spacer(Modifier.height(4.dp))
@@ -2263,18 +2327,34 @@ internal fun FpsCounterConfigDialog(
                 )
                 Spacer(Modifier.height(12.dp))
 
-                HudToggleRow("Frame rate (FPS)", showFPS) { showFPS = it }
-                if (gameHub) HudToggleRow("FPS graph", showGraph) { showGraph = it }
-                HudToggleRow("CPU", showCPU) { showCPU = it }
-                HudToggleRow("GPU", showGPU) { showGPU = it }
-                HudToggleRow("Memory (RAM)", showRAM) { showRAM = it }
-                HudToggleRow("Power", showPower) { showPower = it }
-                HudToggleRow("Temperature", showTemp) { showTemp = it }
-                HudToggleRow("Engine", showEngine) { showEngine = it }
-                if (gameHub) {
-                    HudToggleRow("GPU model", showGpuModel) { showGpuModel = it }
-                    HudToggleRow("Dual-battery power fix", dualBattery) { dualBattery = it }
+                // Compact multi-select metric chips (filled = on) in a wrap layout,
+                // so ~13 metrics fit in a few rows instead of stacked Switch rows.
+                Text("Metrics", style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.height(4.dp))
+                // Build the currently-VISIBLE chips first (respecting per-style gating), then chunk
+                // into an aligned 3-wide grid — so hidden chips never leave holes. Each stays an
+                // independent toggle writing the same state as before.
+                val metricChips = buildList<Triple<String, Boolean, () -> Unit>> {
+                    add(Triple("FPS", showFPS) { showFPS = !showFPS })
+                    if (rich) add(Triple("FPS graph", showGraph) { showGraph = !showGraph })
+                    add(Triple("CPU", showCPU) { showCPU = !showCPU })
+                    if (gameNative) add(Triple("CPU graph", showCpuGraph) { showCpuGraph = !showCpuGraph })
+                    add(Triple("GPU", showGPU) { showGPU = !showGPU })
+                    if (gameNative) add(Triple("GPU graph", showGpuGraph) { showGpuGraph = !showGpuGraph })
+                    add(Triple("RAM", showRAM) { showRAM = !showRAM })
+                    add(Triple("Power", showPower) { showPower = !showPower })
+                    add(Triple("Temp", showTemp) { showTemp = !showTemp })
+                    if (gameNative) {
+                        add(Triple("GPU temp", showGpuTemp) { showGpuTemp = !showGpuTemp })
+                        add(Triple("Battery", showBattery) { showBattery = !showBattery })
+                        add(Triple("Runtime", showRuntime) { showRuntime = !showRuntime })
+                        add(Triple("Clock", showClock) { showClock = !showClock })
+                    }
+                    add(Triple("Engine", showEngine) { showEngine = !showEngine })
+                    if (rich) add(Triple("GPU model", showGpuModel) { showGpuModel = !showGpuModel })
+                    if (gameHub) add(Triple("Dual battery", dualBattery) { dualBattery = !dualBattery })
                 }
+                ModeChipGrid(metricChips, perRow = 3)
 
                 Spacer(Modifier.height(12.dp))
                 Text("HUD Scale: $hudScale%", style = MaterialTheme.typography.bodySmall)
@@ -2284,7 +2364,7 @@ internal fun FpsCounterConfigDialog(
                     valueRange = 50f..150f, steps = 99
                 )
 
-                if (gameHub) {
+                if (rich) {
                     Spacer(Modifier.height(4.dp))
                     Text("HUD Opacity: $hudOpacity%", style = MaterialTheme.typography.bodySmall)
                     Slider(
@@ -2293,9 +2373,18 @@ internal fun FpsCounterConfigDialog(
                         valueRange = 0f..100f, steps = 99
                     )
                     Spacer(Modifier.height(8.dp))
-                    HudThreeStop("HUD skin", listOf("Classic", "Neon", "Mono"), skins.indexOf(skin)) { skin = skins[it] }
+                    if (gameHub) {
+                        HudThreeStop("HUD skin", listOf("Classic", "Neon", "Mono"), skins.indexOf(skin)) { skin = skins[it] }
+                    }
                     HudThreeStop("HUD color", listOf("Soft", "Mid", "Vivid"), colors.indexOf(color)) { color = colors[it] }
-                    HudThreeStop("HUD outline", listOf("Off", "Soft", "Strong"), outlines.indexOf(outline)) { outline = outlines[it] }
+                    Spacer(Modifier.height(8.dp))
+                    Text("HUD outline: $outlineValue", style = MaterialTheme.typography.bodySmall)
+                    Slider(
+                        value = outlineValue.toFloat(),
+                        onValueChange = { outlineValue = it.toInt() },
+                        valueRange = 0f..100f, steps = 99
+                    )
+                    HudThreeStop("Outline color", listOf("Gray", "Accent"), if (outlineAccent) 1 else 0) { outlineAccent = it == 1 }
                 } else {
                     Spacer(Modifier.height(4.dp))
                     Text("HUD Transparency: $hudTransparency", style = MaterialTheme.typography.bodySmall)
@@ -2316,12 +2405,48 @@ internal fun FpsCounterConfigDialog(
     )
 }
 
+// Multi-select metric grid styled exactly like the in-game drawer's FullscreenModeButtons: each item
+// toggles independently, but shares the box style (accent fill + bold black text ON; black bg +
+// dimmed-accent 1dp border + accent medium text OFF) and the aligned equal-width grid (weight(1f),
+// short rows padded with Spacer so widths stay equal). Callers build the VISIBLE list first, then
+// this chunks per row so per-style gating never leaves holes. There's no LocalAccentDim in this
+// screen, so we derive the dim border from a 40%-alpha primary — reads the same as accentDim.
 @Composable
-private fun HudToggleRow(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
-        Spacer(Modifier.width(8.dp))
-        Text(label, modifier = Modifier.weight(1f))
+private fun ModeChipGrid(items: List<Triple<String, Boolean, () -> Unit>>, perRow: Int) {
+    val accent = MaterialTheme.colorScheme.primary
+    val accentDim = accent.copy(alpha = 0.4f)
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        items.chunked(perRow).forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                row.forEach { (label, isOn, onTap) ->
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isOn) accent else Color.Black)
+                            .border(
+                                width = 1.dp,
+                                color = if (isOn) accent else accentDim,
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .clickable { onTap() }
+                            .padding(vertical = 9.dp)
+                    ) {
+                        Text(
+                            label,
+                            color = if (isOn) Color.Black else accent,
+                            fontSize = 12.sp,
+                            fontWeight = if (isOn) FontWeight.Bold else FontWeight.Medium
+                        )
+                    }
+                }
+                repeat(perRow - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
     }
 }
 

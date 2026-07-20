@@ -40,6 +40,8 @@ object ConfigExporter {
         // would be lost on import; carrying it verbatim makes every wrapper — incl. VEGAS — round-trip.
         "dxwrapper",
         "screenSize", "renderer", "renderScale", "sfCompatMode", "fullscreenMode", "frameGenEngine",
+        // Vulkan renderer per-game settings (added 2026-07): Native Rendering, Colors (swapRB), present mode.
+        "native", "swapRB", "presentMode",
         "fpsLimiterEnabled", "sharpnessEffect", "sharpnessLevel", "sharpnessDenoise", "reshadeLoadout",
         "reshadeMode", "reshadeParams", "reshadeEffect", "emulator", "box64Version", "box64Preset",
         "fexcorePreset", "cpuList", "startupSelection", "inputType", "exclusiveXInput", "disableXinput",

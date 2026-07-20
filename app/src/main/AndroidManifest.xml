@@ -60,7 +60,7 @@
         <!-- Main activity -->
         <activity
             android:name="com.winlator.star.MainActivity"
-            android:theme="@style/AppTheme.Dark"
+            android:theme="@style/Theme.Bannerlator.Splash"
             android:screenOrientation="sensor"
             android:exported="true"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|density|navigation">
