@@ -1911,6 +1911,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         XServerDialogState ds = XServerDialogState.INSTANCE;
         ds.setVibrationSlots(kSlots);
         ds.onVibrationSlotChanged = (slot, enabled) -> winHandler.setVibrationEnabledForSlot(slot, enabled);
+        ds.setVibrationMasterEnabled(winHandler.isVibrationMasterEnabled());
+        ds.onVibrationMasterChanged = (enabled) -> winHandler.setVibrationMasterEnabled(enabled);
         ds.show(XServerDialogState.ActiveDialog.VIBRATION);
     }
 
@@ -2888,6 +2890,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
             ds.setVibrationSlots(kSlots);
             ds.onVibrationSlotChanged = (slot, enabled) -> winHandler.setVibrationEnabledForSlot(slot, enabled);
+            ds.setVibrationMasterEnabled(winHandler.isVibrationMasterEnabled());
+            ds.onVibrationMasterChanged = (enabled) -> winHandler.setVibrationMasterEnabled(enabled);
         }
 
         // Task Manager actions (End Process / Bring to Front / New Task / Set Affinity) are

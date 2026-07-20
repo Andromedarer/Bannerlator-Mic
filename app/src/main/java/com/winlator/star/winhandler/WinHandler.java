@@ -77,6 +77,7 @@ public class WinHandler {
     private LocalServerSocket vibrationServer;
     private volatile boolean vibrationRunning = false;
     private boolean[] vibrationEnabledSlots = new boolean[MAX_CONTROLLERS]; // per-slot vibration toggle
+    private boolean vibrationMasterEnabled = true; // master switch — off = NO controller vibration at all
 
     private boolean xinputDisabled;
     private boolean xinputDisabledInitialized = false;
@@ -111,6 +112,8 @@ public class WinHandler {
         for (int i = 0; i < MAX_CONTROLLERS; i++) {
             vibrationEnabledSlots[i] = preferences.getBoolean("vibration_slot_" + i, true);
         }
+        // Master switch (default: enabled) — a single kill-switch for ALL controller vibration.
+        vibrationMasterEnabled = preferences.getBoolean("vibration_master_enabled", true);
     }
 
     private boolean sendPacket(int port) {
@@ -361,6 +364,11 @@ public class WinHandler {
     }
 
     private void triggerVibration(int strong, int weak, int durationMs, int slot) {
+        // Master kill-switch: off = no controller vibration at all, regardless of slot. This catches
+        // rumble on ANY slot (incl. an out-of-range/unmapped slot the per-slot gate below would miss).
+        if (!vibrationMasterEnabled)
+            return;
+
         // Check if vibration is enabled for this slot
         if (slot >= 0 && slot < MAX_CONTROLLERS && !vibrationEnabledSlots[slot])
             return;
@@ -425,6 +433,16 @@ public class WinHandler {
             vibrationEnabledSlots[slot] = enabled;
             preferences.edit().putBoolean("vibration_slot_" + slot, enabled).apply();
         }
+    }
+
+    /** Master controller-vibration switch (persisted globally). Off = ALL controller rumble suppressed. */
+    public boolean isVibrationMasterEnabled() {
+        return vibrationMasterEnabled;
+    }
+
+    public void setVibrationMasterEnabled(boolean enabled) {
+        vibrationMasterEnabled = enabled;
+        preferences.edit().putBoolean("vibration_master_enabled", enabled).apply();
     }
 
     public int getMaxControllers() {

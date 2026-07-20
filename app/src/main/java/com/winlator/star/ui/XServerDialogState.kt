@@ -255,6 +255,14 @@ object XServerDialogState {
     fun interface VibrationSlotCallback { fun invoke(slot: Int, enabled: Boolean) }
     @JvmField var onVibrationSlotChanged: VibrationSlotCallback? = null
 
+    // Master controller-vibration switch (off = all rumble suppressed; disables the per-slot rows).
+    private val _vibrationMasterEnabled = MutableStateFlow(true)
+    val vibrationMasterEnabled: StateFlow<Boolean> = _vibrationMasterEnabled
+    fun setVibrationMasterEnabled(enabled: Boolean) { _vibrationMasterEnabled.value = enabled }
+
+    fun interface VibrationMasterCallback { fun invoke(enabled: Boolean) }
+    @JvmField var onVibrationMasterChanged: VibrationMasterCallback? = null
+
     // -------------------------------------------------------------------------
     // Debug / Logs dialog
     // -------------------------------------------------------------------------
