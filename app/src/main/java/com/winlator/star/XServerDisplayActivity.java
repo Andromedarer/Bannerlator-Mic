@@ -2852,6 +2852,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         seedControlsColorState();
 
         ds.onInputControlsConfirm = (profileIndex, showTouchscreen, timeout, haptics) -> {
+            ds.setSelectedProfileIdx(profileIndex);
             inputControlsView.setShowTouchscreenControls(showTouchscreen);
             SharedPreferences.Editor editor = preferences.edit();
             editor.putBoolean("touchscreen_timeout_enabled", timeout);
@@ -3065,6 +3066,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         seedControlsColorState();
 
         ds.onInputControlsConfirm = (profileIndex, showTouchscreen, timeout, haptics) -> {
+            ds.setSelectedProfileIdx(profileIndex);
             inputControlsView.setShowTouchscreenControls(showTouchscreen);
             SharedPreferences.Editor editor = preferences.edit();
             editor.putBoolean("touchscreen_timeout_enabled", timeout);
