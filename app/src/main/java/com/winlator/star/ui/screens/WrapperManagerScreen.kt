@@ -490,8 +490,10 @@ fun WrapperManagerBody(modifier: Modifier = Modifier) {
  * border) but tighter: a ~40dp icon tile, a weight(1f) info column (title + dimmed subtitle), and a
  * trailing actions slot. Shared frame for slot cards, imported cards, and the import affordance.
  */
+// internal (not private): reused by WrapperCatalogPicker in the same package so a catalog card looks
+// and expands exactly like a manager card.
 @Composable
-private fun WrapperCardFrame(
+internal fun WrapperCardFrame(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     title: String,
     subtitle: String,
@@ -625,9 +627,10 @@ private fun importNeeds(caps: WrapperManager.WrapperCaps, gpu: GpuInfo, version:
     return out
 }
 
-/** A label · value line in the container-card idiom (dimmed label, on-surface value). */
+/** A label · value line in the container-card idiom (dimmed label, on-surface value). internal so the
+ *  catalog detail box (same package) reuses the exact row style. */
 @Composable
-private fun DetailRow(label: String, value: String) {
+internal fun DetailRow(label: String, value: String) {
     val cs = MaterialTheme.colorScheme
     Row(modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp)) {
         Text(

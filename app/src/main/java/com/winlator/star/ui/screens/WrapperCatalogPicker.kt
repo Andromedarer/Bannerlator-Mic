@@ -38,6 +38,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -181,7 +182,14 @@ fun WrapperCatalogPicker(
     )
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+/**
+ * A catalog entry rendered in the wrapper-manager card idiom: reuses [WrapperCardFrame] (icon tile +
+ * name title + author/size subtitle + trailing Download affordance + tap-to-expand chevron). The
+ * expanded box carries the description, license, size, GPU-target chips, the applicability note, and
+ * (while downloading) the full progress bar — so a catalog card looks and expands like a manager card.
+ *
+ * Inapplicable-on-this-GPU rows are dimmed (but still downloadable); a busy/installed row stays full.
+ */
 @Composable
 private fun WrapperCatalogRow(
     entry: WrapperCatalogEntry,
@@ -195,105 +203,135 @@ private fun WrapperCatalogRow(
     onDownload: () -> Unit,
 ) {
     val cs = MaterialTheme.colorScheme
-    // Inapplicable-on-this-GPU rows are dimmed (but still downloadable); a busy/installed row stays full.
+    var expanded by remember(entry.id) { mutableStateOf(false) }
     val alpha = if (applicable || busy || installed) 1f else 0.55f
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(cs.surfaceVariant)
-            .padding(12.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.weight(1f)) {
-                Text(entry.name, style = MaterialTheme.typography.bodyLarge,
-                    color = cs.onSurface.copy(alpha = alpha))
-                val sub = buildString {
-                    if (entry.author.isNotBlank()) append(entry.author)
-                    if (entry.license.isNotBlank()) { if (isNotEmpty()) append(" · "); append(entry.license) }
-                    val sz = formatSize(entry.fileSize)
-                    if (sz != null) { if (isNotEmpty()) append(" · "); append(sz) }
-                }
-                if (sub.isNotBlank()) {
-                    Text(sub, style = MaterialTheme.typography.labelSmall,
-                        color = cs.onSurfaceVariant.copy(alpha = alpha))
-                }
-                if (entry.description.isNotBlank()) {
-                    Text(entry.description, style = MaterialTheme.typography.labelSmall,
-                        color = cs.onSurfaceVariant.copy(alpha = alpha))
-                }
-            }
-            Spacer(Modifier.width(8.dp))
-            when {
-                installed -> Icon(Icons.Filled.CheckCircle, contentDescription = "Downloaded",
-                    tint = cs.primary, modifier = Modifier.size(22.dp))
-                busy -> {}
-                else -> OutlinedButton(enabled = !anyBusy && !offline, onClick = onDownload) {
-                    Icon(Icons.Filled.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text(LocalContextString(R.string.wrapper_catalog_download))
-                }
-            }
-        }
+    // author · size in the subtitle; the collapsed card mirrors the manager's slot/import cards.
+    val subtitle = buildString {
+        if (entry.author.isNotBlank()) append(entry.author)
+        val sz = formatSize(entry.fileSize)
+        if (sz != null) { if (isNotEmpty()) append(" · "); append(sz) }
+    }.ifBlank { entry.license }
 
-        // gpuTargets chips.
-        if (entry.gpuTargets.isNotEmpty()) {
-            Spacer(Modifier.height(6.dp))
-            FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                entry.gpuTargets.forEach { t ->
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(cs.secondaryContainer.copy(alpha = alpha))
-                            .padding(horizontal = 8.dp, vertical = 3.dp),
-                    ) {
-                        Text(t, style = MaterialTheme.typography.labelSmall,
-                            color = cs.onSecondaryContainer.copy(alpha = alpha))
+    Box(modifier = Modifier.fillMaxWidth().alpha(alpha)) {
+        WrapperCardFrame(
+            icon = Icons.Filled.CloudDownload,
+            title = entry.name,
+            subtitle = subtitle,
+            expandable = true,
+            expanded = expanded,
+            onToggleExpand = { expanded = !expanded },
+            details = {
+                WrapperCatalogDetail(
+                    entry = entry,
+                    applicabilityNote = applicabilityNote,
+                    offline = offline,
+                    installed = installed,
+                    busy = busy,
+                    progress = progress,
+                )
+            },
+            trailing = {
+                // Download affordance / progress stays in the collapsed row (accessible without expanding).
+                when {
+                    installed -> Icon(Icons.Filled.CheckCircle, contentDescription = "Downloaded",
+                        tint = cs.primary, modifier = Modifier.size(22.dp))
+                    busy -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(6.dp))
+                        Text("$progress%", style = MaterialTheme.typography.labelSmall,
+                            color = cs.onSurfaceVariant)
+                    }
+                    else -> OutlinedButton(enabled = !anyBusy && !offline, onClick = onDownload) {
+                        Icon(Icons.Filled.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(LocalContextString(R.string.wrapper_catalog_download))
                     }
                 }
+            },
+        )
+    }
+}
+
+/** The expanded detail box for a catalog card, styled to match [WrapperDetailBox]: description, then
+ *  License/Size rows, GPU-target chips, the applicability note, an offline hint, and the full download
+ *  progress bar while busy. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun WrapperCatalogDetail(
+    entry: WrapperCatalogEntry,
+    applicabilityNote: String?,
+    offline: Boolean,
+    installed: Boolean,
+    busy: Boolean,
+    progress: Int,
+) {
+    val cs = MaterialTheme.colorScheme
+    if (entry.description.isNotBlank()) {
+        Text(entry.description, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+        Spacer(Modifier.height(6.dp))
+    }
+    if (entry.license.isNotBlank()) DetailRow("License", entry.license)
+    formatSize(entry.fileSize)?.let { DetailRow("Size", it) }
+
+    // gpuTargets chips.
+    if (entry.gpuTargets.isNotEmpty()) {
+        Spacer(Modifier.height(8.dp))
+        Text("GPU targets", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
+        Spacer(Modifier.height(4.dp))
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            entry.gpuTargets.forEach { t ->
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(cs.secondaryContainer)
+                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                ) {
+                    Text(t, style = MaterialTheme.typography.labelSmall, color = cs.onSecondaryContainer)
+                }
             }
         }
+    }
 
-        // GPU-applicability note (dim), only when the entry doesn't target this GPU.
-        applicabilityNote?.let {
-            Spacer(Modifier.height(4.dp))
-            Text(it, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
-        }
+    // GPU-applicability note, only when the entry doesn't target this GPU.
+    applicabilityNote?.let {
+        Spacer(Modifier.height(8.dp))
+        Text(it, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+    }
 
-        // Offline hint on rows that can't be fetched.
-        if (offline && !installed && !busy) {
-            Spacer(Modifier.height(4.dp))
-            Text(LocalContextString(R.string.wrapper_catalog_needs_connection),
-                style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
-        }
+    // Offline hint on rows that can't be fetched.
+    if (offline && !installed && !busy) {
+        Spacer(Modifier.height(6.dp))
+        Text(LocalContextString(R.string.wrapper_catalog_needs_connection),
+            style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+    }
 
-        if (busy) {
-            Spacer(Modifier.height(8.dp))
-            val frac = (progress.coerceIn(0, 100)) / 100f
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(
-                    LocalContextString(
-                        if (progress >= 100) R.string.wrapper_catalog_installing
-                        else R.string.wrapper_catalog_downloading
-                    ),
-                    style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
-                )
-                Text("$progress%", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
-            }
-            Spacer(Modifier.height(3.dp))
-            Divider(color = cs.outlineVariant.copy(alpha = 0.4f))
-            Spacer(Modifier.height(3.dp))
-            LinearProgressIndicator(
-                progress = frac,
-                modifier = Modifier.fillMaxWidth().height(4.dp),
-                color = cs.primary,
-                trackColor = cs.surfaceContainerHighest,
+    // Full progress bar while downloading/installing.
+    if (busy) {
+        Spacer(Modifier.height(8.dp))
+        val frac = (progress.coerceIn(0, 100)) / 100f
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(
+                LocalContextString(
+                    if (progress >= 100) R.string.wrapper_catalog_installing
+                    else R.string.wrapper_catalog_downloading
+                ),
+                style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
             )
+            Text("$progress%", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
         }
+        Spacer(Modifier.height(3.dp))
+        Divider(color = cs.outlineVariant.copy(alpha = 0.4f))
+        Spacer(Modifier.height(3.dp))
+        LinearProgressIndicator(
+            progress = frac,
+            modifier = Modifier.fillMaxWidth().height(4.dp),
+            color = cs.primary,
+            trackColor = cs.surfaceContainerHighest,
+        )
     }
 }
 

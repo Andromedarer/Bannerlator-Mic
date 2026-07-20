@@ -323,7 +323,6 @@ class MainActivity : AppCompatActivity() {
         R.id.main_menu_contents   -> Screen.Contents.route
         R.id.main_menu_input_controls -> Screen.InputControls.route
         R.id.main_menu_adrenotools_gpu_drivers -> Screen.AdrenoTools.route
-        R.id.main_menu_wrapper_manager -> Screen.Wrappers.route
         R.id.main_menu_settings   -> Screen.Settings.route
         else -> null
     }

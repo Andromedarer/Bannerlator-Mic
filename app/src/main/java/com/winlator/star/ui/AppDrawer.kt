@@ -61,7 +61,6 @@ private fun iconFor(screen: Screen): Int = when (screen) {
     Screen.Games         -> R.drawable.icon_games
     Screen.InputControls -> R.drawable.icon_gamepad
     Screen.AdrenoTools   -> R.drawable.icon_menu_gpu
-    Screen.Wrappers      -> R.drawable.icon_menu_gpu
     Screen.Saves         -> R.drawable.icon_save
     Screen.FileManager   -> R.drawable.icon_menu_file_manager
     Screen.Settings      -> R.drawable.icon_settings
@@ -113,7 +112,6 @@ fun AppDrawerContent(
         DrawerItem(Screen.Appearance,    currentRoute, onNavigate, showNew = true)
         DrawerItem(Screen.InputControls, currentRoute, onNavigate)
         DrawerItem(Screen.AdrenoTools,   currentRoute, onNavigate)
-        DrawerItem(Screen.Wrappers,      currentRoute, onNavigate, showNew = true)
 
         DrawerSectionHeader("Stores", note = "· unchanged", showDivider = true)
         Screen.storeItems.forEach { screen ->

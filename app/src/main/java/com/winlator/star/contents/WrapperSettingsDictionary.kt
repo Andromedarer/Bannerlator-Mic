@@ -70,10 +70,18 @@ object WrapperSettingsDictionary {
         SettingDef("BCN_LAYER_LOG_LEVEL", Type.TEXT, "BCn log level", "e.g. info,error"),
         SettingDef("BCN_MAX_STAGING_CACHE_MB", Type.TEXT, "BCn staging cache (MB)", "number"),
         SettingDef("BCN_QUEUE_THROTTLE_LIMIT", Type.TEXT, "BCn queue throttle limit", "number"),
+        SettingDef("BCN_ASTC_USE_LARGE_STEPS", Type.TOGGLE, "ASTC: use large steps",
+            "Fcharan BCn fork — faster ASTC transcode, lower quality"),
         // --- DXVK/Mali compat + DX12 ---
         SettingDef("ENABLE_DXVK_MALI_COMPAT_LAYER", Type.TOGGLE, "Enable DXVK Mali compat layer"),
         SettingDef("COMPAT_EMULATE_SPARSE_BINDING", Type.TOGGLE, "Emulate sparse binding"),
         SettingDef("COMPAT_FORCE_MASKING", Type.TOGGLE, "Force masking"),
+        SettingDef("COMPAT_EMULATE_PUSH_DESCRIPTORS", Type.TOGGLE, "Emulate push descriptors (DX12)",
+            "Compat layer — leave on for DX12 titles that use push descriptors"),
+        SettingDef("COMPAT_EMULATE_NULL_DESCRIPTORS", Type.TOGGLE, "Emulate null descriptors (DX12)",
+            "Compat layer — DX12 null-descriptor support"),
+        SettingDef("COMPAT_SPARSE_COMMIT_BUDGET", Type.TEXT, "Sparse commit budget (MB)",
+            "Compat layer — memory budget for D3D12 tiled/sparse resources"),
     ).associateBy { it.key }
 
     /** Dictionary hit for [key], else a generic TEXT field whose label is the raw env key. */
