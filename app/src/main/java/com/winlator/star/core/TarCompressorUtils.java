@@ -378,14 +378,18 @@ public abstract class TarCompressorUtils {
                         if (idChar) {
                             if (token.length() < 128) token.append((char) c); // env names are short; cap growth
                         } else {
-                            if (token.length() >= 4 && tokenPattern.matcher(token).matches())
+                            // Only emit on a NUL terminator: a real getenv() argument is a standalone
+                            // NUL-terminated C-string literal, whereas a token embedded in a larger string
+                            // (e.g. "WRAPPER_TEX" inside the log format "[WRAPPER_TEX %d] bc=%d ...") is
+                            // terminated by a space/%/] — a false positive we must NOT surface as a setting.
+                            if (c == 0 && token.length() >= 4 && tokenPattern.matcher(token).matches())
                                 out.add(token.toString());
                             token.setLength(0);
                         }
                     }
                 }
-                if (token.length() >= 4 && tokenPattern.matcher(token).matches())
-                    out.add(token.toString());
+                // A token still open at EOF / byte-cap was never NUL-terminated in the scanned region — do
+                // not emit it (same rule as above), just drop it.
                 break; // only the first matching entry
             }
         }

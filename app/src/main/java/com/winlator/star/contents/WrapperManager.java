@@ -129,10 +129,21 @@ public class WrapperManager {
         "MESA_VK_VERSION_OVERRIDE", "MESA_VK_WSI_PRESENT_MODE", "GALLIUM_DRIVER"
     )));
 
-    /** Namespaces owned by the bundled GPU driver / loader, not by the wrapper author. */
+    /** Namespaces owned by the bundled GPU driver / loader / compiler / profiler, not the wrapper author.
+     *  (NIR_ = Mesa shader compiler, XDG_ = freedesktop dirs, HWCPIPE = ARM hardware-counter profiling —
+     *  all confirmed present as getenv() reads in the fork binaries but never user-facing knobs.) */
     private static final String[] DRIVER_INTERNAL_PREFIXES = {
-        "MESA_", "GALLIUM_", "DRI_", "ADRENOTOOLS_", "TU_", "RADV_", "ZINK_", "LIBGL_", "VK_", "EGL_"
+        "MESA_", "GALLIUM_", "DRI_", "ADRENOTOOLS_", "TU_", "RADV_", "ZINK_", "LIBGL_", "VK_", "EGL_",
+        "NIR_", "XDG_", "HWCPIPE"
     };
+
+    /** Standard system/process environment variables a wrapper reads to locate itself or the host — the
+     *  binary calls getenv() on them, but they are the launch environment, NOT wrapper settings, so they
+     *  must never be surfaced as editable knobs nor generically emitted. */
+    private static final Set<String> SYSTEM_ENV_KEYS = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
+        "HOME", "PREFIX", "PATH", "TMPDIR", "TMP", "TEMP", "USER", "LOGNAME", "LANG", "LC_ALL",
+        "LD_LIBRARY_PATH", "LD_PRELOAD", "DISPLAY", "WAYLAND_DISPLAY", "PWD", "SHELL", "TERM", "HOSTNAME"
+    )));
 
     /**
      * True if {@code key} belongs to the bundled GPU driver / Vulkan-loader namespace (Mesa, Gallium,
@@ -148,6 +159,7 @@ public class WrapperManager {
         if (key == null || key.isEmpty()) return false;
         String up = key.toUpperCase(Locale.ROOT);
         if (DRIVER_INTERNAL_ALLOW.contains(up)) return false;
+        if (SYSTEM_ENV_KEYS.contains(up)) return true;   // launch environment, not a wrapper knob
         for (String prefix : DRIVER_INTERNAL_PREFIXES) if (up.startsWith(prefix)) return true;
         return false;
     }

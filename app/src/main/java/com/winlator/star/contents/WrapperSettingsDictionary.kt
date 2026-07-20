@@ -115,6 +115,21 @@ object WrapperSettingsDictionary {
         // Paths / misc (base ICD)
         SettingDef("WRAPPER_CACHE_PATH", Type.TEXT, "Wrapper cache path", "absolute path"),
         SettingDef("WRAPPER_RESOURCE_TYPE", Type.TEXT, "Resource type override"),
+        // --- Confirmed by getenv() disassembly across the WinlatorMali/WinNative/GameNative/leegao/base
+        //     binaries (#132). Types are what the binary actually does with the value (atoi→INT/TOGGLE,
+        //     pointer→TEXT). System/driver/debug getenv reads (HOME, PREFIX, NIR_SKIP, HWCPIPE_*, …) are
+        //     filtered by WrapperManager.isDriverInternalEnvKey / isDebugEnvKey, NOT curated here.
+        SettingDef("WRAPPER_BLIT", Type.TOGGLE, "Force swapchain blit",
+            "Route presents through a blit — compatibility for some swapchains"),
+        SettingDef("WRAPPER_DEVICE_FAULT", Type.TOGGLE, "Device-fault reporting",
+            "Enable VK_EXT_device_fault diagnostics on GPU hangs"),
+        SettingDef("WRAPPER_EMULATE_PUSH_DESCRIPTOR", Type.TOGGLE, "Emulate push descriptors",
+            "ICD-side push-descriptor emulation"),
+        SettingDef("WRAPPER_ASTC_BLOCK", Type.TEXT, "ASTC block size", "number, 0 = default"),
+        SettingDef("WRAPPER_LAYER_PATH", Type.TEXT, "Vulkan layer path (advanced)",
+            "absolute path — usually leave blank"),
+        SettingDef("USE_IMAGE_VIEW", Type.TOGGLE, "BCn: use storage image view",
+            "leegao BCn — storage-image transcode path"),
     ).associateBy { it.key }
 
     /** Dictionary hit for [key], else a generic TEXT field whose label is the raw env key. */
