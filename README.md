@@ -78,6 +78,7 @@
   - [🛒 Built-in stores & cross-store Download Manager](#-built-in-stores--cross-store-download-manager)
   - [🔒 Security Hardening & your store accounts](#-security-hardening--your-store-accounts)
   - [🧰 Bundled Start-menu utilities](#-bundled-start-menu-utilities)
+  - [📁 Banner File Manager](#-banner-file-manager)
   - [🎛️ Interface & in-game overlay](#️-interface--in-game-overlay)
   - [📥 Builds & distribution](#-builds--distribution)
 - [🎨 Adding your own ReShade effects](#-adding-your-own-reshade-effects)
@@ -359,8 +360,18 @@ The Steam / Epic / GOG / Amazon sign-ins are a **third-party login system, exact
 - **Still be careful sharing logs.** Even with redaction, a log or debug file can contain other diagnostic detail — so only share one publicly if you're comfortable doing so.
 
 ### 🧰 Bundled Start-menu utilities
-- New containers ship with handy Windows tools in the Start menu — **Winlator File Manager (WFM)**, **AIO Graphics Test**, and **Game Controller Test**.
+- New containers ship with handy Windows tools in the Start menu — **[Banner File Manager](https://github.com/The412Banner/banner-file-manager)** (our own file manager — see below), **AIO Graphics Test**, and **Game Controller Test**.
 - **`.lnk` working-directory ("Start in") support** so shortcuts for apps that only run from their own folder launch correctly.
+
+### 📁 Banner File Manager
+The bundled Windows file manager (`C:\windows\wfm.exe`) is **[Banner File Manager](https://github.com/The412Banner/banner-file-manager)** — our own native Win32 file manager, forked from [BrunoSX's Winlator File Manager](https://github.com/brunodev85/wfm) (MIT). It ships in every new container's Start menu.
+- **Dual-pane split view** (`View ▸ Split View`) — two independent panes, active one highlighted, copy between them.
+- **File actions** — Open as administrator, Open with ▸ (registered apps + choose another program), Properties.
+- **Native Win32 copy / move / delete** instead of shell32 `SHFileOperation` — sidesteps the Wine shell32 copy-paste crash on Proton 10.0-4.
+- **Quality of life** — keyboard shortcuts (F2 / Del / F5 / F6 / Backspace / Enter / Ctrl+C·X·V·A), Show Hidden Files, byte-accurate copy progress bar with cancel, status-bar total size.
+- **Theme-aware** (light + dark, follows the container theme; owner-drawn header / status bar / search to match) and **universal x86-64** (Box64 / wowbox64 / FEXCore).
+
+Source, releases & issues: **[github.com/The412Banner/banner-file-manager](https://github.com/The412Banner/banner-file-manager)**.
 
 ### 🎛️ Interface & in-game overlay
 - Modern **Jetpack Compose** user interface with a redesigned, icon-led navigation drawer.
@@ -513,7 +524,7 @@ This build stands on a long chain of prior work — its direct lineage, plus the
 | **Star / Frost dev team** | The [star-emu](https://github.com/star-emu) team behind the original *Star Bionic* and *Winlator Frost* lines this build continues from. |
 | **isygold** (AGBOOLA Israel Oluwagbogo) | [Star Engine / VEGAS](https://github.com/isygold/vegas-releases) — the Adreno-optimized DXVK fork this build's `v1.3-vegas` is named for, eliminating stutter and adding real-time upscaling on mobile GPUs, plus tuned [dxvk.conf profiles](https://github.com/isygold/DXVK.CONF-FILE-SETTINGS-). See the **[VEGAS DXVK FAQ](https://htmlpreview.github.io/?https://github.com/The412Banner/Bannerlator/blob/main/docs/vegas_faq.html)** for help & configuration.<br>🚀 **Support VEGAS Development** — low-level graphics dev & vibecoder: debugging, refactoring & improving original DXVK code for Adreno. **[❤️ Sponsor →](https://github.com/sponsors/isygold)** |
 | **vivsi** | Controller support contributions. |
-| **StevenMXZ** | [Winlator-Ludashi](https://github.com/StevenMXZ/Winlator-Ludashi) and extensive cherry-picked work implemented in this build. This includes the **new user interface** and the **Vulkan rendering** path — both of which were **still unreleased and unfinished at the time these builds and this repo were created** — along with various other cherry-picked commits. This work is set to be released properly in his upcoming **3.1**. The bundled **Winlator File Manager (`wfm.exe`)** — including its correct "Local Disk" drive-icon behaviour — is from StevenMXZ's **Winlator-Ludashi 3.1 hotfix** release. |
+| **StevenMXZ** | [Winlator-Ludashi](https://github.com/StevenMXZ/Winlator-Ludashi) and extensive cherry-picked work implemented in this build. This includes the **new user interface** and the **Vulkan rendering** path — both of which were **still unreleased and unfinished at the time these builds and this repo were created** — along with various other cherry-picked commits. This work is set to be released properly in his upcoming **3.1**. |
 | **GameNative** | [GameNative](https://github.com/utkarshdalal/GameNative) by **utkarshdalal** — Proton bionic translation layers and cherry-picked commits adapted into this build. Its rendering pipeline was also the **reference used to fix and rewire Bannerlator's render options** — the `AHardwareBuffer` present path that makes Vulkan / DXVK / VKD3D content render correctly on both the OpenGL and Vulkan host renderers (GPUImage socket-buffer locking + EGLImage sampling, DRI3 direct-scanout, the Present extension's FLIP / COPY branches, and the Native Rendering+ direct-scanout path) was ported from and cross-examined against GameNative's implementation. The **standalone FPS limiter** is GameNative's too — its guest-side present-pacing mechanism (delaying the X11 Present `IdleNotify` to throttle the game itself, plus the rule that lsfg-vk's own pacing governs when its multiplier is ≥ 2) was ported from GameNative. For the **Steam store** (2.3), the **session-hardening patterns** (derived-`loggedIn` state, off-pump PICS sync, single reconnect funnel, dead-token clearing, keep-alive / watchdog) and the **`DownloadSpeedConfig` cores × ratio 4-tier download-speed model** were also ported / adapted from GameNative. |
 | **xXJSONDeruloXx** | [bionic-fg](https://github.com/xXJSONDeruloXx/bionic-fg) — the Android/bionic Vulkan **frame-generation** layer powering Bannerlator's Frame Generation feature. Included in-tree as a git submodule with the author's permission. |
 | **PancakeTAS** | [lsfg-vk](https://github.com/PancakeTAS/lsfg-vk) — the open-source Vulkan frame-generation layer (a Vulkan-layer reimplementation of Lossless Scaling's frame generation) that Bannerlator's **second, user-selectable FG engine** is built on. |
