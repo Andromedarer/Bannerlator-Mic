@@ -1,5 +1,17 @@
 # Star-Compose — Progress Log
 
+## 2026-07-20 (late) — ✅ RELEASE 2.7 STABLE = LATEST (feature release: Wrapper Version Manager + Mali DX12 driver)
+
+> **Cut from `main`. vc46, tag `2.7`, API-confirmed `Latest`/not-prerelease; 3 flavor APKs + `update.json` (vc46). Release run `29744573080`; version bump `9bf71e76`, README `485464ea`.** First versionCode bump since 2.6.2 — per the standing rule, vc bumps ONLY at a stable/pre-release cut, never for dev/artifacts builds ([[feedback_bannerlator_release_versioning_rule]]).
+>
+> **Consolidation (the day's arc):** two parallel efforts merged onto ONE trunk = main. (1) **Wrapper Version Manager #132** (branch `feat/wrapper-manager-step1`) — import/update/delete/tune `.tzst` wrappers, curated downloadable catalog (18 entries on `winlator-contents`, "Mali only" chips + update-from-catalog), getenv-grounded auto-detection (NUL-guard scanner + driver/system/debug env filter + ~34-key dictionary). (2) **Mali DX12 "Wrapper + compat + bcn" driver** (branch `feat/mali-ultimate-driver`) — opt-in 6th driver + GameNative-engine toggle. Test-merged via throwaway `feat/mali-on-main` (1 real conflict: `ContainerDetailScreen.kt` gate systems → kept BOTH), verified 0 main commits lost, ff to main. Then **picked up leegao's layer-composition fix** (compat `b249686` + bcn `50993a2` — missing `GETPROCADDR(GetDeviceProcAddr)` broke 2-layer device dispatch; user relayed leegao's note): refreshed `extra_libs.tzst` from leegao's CI, `EXTRA_LIBS_VERSION` 3→4.
+>
+> **Release body** (2.6.2 layout via `gh release edit --notes-file`): Wrapper Manager headline + Mali DX12 (framed experimental/opt-in) + community (235 games/274 configs, fresh). **Credits (user-directed):** WinlatorMali **Bionic 1.1** (GunaCharanTeja/Charan) for the wrapper-manager idea + #132 requester @6ui99uhkllj; leegao for bcn_layer + DX12 compat_layer. README updated to match.
+>
+> **Cleanup:** deleted old `mali-compat-test1` prerelease + tag (2.7 stable supersedes it as the installable Mali build) and the 4 merged branches (feat/mali-ultimate-driver, feat/mali-on-main, feat/wrapper-manager, feat/wrapper-manager-step1).
+>
+> **⚠️ Open (not lost):** Mali DX12 still needs real-hardware proof (apiVersion #140 open; leegao path won't DX12 — GameNative toggle is that route); composition fix byte-verified but not Mali-device-tested. Full detail → [[project_bannerlator_wrapper_manager]], [[project_bannerlator_mali_compat_bcn_driver]].
+
 ## 2026-07-20 — 🧩 WRAPPER VERSION MANAGER (#132) — Steps 1–3 + Step 5 catalog BUILT; catalog readability + "Update from catalog" added. CHECKPOINT (context compressing)
 
 > **Branch `feat/wrapper-manager-step1` tip `07b0d666` (pushed); off `main`, NOT merged.** Full AdrenoTools-style wrapper import/update/delete/detect manager + a curated downloadable catalog. Not device-proven for actual wrapper *effect* (Adreno device = BCn/DX12 inert by design — needs a Mali/Exynos community tester); app mechanics are Adreno-testable.
