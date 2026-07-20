@@ -56,7 +56,7 @@
 |---|---|
 | **App label** | `Bannerlator Bionic` (standard) · `Bannerlator Bionic PuBG` (pubg) · `Bannerlator Bionic Ludashi` (ludashi) |
 | **Packages** | `com.winlator.banner` (standard) · `com.tencent.ig` (pubg) · `com.ludashi.benchmark` (ludashi) |
-| **Version** | Bannerlator **V 2.6.2** — built from Star **marcescence** (`versionName 2.6.2`, `versionCode 45`) |
+| **Version** | Bannerlator **V 2.7** — built from Star **marcescence** (`versionName 2.7`, `versionCode 46`) |
 | **Android SDK** | `compileSdk 34` · `targetSdk 28` · `minSdk 26` (Android 8.0+) |
 | **Lineage** | Winlator → cmod → Bionic Nightly → Star Bionic → **marcescence** → **Bannerlator** |
 
@@ -66,7 +66,7 @@
 
 - [📌 Project Notice](#-project-notice)
 - [ℹ️ Information](#ℹ️-information)
-- [🆕 What's New in 2.6.2](#-whats-new-in-262)
+- [🆕 What's New in 2.7](#-whats-new-in-27)
 - [✨ Full Features](#-full-features)
   - [🍷 Windows compatibility](#-windows-compatibility)
   - [🎨 Graphics & translation layers](#-graphics--translation-layers)
@@ -92,7 +92,18 @@
 
 ---
 
-## 🆕 What's New in 2.6.2
+## 🆕 What's New in 2.7
+
+2.7 adds the **Wrapper Version Manager** — you can now **import, update, delete and tune** any graphics wrapper, browse a **curated downloadable catalog** from across the Winlator family, and get **auto-detected settings** for every wrapper with zero setup. It also brings an **experimental, opt-in Mali DX12 driver**. Like the last several releases it's **entirely app-side** — **no ImageFS reinstall** — your containers, themes, custom accent and per-game settings carry over untouched; just install over 2.6.
+
+**🧩 Wrapper Version Manager.** Graphics wrappers are no longer a fixed list. You can **import, update and delete any `.tzst` wrapper** — from another project or your own build — and browse a **curated, downloadable catalog** of wrappers pulled from across the Winlator family, each credited to its source and flagged **"Mali only"** when it won't do anything on your GPU (with **Update** able to pull a replacement straight from the catalog). Every wrapper's **settings are auto-detected**: the manager reads what each wrapper *actually* supports and builds real toggles, sliders and dropdowns with plain-English labels — detection was ground-truthed against every wrapper's binary, so it shows genuine knobs and filters out driver internals and log noise. Each entry gets an overflow (⋮) menu — **Update / Reset / Edit settings / Delete / Details** — plus a pre-import inspection view so you can see what a wrapper is before you name it. *Requested in [#132](https://github.com/The412Banner/Bannerlator/issues/132) by [@6ui99uhkllj](https://github.com/6ui99uhkllj), modeled on [WinlatorMali](https://github.com/GunaCharanTeja/WinlatorMali)'s graphics-driver manager from [Bionic 1.1](https://github.com/GunaCharanTeja/WinlatorMali/releases/tag/bionic-mali-1.1).*
+
+**🧪 Mali DX12 — experimental, opt-in.** A new opt-in **6th graphics driver, "Wrapper + compat + bcn"**, brings [leegao](https://github.com/leegao)'s BCn transcode layer together with a **DX12 compat layer**, with a **"Use GameNative engine (DX12)"** toggle for **Valhall-class Mali** GPUs. This release folds in **leegao's layer-composition fix** so device hooks propagate correctly when both layers stack. It does nothing unless you select it and is **inert on Qualcomm / Adreno** — and DX12 on Mali is still being proven on real hardware, so treat it as a **test path** and please report back with logs.
+
+**🌐 Community — thank you.** Contributed straight to Bannerlator's own config repo: **235 games**, **274 configs**, and growing accounts — and because the in-app browser also merges the **BannerHub** catalog, the total you can browse and apply *inside the app* is bigger still. All growing. This project grows *only* because of the community's support and participation. 🙏 Browse: [Bannerlator repo](https://github.com/The412Banner/bannerlator-game-configs) · [BannerHub catalog](https://github.com/The412Banner/bannerhub-game-configs) · [online](https://the412banner.github.io/bannerlator-game-configs/).
+
+<details>
+<summary><b>Previously in 2.6.2</b> — fixes &amp; hardening</summary>
 
 2.6.2 is a **fixes-and-hardening** update on top of 2.6.1 — no new subsystem, just sharpening what's already here. The **in-game performance HUD** got a ground-up pass, **component downloads** now keep going when you leave the app, and a batch of reported bugs are fixed. Like the last several releases it's **entirely app-side** — **no ImageFS reinstall** — your containers, themes, custom accent and per-game settings carry over untouched; just install over 2.6.
 
@@ -105,6 +116,8 @@
 **🔐 Run games as administrator.** New per-container **"Run as administrator"** toggle (on by default) for installers and games that need elevation.
 
 **🌐 Community — thank you.** Contributed straight to Bannerlator's own config repo: **166 games**, **184 configs**, from **252 accounts** — and because the in-app browser also merges the **BannerHub** catalog, the total you can browse and apply *inside the app* is **2,257 games / 1,548 configs**. All growing. This project grows *only* because of the community's support and participation. 🙏 Browse: [Bannerlator repo](https://github.com/The412Banner/bannerlator-game-configs) · [BannerHub catalog](https://github.com/The412Banner/bannerhub-game-configs) · [online](https://the412banner.github.io/bannerlator-game-configs/).
+
+</details>
 
 <details>
 <summary><b>Previously in 2.6.1</b> — Adreno BCn fix</summary>
@@ -270,6 +283,8 @@ Everything Bannerlator offers, at a glance. No PC and no root required — it ru
   - > 🚀 **Support VEGAS Development** — low-level graphics dev & vibecoder: debugging, refactoring & improving original DXVK code for Adreno. **[❤️ Sponsor isygold →](https://github.com/sponsors/isygold)**
 - **Turnip / Mesa** open-source Adreno Vulkan drivers, with Timeline Semaphore patches for newer DXVK; bundled and downloadable driver options. A **`turnip-26.1.0`** option loads Turnip as a direct system Vulkan ICD (no adrenotools hook) so it works on **Android 10 / pre-11 devices** too.
 - **BCn transcoding for Mali / Xclipse** — a **"Wrapper + bcn_layer"** graphics driver ([leegao](https://github.com/leegao)'s [bcn_layer](https://github.com/leegao/bcn_layer), shader-v3) that decodes BC textures on the GPU, so BCn games run on GPUs without hardware BC support — with a **BCn Layer Settings** panel (force-decode, ETC2 / ASTC transcode, image-view mode, debug logging). An experimental **"Wrapper-gamenative"** driver (BCn baked into the wrapper, Adreno-only) is also selectable. *(Device-proven on Mali-G57.)*
+- **Wrapper Version Manager** — bring your own graphics wrapper: **import / update / delete** any `.tzst` wrapper (from another project or your own build), browse a **curated downloadable catalog** of wrappers from across the Winlator family (each credited to its source, flagged **"Mali only"** where relevant), and get **auto-detected settings** — real toggles / sliders / dropdowns read straight from what each wrapper actually supports, with driver internals and log noise filtered out. Per-entry **Update / Reset / Edit / Delete / Details** plus a pre-import inspection view. *(Modeled on [WinlatorMali](https://github.com/GunaCharanTeja/WinlatorMali)'s graphics-driver manager; requested in [#132](https://github.com/The412Banner/Bannerlator/issues/132).)*
+- **Mali DX12 (experimental)** — a new opt-in **6th graphics driver, "Wrapper + compat + bcn"**, pairing [leegao](https://github.com/leegao)'s BCn transcode layer with a **DX12 compat layer** and a **"Use GameNative engine (DX12)"** toggle, for **Valhall-class Mali** GPUs. Inert unless selected and unaffected on Qualcomm / Adreno; DX12 on Mali is still being proven on hardware — treat it as a **test path** and report back with logs.
 
 ### 🖥️ Renderers
 - Multiple host renderers — **Vulkan**, **OpenGL**, **SurfaceFlinger**, and **VirGL**.
@@ -504,7 +519,8 @@ This build stands on a long chain of prior work — its direct lineage, plus the
 | **PancakeTAS** | [lsfg-vk](https://github.com/PancakeTAS/lsfg-vk) — the open-source Vulkan frame-generation layer (a Vulkan-layer reimplementation of Lossless Scaling's frame generation) that Bannerlator's **second, user-selectable FG engine** is built on. |
 | **FrankBarretta** | [lsfg-vk-android](https://github.com/FrankBarretta/lsfg-vk-android) — the Android/bionic port of lsfg-vk (AHardwareBuffer path + `vkCmdPipelineBarrier2` shim) that runs as Bannerlator's lsfg-vk engine on the Turnip stack. The in-game live multiplier/flow-scale reload uses the `conf.toml` mtime-watch mechanism from **GameNative's** [lsfg-vk-android fork](https://github.com/GameNative). No proprietary shaders are bundled — users supply their own `Lossless.dll` ([Lossless Scaling](https://store.steampowered.com/app/993090/Lossless_Scaling/) by THS) via the in-app picker. |
 | **DadSchoorse** | [vkBasalt](https://github.com/DadSchoorse/vkBasalt) (zlib) — the Vulkan post-processing layer that embeds the ReShade FX compiler. Bannerlator's **ReShade** feature is a continuation of this work: the bundled layer is built from DadSchoorse's source, patched for live on-device toggle and slider control. The bundled / catalog `.fx` effects are MIT / CC0 shaders by the **ReShade ([crosire](https://github.com/crosire/reshade-shaders))**, **prod80 ([prod80-reshade-repository](https://github.com/prod80/prod80-reshade-repository))**, **luluco250 ([FXShaders](https://github.com/luluco250/FXShaders))** and **fubax** authors, each under their own MIT / CC0 license. |
-| **leegao** (Lee Gao) | Vulkan texture-compression work used for mobile-GPU compatibility and performance — the [BCn decompression layer](https://github.com/leegao/bcn_layer) (**shader-v3**, powering 2.5's **"Wrapper + bcn_layer"** Mali driver) and real-time [ASTC/ETC compute-shader encoders](https://github.com/leegao), plus the [bionic-vulkan-wrapper](https://github.com/leegao/bionic-vulkan-wrapper) (**ETC2-Milestone-2**) bundled as the base wrapper for the Mali BCn path. |
+| **leegao** (Lee Gao) | Vulkan texture-compression work used for mobile-GPU compatibility and performance — the [BCn decompression layer](https://github.com/leegao/bcn_layer) (**shader-v3**, powering 2.5's **"Wrapper + bcn_layer"** Mali driver) and the **DX12 `compat_layer`** that, alongside it, powers 2.7's new opt-in **"Wrapper + compat + bcn"** Mali DX12 driver — including the just-landed **layer-composition fix** — plus real-time [ASTC/ETC compute-shader encoders](https://github.com/leegao) and the [bionic-vulkan-wrapper](https://github.com/leegao/bionic-vulkan-wrapper) (**ETC2-Milestone-2**) bundled as the base wrapper for the Mali BCn path. |
+| **WinlatorMali** (GunaCharanTeja / Charan) | [WinlatorMali](https://github.com/GunaCharanTeja/WinlatorMali) — the **Wrapper Version Manager** (new in 2.7) is modeled on WinlatorMali's graphics-driver manager, introduced in [Winlator Mali Bionic 1.1](https://github.com/GunaCharanTeja/WinlatorMali/releases/tag/bionic-mali-1.1); a number of the downloadable catalog wrappers come from WinlatorMali too (each credited in-app). The feature was requested in [#132](https://github.com/The412Banner/Bannerlator/issues/132) by [@6ui99uhkllj](https://github.com/6ui99uhkllj). |
 | **JavaSteam** | [JavaSteam](https://github.com/Longi94/JavaSteam) (`in.dragonbra:javasteam`) by **Longi94** — the Steam **connection-manager client** the built-in Steam store logs in and talks to Steam with, and — via the **`javasteam-depotdownloader`** fork by **joshuatam** — the **entire depot-download engine** Bannerlator's Steam store is built on. |
 | **Goldberg Steam Emu / gbe_fork** | [Goldberg Steam Emu](https://mr_goldberg.gitlab.io/goldberg_emulator/) by **Mr_Goldberg**, and **gbe_fork** by **[Detanup01](https://github.com/Detanup01/gbe_fork)** — the Steam emulator Bannerlator's **Goldberg auto-patch** installs (Regular / Experimental / ColdClient tiers) for offline / emulated play of games you own. |
 | **Pluvia** | [Pluvia](https://github.com/oxters168/Pluvia) — an Android Steam client whose patterns were **referenced alongside GameNative** while building the Steam store's login / session handling. |
