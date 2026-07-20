@@ -13,20 +13,21 @@ Let users bring their own graphics **wrappers** (the layer that makes Windows ga
 
 1. **Update the wrappers we already ship** *(simple, safe)* — an **Update** button per built-in wrapper (swap in a newer file) + **Reset** (revert to ours). Nothing else changes, so nothing existing can break. Delivers the core ask: newer wrappers **without an app update**.
 2. **Add brand-new wrappers** *(medium)* — import / name / delete arbitrary wrappers, which then appear in the driver menu. Care needed: the menu grows/shrinks, and deleting a wrapper a game uses must auto-reset that game.
-3. **Wrappers describe their own settings** *(adaptable)* — a wrapper can include a small "menu card" declaring its toggles/sliders; the app builds those controls automatically. Import a wrapper → its settings appear.
+3. **Each wrapper's settings appear automatically** *(adaptable)* — the app **detects what settings a wrapper supports by scanning the wrapper file itself** (no cooperation from the wrapper author, because none of them ship a "menu card") and matches those against **a dictionary we maintain** to build proper toggles/sliders. Import a wrapper → its real settings appear.
 
-**If a wrapper has no menu card** it still works — we fall back, in order:
+**How it degrades (no menu card — which is every wrapper today):**
 1. It runs on its own defaults (nothing breaks).
-2. We show the **standard settings** almost every Winlator-family wrapper understands; a wrapper ignores any it doesn't (harmless).
-3. A **"add your own setting = value"** box for power users.
-4. For popular wrappers we can bundle a card ourselves.
-So the menu card makes settings *perfect*; it is not required to *work*.
+2. **Auto-detect** finds the setting *names* inside the wrapper file; **our dictionary** turns the common ones into proper controls with labels/ranges — zero author cooperation.
+3. Names we don't recognize → a plain **"set your own value"** field.
+4. For popular wrappers we can bundle a full settings definition ourselves.
+5. A wrapper-shipped "menu card" is used if one ever exists — bonus, never required.
+So the settings appear from what the wrapper *actually supports*, not from what it's *named* (the current name-gating weakness).
 
-**Effort / risk:** Step 1 ≈ a day, low risk. Step 2 ≈ a few days, medium. Step 3 = the biggest piece; worth it if wrappers proliferate.
+**Effort / risk:** Step 1 ≈ a day, low risk. Step 2 ≈ a few days, medium. Step 3 = the biggest piece (auto-detect scan + the dictionary + generic settings UI/emission); worth it once imported wrappers are in real use.
 
 **Testing catch:** we can build/verify the app parts (import, menu, settings) ourselves; **"does an imported wrapper actually run a game" needs a Mali/Exynos community tester** (we have no such device).
 
-**Suggested order:** ship **Step 1 + the "add your own setting" box** first, then Step 2, then Step 3 once a second real wrapper exists to prove it against.
+**Suggested order:** Step 1 + Step 2 are **shipped** (import/update/delete, dynamic dropdown, cascade), plus an interim patch so imported wrappers show the integrated-wrapper option superset. Step 3 (auto-detect + dictionary) replaces that superset with a precise per-wrapper list — do it once imported wrappers are in real use.
 
 ---
 
@@ -59,12 +60,25 @@ Three net-new pieces:
 3. **Delete/rename cascade (net-new)** — sweep every Container (`graphicsDriver` field → `saveData()`) and Shortcut (`graphicsDriver` extra → `saveData()`) referencing the removed/renamed id; reset to `DEFAULT_GRAPHICS_DRIVER` (delete) or new id (rename). The existing `AdrenotoolsManager.reloadContainers` only rewrites the config `version` key, so this is new (but a close analog to copy).
 - Storage migrates to `contents/wrappers/<id>/` (`wrapper.tzst` + `meta.json`). Import package = `.zip` carrying `meta.json` + `wrapper.tzst` (mirrors `AdrenotoolsManager.installDriver`).
 
-### Step 3 — Manifest-driven settings ("menu card")
-- Define a **settings schema** (JSON) a wrapper package may include: list of options, each `{ key (env var), type: toggle|slider|dropdown|text, label, hint, default, min/max/step or choices }`.
-- **Dynamic settings UI:** render controls from the schema in the graphics-driver config dialog (Compose). Store values as arbitrary keys in `graphicsDriverConfig` (already a `;`-separated k=v string — no storage change needed).
-- **Generic env emission:** emit `key=value` env vars from schema+stored values at launch (generalizes today's hardcoded per-var emission in `XServerDisplayActivity`). Unknown env vars are ignored by wrappers → safe.
-- **Fallbacks (no card):** (a) a bundled **standard/common** schema shown for any wrapper (Vulkan version, BCn mode, present mode, extension blacklist, …); (b) a raw **"add your own setting = value"** advanced editor; (c) app-bundled cards for popular wrappers.
-- Own the format; ship it in our wrappers; invite authors (Charan, GameNative) to adopt it.
+### Step 3 — Per-wrapper settings via AUTO-DETECT + our own DICTIONARY (menu card optional)
+
+**Reframe (user, 2026-07-19):** DON'T build this around a wrapper-shipped "menu card" — **no wrapper has ever shipped one**, and most never will. So the primary engine must need zero cooperation from wrapper authors. The card, if one ever appears, is a bonus on top — never a dependency.
+
+**Why this is needed:** wrapper settings are gated by the driver *identifier* (e.g. `isGamenative = graphicsDriver == "wrapper-gamenative"` in `GraphicsDriverConfigDialog`). A user-imported wrapper has a *custom* name, so name-gating can't know its capabilities. (Interim patch already shipped: an imported wrapper is treated as the integrated-wrapper superset — `isImported` → show all gamenative-style options. Step 3 replaces that superset guess with a precise, per-wrapper list.)
+
+**The engine (in priority order):**
+1. **AUTO-DETECT the setting names from the wrapper binary.** On import, scan `usr/lib/libvulkan_wrapper.so` (and the bcn/compat `.so`s) for readable env-var-name strings matching the family vocabulary (`WRAPPER_*`, `ENABLE_*`, `BCN_*`, `COMPAT_*`, `MESA_VK_*`, `GALLIUM_*`, …). This is the **proven `strings`-on-binary trick** (used this session to find GameNative's `WRAPPER_DRIVER_ID`/`WRAPPER_SAFE_CREATE_DEVICE`). Store the detected key list in the wrapper's `.meta` at import time (so it's read once, off the launch path). Works on EVERY wrapper, no author involvement. Caveat: detection yields NAMES only, not types/ranges/labels — and may include a few false positives (label the panel "detected — advanced").
+2. **MATCH detected names against a settings DICTIONARY we maintain.** A built-in table `key → { type: toggle|slider|dropdown|text, label, hint, default, min/max/step or choices }` covering the common Winlator-family vocabulary (`WRAPPER_VK_VERSION` = version string, `WRAPPER_EMULATE_BCN` = 0..3, `WRAPPER_BCN_ASTC` = toggle, present mode, extension blacklist, `COMPAT_*`, …). A matched key renders a **proper control**; the dictionary is OURS to grow (one line per new common setting → every wrapper that uses it gets a nice control). This is what turns raw detected names into a polished UI with zero author cooperation.
+3. **UNKNOWN detected names →** a plain "set your own value" text field (still usable by power users).
+4. **App-bundled cards for popular wrappers (optional polish):** for GameNative / Charan's Mali etc., WE can hand-write a full schema bundled in the app, keyed to the wrapper, to override/augment the auto-detected list for a perfect UI. No author needed.
+5. **Wrapper-shipped card (optional bonus):** if a wrapper ever includes a settings schema (e.g. `settings.json` in the `.tzst`), use it verbatim. Never required.
+
+**Plumbing (unchanged from before):**
+- **Dynamic settings UI:** render controls from the resolved option list (auto-detect ∪ dictionary ∪ bundled-card) in `GraphicsDriverConfigDialog`. Store values as arbitrary keys in `graphicsDriverConfig` (already a `;`-separated k=v string — no storage change).
+- **Generic env emission:** emit `key=value` from the resolved settings at launch (generalizes today's hardcoded per-var emission in `XServerDisplayActivity`). Unknown env vars are ignored by wrappers → safe.
+- **For bundled wrappers:** keep today's precise curated gates (we already know their capabilities); auto-detect + dictionary is primarily for imports. (Could later migrate bundled ones to the dictionary too, to delete the hardcoded `isGamenative`/`isBcnLayer` gates.)
+
+**Effort:** the biggest step. The dictionary + auto-detect scan + dynamic-UI/generic-emission refactor. Worth doing once imported wrappers are actually in use; the interim `isImported` superset covers the common case until then.
 
 ### ContentsManager alternative (considered, not chosen)
 Adding a `CONTENT_TYPE_WRAPPER` to `ContentsManager`/`ContentProfile` would give enumerate/install/remove for free, but it copies files by manifest to explicit targets (not "extract a `.tzst` into imagefs root at launch") and has no container cascade — so a bespoke `WrapperManager` mirroring `AdrenotoolsManager` is lower-risk and idiom-matching. Keep ContentsManager in mind only if we later want remote-catalog/download parity.
