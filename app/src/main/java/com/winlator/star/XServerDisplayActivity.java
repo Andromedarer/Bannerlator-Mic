@@ -3583,8 +3583,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
     if (graphicsDriver != null) {
         WrapperManager wmGeneric = new WrapperManager(this);
         if (wmGeneric.isImported(graphicsDriver)) {
+            java.util.Set<String> hiddenKeys = wmGeneric.hiddenKeys(graphicsDriver);
             for (String key : wmGeneric.detectedEnvKeys(graphicsDriver)) {
                 if (WrapperManager.HANDLED_ENV_KEYS.contains(key)) continue;
+                if (WrapperManager.isDebugEnvKey(key)) continue;   // debug/diag plumbing -> never emit
+                if (hiddenKeys.contains(key)) continue;            // user hid it via Edit settings
                 if (envVars.has(key)) continue; // never overwrite curated env
                 String value = graphicsDriverConfig.get(key);
                 if (value == null) continue;

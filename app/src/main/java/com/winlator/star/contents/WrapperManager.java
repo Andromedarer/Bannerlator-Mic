@@ -25,7 +25,9 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
@@ -97,6 +99,30 @@ public class WrapperManager {
         "BCN_TRANSCODE_TO_ASTC", "BCN_COMPUTE_IMAGE_VIEW", "BCN_LAYER_LOG_LEVEL",
         "BCN_PROFILE_TRANSFERS"
     )));
+
+    /**
+     * Global debug / diagnostics ignore-list (issue #132). Env-var names that are pure plumbing —
+     * logging, tracing, dumping, profiling, watermarks, headless swapchains, GPU sampling — are NEVER
+     * surfaced as an editable user SETTING nor emitted at launch: they don't affect gameplay and only
+     * add noise (and risk). Matched as an UPPERCASE substring so vendor-prefixed variants
+     * (MESA_VK_TRACE_TRIGGER, *_LOG_LEVEL, BCN_DUMP_*, *_PROFILE, *_WATERMARK, *_HEADLESS, …) are all
+     * caught. Shared, single source of truth: called from the Kotlin config dialog AND the Java XSDA
+     * emission loop. NOTE: the read-only "Environment variables" list still shows these — only the
+     * editable settings path filters. Never throws.
+     */
+    private static final String[] DEBUG_ENV_MARKERS = {
+        "LOG_LEVEL", "_TRACE", "TRACE_", "_DEBUG", "DEBUG_", "DIAG", "_DUMP", "DUMP_",
+        "PROFILE", "WATERMARK", "HEADLESS", "SAMPLE_GPU", "COUNTERS"
+    };
+
+    /** True if {@code key} is debug/diagnostics plumbing (see {@link #DEBUG_ENV_MARKERS}); such keys are
+     *  never shown as a setting nor emitted. Callable from Kotlin UI + Java XSDA. Never throws. */
+    public static boolean isDebugEnvKey(String key) {
+        if (key == null || key.isEmpty()) return false;
+        String up = key.toUpperCase(Locale.ROOT);
+        for (String marker : DEBUG_ENV_MARKERS) if (up.contains(marker)) return true;
+        return false;
+    }
 
     /**
      * "strings" a wrapper's binaries for the env-var NAMES they reference, unioned across whichever of
@@ -666,7 +692,14 @@ public class WrapperManager {
         return new Imported(identifier, label);
     }
 
+    /** Rewrite a .meta preserving any already-stored {@code hiddenKeys} line (a caps/env backfill must
+     *  never drop the user's hide/show choices). */
     private boolean writeMeta(String identifier, String label, WrapperCaps caps, List<String> envKeys) {
+        return writeMeta(identifier, label, caps, envKeys, hiddenKeys(identifier));
+    }
+
+    private boolean writeMeta(String identifier, String label, WrapperCaps caps, List<String> envKeys,
+                              Set<String> hidden) {
         File meta = metaFileFor(identifier);
         try (OutputStream out = new FileOutputStream(meta)) {
             StringBuilder content = new StringBuilder()
@@ -679,6 +712,9 @@ public class WrapperManager {
             // Omit the line entirely when unknown (null) so a caps-only backfill doesn't falsely
             // record "no env keys" before they've been scanned. An empty list writes "envKeys=".
             if (envKeys != null) content.append("envKeys=").append(TextUtils.join(",", envKeys)).append("\n");
+            // hiddenKeys line only when non-empty — a missing line means "nothing hidden".
+            if (hidden != null && !hidden.isEmpty())
+                content.append("hiddenKeys=").append(TextUtils.join(",", hidden)).append("\n");
             out.write(content.toString().getBytes());
             return true;
         }
@@ -686,6 +722,50 @@ public class WrapperManager {
             Log.d(TAG, "writeMeta failed for " + identifier + " — " + e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * The per-wrapper HIDDEN detected-settings set (issue #132) — env keys the user chose to hide via
+     * "Edit settings", read from the {@code .meta} ({@code hiddenKeys=}). A hidden key is never rendered
+     * as a setting nor emitted at launch. Returns an empty set when the line/file is absent, the id is
+     * empty, or the id isn't an import. Never throws.
+     */
+    public Set<String> hiddenKeys(String identifier) {
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        if (identifier == null || identifier.isEmpty()) return out;
+        File meta = metaFileFor(identifier);
+        try (BufferedReader r = new BufferedReader(new FileReader(meta))) {
+            String line;
+            while ((line = r.readLine()) != null) {
+                int eq = line.indexOf('=');
+                if (eq < 0) continue;
+                if (!line.substring(0, eq).trim().equals("hiddenKeys")) continue;
+                String v = line.substring(eq + 1).trim();
+                if (!v.isEmpty()) for (String s : v.split(",")) {
+                    String t = s.trim();
+                    if (!t.isEmpty()) out.add(t);
+                }
+                return out;
+            }
+        }
+        catch (IOException e) {
+            return out;
+        }
+        return out;
+    }
+
+    /**
+     * Persist the per-wrapper hidden detected-settings set, preserving the import's label / caps / env
+     * keys. No-op returning false for a non-import or empty id. Never throws.
+     */
+    public boolean setHiddenKeys(String identifier, Set<String> hidden) {
+        if (identifier == null || identifier.isEmpty() || !isImported(identifier)) return false;
+        Imported imp = readMeta(metaFileFor(identifier), identifier);
+        String label = (imp != null) ? imp.label : identifier;
+        WrapperCaps caps = readCapsFromMeta(identifier);
+        if (caps == null) caps = scanCaps(importedFileFor(identifier));
+        List<String> envKeys = readEnvKeysFromMeta(identifier);   // may be null (line absent) -> stays absent
+        return writeMeta(identifier, label, caps, envKeys, (hidden != null) ? hidden : new LinkedHashSet<>());
     }
 
     /**

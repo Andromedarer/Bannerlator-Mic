@@ -33,12 +33,18 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -47,6 +53,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -154,6 +161,8 @@ fun WrapperManagerBody(modifier: Modifier = Modifier) {
     var importNameDraft by remember { mutableStateOf("") }
     // Imported wrapper queued for deletion (confirm dialog).
     var deleteTarget by remember { mutableStateOf<WrapperManager.Imported?>(null) }
+    // Imported wrapper whose detected-settings hide/show dialog is open (#132, Part B).
+    var editSettingsTarget by remember { mutableStateOf<WrapperManager.Imported?>(null) }
     // Step 5 (#132): the curated wrapper catalog browser, layered over this body.
     var showCatalog by remember { mutableStateOf(false) }
 
@@ -255,6 +264,7 @@ fun WrapperManagerBody(modifier: Modifier = Modifier) {
                 manager = manager,
                 gpu = gpu,
                 onDelete = { deleteTarget = imp },
+                onEditSettings = { editSettingsTarget = imp },
             )
         }
 
@@ -439,6 +449,16 @@ fun WrapperManagerBody(modifier: Modifier = Modifier) {
                     Text(context.getString(android.R.string.cancel))
                 }
             },
+        )
+    }
+
+    // Edit settings: per-wrapper hide/show of detected settings (#132, Part B).
+    val toEdit = editSettingsTarget
+    if (toEdit != null) {
+        EditWrapperSettingsDialog(
+            manager = manager,
+            imported = toEdit,
+            onDismiss = { editSettingsTarget = null },
         )
     }
 
@@ -849,16 +869,40 @@ private fun WrapperSlotCard(
             )
         },
         trailing = {
-            Column(horizontalAlignment = Alignment.End) {
-                TextButton(onClick = onUpdate) {
-                    Icon(Icons.Filled.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text(context.getString(R.string.wrapper_update))
+            // #132 Part A: contextual ⋮ overflow menu (Update / Reset / Details) replacing the inline
+            // action buttons. Bundled slots stay Update/Reset/Details — no settings editing (curated UI).
+            var menuOpen by remember { mutableStateOf(false) }
+            Box {
+                IconButton(onClick = { menuOpen = true }) {
+                    Icon(
+                        Icons.Filled.MoreVert,
+                        contentDescription = context.getString(R.string.wrapper_more_actions),
+                    )
                 }
-                if (slot.isOverridden) {
-                    TextButton(onClick = onReset) {
-                        Text(context.getString(R.string.wrapper_reset))
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text(context.getString(R.string.wrapper_update)) },
+                        leadingIcon = { Icon(Icons.Filled.FolderOpen, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                        onClick = { menuOpen = false; onUpdate() },
+                    )
+                    if (slot.isOverridden) {
+                        DropdownMenuItem(
+                            text = { Text(context.getString(R.string.wrapper_reset)) },
+                            leadingIcon = { Icon(Icons.Filled.RestartAlt, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                            onClick = { menuOpen = false; onReset() },
+                        )
                     }
+                    DropdownMenuItem(
+                        text = { Text(context.getString(R.string.wrapper_details)) },
+                        leadingIcon = {
+                            Icon(
+                                if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        },
+                        onClick = { menuOpen = false; expanded = !expanded },
+                    )
                 }
             }
         },
@@ -871,6 +915,7 @@ private fun ImportedWrapperCard(
     manager: WrapperManager,
     gpu: GpuInfo,
     onDelete: () -> Unit,
+    onEditSettings: () -> Unit,
 ) {
     val context = LocalContext.current
     val cs = MaterialTheme.colorScheme
@@ -903,15 +948,160 @@ private fun ImportedWrapperCard(
             )
         },
         trailing = {
-            TextButton(onClick = onDelete) {
-                Icon(
-                    Icons.Filled.Delete,
-                    contentDescription = null,
-                    tint = cs.error,
-                    modifier = Modifier.size(16.dp),
+            // #132 Part A: contextual ⋮ overflow menu (Edit settings / Delete / Details) replacing the
+            // inline Delete button. "Edit settings" opens the per-wrapper hide/show dialog (Part B).
+            var menuOpen by remember { mutableStateOf(false) }
+            Box {
+                IconButton(onClick = { menuOpen = true }) {
+                    Icon(
+                        Icons.Filled.MoreVert,
+                        contentDescription = context.getString(R.string.wrapper_more_actions),
+                    )
+                }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text(context.getString(R.string.wrapper_edit_settings)) },
+                        leadingIcon = { Icon(Icons.Filled.Settings, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                        onClick = { menuOpen = false; onEditSettings() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(context.getString(R.string.wrapper_delete), color = cs.error) },
+                        leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = cs.error, modifier = Modifier.size(20.dp)) },
+                        onClick = { menuOpen = false; onDelete() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(context.getString(R.string.wrapper_details)) },
+                        leadingIcon = {
+                            Icon(
+                                if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        },
+                        onClick = { menuOpen = false; expanded = !expanded },
+                    )
+                }
+            }
+        },
+    )
+}
+
+/**
+ * #132 Part B: per-wrapper "Edit settings" — hide/show the detected settings of an IMPORTED wrapper.
+ * Lists every detected env key that is ELIGIBLE to be a setting (NOT in HANDLED_ENV_KEYS and NOT a
+ * debug/diag key) as a checkbox: checked = shown, unchecked = hidden. The hidden set is persisted per
+ * wrapper in its .meta ([WrapperManager.setHiddenKeys]); the config dialog + XSDA emission then skip
+ * any hidden key. Read-only debug/handled keys never appear here (they're never settings). Never crashes.
+ */
+@Composable
+private fun EditWrapperSettingsDialog(
+    manager: WrapperManager,
+    imported: WrapperManager.Imported,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    val cs = MaterialTheme.colorScheme
+    // null = still loading; non-null = eligible keys (detected minus HANDLED minus debug).
+    var keys by remember(imported.identifier) { mutableStateOf<List<String>?>(null) }
+    // Currently-HIDDEN keys (unchecked). Seeded from .meta, mutated locally, persisted on OK.
+    val hidden = remember(imported.identifier) { mutableStateListOf<String>() }
+
+    LaunchedEffect(imported.identifier) {
+        val eligible = withContext(Dispatchers.IO) {
+            runCatching {
+                manager.detectedEnvKeys(imported.identifier).filter {
+                    it !in WrapperManager.HANDLED_ENV_KEYS && !WrapperManager.isDebugEnvKey(it)
+                }
+            }.getOrDefault(emptyList())
+        }
+        val stored = withContext(Dispatchers.IO) {
+            runCatching { manager.hiddenKeys(imported.identifier) }.getOrDefault(emptySet())
+        }
+        hidden.clear()
+        // Only keep hidden entries that are still eligible keys (stale ids drop off harmlessly).
+        hidden.addAll(stored.filter { it in eligible })
+        keys = eligible
+    }
+
+    OutlinedAlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(context.getString(R.string.wrapper_edit_settings_title)) },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                Text(
+                    context.getString(R.string.wrapper_edit_settings_message),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = cs.onSurfaceVariant,
                 )
-                Spacer(Modifier.width(6.dp))
-                Text(context.getString(R.string.wrapper_delete), color = cs.error)
+                Spacer(Modifier.size(8.dp))
+                val resolved = keys
+                when {
+                    resolved == null ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(vertical = 4.dp),
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Scanning…", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                        }
+                    resolved.isEmpty() ->
+                        Text(
+                            context.getString(R.string.wrapper_edit_settings_empty),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = cs.onSurfaceVariant,
+                        )
+                    else ->
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 300.dp)
+                                .verticalScroll(rememberScrollState()),
+                        ) {
+                            resolved.forEach { key ->
+                                val shown = key !in hidden
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .clickable { if (shown) hidden.add(key) else hidden.remove(key) }
+                                        .padding(vertical = 2.dp),
+                                ) {
+                                    Checkbox(
+                                        checked = shown,
+                                        onCheckedChange = { checked ->
+                                            if (checked) hidden.remove(key) else hidden.add(key)
+                                        },
+                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            WrapperSettingsDictionary.defFor(key).label,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = cs.onSurface,
+                                        )
+                                        Text(
+                                            key,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = cs.onSurfaceVariant,
+                                            fontFamily = FontFamily.Monospace,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                manager.setHiddenKeys(imported.identifier, hidden.toSet())
+                onDismiss()
+            }) { Text(context.getString(android.R.string.ok)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(context.getString(android.R.string.cancel))
             }
         },
     )

@@ -769,6 +769,13 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="wrapper_delete">Delete</string>
     <string name="wrapper_delete_confirm_title">Delete this wrapper?</string>
     <string name="wrapper_delete_confirm_message">Remove this imported wrapper. Any container or game using it goes back to the default wrapper.</string>
+    <!-- #132: per-card overflow menu + per-wrapper Edit settings -->
+    <string name="wrapper_more_actions">More actions</string>
+    <string name="wrapper_details">Details</string>
+    <string name="wrapper_edit_settings">Edit settings</string>
+    <string name="wrapper_edit_settings_title">Edit detected settings</string>
+    <string name="wrapper_edit_settings_message">Choose which detected settings appear in this wrapper\'s Graphics Driver options. Unchecked settings are hidden.</string>
+    <string name="wrapper_edit_settings_empty">No detected settings to configure.</string>
 
     <!-- Step 5 (#132): curated, downloadable wrapper catalog -->
     <string name="wrapper_catalog_title">Download wrappers…</string>
