@@ -976,10 +976,11 @@ private fun WrapperSlotCard(
     val stateLabel = context.getString(
         if (slot.isOverridden) R.string.wrapper_updated_label else R.string.wrapper_bundled
     )
+    // Collapsed subtitle = filename + version only. The descriptive notes would push this past the
+    // 2-line cap and truncate ("Bruno l…"), so they live in the expanded detail box below instead.
     val subtitle = buildString {
         append(slot.fileName)
         append(" · Version: ").append(slot.version).append(" (").append(stateLabel).append(")")
-        if (slot.notes.isNotEmpty()) append(" · ").append(slot.notes)
     }
     WrapperCardFrame(
         icon = Icons.Filled.Layers,
