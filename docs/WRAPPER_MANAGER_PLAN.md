@@ -9,11 +9,12 @@ Status: **planned, not started.** Reference studied: GunaCharanTeja/WinlatorMali
 
 Let users bring their own graphics **wrappers** (the layer that makes Windows games talk to the phone's GPU) instead of only the ones we bundle — and have each wrapper's settings appear automatically.
 
-**Three steps, safe → ambitious:**
+**Four steps, safe → ambitious:**
 
 1. **Update the wrappers we already ship** *(simple, safe)* — an **Update** button per built-in wrapper (swap in a newer file) + **Reset** (revert to ours). Nothing else changes, so nothing existing can break. Delivers the core ask: newer wrappers **without an app update**.
 2. **Add brand-new wrappers** *(medium)* — import / name / delete arbitrary wrappers, which then appear in the driver menu. Care needed: the menu grows/shrinks, and deleting a wrapper a game uses must auto-reset that game.
 3. **Each wrapper's settings appear automatically** *(adaptable)* — the app **detects what settings a wrapper supports by scanning the wrapper file itself** (no cooperation from the wrapper author, because none of them ship a "menu card") and matches those against **a dictionary we maintain** to build proper toggles/sliders. Import a wrapper → its real settings appear.
+4. **Wrapper Workbench — make/save/share your own** *(ambitious)* — save a tuned settings preset as a named wrapper, compose a wrapper from existing parts (ICD + BCn/compat layers), curate its settings UI. Repackaging + presets only — **no compiling** a wrapper binary on-device. See the Step 4 section below.
 
 **How it degrades (no menu card — which is every wrapper today):**
 1. It runs on its own defaults (nothing breaks).
@@ -97,6 +98,20 @@ Surface the detection results in the UI (this SITS ON TOP of the capability/GPU 
 - **Per-wrapper detail** — each installed-wrapper card gets an **expandable box / detail view**: version+notes (from `version.txt`), detected capabilities (ICD / BCn layer / compat layer), the settings it supports, and GPU applicability ("BCn — Mali/non-Qualcomm only; inert on this Adreno").
 - **Pre-import inspection page** — when the user picks a `.tzst` to import, show a **detail/preview screen BEFORE naming+adding**: what it is (ICD? layer bundle?), its detected settings/options, and **what may need to be created/added to use it properly** (e.g. "contains a BCn layer — will show BCn Layer Settings; requires a non-Adreno GPU to take effect", "detected settings: WRAPPER_VK_VERSION, WRAPPER_EMULATE_BCN, …", "unknown keys → add-your-own-value"). Then a Name field → Add. So the user decides with full info instead of importing blind.
 - Both read the same capability/`.meta` + env-scan data the engine produces; no new detection logic, just presentation. Lives in `WrapperManagerScreen.kt` (cards + a new inspection dialog/screen in the import flow) — disjoint from the engine's files except reading `WrapperManager.capsFor()`.
+
+## Step 4 — Wrapper Workbench / curation (user, 2026-07-20)
+Turn the manager from an import/update tool into a **workbench**: make/save/share your own wrappers. Builds directly on Step 3 (the settings detection + generic emission are exactly what presets/compose reuse).
+
+**❌ Hard limit — no compilation.** A wrapper's `libvulkan_wrapper.so` is compiled C (source + NDK). The app has no compiler, so a *brand-new wrapper binary from nothing is impossible on-device.* Everything below is **repackaging existing binaries + presets**, never compiling.
+
+**✅ Three buildable forms:**
+1. **Settings preset → named custom wrapper.** Take a wrapper (bundled or imported) + a tuned set of the Step-3 detected env-var values and **save it as a new named, selectable, shareable wrapper** = *a wrapper reference + a baked-in settings profile.* Storage: a new `.meta` variant (`baseWrapper=<id>` + the preset k=v) OR a thin `.tzst` that re-points to a base + carries a settings file; the launch path resolves base + applies the preset via the existing generic emission. Lowest-effort, highest-value; natural extension of Step 3.
+2. **Compose from parts.** A picker to assemble a new `.tzst` from existing components: pick an ICD (`libvulkan_wrapper.so` from any wrapper) + optionally a BCn layer (`libbcn_layer.so`, e.g. the Fcharan fork) + a compat layer (`libdxvk_mali_compat_layer.so`) + manifests → tar+zstd in-app → name → add. This is exactly the manual `wrapper-compat-bcn.tzst` build (leegao ICD + bcn + compat) done in-UI. Uses `TarCompressorUtils.compress`; capability/env re-scan runs on the result like any import.
+3. **Curate the settings UI ("our own card").** Override/augment what the manager shows for a wrapper — pin labels, hide noisy detected keys, add hints, set defaults — i.e. author an app-side settings card per wrapper (extends `WrapperSettingsDictionary` with a per-wrapper override map). Improves any wrapper's UI without touching its binary; also the mechanism to hand-write perfect cards for popular wrappers (GameNative, Charan's Mali).
+
+**Editing bundled wrappers:** can't recompile the `.so`, but override (Update, shipped) + a settings preset ≈ "your own version" of a bundled wrapper.
+
+**Effort/order:** (1) preset→named wrapper first (small, reuses Step 3 emission), (2) curate-card next (dictionary override), (3) compose-from-parts last (in-app repackaging UI — the biggest). Sharing (export a preset/composed wrapper `.tzst`) rides the existing `.tzst` format + community-config plumbing.
 
 ### ContentsManager alternative (considered, not chosen)
 Adding a `CONTENT_TYPE_WRAPPER` to `ContentsManager`/`ContentProfile` would give enumerate/install/remove for free, but it copies files by manifest to explicit targets (not "extract a `.tzst` into imagefs root at launch") and has no container cascade — so a bespoke `WrapperManager` mirroring `AdrenotoolsManager` is lower-risk and idiom-matching. Keep ContentsManager in mind only if we later want remote-catalog/download parity.
