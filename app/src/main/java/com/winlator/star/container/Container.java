@@ -437,6 +437,17 @@ public class Container {
         putExtra("frameGenFlowScale", String.valueOf(flowScale));
     }
 
+    // lsfg-vk "performance mode" (conf.toml performance_mode): trades interpolation quality for FPS,
+    // aimed at low-end devices. Per-container, default OFF (matches the previous hardcoded false, so
+    // existing users see no change until they flip it). Also live-toggleable from the in-game FG menu.
+    public boolean isLsfgPerformanceMode() {
+        return getExtra("lsfgPerformanceMode", "0").equals("1");
+    }
+
+    public void setLsfgPerformanceMode(boolean performanceMode) {
+        putExtra("lsfgPerformanceMode", performanceMode ? "1" : "0");
+    }
+
     // FPS limiter (implemented by the bionic-fg layer: paces the real/base frames, so with
     // frame gen on the on-screen rate is limit × multiplier). Tuned live from the in-game menu.
     public static final int FPS_LIMITER_DEFAULT = 60;

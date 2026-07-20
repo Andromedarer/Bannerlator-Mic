@@ -628,12 +628,16 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 // lsfg-vk: rewrite its conf.toml — the fork layer watches the file mtime and reloads
                 // live (swapchain recreate). Passthrough = multiplier 1 (layer treats <=1 as off).
                 File dll = new File(getFilesDir(), "lsfg-vk/Lossless.dll");
+                // Live performance_mode: seeded from the container at launch (below), toggled live from
+                // the FG drawer. Rewriting conf.toml with it bumps the mtime so the layer re-reads.
+                boolean perfMode = s.getLsfgPerformanceMode().getValue();
                 // mult is already 0 when the in-game toggle is Off (or FG disabled). lsfg-vk treats
                 // multiplier <= 1 as passthrough, so map anything below 2 to 1 — NOT max(2,mult),
                 // which would force 2x on Off.
-                writeLsfgConfig(mult >= 2 ? mult : 1, flow, dll.getAbsolutePath());
+                writeLsfgConfig(mult >= 2 ? mult : 1, flow, dll.getAbsolutePath(), perfMode);
                 if (fgOn) container.setFrameGenMultiplier(mult);
                 container.setFrameGenFlowScale(flow);
+                container.setLsfgPerformanceMode(perfMode);
                 container.saveData();
                 // lsfg multiplier may have crossed the >=2 threshold -> re-evaluate the limiter
                 // guard (lsfgGovernsFps) so the cap steps aside / resumes without extra user action.
@@ -872,6 +876,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         XServerDrawerState.INSTANCE.setFrameGenMultiplier(0);
         XServerDrawerState.INSTANCE.setFrameGenFlowScale(container.getFrameGenFlowScale());
         XServerDrawerState.INSTANCE.setFrameGenEngine(fgEngine);
+        XServerDrawerState.INSTANCE.setLsfgPerformanceMode(container.isLsfgPerformanceMode());
         XServerDrawerState.INSTANCE.setFpsLimiterEnabled(fpsLimOn);
         XServerDrawerState.INSTANCE.setFpsLimit(resolvedFpsLimiterValue());
         XServerDrawerState.INSTANCE.setMatchRefreshRate(resolvedMatchRefreshRate());
@@ -1348,7 +1353,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // lsfg-vk (GameNative fork) conf.toml. The layer watches this file's mtime in its present hook
     // and forces a swapchain recreate when it changes, re-reading multiplier/flow — so rewriting it
     // from the in-game menu re-applies live. exe MUST equal the LSFG_PROCESS env value.
-    void writeLsfgConfig(int multiplier, float flowScale, String dllPath) {
+    void writeLsfgConfig(int multiplier, float flowScale, String dllPath, boolean performanceMode) {
         try {
             File configDir = new File(imageFs.home_path, ".config/lsfg-vk");
             configDir.mkdirs();
@@ -1362,7 +1367,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     + "exe = \"bannerlator-lsfg\"\n"
                     + "multiplier = " + multiplier + "\n"
                     + "flow_scale = " + String.format(java.util.Locale.US, "%.2f", flowScale) + "\n"
-                    + "performance_mode = false\n"
+                    + "performance_mode = " + performanceMode + "\n"
                     + "hdr_mode = false\n"
                     + "experimental_present_mode = \"fifo\"\n";
             FileUtils.writeString(confFile, toml);
@@ -2141,7 +2146,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     // Start in passthrough (multiplier 1 = frame gen off). ENABLE_LSFG still loads the
                     // layer, so the FG drawer can enable it live in-session (the conf.toml mtime watch
                     // re-applies the user's multiplier without a relaunch). Container value untouched.
-                    writeLsfgConfig(1, container.getFrameGenFlowScale(), losslessDll.getAbsolutePath());
+                    writeLsfgConfig(1, container.getFrameGenFlowScale(), losslessDll.getAbsolutePath(), container.isLsfgPerformanceMode());
                     File lsfgConf = new File(imageFs.home_path, ".config/lsfg-vk/conf.toml");
                     envVars.put("ENABLE_LSFG", "1");
                     envVars.put("LSFG_CONFIG", lsfgConf.getAbsolutePath());

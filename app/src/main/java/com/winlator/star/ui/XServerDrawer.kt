@@ -97,6 +97,8 @@ import com.winlator.star.container.Container
 import com.winlator.star.reshade.ReshadeLoadout
 import com.winlator.star.reshade.ReshadeManager
 import com.winlator.star.ui.components.ColorPicker
+import com.winlator.star.ui.screens.MenuItemDivider
+import com.winlator.star.ui.screens.outlinedMenuCard
 import com.winlator.star.ui.theme.LocalAccentDim
 import com.winlator.star.ui.theme.WinlatorTheme
 import com.winlator.star.widget.perfhud.parseHudOutline
@@ -770,6 +772,7 @@ private fun FrameGenSection(state: XServerDrawerState) {
     val initFgFlow by state.frameGenFlowScale.collectAsState()
     val engine by state.frameGenEngine.collectAsState()
     val layerActive by state.bionicFgActive.collectAsState()
+    val initLsfgPerf by state.lsfgPerformanceMode.collectAsState()
 
     // Title on the left, engine badge on the right (green dot = engine actually running this
     // session). Replaces the old standalone "Frame Generation (AI)" header so the engine isn't
@@ -844,6 +847,25 @@ private fun FrameGenSection(state: XServerDrawerState) {
                     modifier = Modifier.padding(start = 4.dp, top = 2.dp)
                 )
             }
+        }
+
+        // lsfg-vk only: performance_mode (bionic-fg has no such setting). Toggling rewrites conf.toml
+        // via the same applyFg -> onBionicFgConfigChange path (mtime bump -> layer re-reads live) and
+        // persists to the container there.
+        if (engine == "lsfg") {
+            var lsfgPerf by remember(initLsfgPerf) { mutableStateOf(initLsfgPerf) }
+            Spacer(Modifier.height(8.dp))
+            ToggleRow("Performance mode", lsfgPerf) {
+                lsfgPerf = it
+                state.setLsfgPerformanceMode(it)
+                applyFg()
+            }
+            Text(
+                "Lower quality for higher FPS — helps on low-end devices.",
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                fontSize = 11.sp,
+                modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+            )
         }
     } else {
         Text(
@@ -1177,8 +1199,13 @@ private fun ReshadeDropdown(label: String, options: List<String>, selected: Int,
                 )
                 Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+                modifier = Modifier.outlinedMenuCard()
+            ) {
                 options.forEachIndexed { i, opt ->
+                    if (i > 0) MenuItemDivider()
                     DropdownMenuItem(text = { Text(opt) }, onClick = { onSelect(i); expanded = false })
                 }
             }
@@ -2249,7 +2276,8 @@ private fun TmProcessRow(proc: XServerDialogState.TmProcess) {
             }
             DropdownMenu(
                 expanded = menuExpanded,
-                onDismissRequest = { menuExpanded = false }
+                onDismissRequest = { menuExpanded = false },
+                modifier = Modifier.outlinedMenuCard()
             ) {
                 DropdownMenuItem(
                     text = { Text("Bring to Front") },
@@ -2257,7 +2285,8 @@ private fun TmProcessRow(proc: XServerDialogState.TmProcess) {
                         Icon(
                             Icons.Default.FlipToFront,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp),
                         )
                     },
                     onClick = {
@@ -2265,6 +2294,7 @@ private fun TmProcessRow(proc: XServerDialogState.TmProcess) {
                         XServerDialogState.onTmBringToFront?.invoke(proc.name, proc.pid)
                     },
                 )
+                MenuItemDivider()
                 DropdownMenuItem(
                     text = { Text("End Process", color = MaterialTheme.colorScheme.error) },
                     leadingIcon = {
@@ -2272,6 +2302,7 @@ private fun TmProcessRow(proc: XServerDialogState.TmProcess) {
                             Icons.Default.Close,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(18.dp),
                         )
                     },
                     onClick = {

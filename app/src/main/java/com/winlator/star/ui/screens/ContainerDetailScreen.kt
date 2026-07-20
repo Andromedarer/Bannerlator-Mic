@@ -723,6 +723,21 @@ private fun TopLevelFields(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 52.dp, top = 2.dp, bottom = 4.dp)
             )
+            // lsfg-vk performance_mode: lower quality for higher FPS. Also live-toggleable in-game.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(
+                    checked = viewModel.lsfgPerformanceMode,
+                    onCheckedChange = { viewModel.lsfgPerformanceMode = it }
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.fg_performance_mode), modifier = Modifier.weight(1f))
+            }
+            Text(
+                text = stringResource(R.string.fg_performance_mode_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 52.dp, top = 2.dp, bottom = 4.dp)
+            )
         }
 
         // FPS Limiter (bionic-fg). This switch just loads the layer; the cap value is set live

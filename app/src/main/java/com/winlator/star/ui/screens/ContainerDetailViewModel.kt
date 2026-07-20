@@ -108,6 +108,9 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     // Frame-gen engine (per-container): "off" | "bionic" | "lsfg" (mutually exclusive).
     // multiplier & flow scale are tuned live from the in-game side menu (bionic-fg).
     var frameGenEngine by mutableStateOf("off")
+    // lsfg-vk performance_mode (per-container): lower interpolation quality for higher FPS. Also
+    // live-toggleable from the in-game FG menu. Only meaningful when frameGenEngine == "lsfg".
+    var lsfgPerformanceMode by mutableStateOf(false)
     // FPS limiter on/off (loads the layer); the cap value is set live in-game.
     var fpsLimiterEnabled by mutableStateOf(false)
     // VRR: match the display panel refresh rate to the game's FPS. Default ON (safe — no-op unless
@@ -356,6 +359,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         fullscreenMode      = c?.getFullscreenMode() ?: Container.FULLSCREEN_OFF
 
         frameGenEngine     = c?.frameGenEngine ?: "off"
+        lsfgPerformanceMode = c?.isLsfgPerformanceMode == true
         fpsLimiterEnabled  = c?.isFpsLimiterEnabled == true
         matchRefreshRate   = c?.isMatchRefreshRate != false   // default ON for new/unset containers
         manualRefreshRate  = c?.manualRefreshRate ?: 0
@@ -645,6 +649,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             c.setFPSCounterConfig(fpsConfig)
             c.setFullscreenMode(fullscreenMode)
             c.setFrameGenEngine(frameGenEngine)
+            c.setLsfgPerformanceMode(lsfgPerformanceMode)
             c.setFpsLimiterEnabled(fpsLimiterEnabled)
             c.setMatchRefreshRate(matchRefreshRate)
             c.setManualRefreshRate(manualRefreshRate)
@@ -723,6 +728,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
                 container = created
                 if (created != null) {
                     created.setFrameGenEngine(frameGenEngine)
+                    created.setLsfgPerformanceMode(lsfgPerformanceMode)
                     created.setFpsLimiterEnabled(fpsLimiterEnabled)
                     created.setMatchRefreshRate(matchRefreshRate)
                     created.setManualRefreshRate(manualRefreshRate)

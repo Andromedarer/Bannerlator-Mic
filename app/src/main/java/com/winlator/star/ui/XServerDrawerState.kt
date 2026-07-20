@@ -66,6 +66,11 @@ object XServerDrawerState {
     private val _frameGenEngine = MutableStateFlow("off")
     val frameGenEngine: StateFlow<String> = _frameGenEngine
 
+    // lsfg-vk only: performance_mode (lower interpolation quality, higher FPS — for low-end devices).
+    // Seeded from the container when the drawer opens; toggled live from the FG pane (rewrites conf.toml).
+    private val _lsfgPerformanceMode = MutableStateFlow(false)
+    val lsfgPerformanceMode: StateFlow<Boolean> = _lsfgPerformanceMode
+
     private val _fpsLimiterEnabled = MutableStateFlow(false)
     val fpsLimiterEnabled: StateFlow<Boolean> = _fpsLimiterEnabled
 
@@ -208,6 +213,7 @@ object XServerDrawerState {
     fun setFrameGenMultiplier(v: Int)      { _frameGenMultiplier.value = v }
     fun setFrameGenFlowScale(v: Float)     { _frameGenFlowScale.value = v }
     fun setFrameGenEngine(v: String)       { _frameGenEngine.value = v }
+    fun setLsfgPerformanceMode(v: Boolean) { _lsfgPerformanceMode.value = v }
     fun setFpsLimiterEnabled(v: Boolean)   { _fpsLimiterEnabled.value = v }
     fun setFpsLimit(v: Int)                { _fpsLimit.value = v }
     fun setMatchRefreshRate(v: Boolean)    { _matchRefreshRate.value = v }
@@ -242,6 +248,7 @@ object XServerDrawerState {
         _frameGenMultiplier.value = 2
         _frameGenFlowScale.value = 0.6f
         _frameGenEngine.value = "off"
+        _lsfgPerformanceMode.value = false
         _fpsLimiterEnabled.value = false
         _fpsLimit.value = 60
         _matchRefreshRate.value = true
