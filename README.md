@@ -56,7 +56,7 @@
 |---|---|
 | **App label** | `Bannerlator Bionic` (standard) · `Bannerlator Bionic PuBG` (pubg) · `Bannerlator Bionic Ludashi` (ludashi) |
 | **Packages** | `com.winlator.banner` (standard) · `com.tencent.ig` (pubg) · `com.ludashi.benchmark` (ludashi) |
-| **Version** | Bannerlator **V 2.7** — built from Star **marcescence** (`versionName 2.7`, `versionCode 46`) |
+| **Version** | Bannerlator **V 2.7.1** — built from Star **marcescence** (`versionName 2.7.1`, `versionCode 47`) |
 | **Android SDK** | `compileSdk 34` · `targetSdk 28` · `minSdk 26` (Android 8.0+) |
 | **Lineage** | Winlator → cmod → Bionic Nightly → Star Bionic → **marcescence** → **Bannerlator** |
 
@@ -66,7 +66,7 @@
 
 - [📌 Project Notice](#-project-notice)
 - [ℹ️ Information](#ℹ️-information)
-- [🆕 What's New in 2.7](#-whats-new-in-27)
+- [🆕 What's New in 2.7.1](#-whats-new-in-271)
 - [✨ Full Features](#-full-features)
   - [🍷 Windows compatibility](#-windows-compatibility)
   - [🎨 Graphics & translation layers](#-graphics--translation-layers)
@@ -93,7 +93,22 @@
 
 ---
 
-## 🆕 What's New in 2.7
+## 🆕 What's New in 2.7.1
+
+2.7.1 builds on 2.7's **Wrapper Version Manager** with a big round of **catalog + update improvements**, plus a frame-gen **Performance mode**, a **controller-vibration master switch**, our own **Banner File Manager** (replacing WFM), and consistent menu styling across the app. Like the last several releases it's **entirely app-side** — **no ImageFS reinstall** — your containers, themes, custom accent and per-game settings carry over untouched; just install over 2.7.
+
+**🧩 Wrapper Version Manager — catalog + bundled updates.** The wrapper catalog now **remembers what you've installed** across restarts and flags **"Update available"** when a newer build exists — for **imported *and* bundled** wrappers — with **one-tap Update** and a **"From catalog"** chip marking catalog-installed entries. The **GameNative wrapper** is refreshed to its latest July build (adds 32-bit game support). Plus a batch of fixes: the **BCn layer (leegao)** entry now detects correctly (was "Vulkan ICD" / 0 settings → **BCn layer / 13 knobs**), the shared **"Extra libraries"** payload is hidden from the manager (it isn't a wrapper), card text no longer truncates, and the catalog's Installed mark now clears properly on **Reset**.
+
+**🎞️ Frame generation — Performance mode.** A new **"Performance mode"** toggle for **lsfg-vk** frame generation — per-container in settings **and** live in the in-game drawer — switches to a lighter frame-gen model for a real FPS gain on weaker GPUs, **with no root or read-only file hacks**. Defaults off. *(Thanks [@Tony57319](https://github.com/Tony57319) — [#152](https://github.com/The412Banner/Bannerlator/issues/152).)*
+
+**🎮 Controllers.** A new **"Controller vibration" master switch** in the in-game Vibration section silences **all** rumble regardless of slot, saved globally — and the per-slot vibration toggles that used to snap back now reflect your changes.
+
+**📁 Banner File Manager.** New containers now ship **[Banner File Manager](https://github.com/The412Banner/banner-file-manager)** — our own native Win32 file manager, forked from [BrunoSX's Winlator File Manager](https://github.com/brunodev85/wfm): **dual-pane split view**, **Open as administrator / Open with**, and a **native Win32 copy** that sidesteps the Proton 10.0-4 shell32 copy-paste crash. *(Applies to new containers.)*
+
+**🎨 Interface.** Every dropdown / overflow menu now shares one clean **outlined-card style** (dividers + accent icons), matching the File Manager.
+
+<details>
+<summary><b>Previously in 2.7</b> — Wrapper Version Manager + experimental Mali DX12</summary>
 
 2.7 adds the **Wrapper Version Manager** — you can now **import, update, delete and tune** any graphics wrapper, browse a **curated downloadable catalog** from across the Winlator family, and get **auto-detected settings** for every wrapper with zero setup. It also brings an **experimental, opt-in Mali DX12 driver**. Like the last several releases it's **entirely app-side** — **no ImageFS reinstall** — your containers, themes, custom accent and per-game settings carry over untouched; just install over 2.6.
 
@@ -102,6 +117,8 @@
 **🧪 Mali DX12 — experimental, opt-in.** A new opt-in **6th graphics driver, "Wrapper + compat + bcn"**, brings [leegao](https://github.com/leegao)'s BCn transcode layer together with a **DX12 compat layer**, with a **"Use GameNative engine (DX12)"** toggle for **Valhall-class Mali** GPUs. This release folds in **leegao's layer-composition fix** so device hooks propagate correctly when both layers stack. It does nothing unless you select it and is **inert on Qualcomm / Adreno** — and DX12 on Mali is still being proven on real hardware, so treat it as a **test path** and please report back with logs.
 
 **🌐 Community — thank you.** Contributed straight to Bannerlator's own config repo: **235 games**, **274 configs**, and growing accounts — and because the in-app browser also merges the **BannerHub** catalog, the total you can browse and apply *inside the app* is bigger still. All growing. This project grows *only* because of the community's support and participation. 🙏 Browse: [Bannerlator repo](https://github.com/The412Banner/bannerlator-game-configs) · [BannerHub catalog](https://github.com/The412Banner/bannerhub-game-configs) · [online](https://the412banner.github.io/bannerlator-game-configs/).
+
+</details>
 
 <details>
 <summary><b>Previously in 2.6.2</b> — fixes &amp; hardening</summary>
@@ -309,6 +326,7 @@ Everything Bannerlator offers, at a glance. No PC and no root required — it ru
 - > ⚠️ **lsfg-vk requires you to supply your own `Lossless.dll`.** Bannerlator bundles **no** proprietary Lossless Scaling files. You must own **[Lossless Scaling](https://store.steampowered.com/app/993090/Lossless_Scaling/)** (THS, on Steam) and import its `Lossless.dll` via **Settings → Frame Generation (lsfg-vk) → pick DLL**. The DLL is copied into app storage and serves all containers. Until you import a valid `Lossless.dll`, the **lsfg-vk** option stays greyed out; **bionic-fg** needs no DLL and works without it.
 - **Live in-game controls** for whichever engine the container runs: switch between **Off / 2× / 3× / 4×** and adjust the **flow-scale** slider right from the in-game Graphics drawer, hot-reloaded with no restart.
 - **FPS Limiter** — a **standalone, engine-independent** live frame cap. It paces the X11 Present extension by delaying the `IdleNotify` that frees the guest's buffer, so the game itself throttles (the in-game HUD reflects the cap and GPU/power draw drops). Works the same with frame gen **Off**, **bionic-fg**, or **lsfg-vk**, on both host renderers, all guest APIs. When **lsfg-vk** is multiplying (2×+) the limiter automatically steps aside so lsfg's own pacing governs — no double-cap. This guest-side present-pacing mechanism was ported from **[GameNative](https://github.com/utkarshdalal/GameNative)** (see [Credits](#-credits)).
+- **lsfg Performance mode** — a lighter frame-gen model for weaker GPUs, selectable **per container** and live in the **in-game drawer**, with no root or read-only file hacks; defaults off. *(Requested by [@Tony57319](https://github.com/Tony57319) — [#152](https://github.com/The412Banner/Bannerlator/issues/152).)*
 - Confirmed on **both** the OpenGL and Vulkan host renderers.
 
 ### 📦 Containers
@@ -329,6 +347,7 @@ Everything Bannerlator offers, at a glance. No PC and no root required — it ru
 - Per-game settings including display language / locale.
 - **Customizable on-screen touch controls** and virtual gamepad overlays, which **follow your app theme** or take a **per-game custom colour** you set in the Controls editor.
 - **Physical controller** support (SDL2), plus touchpad / mouse emulation with adjustable cursor speed. The **external controller-binding screen** lists each input as a card with readable labels, and buttons you press while binding appear instantly.
+- **Controller vibration** — **per-slot** rumble toggles plus a **master switch** (in the in-game Vibration section) that silences all rumble regardless of slot, saved globally.
 
 ### 🌐 Community Configs
 Browse **community-shared, per-game / per-device tuning configs** in-app and apply a known-good setup in one tap.
@@ -532,6 +551,8 @@ This build stands on a long chain of prior work — its direct lineage, plus the
 | **DadSchoorse** | [vkBasalt](https://github.com/DadSchoorse/vkBasalt) (zlib) — the Vulkan post-processing layer that embeds the ReShade FX compiler. Bannerlator's **ReShade** feature is a continuation of this work: the bundled layer is built from DadSchoorse's source, patched for live on-device toggle and slider control. The bundled / catalog `.fx` effects are MIT / CC0 shaders by the **ReShade ([crosire](https://github.com/crosire/reshade-shaders))**, **prod80 ([prod80-reshade-repository](https://github.com/prod80/prod80-reshade-repository))**, **luluco250 ([FXShaders](https://github.com/luluco250/FXShaders))** and **fubax** authors, each under their own MIT / CC0 license. |
 | **leegao** (Lee Gao) | Vulkan texture-compression work used for mobile-GPU compatibility and performance — the [BCn decompression layer](https://github.com/leegao/bcn_layer) (**shader-v3**, powering 2.5's **"Wrapper + bcn_layer"** Mali driver) and the **DX12 `compat_layer`** that, alongside it, powers 2.7's new opt-in **"Wrapper + compat + bcn"** Mali DX12 driver — including the just-landed **layer-composition fix** — plus real-time [ASTC/ETC compute-shader encoders](https://github.com/leegao) and the [bionic-vulkan-wrapper](https://github.com/leegao/bionic-vulkan-wrapper) (**ETC2-Milestone-2**) bundled as the base wrapper for the Mali BCn path. |
 | **WinlatorMali** (GunaCharanTeja / Charan) | [WinlatorMali](https://github.com/GunaCharanTeja/WinlatorMali) — the **Wrapper Version Manager** (new in 2.7) is modeled on WinlatorMali's graphics-driver manager, introduced in [Winlator Mali Bionic 1.1](https://github.com/GunaCharanTeja/WinlatorMali/releases/tag/bionic-mali-1.1); a number of the downloadable catalog wrappers come from WinlatorMali too (each credited in-app). The feature was requested in [#132](https://github.com/The412Banner/Bannerlator/issues/132) by [@6ui99uhkllj](https://github.com/6ui99uhkllj). |
+| **BrunoSX** | The bundled Windows file manager is **[Banner File Manager](https://github.com/The412Banner/banner-file-manager)** (new in 2.7.1), Bannerlator's fork of BrunoSX's [Winlator File Manager](https://github.com/brunodev85/wfm) (**MIT**) — rebuilt with **native Win32 file operations** (sidestepping the Proton 10.0-4 shell32 copy-paste crash), a **dual-pane split view**, and **Open-as-administrator / Open-with**. |
+| **[@Tony57319](https://github.com/Tony57319)** | Reported / requested the **lsfg Performance mode** frame-gen toggle new in 2.7.1 ([#152](https://github.com/The412Banner/Bannerlator/issues/152)). |
 | **JavaSteam** | [JavaSteam](https://github.com/Longi94/JavaSteam) (`in.dragonbra:javasteam`) by **Longi94** — the Steam **connection-manager client** the built-in Steam store logs in and talks to Steam with, and — via the **`javasteam-depotdownloader`** fork by **joshuatam** — the **entire depot-download engine** Bannerlator's Steam store is built on. |
 | **Goldberg Steam Emu / gbe_fork** | [Goldberg Steam Emu](https://mr_goldberg.gitlab.io/goldberg_emulator/) by **Mr_Goldberg**, and **gbe_fork** by **[Detanup01](https://github.com/Detanup01/gbe_fork)** — the Steam emulator Bannerlator's **Goldberg auto-patch** installs (Regular / Experimental / ColdClient tiers) for offline / emulated play of games you own. |
 | **Pluvia** | [Pluvia](https://github.com/oxters168/Pluvia) — an Android Steam client whose patterns were **referenced alongside GameNative** while building the Steam store's login / session handling. |
