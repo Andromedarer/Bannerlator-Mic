@@ -53,6 +53,7 @@ import com.winlator.star.contentdialog.WineD3DConfigDialog
 import com.winlator.star.contents.AdrenotoolsManager
 import com.winlator.star.contents.ContentProfile
 import com.winlator.star.contents.ContentsManager
+import com.winlator.star.contents.WrapperManager
 import com.winlator.star.core.AppUtils
 import com.winlator.star.core.DefaultVersion
 import com.winlator.star.core.FileUtils
@@ -1609,11 +1610,14 @@ internal fun GraphicsDriverConfigDialog(
 
     // --- BCn Layer (leegao bcn_layer) settings; only meaningful when driver == wrapper-bcn_layer ---
     val isBcnLayer = graphicsDriver == "wrapper-bcn_layer"
-    // The integrated-BCn wrapper (Wrapper-gamenative) is the only wrapper ICD that actually honors
+    // The integrated-BCn wrapper (Wrapper-gamenative) is the only bundled wrapper ICD that honors
     // WRAPPER_BCN_ASTC (see XServerDisplayActivity BCn env block). The older wrappers
     // (original/leegao/legacy) ignore it, and Wrapper + bcn_layer has its own ASTC control
-    // (bcnTranscodeAstc), so the general "BCn -> ASTC transcode" toggle belongs to gamenative only.
-    val isGamenative = graphicsDriver == "wrapper-gamenative"
+    // (bcnTranscodeAstc). An IMPORTED wrapper (#132) has unknown capabilities and may well be a
+    // GameNative-family ICD, so expose the same integrated-wrapper options for it too (a wrapper
+    // ignores env vars it doesn't read, so showing the toggle is harmless).
+    val isImported = remember(graphicsDriver) { WrapperManager(context).isImported(graphicsDriver) }
+    val isGamenative = graphicsDriver == "wrapper-gamenative" || isImported
     var bcnSectionExpanded by remember { mutableStateOf(false) }
     // Force decode on all GPUs -> BCN_COMPUTE_AUTO=0. Default ON (the Mali force-decode fix).
     var bcnLayerAuto      by remember { mutableStateOf(cfg["bcnLayerAuto"]?.let { it == "1" } ?: true) }

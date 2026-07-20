@@ -296,6 +296,14 @@ public class WrapperManager {
         return false;
     }
 
+    /** True if the identifier is a user-imported wrapper (has a .meta sidecar). Used to expose the
+     *  full integrated-wrapper option set for imports (their exact capabilities aren't known, and a
+     *  wrapper ignores env it doesn't read — so showing all options is safe). */
+    public boolean isImported(String identifier) {
+        if (identifier == null || identifier.isEmpty()) return false;
+        return new File(overrideDir, identifier + ".meta").isFile();
+    }
+
     /** Enumerate imported wrappers (each has a .meta sidecar AND a .tzst payload). Never throws. */
     public List<Imported> enumerateImported() {
         ArrayList<Imported> out = new ArrayList<>();
