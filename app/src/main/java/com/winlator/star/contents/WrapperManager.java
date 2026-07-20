@@ -13,7 +13,10 @@ import com.winlator.star.core.StreamUtils;
 import com.winlator.star.core.StringUtils;
 import com.winlator.star.core.TarCompressorUtils;
 
+import org.json.JSONObject;
+
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileReader;
@@ -354,12 +357,62 @@ public class WrapperManager {
             // the override/extraction machinery, but hide it from the manager's user-facing list.
             if ("extra_libs.tzst".equals(slot.fileName)) continue;
             boolean overridden = hasOverride(slot.fileName);
+            // Overridden slot: read the installed override's version.txt. Bundled slot: read the small
+            // bundled_wrappers.json manifest (instant — no multi-MB tar to decompress on this thread).
             String[] info = overridden
                 ? readVersionInfo(overrideFileFor(slot.fileName))
-                : new String[] {"Unknown", ""};
+                : bundledVersionInfo(slot.fileName);
             out.add(new WrapperSlot(slot, overridden, info[0], info[1]));
         }
         return out;
+    }
+
+    // --- Bundled-slot version + catalog mapping (bundled_wrappers.json) -------------------------------
+    /** Bundled-wrapper version/catalog manifest, parsed once per instance ({@code null} if absent/bad). */
+    private static final String BUNDLED_MANIFEST = "bundled_wrappers.json";
+    private JSONObject bundledManifest;
+    private boolean bundledManifestTried;
+
+    private JSONObject bundledManifest() {
+        if (bundledManifestTried) return bundledManifest;
+        bundledManifestTried = true;
+        try (InputStream in = mContext.getAssets().open(ASSET_DIR + BUNDLED_MANIFEST)) {
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            StreamUtils.copy(in, bos);
+            bundledManifest = new JSONObject(new String(bos.toByteArray()));
+        }
+        catch (Exception e) {
+            bundledManifest = null; // absent / malformed -> callers fall back to "Unknown" / no mapping
+        }
+        return bundledManifest;
+    }
+
+    /** {version, notes} for a bundled slot from the manifest, or {"Unknown",""} when unmapped. */
+    private String[] bundledVersionInfo(String fileName) {
+        JSONObject m = bundledManifest();
+        if (m != null) {
+            JSONObject e = m.optJSONObject(fileName);
+            if (e != null) return new String[]{ e.optString("version", "Unknown"), e.optString("notes", "") };
+        }
+        return new String[]{"Unknown", ""};
+    }
+
+    /** The canonical catalog id a bundled slot maps to (for update-available detection), or null. */
+    public String bundledCatalogId(String fileName) {
+        JSONObject m = bundledManifest();
+        if (m == null) return null;
+        JSONObject e = m.optJSONObject(fileName);
+        String id = (e != null) ? e.optString("catalogId", "") : "";
+        return id.isEmpty() ? null : id;
+    }
+
+    /** The catalog version the bundled slot's asset corresponds to (0 when unmapped). Compared against
+     *  the live catalog entry's version to flag an available update for a bundled slot. */
+    public int bundledCatalogVersion(String fileName) {
+        JSONObject m = bundledManifest();
+        if (m == null) return 0;
+        JSONObject e = m.optJSONObject(fileName);
+        return (e != null) ? e.optInt("catalogVersion", 0) : 0;
     }
 
     /**
