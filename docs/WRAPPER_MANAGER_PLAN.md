@@ -9,12 +9,13 @@ Status: **planned, not started.** Reference studied: GunaCharanTeja/WinlatorMali
 
 Let users bring their own graphics **wrappers** (the layer that makes Windows games talk to the phone's GPU) instead of only the ones we bundle — and have each wrapper's settings appear automatically.
 
-**Four steps, safe → ambitious:**
+**Five steps, safe → ambitious:**
 
 1. **Update the wrappers we already ship** *(simple, safe)* — an **Update** button per built-in wrapper (swap in a newer file) + **Reset** (revert to ours). Nothing else changes, so nothing existing can break. Delivers the core ask: newer wrappers **without an app update**.
 2. **Add brand-new wrappers** *(medium)* — import / name / delete arbitrary wrappers, which then appear in the driver menu. Care needed: the menu grows/shrinks, and deleting a wrapper a game uses must auto-reset that game.
 3. **Each wrapper's settings appear automatically** *(adaptable)* — the app **detects what settings a wrapper supports by scanning the wrapper file itself** (no cooperation from the wrapper author, because none of them ship a "menu card") and matches those against **a dictionary we maintain** to build proper toggles/sliders. Import a wrapper → its real settings appear.
 4. **Wrapper Workbench — make/save/share your own** *(ambitious)* — save a tuned settings preset as a named wrapper, compose a wrapper from existing parts (ICD + BCn/compat layers), curate its settings UI. Repackaging + presets only — **no compiling** a wrapper binary on-device. See the Step 4 section below.
+5. **Curated wrapper catalog** *(medium)* — browse + download wrappers from other projects (WinlatorMali, GameNative, Ludashi, WinNative) right in the manager, mirroring the ReShade catalog. Downloads run through the smart import pipeline. Credit + license every source. See the Step 5 section below.
 
 **How it degrades (no menu card — which is every wrapper today):**
 1. It runs on its own defaults (nothing breaks).
@@ -112,6 +113,20 @@ Turn the manager from an import/update tool into a **workbench**: make/save/shar
 **Editing bundled wrappers:** can't recompile the `.so`, but override (Update, shipped) + a settings preset ≈ "your own version" of a bundled wrapper.
 
 **Effort/order:** (1) preset→named wrapper first (small, reuses Step 3 emission), (2) curate-card next (dictionary override), (3) compose-from-parts last (in-app repackaging UI — the biggest). Sharing (export a preset/composed wrapper `.tzst`) rides the existing `.tzst` format + community-config plumbing.
+
+## Step 5 — Curated wrapper catalog (downloadable) (user, 2026-07-20)
+Browse + download curated wrappers from other projects (WinlatorMali, GameNative, Steven's Ludashi, WinNative, …) inside the manager — mirroring the **ReShade catalog** exactly.
+
+**Mirror the ReShade infra (already trusted):** ReShade effects come from `reshade.json` on `The412Banner/winlator-contents` (`ReshadeCatalog.URL = https://raw.githubusercontent.com/The412Banner/winlator-contents/main/reshade.json`); each entry has `id/name/description/author/license/url(.tzst release asset)/fileSize/checksum(MD5)/version`. `ReshadeCatalog` fetches+caches the JSON; `ReshadeDownloader` downloads the entry `url`, verifies MD5, extracts via `TarCompressorUtils`.
+
+**App side (clone the two classes + a browser):**
+- `WrapperCatalog` (clone `ReshadeCatalog`) → `wrappers.json` on the SAME `winlator-contents` repo. Entry adds `gpuTargets` (Mali/Exynos/Adreno/PowerVR/all) so the browser can flag applicability against the detected GPU.
+- `WrapperCatalogDownloader` (clone `ReshadeDownloader`) → download the `.tzst`, verify checksum, then **feed it straight into `WrapperManager.importWrapper`** (File→Uri or a new File overload) so a downloaded wrapper runs through the SAME import pipeline → capability detection + env-scan + smart settings + inspection all apply for free. Land it as an import (with the catalog `name`).
+- **Browser UI**: a "Download wrappers" section/tab in the manager (mirror the ReShade catalog browser) — cards with name/author/license/size/GPU-target + a Download button (progress); on this GPU, grey/note entries whose `gpuTargets` don't include it ("Mali-only — inert on Adreno").
+
+**Catalog content (separate deploy, licensing-gated):** seed `wrappers.json` + upload the `.tzst` assets to a `winlator-contents` release. ⚠️ **Redistribution:** these are OTHER projects' binaries — each entry MUST carry accurate `author` + `license` (the entry model already has both). Open ones (GameNative, leegao upstream) → include with credit. Forks with murky terms (Fcharan/WinMali BCn fork — no source/vague notes) → get maintainer OK or LINK the source rather than re-host. Sources to pull from: WinlatorMali APK assets (extracted this session), GameNative (`wrapper-gamenative`), Steven's Ludashi + WinNative (pull from their APKs). Don't ship anything whose license we can't honor.
+
+**Effort/order:** app-side catalog+downloader+browser is a near-clone of ReShade (small-medium). Catalog content is curation + a deploy to `winlator-contents` (license review per entry). The download→import reuse means zero new detection work.
 
 ### ContentsManager alternative (considered, not chosen)
 Adding a `CONTENT_TYPE_WRAPPER` to `ContentsManager`/`ContentProfile` would give enumerate/install/remove for free, but it copies files by manifest to explicit targets (not "extract a `.tzst` into imagefs root at launch") and has no container cascade — so a bespoke `WrapperManager` mirroring `AdrenotoolsManager` is lower-risk and idiom-matching. Keep ContentsManager in mind only if we later want remote-catalog/download parity.
