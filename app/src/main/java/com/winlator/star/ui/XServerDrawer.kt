@@ -2062,9 +2062,21 @@ private fun ControlsContent(state: XServerDrawerState) {
     Text("Vibration", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
     Spacer(Modifier.height(4.dp))
 
+    // Master kill-switch — off suppresses ALL controller rumble regardless of slot (and hides the
+    // per-slot rows, which are moot while it's off). Persists globally.
+    val vibrationMasterOn by XServerDialogState.vibrationMasterEnabled.collectAsState()
+    ToggleRow("Controller vibration", vibrationMasterOn) {
+        XServerDialogState.setVibrationMasterEnabled(it)
+        XServerDialogState.onVibrationMasterChanged?.invoke(it)
+    }
     val vibrationSlots by XServerDialogState.vibrationSlots.collectAsState()
-    vibrationSlots.forEachIndexed { index, slot ->
-        ToggleRow(slot.first, slot.second) { XServerDialogState.onVibrationSlotChanged?.invoke(index, it) }
+    if (vibrationMasterOn) {
+        vibrationSlots.forEachIndexed { index, slot ->
+            ToggleRow(slot.first, slot.second) {
+                XServerDialogState.updateVibrationSlot(index, it)          // reflect in the UI immediately
+                XServerDialogState.onVibrationSlotChanged?.invoke(index, it) // persist to WinHandler
+            }
+        }
     }
 }
 

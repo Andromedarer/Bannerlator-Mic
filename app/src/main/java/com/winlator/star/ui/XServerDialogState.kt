@@ -252,6 +252,16 @@ object XServerDialogState {
 
     fun setVibrationSlots(slots: List<Pair<String, Boolean>>) { _vibrationSlots.value = slots }
 
+    /** Reflect a per-slot toggle in the UI list IMMEDIATELY. The row's ToggleRow is controlled purely by
+     *  this list, so without this a toggle would snap back visually (the WinHandler persist via
+     *  onVibrationSlotChanged happened, but the list stayed stale). Call this alongside the callback. */
+    fun updateVibrationSlot(index: Int, enabled: Boolean) {
+        val cur = _vibrationSlots.value
+        if (index in cur.indices) {
+            _vibrationSlots.value = cur.toMutableList().also { it[index] = it[index].first to enabled }
+        }
+    }
+
     fun interface VibrationSlotCallback { fun invoke(slot: Int, enabled: Boolean) }
     @JvmField var onVibrationSlotChanged: VibrationSlotCallback? = null
 
