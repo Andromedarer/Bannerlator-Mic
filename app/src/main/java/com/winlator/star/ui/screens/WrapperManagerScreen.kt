@@ -1081,34 +1081,42 @@ private fun WrapperSlotCard(
                         contentDescription = context.getString(R.string.wrapper_more_actions),
                     )
                 }
-                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenu(
+                    expanded = menuOpen,
+                    onDismissRequest = { menuOpen = false },
+                    modifier = Modifier.outlinedMenuCard(),
+                ) {
                     // #132 feature-c: one-tap update to the newer catalog build (only when available).
                     if (updateAvailable && !updating) {
                         DropdownMenuItem(
                             text = { Text(context.getString(R.string.wrapper_update_from_catalog), color = cs.primary) },
-                            leadingIcon = { Icon(Icons.Filled.CloudDownload, contentDescription = null, tint = cs.primary, modifier = Modifier.size(20.dp)) },
+                            leadingIcon = { Icon(Icons.Filled.CloudDownload, contentDescription = null, tint = cs.primary, modifier = Modifier.size(18.dp)) },
                             onClick = { menuOpen = false; onUpdateFromCatalog() },
                         )
+                        MenuItemDivider()
                     }
                     DropdownMenuItem(
                         text = { Text(context.getString(R.string.wrapper_update)) },
-                        leadingIcon = { Icon(Icons.Filled.FolderOpen, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                        leadingIcon = { Icon(Icons.Filled.FolderOpen, contentDescription = null, tint = cs.primary, modifier = Modifier.size(18.dp)) },
                         onClick = { menuOpen = false; onUpdate() },
                     )
                     if (slot.isOverridden) {
+                        MenuItemDivider()
                         DropdownMenuItem(
                             text = { Text(context.getString(R.string.wrapper_reset)) },
-                            leadingIcon = { Icon(Icons.Filled.RestartAlt, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                            leadingIcon = { Icon(Icons.Filled.RestartAlt, contentDescription = null, tint = cs.primary, modifier = Modifier.size(18.dp)) },
                             onClick = { menuOpen = false; onReset() },
                         )
                     }
+                    MenuItemDivider()
                     DropdownMenuItem(
                         text = { Text(context.getString(R.string.wrapper_details)) },
                         leadingIcon = {
                             Icon(
                                 if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
                                 contentDescription = null,
-                                modifier = Modifier.size(20.dp),
+                                tint = cs.primary,
+                                modifier = Modifier.size(18.dp),
                             )
                         },
                         onClick = { menuOpen = false; expanded = !expanded },
@@ -1218,32 +1226,40 @@ private fun ImportedWrapperCard(
                         contentDescription = context.getString(R.string.wrapper_more_actions),
                     )
                 }
-                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenu(
+                    expanded = menuOpen,
+                    onDismissRequest = { menuOpen = false },
+                    modifier = Modifier.outlinedMenuCard(),
+                ) {
                     // #132: in-place update from the catalog, only when a newer version is available.
                     if (updateAvailable && !updating) {
                         DropdownMenuItem(
                             text = { Text(context.getString(R.string.wrapper_update), color = cs.primary) },
-                            leadingIcon = { Icon(Icons.Filled.CloudDownload, contentDescription = null, tint = cs.primary, modifier = Modifier.size(20.dp)) },
+                            leadingIcon = { Icon(Icons.Filled.CloudDownload, contentDescription = null, tint = cs.primary, modifier = Modifier.size(18.dp)) },
                             onClick = { menuOpen = false; onUpdate() },
                         )
+                        MenuItemDivider()
                     }
                     DropdownMenuItem(
                         text = { Text(context.getString(R.string.wrapper_edit_settings)) },
-                        leadingIcon = { Icon(Icons.Filled.Settings, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                        leadingIcon = { Icon(Icons.Filled.Settings, contentDescription = null, tint = cs.primary, modifier = Modifier.size(18.dp)) },
                         onClick = { menuOpen = false; onEditSettings() },
                     )
+                    MenuItemDivider()
                     DropdownMenuItem(
                         text = { Text(context.getString(R.string.wrapper_delete), color = cs.error) },
-                        leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = cs.error, modifier = Modifier.size(20.dp)) },
+                        leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = cs.error, modifier = Modifier.size(18.dp)) },
                         onClick = { menuOpen = false; onDelete() },
                     )
+                    MenuItemDivider()
                     DropdownMenuItem(
                         text = { Text(context.getString(R.string.wrapper_details)) },
                         leadingIcon = {
                             Icon(
                                 if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
                                 contentDescription = null,
-                                modifier = Modifier.size(20.dp),
+                                tint = cs.primary,
+                                modifier = Modifier.size(18.dp),
                             )
                         },
                         onClick = { menuOpen = false; expanded = !expanded },
