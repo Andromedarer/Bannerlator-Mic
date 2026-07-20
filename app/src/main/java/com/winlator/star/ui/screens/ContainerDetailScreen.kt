@@ -1618,11 +1618,12 @@ internal fun GraphicsDriverConfigDialog(
     // "Use GameNative engine"), which lives on a different branch — no compat control is built here.
     val caps = remember(graphicsDriver) { WrapperManager(context).capsFor(graphicsDriver) }
     val isImported = remember(graphicsDriver) { WrapperManager(context).isImported(graphicsDriver) }
-    // Integrated-BCn ICD = a wrapper ICD that ALSO carries a BCn transcode path; it honors
-    // WRAPPER_BCN_ASTC. Bundled: only wrapper-gamenative (hasIcd + hasBcnLayer). Imports with both
-    // resolve the same way. The older wrappers (original/leegao/legacy) lack a BCn layer, and the
-    // standalone bcn_layer has its own ASTC control below — so neither shows this.
-    val isIntegratedBcn = caps.hasIcd && caps.hasBcnLayer
+    // Integrated-BCn ICD = a wrapper ICD that honors WRAPPER_BCN_ASTC. Bundled: only wrapper-gamenative
+    // (hasIcd + hasBcnLayer). For IMPORTS we can't yet tell integrated-BCn (env baked into the ICD, no
+    // separate .so) from a plain ICD without an env-scan of the binary (Step-3 Layer 1, deferred), so
+    // any imported ICD shows the toggle — a non-gamenative ICD simply ignores WRAPPER_BCN_ASTC (inert,
+    // harmless). This keeps an imported GameNative wrapper from losing its ASTC toggle.
+    val isIntegratedBcn = (caps.hasIcd && caps.hasBcnLayer) || (isImported && caps.hasIcd)
     // Standalone BCn Layer Settings (the implicit bcn_layer overlay's env block). Bundled: only
     // wrapper-bcn_layer (hasBcnLayer, no own ICD). For imports: any archive carrying a BCn layer.
     // The bundled integrated-BCn ICD (gamenative, hasIcd + hasBcnLayer but NOT an import) is excluded
