@@ -337,6 +337,64 @@ public abstract class TarCompressorUtils {
         return false;
     }
 
+    /**
+     * Stream a SINGLE tar entry (lenient name match, same rules as {@link #containsEntry}) and collect
+     * every identifier token in its bytes that fully matches [tokenPattern]. This is the "strings on a
+     * binary" trick used by the Smart Wrapper Manager (#132) to auto-detect the env-var NAMES a wrapper
+     * .so references, with zero cooperation from the wrapper author.
+     *
+     * A token is a maximal run of {@code [A-Za-z0-9_]} of length &gt;= 4; [tokenPattern] is applied to
+     * each WHOLE token (anchor it with {@code ^...$}). Uncompressed bytes read from the entry are capped
+     * at [maxBytes] so a multi-MB .so can't hang the import worker. Never throws — returns whatever was
+     * collected before an error/cap (possibly empty).
+     */
+    public static java.util.Set<String> scanEntryForTokens(Type type, File source, String entryName,
+                                                            java.util.regex.Pattern tokenPattern, long maxBytes) {
+        java.util.Set<String> out = new java.util.HashSet<>();
+        if (source == null || !source.isFile() || entryName == null || tokenPattern == null) return out;
+        String wantPath = entryName.replaceFirst("^\\./", "").replaceFirst("^/", "");
+        String wantBase = wantPath.substring(wantPath.lastIndexOf('/') + 1);
+        try (InputStream inStream = getCompressorInputStream(type, new BufferedInputStream(new FileInputStream(source), StreamUtils.BUFFER_SIZE));
+             ArchiveInputStream tar = new TarArchiveInputStream(inStream)) {
+            TarArchiveEntry entry;
+            while ((entry = (TarArchiveEntry) tar.getNextEntry()) != null) {
+                if (entry.isDirectory() || !tar.canReadEntryData(entry)) continue;
+                String name = entry.getName().replaceFirst("^\\./", "").replaceFirst("^/", "");
+                String base = name.substring(name.lastIndexOf('/') + 1);
+                if (base.startsWith("._")) continue; // AppleDouble sidecar
+                if (!(name.equals(wantPath) || name.endsWith("/" + wantPath) || base.equals(wantBase))) continue;
+
+                // Matching entry found — walk its bytes, building identifier tokens across buffer reads.
+                byte[] buf = new byte[StreamUtils.BUFFER_SIZE];
+                StringBuilder token = new StringBuilder();
+                long scanned = 0;
+                int n;
+                while (scanned < maxBytes && (n = tar.read(buf)) > 0) {
+                    scanned += n;
+                    for (int i = 0; i < n; i++) {
+                        int c = buf[i] & 0xFF;
+                        boolean idChar = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+                                      || (c >= '0' && c <= '9') || c == '_';
+                        if (idChar) {
+                            if (token.length() < 128) token.append((char) c); // env names are short; cap growth
+                        } else {
+                            if (token.length() >= 4 && tokenPattern.matcher(token).matches())
+                                out.add(token.toString());
+                            token.setLength(0);
+                        }
+                    }
+                }
+                if (token.length() >= 4 && tokenPattern.matcher(token).matches())
+                    out.add(token.toString());
+                break; // only the first matching entry
+            }
+        }
+        catch (Exception e) {
+            // Best-effort: degrade to whatever was collected. Auto-detect must never crash an import.
+        }
+        return out;
+    }
+
     private static InputStream getCompressorInputStream(Type type, InputStream source) throws IOException {
         if (type == Type.XZ) {
             return new XZCompressorInputStream(source);

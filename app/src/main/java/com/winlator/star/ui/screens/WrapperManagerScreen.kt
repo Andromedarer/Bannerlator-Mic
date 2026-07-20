@@ -335,6 +335,21 @@ fun WrapperManagerBody(modifier: Modifier = Modifier) {
                             color = cs.onSurfaceVariant,
                         )
                     }
+                    // #132 Layer 1: env-var names auto-detected from the binaries (advanced preview).
+                    if (inspection.envKeys.isNotEmpty()) {
+                        Spacer(Modifier.size(10.dp))
+                        Text(
+                            "Detected settings (${inspection.envKeys.size})",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = cs.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.size(2.dp))
+                        Text(
+                            inspection.envKeys.joinToString(", "),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = cs.onSurfaceVariant,
+                        )
+                    }
                     // Name field.
                     Spacer(Modifier.size(12.dp))
                     Text(

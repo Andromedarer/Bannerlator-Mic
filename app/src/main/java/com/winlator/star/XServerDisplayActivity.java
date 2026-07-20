@@ -3571,6 +3571,29 @@ public class XServerDisplayActivity extends AppCompatActivity {
         envVars.put("ENABLE_VKBASALT", "1");
         envVars.put("VKBASALT_CONFIG", vkbasaltConfig);
     }
+
+    // #132 Smart Wrapper Manager, Layer 1: GENERIC emission for IMPORTED wrappers. For each env-var
+    // NAME auto-detected from this wrapper's binaries (cached in its .meta), emit KEY=value from the
+    // per-game config — EXCEPT keys a curated control already drives (HANDLED_ENV_KEYS) and any key the
+    // block above already set (has() guard: belt-and-suspenders against double-emit / clobbering curated
+    // env). Toggle "0" and empty values are off/default and skipped, so we only emit what the user
+    // enabled or filled in. This is what activates an imported compat/DX12 or BCn wrapper generically
+    // (e.g. ENABLE_DXVK_MALI_COMPAT_LAYER=1 + COMPAT_*) via the already-set VK_LAYER_PATH — no hardcoded
+    // per-name logic. Bundled wrappers are untouched (isImported gate).
+    if (graphicsDriver != null) {
+        WrapperManager wmGeneric = new WrapperManager(this);
+        if (wmGeneric.isImported(graphicsDriver)) {
+            for (String key : wmGeneric.detectedEnvKeys(graphicsDriver)) {
+                if (WrapperManager.HANDLED_ENV_KEYS.contains(key)) continue;
+                if (envVars.has(key)) continue; // never overwrite curated env
+                String value = graphicsDriverConfig.get(key);
+                if (value == null) continue;
+                value = value.trim();
+                if (value.isEmpty() || value.equals("0")) continue; // off / default -> don't emit
+                envVars.put(key, value);
+            }
+        }
+    }
 }
     
     

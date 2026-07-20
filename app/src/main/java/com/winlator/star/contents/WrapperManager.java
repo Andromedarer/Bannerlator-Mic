@@ -3,6 +3,7 @@ package com.winlator.star.contents;
 import android.content.Context;
 import android.content.res.AssetManager;
 import android.net.Uri;
+import android.text.TextUtils;
 import android.util.Log;
 
 import com.winlator.star.container.Container;
@@ -20,7 +21,13 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.regex.Pattern;
 
 /**
  * Step 1 of the Wrapper Version Manager (issue #132) — a fixed-slot updater for our bundled
@@ -53,6 +60,71 @@ public class WrapperManager {
      *  We record hasCompatLayer in the .meta so the compat gate exists the moment that UI merges in;
      *  no compat controls are built (or activated) here — see step 5 deferral in XServerDisplayActivity. */
     private static final String COMPAT_MARKER_ENTRY  = "usr/lib/libdxvk_mali_compat_layer.so";
+
+    // ---------------------------------------------------------------------------------------------
+    // Step 3 Layer 1 (issue #132): env-var auto-detect ("strings" the wrapper binaries for the
+    // env-var NAMES they reference, match them to WrapperSettingsDictionary, render + emit generically).
+    // ---------------------------------------------------------------------------------------------
+
+    /** The Winlator-family env-var vocabulary. A whole token must match to be recorded (anchored). */
+    private static final Pattern ENV_KEY_PATTERN =
+        Pattern.compile("^(WRAPPER|ENABLE|BCN|COMPAT|MESA_VK|GALLIUM|ADRENOTOOLS)_[A-Z0-9_]+$");
+    /** Binaries scanned for env-var names — whichever the archive actually contains (union). */
+    private static final String[] ENV_SCAN_ENTRIES = {
+        "usr/lib/libvulkan_wrapper.so",
+        "usr/lib/libbcn_layer.so",
+        "usr/lib/libdxvk_mali_compat_layer.so",
+    };
+    /** Per-.so cap on uncompressed bytes read, so a huge binary can't hang the import worker. */
+    private static final long ENV_SCAN_BYTE_CAP = 64L * 1024 * 1024;
+
+    /**
+     * Env-var names ALREADY driven by the curated {@code GraphicsDriverConfigDialog} controls and the
+     * hardcoded XSDA graphics-driver emission. The auto-detect "Detected settings" section EXCLUDES
+     * these (so it never duplicates an existing control), and generic emission SKIPS them (so it never
+     * double-emits or fights the curated BCn / present-mode / GPU-spoof logic). Shared, single source of
+     * truth, read from both the dialog (Kotlin) and XSDA (Java).
+     */
+    public static final Set<String> HANDLED_ENV_KEYS = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
+        "MESA_VK_WSI_PRESENT_MODE", "MESA_VK_WSI_DEBUG", "GALLIUM_DRIVER",
+        "WRAPPER_VK_VERSION", "WRAPPER_EXTENSION_BLACKLIST", "WRAPPER_RESOURCE_TYPE",
+        "WRAPPER_EMULATE_BCN", "WRAPPER_BCN_ASTC", "WRAPPER_USE_BCN_CACHE",
+        "WRAPPER_DISABLE_PRESENT_WAIT", "WRAPPER_VMEM_MAX_SIZE", "WRAPPER_MAX_IMAGE_COUNT",
+        "WRAPPER_DEVICE_NAME", "WRAPPER_DEVICE_ID", "WRAPPER_VENDOR_ID",
+        "ENABLE_BCN_COMPUTE", "BCN_COMPUTE_AUTO", "BCN_TRANSCODE_TO_ETC2",
+        "BCN_TRANSCODE_TO_ASTC", "BCN_COMPUTE_IMAGE_VIEW", "BCN_LAYER_LOG_LEVEL",
+        "BCN_PROFILE_TRANSFERS"
+    )));
+
+    /**
+     * "strings" a wrapper's binaries for the env-var NAMES they reference, unioned across whichever of
+     * the ICD / BCn / compat .so the archive contains. Bounded ({@link #ENV_SCAN_BYTE_CAP} per .so),
+     * sorted, deduped, and never throws. Runs off the main thread (import worker / IO dispatcher).
+     */
+    public List<String> scanEnvKeys(File tzst) {
+        TreeSet<String> keys = new TreeSet<>();
+        if (tzst != null && tzst.isFile()) {
+            for (String entry : ENV_SCAN_ENTRIES) {
+                keys.addAll(TarCompressorUtils.scanEntryForTokens(
+                    TarCompressorUtils.Type.ZSTD, tzst, entry, ENV_KEY_PATTERN, ENV_SCAN_BYTE_CAP));
+            }
+        }
+        return new ArrayList<>(keys);
+    }
+
+    /**
+     * The detected env-var keys for an IMPORTED wrapper, read from its {@code .meta} ({@code envKeys=}).
+     * An older import whose {@code .meta} predates env scanning is backfilled once by re-scanning its
+     * {@code .tzst}. Returns empty for a bundled/unknown/empty identifier. Never throws.
+     */
+    public List<String> detectedEnvKeys(String identifier) {
+        if (identifier == null || identifier.isEmpty() || !isImported(identifier)) return new ArrayList<>();
+        List<String> fromMeta = readEnvKeysFromMeta(identifier);
+        if (fromMeta != null) return fromMeta;                 // line present (may be an empty list)
+        List<String> scanned = scanEnvKeys(importedFileFor(identifier)); // older import -> scan + backfill
+        backfillEnvKeys(identifier, scanned);
+        return scanned;
+    }
 
     /** The updatable slots, in display order. Each may require a marker entry to validate an import.
      *  extra_libs is a shared-libs payload (no marker). leegao_bcn is the BCn transcode layer (its own
@@ -346,11 +418,14 @@ public class WrapperManager {
         public final WrapperCaps caps;
         public final String version;
         public final String notes;
-        Inspection(boolean valid, WrapperCaps caps, String version, String notes) {
+        /** Env-var names auto-detected from the picked file's binaries (pre-import preview). */
+        public final List<String> envKeys;
+        Inspection(boolean valid, WrapperCaps caps, String version, String notes, List<String> envKeys) {
             this.valid = valid;
             this.caps = caps;
             this.version = version;
             this.notes = notes;
+            this.envKeys = (envKeys != null) ? envKeys : new ArrayList<>();
         }
     }
 
@@ -362,7 +437,7 @@ public class WrapperManager {
      */
     public Inspection inspectUri(Uri src) {
         WrapperCaps none = new WrapperCaps(false, false, false);
-        if (src == null) return new Inspection(false, none, "Unknown", "");
+        if (src == null) return new Inspection(false, none, "Unknown", "", null);
         if (!overrideDir.exists()) overrideDir.mkdirs();
         File tmp = new File(overrideDir, ".inspect.tzst.tmp");
         if (tmp.exists()) tmp.delete();
@@ -370,24 +445,25 @@ public class WrapperManager {
              OutputStream out = new FileOutputStream(tmp)) {
             if (in == null || !StreamUtils.copy(in, out)) {
                 tmp.delete();
-                return new Inspection(false, none, "Unknown", "");
+                return new Inspection(false, none, "Unknown", "", null);
             }
         }
         catch (IOException | SecurityException e) {
             Log.d(TAG, "inspectUri: copy error — " + e.getMessage());
             tmp.delete();
-            return new Inspection(false, none, "Unknown", "");
+            return new Inspection(false, none, "Unknown", "", null);
         }
         boolean ok = TarCompressorUtils.isValidArchive(TarCompressorUtils.Type.ZSTD, tmp)
                 && TarCompressorUtils.containsEntry(TarCompressorUtils.Type.ZSTD, tmp, WRAPPER_MARKER_ENTRY);
         if (!ok) {
             tmp.delete();
-            return new Inspection(false, none, "Unknown", "");
+            return new Inspection(false, none, "Unknown", "", null);
         }
         WrapperCaps caps = scanCaps(tmp);
         String[] info = readVersionInfo(tmp);
+        List<String> envKeys = scanEnvKeys(tmp);
         tmp.delete();
-        return new Inspection(true, caps, info[0], info[1]);
+        return new Inspection(true, caps, info[0], info[1], envKeys);
     }
 
     /** Scan a wrapper .tzst for the ICD / BCn / compat marker entries (lenient membership match). */
@@ -422,11 +498,46 @@ public class WrapperManager {
         return new WrapperCaps(icd, bcn, compat);
     }
 
-    /** Rewrite an import's .meta to include the detected caps, preserving its label. */
+    /** Rewrite an import's .meta to include the detected caps, preserving its label AND any already-
+     *  recorded envKeys line (null = line absent -> left absent so env scanning can still backfill). */
     private void backfillMeta(String identifier, WrapperCaps caps) {
         Imported imp = readMeta(metaFileFor(identifier), identifier);
         String label = (imp != null) ? imp.label : identifier;
-        writeMeta(identifier, label, caps);
+        writeMeta(identifier, label, caps, readEnvKeysFromMeta(identifier));
+    }
+
+    /** Rewrite an import's .meta to record the detected env keys, preserving label + caps. */
+    private void backfillEnvKeys(String identifier, List<String> keys) {
+        Imported imp = readMeta(metaFileFor(identifier), identifier);
+        String label = (imp != null) ? imp.label : identifier;
+        WrapperCaps caps = readCapsFromMeta(identifier);
+        if (caps == null) caps = scanCaps(importedFileFor(identifier));
+        writeMeta(identifier, label, caps, keys);
+    }
+
+    /** Read the {@code envKeys=} line from a .meta. Returns null when the line is ABSENT (older import,
+     *  caller re-scans), or a (possibly empty) list when present. Never throws. */
+    private List<String> readEnvKeysFromMeta(String identifier) {
+        File meta = metaFileFor(identifier);
+        try (BufferedReader r = new BufferedReader(new FileReader(meta))) {
+            String line;
+            while ((line = r.readLine()) != null) {
+                int eq = line.indexOf('=');
+                if (eq < 0) continue;
+                if (!line.substring(0, eq).trim().equals("envKeys")) continue;
+                String v = line.substring(eq + 1).trim();
+                ArrayList<String> out = new ArrayList<>();
+                if (!v.isEmpty()) for (String s : v.split(",")) {
+                    String t = s.trim();
+                    if (!t.isEmpty()) out.add(t);
+                }
+                return out;
+            }
+        }
+        catch (IOException e) {
+            return null;
+        }
+        return null;
     }
 
     /** A user-imported wrapper: canonical identifier (persisted in Container.graphicsDriver) + label. */
@@ -507,16 +618,20 @@ public class WrapperManager {
         return new Imported(identifier, label);
     }
 
-    private boolean writeMeta(String identifier, String label, WrapperCaps caps) {
+    private boolean writeMeta(String identifier, String label, WrapperCaps caps, List<String> envKeys) {
         File meta = metaFileFor(identifier);
         try (OutputStream out = new FileOutputStream(meta)) {
-            String content = "label=" + label + "\n"
-                + "identifier=" + identifier + "\n"
-                + "imported=true\n"
-                + "hasIcd=" + (caps.hasIcd ? "1" : "0") + "\n"
-                + "hasBcnLayer=" + (caps.hasBcnLayer ? "1" : "0") + "\n"
-                + "hasCompatLayer=" + (caps.hasCompatLayer ? "1" : "0") + "\n";
-            out.write(content.getBytes());
+            StringBuilder content = new StringBuilder()
+                .append("label=").append(label).append("\n")
+                .append("identifier=").append(identifier).append("\n")
+                .append("imported=true\n")
+                .append("hasIcd=").append(caps.hasIcd ? "1" : "0").append("\n")
+                .append("hasBcnLayer=").append(caps.hasBcnLayer ? "1" : "0").append("\n")
+                .append("hasCompatLayer=").append(caps.hasCompatLayer ? "1" : "0").append("\n");
+            // Omit the line entirely when unknown (null) so a caps-only backfill doesn't falsely
+            // record "no env keys" before they've been scanned. An empty list writes "envKeys=".
+            if (envKeys != null) content.append("envKeys=").append(TextUtils.join(",", envKeys)).append("\n");
+            out.write(content.toString().getBytes());
             return true;
         }
         catch (IOException e) {
@@ -590,7 +705,10 @@ public class WrapperManager {
         // Detect capabilities once (ICD / BCn layer / compat layer) and cache them in the sidecar so
         // the driver-config dialog + XSDA activation can gate by CONTENT, not by the import's name.
         WrapperCaps caps = scanCaps(dst);
-        if (!writeMeta(identifier, label, caps)) {
+        // Layer 1 (#132): auto-detect the env-var names this wrapper's binaries reference, once at
+        // import (this runs on the import worker), and persist them in the sidecar for the dialog.
+        List<String> envKeys = scanEnvKeys(dst);
+        if (!writeMeta(identifier, label, caps, envKeys)) {
             dst.delete();
             return null;
         }

@@ -54,6 +54,7 @@ import com.winlator.star.contents.AdrenotoolsManager
 import com.winlator.star.contents.ContentProfile
 import com.winlator.star.contents.ContentsManager
 import com.winlator.star.contents.WrapperManager
+import com.winlator.star.contents.WrapperSettingsDictionary
 import com.winlator.star.core.AppUtils
 import com.winlator.star.core.DefaultVersion
 import com.winlator.star.core.FileUtils
@@ -1643,6 +1644,28 @@ internal fun GraphicsDriverConfigDialog(
     var bcnImageView      by remember { mutableStateOf(cfg["bcnImageView"]?.let { it == "1" } ?: true) }
     var bcnDebugLog       by remember { mutableStateOf(cfg["bcnDebugLog"] == "1") }
 
+    // --- #132 Smart Wrapper Manager, Layer 1: auto-detected settings for IMPORTED wrappers only ---
+    // The env-var NAMES were scanned out of the wrapper's binaries at import and cached in its .meta.
+    // We only READ the .meta here (off-main via IO, keyed on the config so it can't drift), then render
+    // one control per detected key that ISN'T already exposed by a curated control above. Values live in
+    // graphicsDriverConfig under the RAW ENV KEY so they round-trip and XSDA emits them generically.
+    var detectedKeys by remember(graphicsDriver) { mutableStateOf<List<String>>(emptyList()) }
+    val detectedValues = remember(graphicsDriver) { mutableStateMapOf<String, String>() }
+    LaunchedEffect(graphicsDriver, isImported) {
+        if (!isImported) { detectedKeys = emptyList(); return@LaunchedEffect }
+        val keys = withContext(Dispatchers.IO) { WrapperManager(context).detectedEnvKeys(graphicsDriver) }
+            .filter { it !in WrapperManager.HANDLED_ENV_KEYS }
+        keys.forEach { k ->
+            val def = WrapperSettingsDictionary.defFor(k)
+            // Seed from the stored config; a toggle normalises to "1"/"0", others keep the raw string.
+            detectedValues[k] = when (def.type) {
+                WrapperSettingsDictionary.Type.TOGGLE -> if (cfg[k] == "1") "1" else "0"
+                else -> cfg[k] ?: ""
+            }
+        }
+        detectedKeys = keys
+    }
+
     val deviceMemoryEntries = remember { context.resources.getStringArray(R.array.device_memory_entries).toList() }
     var selectedMemoryEntry by remember {
         val storedNum = cfg["maxDeviceMemory"] ?: "0"
@@ -1877,6 +1900,80 @@ internal fun GraphicsDriverConfigDialog(
                         )
                     }
                 }
+
+                // --- #132 Smart Wrapper Manager, Layer 1: auto-detected settings (imports only) ---
+                // One control per env-var name scanned from THIS wrapper's binaries, minus the keys a
+                // curated control above already exposes (HANDLED_ENV_KEYS). Values are stored under the
+                // raw env key and passed to the wrapper verbatim at launch. Bundled wrappers: not shown.
+                if (isImported) {
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        "Detected settings (advanced) — from scanning this wrapper",
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        "Values are passed to the wrapper as-is; unknown ones are safe to leave blank.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    if (detectedKeys.isEmpty()) {
+                        Text(
+                            "No extra settings detected.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        detectedKeys.forEach { key ->
+                            val def = WrapperSettingsDictionary.defFor(key)
+                            val current = detectedValues[key] ?: ""
+                            when (def.type) {
+                                WrapperSettingsDictionary.Type.TOGGLE -> {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Checkbox(
+                                            checked = current == "1",
+                                            onCheckedChange = { detectedValues[key] = if (it) "1" else "0" }
+                                        )
+                                        Text(def.label)
+                                    }
+                                }
+                                WrapperSettingsDictionary.Type.DROPDOWN -> {
+                                    val selected = current.ifEmpty { def.default }.ifEmpty { def.choices.firstOrNull() ?: "" }
+                                    LabeledDropdown(def.label, def.choices, selected, { detectedValues[key] = it })
+                                }
+                                WrapperSettingsDictionary.Type.SLIDER -> {
+                                    val fv = current.toFloatOrNull() ?: def.default.toFloatOrNull() ?: def.min
+                                    Text("${def.label}: ${fv.toInt()}", style = MaterialTheme.typography.bodySmall)
+                                    Slider(
+                                        value = fv,
+                                        onValueChange = { detectedValues[key] = it.toInt().toString() },
+                                        valueRange = def.min..(if (def.max > def.min) def.max else def.min + 1f),
+                                        steps = if (def.step > 0f && def.max > def.min)
+                                            (((def.max - def.min) / def.step).toInt() - 1).coerceAtLeast(0) else 0
+                                    )
+                                }
+                                WrapperSettingsDictionary.Type.TEXT -> {
+                                    OutlinedTextField(
+                                        value = current,
+                                        onValueChange = { detectedValues[key] = it },
+                                        singleLine = true,
+                                        label = { Text(def.label) },
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                            }
+                            if (def.hint.isNotBlank()) {
+                                Text(
+                                    def.hint,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Spacer(Modifier.height(8.dp))
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
@@ -1900,7 +1997,13 @@ internal fun GraphicsDriverConfigDialog(
                     "bcnDebugLog=${if (bcnDebugLog) "1" else "0"};" +
                     "gpuName=$gpuName" +
                     ";fdDevFeatures=${if (fdDevFeatures) "1" else "0"}"
-                onConfirm(config)
+                // #132 Layer 1: append auto-detected wrapper settings under their RAW ENV KEY. Sanitise
+                // values so they can't break the ";"/"=" k=v format the config round-trips through.
+                val detectedPart = detectedKeys.joinToString("") { key ->
+                    val v = (detectedValues[key] ?: "").replace(";", "").replace("=", "")
+                    ";$key=$v"
+                }
+                onConfirm(config + detectedPart)
             }) { Text(stringResource(android.R.string.ok)) }
         },
         dismissButton = {
