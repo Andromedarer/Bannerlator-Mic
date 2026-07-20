@@ -23,8 +23,10 @@ import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Pattern;
@@ -124,6 +126,52 @@ public class WrapperManager {
         List<String> scanned = scanEnvKeys(importedFileFor(identifier)); // older import -> scan + backfill
         backfillEnvKeys(identifier, scanned);
         return scanned;
+    }
+
+    /** Process-wide cache for {@link #scanBundledEnvKeys} — keyed by slot file name. Bundled assets
+     *  are multi-MB zstd tars scanned on demand, so each is decompressed at most once per process. */
+    private static final Map<String, List<String>> BUNDLED_ENV_KEYS_CACHE = new HashMap<>();
+
+    /**
+     * The detected env-var keys for a BUNDLED slot ({@code fileName} e.g. {@code wrapper.tzst}),
+     * scanned ON DEMAND — bundled assets are intentionally NOT scanned on screen-open (each is a
+     * multi-MB zstd tar; see {@link #listSlots}). Prefers the user's installed override for the slot
+     * (so the list reflects what will actually be used) and otherwise copies the bundled asset
+     * {@code graphics_driver/<fileName>} to a temp file, scans it, then deletes the temp. The result
+     * is cached per process, so re-expanding is instant. Returns an empty list on any failure; never
+     * throws. Run OFF the main thread (the UI hops onto an IO dispatcher).
+     */
+    public List<String> scanBundledEnvKeys(String fileName) {
+        if (fileName == null || fileName.isEmpty()) return new ArrayList<>();
+        synchronized (BUNDLED_ENV_KEYS_CACHE) {
+            List<String> cached = BUNDLED_ENV_KEYS_CACHE.get(fileName);
+            if (cached != null) return cached;
+        }
+        List<String> result;
+        // Prefer the installed override (what actually launches) over the bundled asset.
+        File override = overrideFileFor(fileName);
+        if (override.isFile()) {
+            result = scanEnvKeys(override);
+        } else {
+            result = new ArrayList<>();
+            if (!overrideDir.exists()) overrideDir.mkdirs();
+            File tmp = new File(overrideDir, ".scan-" + fileName + ".tmp");
+            if (tmp.exists()) tmp.delete();
+            boolean copied = false;
+            try (InputStream in = mContext.getAssets().open(ASSET_DIR + fileName);
+                 OutputStream out = new FileOutputStream(tmp)) {
+                copied = StreamUtils.copy(in, out);
+            }
+            catch (IOException e) {
+                Log.d(TAG, "scanBundledEnvKeys: copy error for " + fileName + " — " + e.getMessage());
+            }
+            if (copied && tmp.isFile()) result = scanEnvKeys(tmp);
+            if (tmp.exists()) tmp.delete();
+        }
+        synchronized (BUNDLED_ENV_KEYS_CACHE) {
+            BUNDLED_ENV_KEYS_CACHE.put(fileName, result);
+        }
+        return result;
     }
 
     /** The updatable slots, in display order. Each may require a marker entry to validate an import.

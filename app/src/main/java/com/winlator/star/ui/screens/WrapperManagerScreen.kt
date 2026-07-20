@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -34,6 +35,7 @@ import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -42,6 +44,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,14 +53,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import com.winlator.star.R
 import com.winlator.star.contents.WrapperManager
+import com.winlator.star.contents.WrapperSettingsDictionary
 import com.winlator.star.core.GPUInformation
 import com.winlator.star.core.StringUtils
 import com.winlator.star.util.InAppFilePicker
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Wrapper Version Manager (issue #132). Step 1: a fixed-slot updater — each bundled graphics-wrapper
@@ -224,6 +231,7 @@ fun WrapperManagerBody(modifier: Modifier = Modifier) {
                 slot = slot,
                 caps = manager.capsFor(slot.fileName.removeSuffix(".tzst")),
                 gpu = gpu,
+                manager = manager,
                 onUpdate = {
                     pendingFileName = slot.fileName
                     importMode = false
@@ -627,7 +635,16 @@ private fun CapabilityChips(labels: List<String>) {
     }
 }
 
-/** The shared per-wrapper detail box (Part 1) rendered inside an expanded card. */
+/**
+ * The shared per-wrapper detail box (Part 1) rendered inside an expanded card. Below the capability
+ * chips it carries a NESTED, independently-expandable "Environment variables" section that lists the
+ * full set of env-var names the wrapper references (issue #132) — read-only, informational.
+ *
+ * [manager] + [isImported] + [envSourceId] drive that env-var list: for an imported wrapper the keys
+ * come from its cached .meta ([WrapperManager.detectedEnvKeys], [envSourceId] = identifier); for a
+ * bundled slot they are scanned ON DEMAND from the asset/override ([WrapperManager.scanBundledEnvKeys],
+ * [envSourceId] = slot file name).
+ */
 @Composable
 private fun WrapperDetailBox(
     fileName: String,
@@ -636,6 +653,9 @@ private fun WrapperDetailBox(
     notes: String,
     caps: WrapperManager.WrapperCaps,
     gpu: GpuInfo,
+    manager: WrapperManager,
+    isImported: Boolean,
+    envSourceId: String,
 ) {
     val cs = MaterialTheme.colorScheme
     DetailRow("File", fileName)
@@ -657,6 +677,119 @@ private fun WrapperDetailBox(
         Spacer(Modifier.size(8.dp))
         Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
     }
+    EnvVarSection(manager = manager, isImported = isImported, envSourceId = envSourceId)
+}
+
+/**
+ * A nested, independently-expandable "Environment variables" row inside [WrapperDetailBox]. Default
+ * collapsed; opening it triggers the (bounded, off-main) scan ONLY when the user asks. Each entry
+ * shows the friendly dictionary label ([WrapperSettingsDictionary.defFor]) plus the raw env key in a
+ * dim monospace face. Read-only.
+ */
+@Composable
+private fun EnvVarSection(
+    manager: WrapperManager,
+    isImported: Boolean,
+    envSourceId: String,
+) {
+    val cs = MaterialTheme.colorScheme
+    var expanded by remember(envSourceId) { mutableStateOf(false) }
+    // null = not yet scanned (show a spinner); non-null = resolved (possibly empty) list.
+    var keys by remember(envSourceId) { mutableStateOf<List<String>?>(null) }
+
+    // Scan ON DEMAND: bundled slots are multi-MB zstd tars we skip on screen-open, so we only pay the
+    // decompress when the user opens THIS section. Off the main thread; WrapperManager caches bundled
+    // scans so a re-expand is instant. Imported wrappers read from their .meta (near-instant) but we
+    // still hop off-main for uniformity + the older-import backfill path. Never crashes (empty list).
+    LaunchedEffect(expanded, envSourceId) {
+        if (expanded && keys == null) {
+            keys = withContext(Dispatchers.IO) {
+                runCatching {
+                    if (isImported) manager.detectedEnvKeys(envSourceId)
+                    else manager.scanBundledEnvKeys(envSourceId)
+                }.getOrDefault(emptyList())
+            }
+        }
+    }
+
+    Spacer(Modifier.size(8.dp))
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .clickable { expanded = !expanded }
+            .padding(vertical = 4.dp),
+    ) {
+        Text(
+            text = keys?.let { "Environment variables (${it.size})" } ?: "Environment variables",
+            style = MaterialTheme.typography.labelMedium,
+            color = cs.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        Icon(
+            if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+            contentDescription = null,
+            tint = cs.onSurfaceVariant,
+            modifier = Modifier.size(18.dp),
+        )
+    }
+    if (expanded) {
+        val resolved = keys
+        when {
+            resolved == null ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(vertical = 4.dp),
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "Scanning…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = cs.onSurfaceVariant,
+                    )
+                }
+            resolved.isEmpty() ->
+                Text(
+                    "No environment variables detected.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = cs.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 2.dp),
+                )
+            else ->
+                // Height-bounded + scrollable so a long list can't blow out the width-constrained dialog.
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 220.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    resolved.forEach { key ->
+                        EnvVarRow(label = WrapperSettingsDictionary.defFor(key).label, rawKey = key)
+                    }
+                }
+        }
+    }
+}
+
+/** One read-only env-var entry: friendly label (when the dictionary has one) over the raw key in a
+ *  dim monospace face. A generic key (no dictionary hit) shows just the mono key — defFor returns the
+ *  key as its own label, so we skip the duplicate line. */
+@Composable
+private fun EnvVarRow(label: String, rawKey: String) {
+    val cs = MaterialTheme.colorScheme
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+        if (label != rawKey) {
+            Text(label, style = MaterialTheme.typography.bodySmall, color = cs.onSurface)
+        }
+        Text(
+            rawKey,
+            style = MaterialTheme.typography.labelSmall,
+            color = cs.onSurfaceVariant,
+            fontFamily = FontFamily.Monospace,
+        )
+    }
 }
 
 @Composable
@@ -664,6 +797,7 @@ private fun WrapperSlotCard(
     slot: WrapperManager.WrapperSlot,
     caps: WrapperManager.WrapperCaps,
     gpu: GpuInfo,
+    manager: WrapperManager,
     onUpdate: () -> Unit,
     onReset: () -> Unit,
 ) {
@@ -693,6 +827,9 @@ private fun WrapperSlotCard(
                 notes = slot.notes,
                 caps = caps,
                 gpu = gpu,
+                manager = manager,
+                isImported = false,
+                envSourceId = slot.fileName,
             )
         },
         trailing = {
@@ -744,6 +881,9 @@ private fun ImportedWrapperCard(
                 notes = versionInfo[1],
                 caps = caps,
                 gpu = gpu,
+                manager = manager,
+                isImported = true,
+                envSourceId = imported.identifier,
             )
         },
         trailing = {
