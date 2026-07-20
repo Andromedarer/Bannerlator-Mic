@@ -42,6 +42,9 @@ class InputControlsFormatTest {
             .put("expandableChildCount", 8)
             .put("expandableLayout", "LIST")
             .put("expandableDirection", "RIGHT")
+            .put("customAreaAppearanceEnabled", true)
+            .put("customAreaColor", 0xFF112233.toInt())
+            .put("customAreaOpacity", 0.5)
             .put("forkField", "keep")
 
         val copy = ControlElement.copyForSerialization(source)
@@ -53,6 +56,9 @@ class InputControlsFormatTest {
         assertFalse(copy.has("expandableChildCount"))
         assertFalse(copy.has("expandableLayout"))
         assertFalse(copy.has("expandableDirection"))
+        assertFalse(copy.has("customAreaAppearanceEnabled"))
+        assertFalse(copy.has("customAreaColor"))
+        assertFalse(copy.has("customAreaOpacity"))
         assertEquals("keep", copy.getString("forkField"))
     }
 

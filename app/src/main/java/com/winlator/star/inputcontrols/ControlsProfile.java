@@ -464,6 +464,11 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
                         Math.min(inputControlsView.getMaxWidth(), inputControlsView.getMaxHeight()));
                     if (stickRadius != null) element.setStickRadius(stickRadius);
                     if (elementJSONObject.has("mouseSensitivity")) element.setMouseSensitivity((float)elementJSONObject.getDouble("mouseSensitivity"));
+                    if (elementJSONObject.has("customAreaColor")) element.setCustomAreaColor(elementJSONObject.getInt("customAreaColor"));
+                    if (elementJSONObject.has("customAreaOpacity")) element.setCustomAreaOpacity((float)elementJSONObject.getDouble("customAreaOpacity"));
+                    if (elementJSONObject.has("customAreaAppearanceEnabled")) {
+                        element.setCustomAreaAppearanceEnabled(elementJSONObject.getBoolean("customAreaAppearanceEnabled"));
+                    }
                     if (elementJSONObject.has("gridRows")) element.setGridRows(elementJSONObject.getInt("gridRows"));
                     if (elementJSONObject.has("gridCols")) element.setGridCols(elementJSONObject.getInt("gridCols"));
                     if (element.getType() == ControlElement.Type.EXPANDABLE_BUTTON) {

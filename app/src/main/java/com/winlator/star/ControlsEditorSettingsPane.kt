@@ -57,6 +57,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.text.KeyboardOptions
@@ -67,6 +68,7 @@ import com.winlator.star.inputcontrols.Binding
 import com.winlator.star.inputcontrols.ControlElement
 import com.winlator.star.inputcontrols.ControlsProfile
 import com.winlator.star.inputcontrols.CustomIconManager
+import com.winlator.star.ui.components.ColorPicker
 import kotlinx.coroutines.delay
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -177,6 +179,10 @@ fun ControlsEditorSettingsPane(
     var expandableChildCount by remember { mutableStateOf(element.getExpandableChildCount().coerceAtLeast(1)) }
     var expandableLayoutIndex by remember { mutableStateOf(element.getExpandableLayout().ordinal) }
     var expandableDirectionIndex by remember { mutableStateOf(element.getExpandableDirection().ordinal) }
+    var customAreaAppearanceEnabled by remember { mutableStateOf(element.isCustomAreaAppearanceEnabled()) }
+    var customAreaColor by remember { mutableStateOf(element.getCustomAreaColor()) }
+    var customAreaOpacity by remember { mutableStateOf((element.getCustomAreaOpacity() * 100f).roundToInt()) }
+    var showAreaColorPicker by remember { mutableStateOf(false) }
 
     fun saveAndInvalidate() {
         val normalizedGroupId = groupId.trim()
@@ -269,6 +275,9 @@ fun ControlsEditorSettingsPane(
         expandableChildCount = element.getExpandableChildCount().coerceAtLeast(1)
         expandableLayoutIndex = element.getExpandableLayout().ordinal
         expandableDirectionIndex = element.getExpandableDirection().ordinal
+        customAreaAppearanceEnabled = element.isCustomAreaAppearanceEnabled()
+        customAreaColor = element.getCustomAreaColor()
+        customAreaOpacity = (element.getCustomAreaOpacity() * 100f).roundToInt().coerceIn(0, 100)
         groupId = element.groupId ?: ""
     }
 
@@ -523,6 +532,65 @@ fun ControlsEditorSettingsPane(
                     onInvalidate()
                 },
                 onValueChangeFinished = ::saveAndInvalidate,
+            )
+        }
+
+        SettingsSection(
+            title = stringResource(R.string.area_appearance),
+            visible = selectedType == ControlElement.Type.DYNAMIC_STICK || selectedType == ControlElement.Type.MOUSE_AREA,
+        ) {
+            SettingSwitch(
+                label = stringResource(R.string.independent_area_appearance),
+                checked = customAreaAppearanceEnabled,
+                visible = true,
+                onCheckedChange = { enabled ->
+                    customAreaAppearanceEnabled = enabled
+                    element.setCustomAreaAppearanceEnabled(enabled)
+                    saveAndInvalidate()
+                },
+            )
+            AnimatedVisibility(visible = customAreaAppearanceEnabled) {
+                Column(verticalArrangement = Arrangement.spacedBy(EditorSpacing)) {
+                    AreaColorRow(
+                        color = customAreaColor,
+                        onClick = { showAreaColorPicker = true },
+                    )
+                    LabeledSlider(
+                        label = stringResource(R.string.area_opacity),
+                        value = customAreaOpacity,
+                        rangeStart = 0,
+                        rangeEnd = 100,
+                        suffix = "%",
+                        onValueChange = { value ->
+                            customAreaOpacity = value
+                            element.setCustomAreaOpacity(value / 100f)
+                            onInvalidate()
+                        },
+                        onValueChangeFinished = ::saveAndInvalidate,
+                    )
+                }
+            }
+        }
+
+        if (showAreaColorPicker) {
+            AlertDialog(
+                onDismissRequest = { showAreaColorPicker = false },
+                title = { Text(stringResource(R.string.area_color)) },
+                text = {
+                    ColorPicker(
+                        initialColor = Color(customAreaColor),
+                        onColorChanged = { color ->
+                            customAreaColor = color.toArgb()
+                            element.setCustomAreaColor(customAreaColor)
+                            saveAndInvalidate()
+                        },
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = { showAreaColorPicker = false }) {
+                        Text(stringResource(R.string.ok), color = EditorAccent)
+                    }
+                },
             )
         }
 
@@ -1041,6 +1109,32 @@ private fun SettingSwitch(
         ) {
             Text(text = label, color = EditorSubText)
             Switch(checked = checked, onCheckedChange = onCheckedChange)
+        }
+    }
+}
+
+@Composable
+private fun AreaColorRow(color: Int, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text = stringResource(R.string.area_color), color = EditorSubText)
+        Row(horizontalArrangement = Arrangement.spacedBy(EditorSpacing), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = String.format(Locale.US, "#%06X", color and 0xFFFFFF),
+                color = EditorTextValue,
+            )
+            Surface(
+                modifier = Modifier.size(36.dp),
+                color = Color(color),
+                shape = SmallShape,
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.35f)),
+            ) {}
         }
     }
 }

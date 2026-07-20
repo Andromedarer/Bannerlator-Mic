@@ -45,6 +45,10 @@
     <string name="area_height">Area Height</string>
     <string name="stick_radius">Stick Radius</string>
     <string name="mouse_sensitivity">Mouse Sensitivity</string>
+    <string name="area_appearance">Area Appearance</string>
+    <string name="independent_area_appearance">Use independent color and opacity</string>
+    <string name="area_color">Area Color</string>
+    <string name="area_opacity">Area Opacity</string>
     <string name="grid_rows">Rows</string>
     <string name="grid_cols">Columns</string>
     <string name="overlay_opacity">Overlay Opacity</string>

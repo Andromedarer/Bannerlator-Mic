@@ -126,6 +126,9 @@ public class ControlElement {
     private long[] cellPressTimes;     // per-cell press timestamps for flash animation
     private Binding holdKey;           // key held while touch is active (TRACKPAD/MOUSE_AREA/STICK/DYNAMIC_STICK), default NONE
     private float deadZone = 0.15f;
+    private boolean customAreaAppearanceEnabled;
+    private int customAreaColor = 0xFF0055FF;
+    private float customAreaOpacity = 0.25f;
     private String groupId = null;
     private JSONObject sourceJSONObject;
     private ExpandableLayout expandableLayout = ExpandableLayout.RADIAL;
@@ -176,6 +179,9 @@ public class ControlElement {
         holdKeyActive = false;
         toggleSwitch = false;
         deadZone = 0.15f;
+        customAreaAppearanceEnabled = false;
+        customAreaColor = 0xFF0055FF;
+        customAreaOpacity = 0.25f;
         orientation = 0;
         currentPointerId = -1;
         currentPosition = null;
@@ -409,6 +415,12 @@ public class ControlElement {
     public void setHoldKey(Binding key) { this.holdKey = key != null ? key : Binding.NONE; }
     public float getDeadZone() { return deadZone; }
     public void setDeadZone(float dz) { this.deadZone = Math.max(0f, Math.min(0.5f, dz)); }
+    public boolean isCustomAreaAppearanceEnabled() { return customAreaAppearanceEnabled; }
+    public void setCustomAreaAppearanceEnabled(boolean enabled) { customAreaAppearanceEnabled = enabled; }
+    public int getCustomAreaColor() { return customAreaColor; }
+    public void setCustomAreaColor(int color) { customAreaColor = 0xFF000000 | (color & 0x00FFFFFF); }
+    public float getCustomAreaOpacity() { return customAreaOpacity; }
+    public void setCustomAreaOpacity(float opacity) { customAreaOpacity = Math.max(0f, Math.min(1f, opacity)); }
     public String getGroupId() { return groupId; }
     public void setGroupId(String id) {
         String trimmedId = id != null ? id.trim() : null;
@@ -991,12 +1003,16 @@ public class ControlElement {
 
                 // Draw detection area (semi-transparent)
                 paint.setStyle(Paint.Style.FILL);
-                paint.setColor(Color.argb((int)(overlayAlpha * 0.3f), 100, 100, 255));
+                paint.setColor(customAreaAppearanceEnabled
+                        ? colorWithAlpha(customAreaColor, customAreaOpacity)
+                        : Color.argb((int)(overlayAlpha * 0.3f), 100, 100, 255));
                 canvas.drawRoundRect(cx - areaHalfW, cy - areaHalfH, cx + areaHalfW, cy + areaHalfH, 16, 16, paint);
 
                 // Draw area border
                 paint.setStyle(Paint.Style.STROKE);
-                paint.setColor(inputControlsView.getAccentColor());
+                paint.setColor(customAreaAppearanceEnabled
+                        ? colorWithAlpha(customAreaColor, customAreaOpacity)
+                        : inputControlsView.getAccentColor());
                 paint.setStrokeWidth(strokeWidth * 0.5f);
                 canvas.drawRoundRect(cx - areaHalfW, cy - areaHalfH, cx + areaHalfW, cy + areaHalfH, 16, 16, paint);
 
@@ -1036,12 +1052,16 @@ public class ControlElement {
 
                 // Draw mouse area (semi-transparent green tint)
                 paint.setStyle(Paint.Style.FILL);
-                paint.setColor(Color.argb((int)(overlayAlpha * 0.25f), 0, 200, 100));
+                paint.setColor(customAreaAppearanceEnabled
+                        ? colorWithAlpha(customAreaColor, customAreaOpacity)
+                        : Color.argb((int)(overlayAlpha * 0.25f), 0, 200, 100));
                 canvas.drawRoundRect(cx - mw, cy - mh, cx + mw, cy + mh, 12, 12, paint);
 
                 // Border
                 paint.setStyle(Paint.Style.STROKE);
-                paint.setColor(inputControlsView.getAccentColor());
+                paint.setColor(customAreaAppearanceEnabled
+                        ? colorWithAlpha(customAreaColor, customAreaOpacity)
+                        : inputControlsView.getAccentColor());
                 paint.setStrokeWidth(strokeWidth * 0.5f);
                 canvas.drawRoundRect(cx - mw, cy - mh, cx + mw, cy + mh, 12, 12, paint);
 
@@ -1119,6 +1139,12 @@ public class ControlElement {
         // Phase 4: drive the GAMEHUB glass style off the live theme accent (full opacity)
         // instead of the hardcoded blue fallback. Never -1 now → the hasAccent path is live.
         return inputControlsView.getAccentColor();
+    }
+
+    private static int colorWithAlpha(int color, float opacity) {
+        return Color.argb(
+                Math.round(255 * Math.max(0f, Math.min(1f, opacity))),
+                Color.red(color), Color.green(color), Color.blue(color));
     }
 
     private GameHubLayout.RenderShape gameHubTriggerShape() {
@@ -1383,13 +1409,18 @@ public class ControlElement {
                 float areaHalfH = boundingBox.height() * 0.5f;
                 float areaRadius = 16f;
 
-                // Detection area only visible in edit mode
-                if (inputControlsView.isEditMode()) {
+                // A custom area remains visible in-game; the inherited area keeps the legacy
+                // editor-only behavior.
+                if (inputControlsView.isEditMode() || customAreaAppearanceEnabled) {
                     paint.setStyle(Paint.Style.FILL);
-                    paint.setColor(Color.argb((int)(fillAlpha * 0.15f), 100, 100, 255));
+                    paint.setColor(customAreaAppearanceEnabled
+                            ? colorWithAlpha(customAreaColor, customAreaOpacity)
+                            : Color.argb((int)(fillAlpha * 0.15f), 100, 100, 255));
                     canvas.drawRoundRect(cx - areaHalfW, cy - areaHalfH, cx + areaHalfW, cy + areaHalfH, areaRadius, areaRadius, paint);
                     paint.setStyle(Paint.Style.STROKE);
-                    paint.setColor(strokeColor);
+                    paint.setColor(customAreaAppearanceEnabled
+                            ? colorWithAlpha(customAreaColor, customAreaOpacity)
+                            : strokeColor);
                     paint.setStrokeWidth(strokeWidth * 0.5f);
                     canvas.drawRoundRect(cx - areaHalfW, cy - areaHalfH, cx + areaHalfW, cy + areaHalfH, areaRadius, areaRadius, paint);
                     paint.setStrokeWidth(strokeWidth);
@@ -1451,10 +1482,14 @@ public class ControlElement {
                 float mh = boundingBox.height() * 0.5f;
 
                 paint.setStyle(Paint.Style.FILL);
-                paint.setColor(Color.argb((int)(fillAlpha * 0.12f), 0, 200, 100));
+                paint.setColor(customAreaAppearanceEnabled
+                        ? colorWithAlpha(customAreaColor, customAreaOpacity)
+                        : Color.argb((int)(fillAlpha * 0.12f), 0, 200, 100));
                 canvas.drawRoundRect(cx - mw, cy - mh, cx + mw, cy + mh, 12, 12, paint);
                 paint.setStyle(Paint.Style.STROKE);
-                paint.setColor(strokeColor);
+                paint.setColor(customAreaAppearanceEnabled
+                        ? colorWithAlpha(customAreaColor, customAreaOpacity)
+                        : strokeColor);
                 paint.setStrokeWidth(strokeWidth * 0.5f);
                 canvas.drawRoundRect(cx - mw, cy - mh, cx + mw, cy + mh, 12, 12, paint);
                 paint.setStrokeWidth(strokeWidth);
@@ -1997,6 +2032,11 @@ public class ControlElement {
                 elementJSONObject.put("areaWidthRatio", (float)areaWidth / Math.max(1, inputControlsView.getMaxWidth()));
                 elementJSONObject.put("areaHeightRatio", (float)areaHeight / Math.max(1, inputControlsView.getMaxHeight()));
             }
+            if ((type == Type.DYNAMIC_STICK || type == Type.MOUSE_AREA) && customAreaAppearanceEnabled) {
+                elementJSONObject.put("customAreaAppearanceEnabled", true);
+                elementJSONObject.put("customAreaColor", customAreaColor);
+                elementJSONObject.put("customAreaOpacity", Float.valueOf(customAreaOpacity));
+            }
             if (type == Type.BUTTON_GRID) {
                 elementJSONObject.put("gridRows", getEffectiveGridRows());
                 elementJSONObject.put("gridCols", getEffectiveGridCols());
@@ -2046,7 +2086,8 @@ public class ControlElement {
                 "range", "orientation", "groupId", "areaWidthRatio", "areaHeightRatio",
                 "stickRadiusRatio", "areaWidth", "areaHeight", "stickRadius",
                 "mouseSensitivity", "gridRows", "gridCols", "gridCellShape", "combos", "holdKey",
-                "expandableChildCount", "expandableLayout", "expandableDirection"
+                "expandableChildCount", "expandableLayout", "expandableDirection",
+                "customAreaAppearanceEnabled", "customAreaColor", "customAreaOpacity"
         };
         for (String key : optionalKeys) elementJSONObject.remove(key);
         return elementJSONObject;
