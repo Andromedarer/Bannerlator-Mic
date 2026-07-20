@@ -1,5 +1,15 @@
 # Star-Compose — Progress Log
 
+## 2026-07-20 (night) — ✅ RELEASE 2.7.1 STABLE = LATEST (the post-2.7 accumulator, cut as a patch stable)
+
+> **Cut from `main`. vc47, tag `2.7.1`, API-confirmed `Latest`/not-prerelease; 3 flavor APKs + `update.json` (vc47, all flavors mapped). Release run `29785981112`; version bump `d84a502b`, README `a565e997`, PROGRESS_LOG this entry.** Patch stable (user asked "release 2.7.1"); plain numeric tag = stable per [[feedback_bannerlator_release_versioning_rule]].
+>
+> **Contents (everything on main since 2.7 — 19 commits, all device-confirmed):** Wrapper Version Manager catalog/update suite — persistent **Installed ✓ / Update available** badges (imports AND bundled slots) + one-tap Update + "From catalog" chip; GameNative wrapper refreshed to July-20 build (32-bit support); bundled version labels; fixes (BCn-layer(leegao) slot detection, hide "Extra libraries", card truncation, slot_catalog cross-instance cache). **lsfg Performance Mode** toggle (#152, per-container + live in-game, no root). **Controller Vibration master switch** + per-slot reflect fix. **Banner File Manager** replaces WFM in the container template (new containers). **Menu-style sweep** (all dropdowns → outlined MenuStyle, new rule). Catalog side: winlator-contents GameNative→v2 + README maintenance ritual.
+>
+> **Release body** (2.7 layout via `gh release edit --notes-file` from `scratchpad/body_271.md`): What's-New-in-2.7.1 + "Previously in 2.7" collapsible + Community **248 games / 291 configs** + Downloads + Credits. **Credits:** @Tony57319 ([#152](https://github.com/The412Banner/Bannerlator/issues/152), lsfg Performance mode) + BrunoSX (Banner File Manager = MIT fork of his Winlator File Manager) alongside leegao / GameNative / WinlatorMali(#132/@6ui99uhkllj). README thoroughly updated to match (version line vc47, TOC, What's-New→2.7.1, Full Features +Performance-mode/+vibration, credits table +BrunoSX/+Tony57319, Banner File Manager section).
+>
+> **NEXT stable = 2.8/user's call.** ⚠️ versionCode STAYS vc47/2.7.1 for all dev/artifacts builds until the next cut. **Still deferred:** menu destructive-item red-vs-orange (Contents/Saves); catalog `versionLabel` build-stamp consistency; hide bundled wrappers; Step 4 Workbench.
+
 ## 2026-07-20 (post-2.7) — 📌 CHECKPOINT: main accumulator since 2.7 (all artifacts-only, NO version bump — "fix main going forward")
 
 > **Main tip `039571ff` @ 2.7/vc46 (NO bump — user rule: never bump vc outside a stable/pre-release cut). 16 commits on main since tag `2.7`, all committed DIRECTLY to main (no lingering feature branches — all merged+deleted). NEXT stable = 2.8/user's call; big changelog piled up for it.**
