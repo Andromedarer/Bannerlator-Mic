@@ -73,6 +73,11 @@ fun WrapperCatalogPicker(
     gpuModel: String,
     onDismiss: () -> Unit,
     onInstalled: () -> Unit,
+    // Target-slot mode (#132): when non-null, a Download installs the entry as THIS bundled slot's
+    // override (via WrapperCatalogDownloader.installToSlot) instead of a free-form import. The label is
+    // only used for the title/intro. Left null = the free-form "Download wrappers" behaviour (unchanged).
+    targetSlot: String? = null,
+    targetSlotLabel: String? = null,
 ) {
     val context = LocalContext.current
     val activity = context.findActivity()
@@ -104,18 +109,26 @@ fun WrapperCatalogPicker(
         progress = 0
         errorMsg = null
         scope.launch {
-            val id = WrapperCatalogDownloader.install(context, entry) { pct ->
-                activity?.runOnUiThread { progress = pct }
+            // Target-slot mode installs the entry as a slot override (marker-validated); the free-form
+            // mode routes through the normal import pipeline. The two branches differ only in the call.
+            val ok = if (targetSlot != null) {
+                WrapperCatalogDownloader.installToSlot(context, entry, targetSlot) { pct ->
+                    activity?.runOnUiThread { progress = pct }
+                }
+            } else {
+                WrapperCatalogDownloader.install(context, entry) { pct ->
+                    activity?.runOnUiThread { progress = pct }
+                } != null
             }
             downloadingId = null
-            if (id != null) {
+            if (ok) {
                 installedIds = installedIds + entry.id
                 Toast.makeText(
                     context,
                     context.getString(R.string.wrapper_catalog_download_ok, entry.name),
                     Toast.LENGTH_SHORT,
                 ).show()
-                onInstalled()   // parent rescans imported list -> new wrapper appears
+                onInstalled()   // parent rescans slot/imported list -> new wrapper appears
             } else {
                 errorMsg = context.getString(R.string.wrapper_catalog_download_failed, entry.name)
             }
@@ -128,9 +141,27 @@ fun WrapperCatalogPicker(
         // cards so their names truncate to a couple of characters. Matches the manager dialog.
         modifier = Modifier.fillMaxWidth(0.96f),
         properties = DialogProperties(usePlatformDefaultWidth = false),
-        title = { Text(context.getString(R.string.wrapper_catalog_dialog_title)) },
+        title = {
+            Text(
+                if (targetSlot != null)
+                    "Replace ${targetSlotLabel ?: targetSlot} from catalog"
+                else
+                    context.getString(R.string.wrapper_catalog_dialog_title)
+            )
+        },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
+                // In target-slot mode, a one-line intro clarifies the download replaces this slot's
+                // override (rather than adding a new imported wrapper).
+                if (targetSlot != null) {
+                    Text(
+                        "Downloading a wrapper installs it as this slot's override. A wrapper that " +
+                            "doesn't match the slot is rejected.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = cs.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+                }
                 if (offline && !loading) {
                     Text(
                         context.getString(

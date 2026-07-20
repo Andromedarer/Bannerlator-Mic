@@ -70,6 +70,55 @@ object WrapperCatalogDownloader {
         }
     }
 
+    /**
+     * Download + verify [entry] exactly like [install], but instead of a free-form import it installs
+     * the archive as the OVERRIDE for the bundled slot [slotFileName] via
+     * [WrapperManager.installOverride] — so the slot's marker validation applies (a wrapper archive
+     * that doesn't match the slot type is rejected there, surfacing the usual invalid-wrapper toast).
+     * [onProgress] reports 0..100 (download fraction; jumps to 100 for the short install step). Returns
+     * true on success, false on any failure (download / checksum / invalid archive / mismatched slot).
+     * Off-main (IO); the temp archive is always deleted; never crashes.
+     */
+    suspend fun installToSlot(
+        context: Context,
+        entry: WrapperCatalogEntry,
+        slotFileName: String,
+        onProgress: (Int) -> Unit,
+    ): Boolean = withContext(Dispatchers.IO) {
+        val cacheDir = File(context.cacheDir, "wrapper_dl").apply { mkdirs() }
+        val archive = File(cacheDir, "${safe(entry.id)}.tzst")
+        if (archive.exists()) archive.delete()
+        try {
+            onProgress(0)
+            if (!Downloader.downloadFile(entry.url, archive) { fraction ->
+                    onProgress((fraction.coerceIn(0f, 1f) * 100f).toInt())
+                }) {
+                Log.w(TAG, "download failed: ${entry.url}")
+                return@withContext false
+            }
+            // Verify the UPPERCASE MD5 from the catalog before trusting the archive (blank = skip).
+            if (entry.checksum.isNotBlank()) {
+                val actual = md5Upper(archive)
+                if (!actual.equals(entry.checksum, ignoreCase = true)) {
+                    Log.w(TAG, "checksum mismatch for ${entry.id}: expected ${entry.checksum} got $actual")
+                    return@withContext false
+                }
+            }
+            onProgress(100)
+            // Install as THIS slot's override. installOverride reads the source via
+            // ContentResolver.openInputStream (accepts a file:// Uri in-process) and applies the slot's
+            // marker validation, returning false for a mismatched/invalid archive.
+            val ok = WrapperManager(context).installOverride(slotFileName, Uri.fromFile(archive))
+            if (!ok) Log.w(TAG, "installOverride failed for ${entry.id} -> $slotFileName")
+            ok
+        } catch (t: Throwable) {
+            Log.w(TAG, "installToSlot failed for ${entry.id}", t)
+            false
+        } finally {
+            archive.delete()
+        }
+    }
+
     private fun md5Upper(file: File): String {
         val md = MessageDigest.getInstance("MD5")
         file.inputStream().use { input ->

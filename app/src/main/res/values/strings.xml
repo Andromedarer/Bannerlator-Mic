@@ -745,6 +745,8 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="wrapper_manager_title">Manage Wrappers</string>
     <string name="wrapper_manager_header">Replace a bundled graphics wrapper with a newer file; updates are stored on-device and used instead of the built-in one.</string>
     <string name="wrapper_update">Update</string>
+    <string name="wrapper_update_from_file">From file</string>
+    <string name="wrapper_update_from_catalog">From catalog</string>
     <string name="wrapper_reset">Reset</string>
     <string name="wrapper_reset_all">Reset all</string>
     <string name="wrapper_reset_all_confirm_title">Reset all wrappers?</string>

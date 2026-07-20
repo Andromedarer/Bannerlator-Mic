@@ -165,6 +165,11 @@ fun WrapperManagerBody(modifier: Modifier = Modifier) {
     var editSettingsTarget by remember { mutableStateOf<WrapperManager.Imported?>(null) }
     // Step 5 (#132): the curated wrapper catalog browser, layered over this body.
     var showCatalog by remember { mutableStateOf(false) }
+    // Bundled-slot Update source chooser (#132): the slot whose "From file / From catalog" chooser is
+    // open (null = closed).
+    var updateChooserSlot by remember { mutableStateOf<WrapperManager.WrapperSlot?>(null) }
+    // When non-null, the catalog browser is open in "replace this slot" mode (installs as an override).
+    var catalogTargetSlot by remember { mutableStateOf<WrapperManager.WrapperSlot?>(null) }
 
     fun refresh() {
         slots = manager.listSlots().toList()
@@ -245,9 +250,8 @@ fun WrapperManagerBody(modifier: Modifier = Modifier) {
                 gpu = gpu,
                 manager = manager,
                 onUpdate = {
-                    pendingFileName = slot.fileName
-                    importMode = false
-                    confirmInstallPrompt = true
+                    // Offer a source chooser (From file / From catalog) before doing anything.
+                    updateChooserSlot = slot
                 },
                 onReset = {
                     manager.removeOverride(slot.fileName)
@@ -283,6 +287,71 @@ fun WrapperManagerBody(modifier: Modifier = Modifier) {
             gpuModel = gpu.model,
             onDismiss = { showCatalog = false },
             onInstalled = { refresh() },
+        )
+    }
+
+    // Bundled-slot Update source chooser (#132): "From file" (existing SAF/in-app picker path) or
+    // "From catalog" (opens the catalog browser in replace-this-slot mode). Cancel just dismisses.
+    val chooserSlot = updateChooserSlot
+    if (chooserSlot != null) {
+        OutlinedAlertDialog(
+            onDismissRequest = { updateChooserSlot = null },
+            title = { Text(context.getString(R.string.wrapper_update)) },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = context.getString(R.string.wrapper_manager_header),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = cs.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.size(12.dp))
+                    OutlinedButton(
+                        onClick = {
+                            updateChooserSlot = null
+                            pendingFileName = chooserSlot.fileName
+                            importMode = false
+                            confirmInstallPrompt = true
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Filled.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(context.getString(R.string.wrapper_update_from_file))
+                    }
+                    Spacer(Modifier.size(8.dp))
+                    OutlinedButton(
+                        onClick = {
+                            updateChooserSlot = null
+                            catalogTargetSlot = chooserSlot
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Filled.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(context.getString(R.string.wrapper_update_from_catalog))
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { updateChooserSlot = null }) {
+                    Text(context.getString(android.R.string.cancel))
+                }
+            },
+        )
+    }
+
+    // Catalog browser in "replace this slot" mode: a Download installs the entry as this slot's
+    // override (marker-validated), then refresh() so the slot's Updated state shows.
+    val targetSlot = catalogTargetSlot
+    if (targetSlot != null) {
+        WrapperCatalogPicker(
+            isQualcomm = gpu.isQualcomm,
+            gpuModel = gpu.model,
+            onDismiss = { catalogTargetSlot = null },
+            onInstalled = { refresh() },
+            targetSlot = targetSlot.fileName,
+            targetSlotLabel = targetSlot.label,
         )
     }
 
