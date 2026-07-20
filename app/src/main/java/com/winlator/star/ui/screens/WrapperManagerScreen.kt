@@ -27,6 +27,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -153,6 +154,8 @@ fun WrapperManagerBody(modifier: Modifier = Modifier) {
     var importNameDraft by remember { mutableStateOf("") }
     // Imported wrapper queued for deletion (confirm dialog).
     var deleteTarget by remember { mutableStateOf<WrapperManager.Imported?>(null) }
+    // Step 5 (#132): the curated wrapper catalog browser, layered over this body.
+    var showCatalog by remember { mutableStateOf(false) }
 
     fun refresh() {
         slots = manager.listSlots().toList()
@@ -257,7 +260,20 @@ fun WrapperManagerBody(modifier: Modifier = Modifier) {
 
         // Import affordance.
         ImportWrapperCard(onClick = { launchImportPicker() })
+        // Download-from-catalog affordance (Step 5, #132). Coexists with the file import above.
+        DownloadWrapperCard(onClick = { showCatalog = true })
         Spacer(Modifier.size(8.dp))
+    }
+
+    // Curated wrapper catalog browser (Step 5). Layered over this body (works when the manager is a
+    // full screen AND a dialog). A successful install refreshes the imported list so it appears at once.
+    if (showCatalog) {
+        WrapperCatalogPicker(
+            isQualcomm = gpu.isQualcomm,
+            gpuModel = gpu.model,
+            onDismiss = { showCatalog = false },
+            onInstalled = { refresh() },
+        )
     }
 
     // Confirm: pick a file (offers in-app picker or system SAF, like AdrenoToolsScreen). Shared by
@@ -908,6 +924,17 @@ private fun ImportWrapperCard(onClick: () -> Unit) {
         icon = Icons.Filled.Add,
         title = context.getString(R.string.wrapper_import_title),
         subtitle = context.getString(R.string.wrapper_import_subtitle),
+        onClick = onClick,
+    )
+}
+
+@Composable
+private fun DownloadWrapperCard(onClick: () -> Unit) {
+    val context = LocalContext.current
+    WrapperCardFrame(
+        icon = Icons.Filled.CloudDownload,
+        title = context.getString(R.string.wrapper_catalog_title),
+        subtitle = context.getString(R.string.wrapper_catalog_subtitle),
         onClick = onClick,
     )
 }

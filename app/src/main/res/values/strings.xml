@@ -769,6 +769,21 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="wrapper_delete">Delete</string>
     <string name="wrapper_delete_confirm_title">Delete this wrapper?</string>
     <string name="wrapper_delete_confirm_message">Remove this imported wrapper. Any container or game using it goes back to the default wrapper.</string>
+
+    <!-- Step 5 (#132): curated, downloadable wrapper catalog -->
+    <string name="wrapper_catalog_title">Download wrappers…</string>
+    <string name="wrapper_catalog_subtitle">Browse curated wrappers from other projects and download them straight into the manager.</string>
+    <string name="wrapper_catalog_dialog_title">Wrapper Catalog</string>
+    <string name="wrapper_catalog_empty">No wrappers available yet.</string>
+    <string name="wrapper_catalog_offline">Offline — connect to browse and download the catalog.</string>
+    <string name="wrapper_catalog_offline_cache">Offline — showing a cached list. Connect to download.</string>
+    <string name="wrapper_catalog_needs_connection">Needs a connection to download</string>
+    <string name="wrapper_catalog_download">Download</string>
+    <string name="wrapper_catalog_downloading">Downloading</string>
+    <string name="wrapper_catalog_installing">Installing</string>
+    <string name="wrapper_catalog_download_ok">%1$s added</string>
+    <string name="wrapper_catalog_download_failed">Couldn\'t download %1$s</string>
+    <string name="wrapper_catalog_close">Done</string>
 </resources>
 
 
