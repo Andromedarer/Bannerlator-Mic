@@ -80,6 +80,18 @@ Three net-new pieces:
 
 **Effort:** the biggest step. The dictionary + auto-detect scan + dynamic-UI/generic-emission refactor. Worth doing once imported wrappers are actually in use; the interim `isImported` superset covers the common case until then.
 
+### Step 3 (expanded) — the "Smart Wrapper Manager" (user, 2026-07-19)
+Goal: the manager must be **very smart** — auto-detect settings, options, GPU (Adreno/Mali/Xclipse/PowerVR), and show/create exactly the settings a wrapper *requires to work properly*, hiding what it doesn't have or can't use. This **replaces all name-gating** (`isGamenative`/`isBcnLayer` exact-name checks in `GraphicsDriverConfigDialog`) with data-driven capability detection. Four detection layers, run per wrapper:
+
+1. **Setting support (env-var scan + dictionary)** — as above: scan the wrapper `.so`(s) for env-var-name strings, match our dictionary → proper controls; unknown → generic field.
+2. **Capability detection (what the `.tzst` contains)** — inspect the archive at import (store results in `.meta`): `usr/lib/libvulkan_wrapper.so` → it's an ICD; `libbcn_layer.so` → show the BCn Layer Settings block; `libdxvk_mali_compat_layer.so` → show DX12/compat options (sparse, GameNative-engine, etc.). This is what makes an imported compat+bcn wrapper (e.g. "112") show the BCn + compat blocks WITHOUT a hardcoded name — it's detected from contents.
+3. **GPU awareness (`GPUInformation`)** — read real vendor/model: Adreno/Qualcomm (0x5143), Mali (+ Valhall r32p1+ allowlist), Xclipse, PowerVR. Hide/grey options that are inert on this GPU WITH a reason (e.g. "BCn does nothing on Adreno — native BCn"; "DX12/compat needs Valhall Mali r32p1+"). Mirrors the existing XSDA activation gates (`activateBcnLayer = getVendorID != 0x5143`, `isCompatLayerSupportedGpu`).
+4. **Intersection + honest emission** — show settings = (wrapper supports) ∩ (GPU can use); warn on mismatch; emit only env the wrapper+GPU will honor. No dead toggles shown, no live ones hidden.
+
+**⚠️ Prerequisite:** the Wrapper Manager currently lives on `feat/wrapper-manager-step1` (off **main**), which does NOT have the Mali BCn/compat driver machinery (activation env, Valhall gate, sparse/GameNative-engine UI) — that's on `feat/mali-ultimate-driver`. For the smart manager to *show AND activate* BCn/compat options for imports, the two must be **unified** (merge the Mali BCn/compat driver into the manager branch, or vice-versa). Until then, capability/GPU detection can drive the UI but activation is limited to what the host build supports.
+
+**Build order for the smart manager:** (a) unify branches so the BCn/compat activation + Valhall/Adreno gates exist alongside the manager; (b) capability-detect at import → `.meta`; (c) replace name-gates in `GraphicsDriverConfigDialog` with capability + GPU checks; (d) env-var scan + dictionary for the fine-grained per-setting list; (e) generic env emission driven by the resolved settings. This is the largest single piece of the whole feature.
+
 ### ContentsManager alternative (considered, not chosen)
 Adding a `CONTENT_TYPE_WRAPPER` to `ContentsManager`/`ContentProfile` would give enumerate/install/remove for free, but it copies files by manifest to explicit targets (not "extract a `.tzst` into imagefs root at launch") and has no container cascade — so a bespoke `WrapperManager` mirroring `AdrenotoolsManager` is lower-risk and idiom-matching. Keep ContentsManager in mind only if we later want remote-catalog/download parity.
 
