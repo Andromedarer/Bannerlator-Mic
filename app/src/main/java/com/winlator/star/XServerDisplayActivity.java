@@ -549,6 +549,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         state.setIsPaused(isPaused);
         state.setIsRelativeMouseMovement(isRelativeMouseMovement);
         state.setIsMouseDisabled(isMouseDisabled);
+        state.setMoveCursorToTouchpoint(preferences.getBoolean("move_cursor_to_touchpoint", false));
         state.onClose                  = () -> runOnUiThread(() -> drawerLayout.closeDrawers());
         state.onKeyboard               = this::showGuestKeyboard;
         state.onInputControls          = () -> showInputControlsDialog();
@@ -4573,7 +4574,8 @@ return true;
         boolean newValue = !currentValue;
         
         preferences.edit().putBoolean("move_cursor_to_touchpoint", newValue).apply();
-        
+        XServerDrawerState.INSTANCE.setMoveCursorToTouchpoint(newValue);
+
         // Update the touchpadView state
         if (touchpadView != null) {
             touchpadView.setMoveCursorToTouchpoint(newValue);

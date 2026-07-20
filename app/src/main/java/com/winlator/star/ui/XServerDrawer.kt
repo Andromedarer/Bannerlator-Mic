@@ -2020,13 +2020,13 @@ private fun ControlsContent(state: XServerDrawerState) {
     Spacer(Modifier.height(4.dp))
 
     ToggleRow("Move Cursor to Touchpoint", moveCursorToTouch) {
-        state.onMoveCursorToTouchpoint?.run(); state.onClose?.run()
+        state.onMoveCursorToTouchpoint?.run()
     }
     ToggleRow("Relative Mouse Movement", isRelativeMouse) {
-        state.onRelativeMouseMovement?.run(); state.onClose?.run()
+        state.onRelativeMouseMovement?.run()
     }
     ToggleRow("Disable Mouse", isMouseDisabled) {
-        state.onDisableMouse?.run(); state.onClose?.run()
+        state.onDisableMouse?.run()
     }
 
     HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
