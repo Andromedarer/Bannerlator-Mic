@@ -48,6 +48,7 @@ import com.winlator.star.R
 import com.winlator.star.contents.WrapperCatalog
 import com.winlator.star.contents.WrapperCatalogDownloader
 import com.winlator.star.contents.WrapperCatalogEntry
+import com.winlator.star.contents.WrapperManager
 import com.winlator.star.ui.findActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -93,11 +94,25 @@ fun WrapperCatalogPicker(
     // Catalog ids installed this session — the row then shows a "Downloaded" state (the imported
     // identifier is derived from the name, so tracking by catalog id is the simplest reliable signal).
     var installedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    // DURABLE installed state (#132): catalog ids on device (imports + slot overrides) and the version
+    // each is installed at, loaded once on open (WrapperManager reads are local, so this works offline).
+    // Merged with the session [installedIds] so a wrapper grabbed THIS open reads installed immediately.
+    var installedCatalogIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var installedVersions by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
 
     LaunchedEffect(Unit) {
         val result = withContext(Dispatchers.IO) { WrapperCatalog.loadCached(context) }
         catalog = result.entries
         source = result.source
+        // Load the durable installed set + per-id installed version (local reads; never throws).
+        val wm = WrapperManager(context)
+        val ids = withContext(Dispatchers.IO) {
+            runCatching { wm.installedCatalogIds() }.getOrDefault(emptySet())
+        }
+        installedCatalogIds = ids
+        installedVersions = withContext(Dispatchers.IO) {
+            runCatching { ids.associateWith { wm.installedCatalogVersion(it) } }.getOrDefault(emptyMap())
+        }
         loading = false
     }
 
@@ -195,12 +210,20 @@ fun WrapperCatalogPicker(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         catalog.forEach { entry ->
+                            // Durable state wins; the session set covers a wrapper grabbed just now
+                            // (before a reload would refresh the durable set).
+                            val durablyInstalled = entry.id in installedCatalogIds
+                            val installed = durablyInstalled || entry.id in installedIds
+                            // Only a durably-recorded install carries a version to compare against.
+                            val updateAvailable = durablyInstalled &&
+                                entry.version > (installedVersions[entry.id] ?: 0)
                             WrapperCatalogRow(
                                 entry = entry,
                                 applicable = isApplicable(entry.gpuTargets, isQualcomm),
                                 applicabilityNote = applicabilityNote(entry.gpuTargets, isQualcomm, gpuModel),
                                 badgeLabel = applicabilityChip(entry.gpuTargets, isQualcomm),
-                                installed = entry.id in installedIds,
+                                installed = installed,
+                                updateAvailable = updateAvailable,
                                 busy = downloadingId == entry.id,
                                 anyBusy = downloadingId != null,
                                 offline = offline,
@@ -235,6 +258,7 @@ private fun WrapperCatalogRow(
     applicabilityNote: String?,
     badgeLabel: String?,
     installed: Boolean,
+    updateAvailable: Boolean,
     busy: Boolean,
     anyBusy: Boolean,
     offline: Boolean,
@@ -260,6 +284,23 @@ private fun WrapperCatalogRow(
             expanded = expanded,
             onToggleExpand = { expanded = !expanded },
             titleBadge = {
+                // #132: a durable "Update available" chip when the catalog carries a newer version than
+                // what's installed (the download affordance below stays, to pull the update).
+                if (updateAvailable) {
+                    Spacer(Modifier.height(3.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(cs.tertiaryContainer)
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    ) {
+                        Text(
+                            LocalContextString(R.string.wrapper_update_available),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = cs.onTertiaryContainer,
+                        )
+                    }
+                }
                 // Small status chip under the title on GPU-inapplicable entries (e.g. "Mali only"), so
                 // the reason a row is dimmed is visible without expanding it.
                 badgeLabel?.let {
@@ -292,9 +333,16 @@ private fun WrapperCatalogRow(
                 // Compact icon only, so the name column stays readable. The full Download button
                 // (with progress) lives in the expanded detail box below.
                 when {
-                    installed -> Icon(Icons.Filled.CheckCircle, contentDescription = "Downloaded",
-                        tint = cs.primary, modifier = Modifier.size(22.dp))
                     busy -> CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    // Update available -> keep the download affordance (it pulls the newer version).
+                    updateAvailable -> IconButton(enabled = !anyBusy && !offline, onClick = onDownload) {
+                        Icon(Icons.Filled.CloudDownload, contentDescription =
+                            LocalContextString(R.string.wrapper_catalog_download), tint = cs.primary)
+                    }
+                    // Installed + current -> a checkmark instead of the download button.
+                    installed -> Icon(Icons.Filled.CheckCircle, contentDescription =
+                        LocalContextString(R.string.wrapper_installed),
+                        tint = cs.primary, modifier = Modifier.size(22.dp))
                     else -> IconButton(enabled = !anyBusy && !offline, onClick = onDownload) {
                         Icon(Icons.Filled.CloudDownload, contentDescription =
                             LocalContextString(R.string.wrapper_catalog_download), tint = cs.primary)

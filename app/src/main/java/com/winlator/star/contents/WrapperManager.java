@@ -415,6 +415,132 @@ public class WrapperManager {
         return (e != null) ? e.optInt("catalogVersion", 0) : 0;
     }
 
+    // --- Slot-override catalog provenance (slot_catalog.json) -----------------------------------------
+    // A bundled-slot OVERRIDE has no .meta sidecar (only free-form imports do), so a catalog install into
+    // a slot (Update -> From catalog, via installToSlot) had nowhere to record WHERE it came from. This
+    // tiny prefs file at filesDir/graphics_driver/slot_catalog.json maps slotFileName -> {catalogId,
+    // catalogVersion}, giving slot installs the same durable "installed from catalog X @ vN" provenance an
+    // import gets from its .meta. Parsed once per instance (like bundledManifest); every method never
+    // throws. Cleared for a slot when its override is reset/removed so a reverted slot stops reading as
+    // catalog-installed. ---------------------------------------------------------------------------------
+    private static final String SLOT_CATALOG_FILE = "slot_catalog.json";
+    /** Parsed slot_catalog.json, loaded once per instance. Always a (possibly empty) object once loaded so
+     *  callers can upsert; null only before the first {@link #slotCatalog()} call. */
+    private JSONObject slotCatalog;
+    private boolean slotCatalogLoaded;
+
+    private JSONObject slotCatalog() {
+        if (slotCatalogLoaded) return slotCatalog;
+        slotCatalogLoaded = true;
+        slotCatalog = new JSONObject();
+        File f = new File(overrideDir, SLOT_CATALOG_FILE);
+        if (f.isFile()) {
+            StringBuilder sb = new StringBuilder();
+            try (BufferedReader r = new BufferedReader(new FileReader(f))) {
+                String line;
+                while ((line = r.readLine()) != null) sb.append(line);
+            }
+            catch (IOException e) {
+                Log.d(TAG, "slotCatalog: read error — " + e.getMessage());
+            }
+            if (sb.length() > 0) {
+                try { slotCatalog = new JSONObject(sb.toString()); }
+                catch (Exception e) { slotCatalog = new JSONObject(); } // malformed -> start clean
+            }
+        }
+        return slotCatalog;
+    }
+
+    private void persistSlotCatalog() {
+        if (!overrideDir.exists()) overrideDir.mkdirs();
+        File f = new File(overrideDir, SLOT_CATALOG_FILE);
+        try (OutputStream out = new FileOutputStream(f)) {
+            out.write(slotCatalog().toString().getBytes());
+        }
+        catch (IOException e) {
+            Log.d(TAG, "persistSlotCatalog: write error — " + e.getMessage());
+        }
+    }
+
+    /** Record (upsert + persist) the catalog provenance of a slot OVERRIDE — called by the downloader
+     *  after a successful {@link #installOverride} from the catalog. No-op for a blank slot/id. Never
+     *  throws. */
+    public void recordSlotCatalog(String slotFileName, String catalogId, int catalogVersion) {
+        if (slotFileName == null || slotFileName.isEmpty() || catalogId == null || catalogId.isEmpty()) return;
+        JSONObject obj = slotCatalog();
+        try {
+            JSONObject e = new JSONObject();
+            e.put("catalogId", catalogId);
+            e.put("catalogVersion", catalogVersion);
+            obj.put(slotFileName, e);
+        }
+        catch (Exception ex) {
+            Log.d(TAG, "recordSlotCatalog: " + ex.getMessage());
+            return;
+        }
+        persistSlotCatalog();
+    }
+
+    /** Drop a slot's recorded catalog provenance (+ persist). Called from {@link #removeOverride} /
+     *  {@link #resetAll} so a slot reverted to bundled stops reading as catalog-installed. Never throws. */
+    public void clearSlotCatalog(String slotFileName) {
+        if (slotFileName == null || slotFileName.isEmpty()) return;
+        JSONObject obj = slotCatalog();
+        if (obj.has(slotFileName)) {
+            obj.remove(slotFileName);
+            persistSlotCatalog();
+        }
+    }
+
+    /** The catalog id a slot OVERRIDE was installed from, or null when the slot isn't catalog-installed.
+     *  Never throws. */
+    public String slotCatalogId(String slotFileName) {
+        if (slotFileName == null || slotFileName.isEmpty()) return null;
+        JSONObject e = slotCatalog().optJSONObject(slotFileName);
+        if (e == null) return null;
+        String id = e.optString("catalogId", "");
+        return id.isEmpty() ? null : id;
+    }
+
+    /** The catalog version a slot OVERRIDE was installed at, or 0 when unmapped. Never throws. */
+    public int slotCatalogVersion(String slotFileName) {
+        if (slotFileName == null || slotFileName.isEmpty()) return 0;
+        JSONObject e = slotCatalog().optJSONObject(slotFileName);
+        return (e != null) ? e.optInt("catalogVersion", 0) : 0;
+    }
+
+    /**
+     * The durable "which catalog entries are installed" answer (#132): the union of every IMPORTED
+     * wrapper's recorded {@code catalogId} (from its .meta) and every bundled SLOT override's recorded
+     * {@code catalogId} (from slot_catalog.json). Survives dialog reopen (unlike the picker's session
+     * set). Older imports / hand-picked file imports lacking provenance simply don't appear. Never throws.
+     */
+    public Set<String> installedCatalogIds() {
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        for (Imported imp : enumerateImported()) {
+            String id = catalogIdFor(imp.identifier);
+            if (id != null && !id.isEmpty()) out.add(id);
+        }
+        for (Slot slot : SLOTS) {
+            String id = slotCatalogId(slot.fileName);
+            if (id != null && !id.isEmpty()) out.add(id);
+        }
+        return out;
+    }
+
+    /** The on-device version installed for {@code catalogId} — from the matching import's
+     *  {@code catalogVersion}, else the matching slot override's, else 0 (not installed). Lets a picker
+     *  compare against the live catalog entry to flag "Update available". Never throws. */
+    public int installedCatalogVersion(String catalogId) {
+        if (catalogId == null || catalogId.isEmpty()) return 0;
+        String impId = findImportByCatalogId(catalogId);
+        if (impId != null) return catalogVersionFor(impId);
+        for (Slot slot : SLOTS) {
+            if (catalogId.equals(slotCatalogId(slot.fileName))) return slotCatalogVersion(slot.fileName);
+        }
+        return 0;
+    }
+
     /**
      * Copy the picked file's bytes verbatim to {@code filesDir/graphics_driver/<fileName>}.
      * Validates first that it's a readable zstd tar; for wrapper-* slots additionally that it
@@ -476,16 +602,19 @@ public class WrapperManager {
         return true;
     }
 
-    /** Delete a single slot's override (revert to bundled). No-op if absent. */
+    /** Delete a single slot's override (revert to bundled). No-op if absent. Also drops any recorded
+     *  catalog provenance so a reverted slot stops reading as catalog-installed (#132). */
     public void removeOverride(String fileName) {
         File f = overrideFileFor(fileName);
         if (f.exists()) {
             f.delete();
             Log.d(TAG, "removeOverride: reverted " + fileName + " to bundled");
         }
+        clearSlotCatalog(fileName);
     }
 
-    /** Delete every override among the 6 known slots (revert all to bundled). */
+    /** Delete every override among the known slots (revert all to bundled). Each {@link #removeOverride}
+     *  also clears that slot's catalog provenance (#132), so a reset never leaves a stale "installed". */
     public void resetAll() {
         for (Slot slot : SLOTS) removeOverride(slot.fileName);
     }

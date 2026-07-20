@@ -112,8 +112,16 @@ object WrapperCatalogDownloader {
             // Install as THIS slot's override. installOverride reads the source via
             // ContentResolver.openInputStream (accepts a file:// Uri in-process) and applies the slot's
             // marker validation, returning false for a mismatched/invalid archive.
-            val ok = WrapperManager(context).installOverride(slotFileName, Uri.fromFile(archive))
-            if (!ok) Log.w(TAG, "installOverride failed for ${entry.id} -> $slotFileName")
+            val wm = WrapperManager(context)
+            val ok = wm.installOverride(slotFileName, Uri.fromFile(archive))
+            if (ok) {
+                // Record catalog provenance for the slot override (#132). Slot overrides have no .meta,
+                // so this durable mapping is what lets the picker/manager show a persistent "Installed"
+                // state + detect a newer catalog version for a slot-installed wrapper.
+                wm.recordSlotCatalog(slotFileName, entry.id, entry.version)
+            } else {
+                Log.w(TAG, "installOverride failed for ${entry.id} -> $slotFileName")
+            }
             ok
         } catch (t: Throwable) {
             Log.w(TAG, "installToSlot failed for ${entry.id}", t)

@@ -313,11 +313,15 @@ fun WrapperManagerBody(modifier: Modifier = Modifier) {
             val matchedEntry = catId?.let { id -> catalogEntries.firstOrNull { it.id == id } }
             val updateAvailable = matchedEntry != null &&
                 matchedEntry.version > manager.catalogVersionFor(imp.identifier)
+            // #132: a catalog-installed import (has provenance) shows a durable "From catalog" chip.
+            // Read inline (not remember-cached) so it stays fresh across import/delete/refresh.
+            val fromCatalog = catId != null
             ImportedWrapperCard(
                 imported = imp,
                 manager = manager,
                 gpu = gpu,
                 updateAvailable = updateAvailable,
+                fromCatalog = fromCatalog,
                 updating = updatingId == imp.identifier,
                 updateProgress = updateProgress,
                 onUpdate = { matchedEntry?.let { startUpdate(imp.identifier, it) } },
@@ -1045,6 +1049,7 @@ private fun ImportedWrapperCard(
     manager: WrapperManager,
     gpu: GpuInfo,
     updateAvailable: Boolean = false,
+    fromCatalog: Boolean = false,
     updating: Boolean = false,
     updateProgress: Int = 0,
     onUpdate: () -> Unit = {},
@@ -1069,8 +1074,9 @@ private fun ImportedWrapperCard(
         expanded = expanded,
         onToggleExpand = { expanded = !expanded },
         titleBadge = {
-            // #132: catalog-installed wrapper with a newer version available -> a small chip; while the
-            // in-place update downloads, the chip shows live progress instead.
+            // #132: badge priority — updating (live progress) > update-available > from-catalog. A
+            // catalog-installed import always carries provenance, so "From catalog" is the resting state
+            // and the update chip supersedes it when a newer version is out.
             when {
                 updating -> {
                     Spacer(Modifier.height(3.dp))
@@ -1090,6 +1096,21 @@ private fun ImportedWrapperCard(
                     ) {
                         Text(
                             context.getString(R.string.wrapper_update_available),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = cs.onTertiaryContainer,
+                        )
+                    }
+                }
+                fromCatalog -> {
+                    Spacer(Modifier.height(3.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(cs.tertiaryContainer)
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    ) {
+                        Text(
+                            context.getString(R.string.wrapper_from_catalog),
                             style = MaterialTheme.typography.labelSmall,
                             color = cs.onTertiaryContainer,
                         )

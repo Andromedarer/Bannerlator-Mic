@@ -786,6 +786,9 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="wrapper_update_available">Update available</string>
     <!-- #132: shown on a wrapper card while its in-place catalog update downloads (%1$d = percent) -->
     <string name="wrapper_updating_progress">Updating… %1$d%%</string>
+    <!-- #132: persistent "Installed" state for catalog entries + "From catalog" provenance chip -->
+    <string name="wrapper_installed">Installed</string>
+    <string name="wrapper_from_catalog">From catalog</string>
 
     <!-- Step 5 (#132): curated, downloadable wrapper catalog -->
     <string name="wrapper_catalog_title">Download wrappers…</string>
