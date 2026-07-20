@@ -1608,16 +1608,31 @@ internal fun GraphicsDriverConfigDialog(
     var disablePresentWait by remember { mutableStateOf(cfg["disablePresentWait"] == "1") }
     var fdDevFeatures    by remember { mutableStateOf(cfg["fdDevFeatures"] == "1") }
 
-    // --- BCn Layer (leegao bcn_layer) settings; only meaningful when driver == wrapper-bcn_layer ---
-    val isBcnLayer = graphicsDriver == "wrapper-bcn_layer"
-    // The integrated-BCn wrapper (Wrapper-gamenative) is the only bundled wrapper ICD that honors
-    // WRAPPER_BCN_ASTC (see XServerDisplayActivity BCn env block). The older wrappers
-    // (original/leegao/legacy) ignore it, and Wrapper + bcn_layer has its own ASTC control
-    // (bcnTranscodeAstc). An IMPORTED wrapper (#132) has unknown capabilities and may well be a
-    // GameNative-family ICD, so expose the same integrated-wrapper options for it too (a wrapper
-    // ignores env vars it doesn't read, so showing the toggle is harmless).
+    // --- #132 Smart Wrapper Manager: capability + GPU gating (replaces the old exact-name gates) ---
+    // Gate the BCn options by WHAT THE WRAPPER CONTAINS, not by its identifier string. capsFor()
+    // returns a bundled driver's known caps, or — for an imported wrapper — the caps detected from
+    // its .tzst at import time (libvulkan_wrapper.so / libbcn_layer.so / libdxvk_mali_compat_layer.so,
+    // cached in the .meta). This reproduces every bundled driver's current gating exactly, while
+    // letting an imported wrapper that actually carries a BCn layer (e.g. "112") show the same
+    // options. hasCompatLayer is detected + stored for the future DX12/compat UI (sparse binding /
+    // "Use GameNative engine"), which lives on a different branch — no compat control is built here.
+    val caps = remember(graphicsDriver) { WrapperManager(context).capsFor(graphicsDriver) }
     val isImported = remember(graphicsDriver) { WrapperManager(context).isImported(graphicsDriver) }
-    val isGamenative = graphicsDriver == "wrapper-gamenative" || isImported
+    // Integrated-BCn ICD = a wrapper ICD that ALSO carries a BCn transcode path; it honors
+    // WRAPPER_BCN_ASTC. Bundled: only wrapper-gamenative (hasIcd + hasBcnLayer). Imports with both
+    // resolve the same way. The older wrappers (original/leegao/legacy) lack a BCn layer, and the
+    // standalone bcn_layer has its own ASTC control below — so neither shows this.
+    val isIntegratedBcn = caps.hasIcd && caps.hasBcnLayer
+    // Standalone BCn Layer Settings (the implicit bcn_layer overlay's env block). Bundled: only
+    // wrapper-bcn_layer (hasBcnLayer, no own ICD). For imports: any archive carrying a BCn layer.
+    // The bundled integrated-BCn ICD (gamenative, hasIcd + hasBcnLayer but NOT an import) is excluded
+    // — it drives BCn through WRAPPER_EMULATE_BCN, not the implicit-layer env — so its dialog stays
+    // byte-for-byte as today.
+    val showBcnLayerSettings = caps.hasBcnLayer && (isImported || !caps.hasIcd)
+    // GPU awareness: BCn transcode/emulation is inert on Qualcomm/Adreno (native BCn). Mirror XSDA's
+    // activateBcnLayer = getVendorID != 0x5143 gate so we MARK (never silently hide) those options.
+    val isQualcomm = remember { GPUInformation.getVendorID(null, null) == 0x5143 }
+    val gpuModel = remember { GPUInformation.extractModelName(GPUInformation.getRenderer(null, context)) ?: "" }
     var bcnSectionExpanded by remember { mutableStateOf(false) }
     // Force decode on all GPUs -> BCN_COMPUTE_AUTO=0. Default ON (the Mali force-decode fix).
     var bcnLayerAuto      by remember { mutableStateOf(cfg["bcnLayerAuto"]?.let { it == "1" } ?: true) }
@@ -1737,20 +1752,37 @@ internal fun GraphicsDriverConfigDialog(
                 Spacer(Modifier.height(8.dp))
                 LabeledDropdown(stringResource(R.string.graphics_driver_resource_type), resourceTypeEntries, resourceType, { resourceType = it })
                 Spacer(Modifier.height(8.dp))
+                // #132 GPU-context note: BCn transcode/emulation (and the compat layers) only do
+                // anything on Mali/non-Qualcomm GPUs — Adreno has native BCn. Surface the real chip so
+                // Adreno users understand why these options are inert for them (a real point of confusion).
+                Text(
+                    (if (gpuModel.isNotEmpty()) "GPU: $gpuModel — " else "") +
+                        "BCn/compat layers apply to Mali and other non-Qualcomm GPUs",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
                 LabeledDropdown(stringResource(R.string.graphics_driver_bcn_emulation), bcnEmulationEntries, bcnEmulation, { bcnEmulation = it })
                 Spacer(Modifier.height(8.dp))
                 LabeledDropdown(stringResource(R.string.graphics_driver_bcn_emulation_type), bcnTypeEntries, bcnEmulationType, { bcnEmulationType = it })
                 Spacer(Modifier.height(8.dp))
                 LabeledDropdown(stringResource(R.string.graphics_driver_bcn_emulation_cache), bcnCacheEntries, bcnEmulationCache, { bcnEmulationCache = it })
                 Spacer(Modifier.height(8.dp))
-                // ASTC transcode is offered by the BCn-integrated wrapper (Wrapper-gamenative).
-                // The Wrapper + bcn_layer driver has its own ASTC control in its section below;
-                // the older wrappers ignore WRAPPER_BCN_ASTC entirely, so only expose it here for
-                // the gamenative integrated-BCn wrapper.
-                if (isGamenative) {
+                // ASTC transcode is offered by any integrated-BCn wrapper ICD (bundled Wrapper-
+                // gamenative, or an imported wrapper whose archive carries a BCn layer). The standalone
+                // bcn_layer driver has its own ASTC control in its section below; the older wrappers
+                // ignore WRAPPER_BCN_ASTC entirely — so gate on the detected capability, not the name.
+                if (isIntegratedBcn) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(checked = bcnEmulationAstc, onCheckedChange = { bcnEmulationAstc = it })
                         Text(stringResource(R.string.graphics_driver_bcn_emulation_astc))
+                    }
+                    if (isQualcomm) {
+                        Text(
+                            "No effect on Adreno (native BCn)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1766,8 +1798,10 @@ internal fun GraphicsDriverConfigDialog(
                     Text("OneUI / HyperOS Fix")
                 }
 
-                // BCn Layer Settings — only when the Wrapper + bcn_layer driver is selected.
-                if (isBcnLayer) {
+                // BCn Layer Settings — shown when the wrapper carries a BCn layer as an implicit
+                // overlay: bundled wrapper-bcn_layer, or an imported wrapper whose .tzst contains
+                // libbcn_layer.so (e.g. "112"). Detected via caps, not the driver name.
+                if (showBcnLayerSettings) {
                     Spacer(Modifier.height(12.dp))
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -1788,6 +1822,14 @@ internal fun GraphicsDriverConfigDialog(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        if (isQualcomm) {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "No effect on Adreno (native BCn) — these apply to Mali/non-Qualcomm GPUs",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                         Spacer(Modifier.height(8.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(checked = bcnLayerAuto, onCheckedChange = { bcnLayerAuto = it })

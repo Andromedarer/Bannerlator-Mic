@@ -63,6 +63,7 @@ import com.winlator.star.contentdialog.WineD3DConfigDialog;
 import com.winlator.star.contents.ContentProfile;
 import com.winlator.star.contents.ContentsManager;
 import com.winlator.star.contents.AdrenotoolsManager;
+import com.winlator.star.contents.WrapperManager;
 import com.winlator.star.core.AppUtils;
 import com.winlator.star.core.DefaultVersion;
 import com.winlator.star.core.EnvVars;
@@ -3456,6 +3457,19 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // check (below): activated on non-Qualcomm GPUs (Mali/Xclipse/PowerVR) which lack native BCn,
     // and skipped on Adreno/Qualcomm which has native BCn.
     boolean isBcnLayerDriver = graphicsDriver != null && graphicsDriver.startsWith("wrapper-bcn_layer");
+
+    // #132 Smart Wrapper Manager: an IMPORTED wrapper whose archive carries libbcn_layer.so also
+    // drives the implicit bcn_layer, so it must run the same activation env (below) — otherwise the
+    // BCn Layer Settings the dialog now SHOWS for that import would do nothing. Gate on the import's
+    // DETECTED caps (WrapperManager.capsFor), and only for imports: a bundled driver's behavior is
+    // decided by the name check above and is left untouched (e.g. wrapper-gamenative keeps its
+    // WRAPPER_EMULATE_BCN path even though its caps include a BCn layer). The compat_layer path is
+    // NOT activated here — that lives on feat/mali-ultimate-driver, not this branch.
+    if (!isBcnLayerDriver && graphicsDriver != null) {
+        WrapperManager wm = new WrapperManager(this);
+        if (wm.isImported(graphicsDriver) && wm.capsFor(graphicsDriver).hasBcnLayer)
+            isBcnLayerDriver = true;
+    }
 
     if (!isBcnLayerDriver) {
         String bcnEmulation = graphicsDriverConfig.get("bcnEmulation");

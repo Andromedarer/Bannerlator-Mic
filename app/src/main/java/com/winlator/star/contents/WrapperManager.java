@@ -48,6 +48,11 @@ public class WrapperManager {
     /** Wrapper archives must ship this entry; validated before an override is accepted. */
     private static final String WRAPPER_MARKER_ENTRY = "usr/lib/libvulkan_wrapper.so";
     private static final String BCN_MARKER_ENTRY     = "usr/lib/libbcn_layer.so";
+    /** DX12/compat implicit layer marker. Detected + persisted for the FUTURE compat UI (sparse
+     *  binding / "Use GameNative engine") which lives on feat/mali-ultimate-driver, NOT this branch.
+     *  We record hasCompatLayer in the .meta so the compat gate exists the moment that UI merges in;
+     *  no compat controls are built (or activated) here — see step 5 deferral in XServerDisplayActivity. */
+    private static final String COMPAT_MARKER_ENTRY  = "usr/lib/libdxvk_mali_compat_layer.so";
 
     /** The updatable slots, in display order. Each may require a marker entry to validate an import.
      *  extra_libs is a shared-libs payload (no marker). leegao_bcn is the BCn transcode layer (its own
@@ -264,6 +269,111 @@ public class WrapperManager {
     // file name) are refused so an import can never clobber a bundled-slot override.
     // ---------------------------------------------------------------------------------------------
 
+    // ---------------------------------------------------------------------------------------------
+    // Step 3 (issue #132) "Smart Wrapper Manager": capability detection.
+    //
+    // Instead of gating driver-config options by EXACT identifier name (isGamenative/isBcnLayer),
+    // the dialog (and XSDA activation) ask WHAT A WRAPPER CONTAINS via {@link #capsFor}. For an
+    // imported wrapper the caps are detected once at import time (scan the .tzst) and cached in the
+    // .meta sidecar; for a bundled/known identifier the caps come from {@link #BUNDLED_CAPS} (we
+    // already know what each ships). This lets an imported wrapper (e.g. "112") that actually carries
+    // a BCn layer show + activate the BCn options WITHOUT a hardcoded name, while bundled wrappers
+    // resolve to exactly their current gating (gamenative -> integrated BCn, bcn_layer -> BCn layer
+    // settings, others -> plain ICD). Never throws.
+    // ---------------------------------------------------------------------------------------------
+
+    /** What a wrapper archive contains: an ICD (vulkan_wrapper), a BCn transcode layer, and/or the
+     *  DX12/compat layer. hasCompatLayer is detected + stored for the future compat UI only (that UI
+     *  is on a different branch) — nothing on THIS branch renders or activates a compat control. */
+    public static final class WrapperCaps {
+        public final boolean hasIcd;
+        public final boolean hasBcnLayer;
+        public final boolean hasCompatLayer;
+        WrapperCaps(boolean hasIcd, boolean hasBcnLayer, boolean hasCompatLayer) {
+            this.hasIcd = hasIcd;
+            this.hasBcnLayer = hasBcnLayer;
+            this.hasCompatLayer = hasCompatLayer;
+        }
+    }
+
+    /** Known capabilities of the BUNDLED driver identifiers, so bundled and imported wrappers resolve
+     *  through the same {@link #capsFor} path. These reproduce each bundled driver's CURRENT gating:
+     *  gamenative = integrated-BCn ICD; bcn_layer = a BCn overlay layer (no own ICD); the rest = plain
+     *  ICDs. compat-bcn is listed for completeness in case such a bundled driver is ever added. */
+    private static WrapperCaps bundledCaps(String identifier) {
+        switch (identifier) {
+            case "wrapper-gamenative": return new WrapperCaps(true,  true,  false);
+            case "wrapper-bcn_layer":  return new WrapperCaps(false, true,  false);
+            case "wrapper-compat-bcn": return new WrapperCaps(true,  true,  true);
+            case "wrapper-original":
+            case "wrapper-legacy":
+            case "wrapper-leegao":
+            case "wrapper":            return new WrapperCaps(true,  false, false);
+            default:                   return null;
+        }
+    }
+
+    /**
+     * Resolve a driver identifier to its capabilities. For an IMPORTED wrapper the caps are read from
+     * the .meta (backfilled by scanning the .tzst once if an older import's .meta predates the flags).
+     * For a bundled/known identifier they come from {@link #bundledCaps}. An unknown non-import id
+     * falls back to a plain ICD (matches "wrapper"). Never throws.
+     */
+    public WrapperCaps capsFor(String identifier) {
+        if (identifier == null || identifier.isEmpty())
+            return new WrapperCaps(false, false, false);
+        if (isImported(identifier)) {
+            WrapperCaps cached = readCapsFromMeta(identifier);
+            if (cached != null) return cached;
+            // Older import whose .meta lacks the flags -> derive once and rewrite the sidecar.
+            WrapperCaps scanned = scanCaps(importedFileFor(identifier));
+            backfillMeta(identifier, scanned);
+            return scanned;
+        }
+        WrapperCaps bundled = bundledCaps(identifier);
+        if (bundled != null) return bundled;
+        return new WrapperCaps(true, false, false);
+    }
+
+    /** Scan a wrapper .tzst for the ICD / BCn / compat marker entries (lenient membership match). */
+    private WrapperCaps scanCaps(File tzst) {
+        boolean icd = TarCompressorUtils.containsEntry(TarCompressorUtils.Type.ZSTD, tzst, WRAPPER_MARKER_ENTRY);
+        boolean bcn = TarCompressorUtils.containsEntry(TarCompressorUtils.Type.ZSTD, tzst, BCN_MARKER_ENTRY);
+        boolean compat = TarCompressorUtils.containsEntry(TarCompressorUtils.Type.ZSTD, tzst, COMPAT_MARKER_ENTRY);
+        return new WrapperCaps(icd, bcn, compat);
+    }
+
+    /** Read the hasIcd/hasBcnLayer/hasCompatLayer flags from a .meta; null if any is absent (old
+     *  import -> caller backfills). Never throws. */
+    private WrapperCaps readCapsFromMeta(String identifier) {
+        File meta = metaFileFor(identifier);
+        Boolean icd = null, bcn = null, compat = null;
+        try (BufferedReader r = new BufferedReader(new FileReader(meta))) {
+            String line;
+            while ((line = r.readLine()) != null) {
+                int eq = line.indexOf('=');
+                if (eq < 0) continue;
+                String k = line.substring(0, eq).trim();
+                String v = line.substring(eq + 1).trim();
+                if (k.equals("hasIcd")) icd = v.equals("1");
+                else if (k.equals("hasBcnLayer")) bcn = v.equals("1");
+                else if (k.equals("hasCompatLayer")) compat = v.equals("1");
+            }
+        }
+        catch (IOException e) {
+            return null;
+        }
+        if (icd == null || bcn == null || compat == null) return null;
+        return new WrapperCaps(icd, bcn, compat);
+    }
+
+    /** Rewrite an import's .meta to include the detected caps, preserving its label. */
+    private void backfillMeta(String identifier, WrapperCaps caps) {
+        Imported imp = readMeta(metaFileFor(identifier), identifier);
+        String label = (imp != null) ? imp.label : identifier;
+        writeMeta(identifier, label, caps);
+    }
+
     /** A user-imported wrapper: canonical identifier (persisted in Container.graphicsDriver) + label. */
     public static final class Imported {
         public final String identifier;
@@ -342,10 +452,15 @@ public class WrapperManager {
         return new Imported(identifier, label);
     }
 
-    private boolean writeMeta(String identifier, String label) {
+    private boolean writeMeta(String identifier, String label, WrapperCaps caps) {
         File meta = metaFileFor(identifier);
         try (OutputStream out = new FileOutputStream(meta)) {
-            String content = "label=" + label + "\nidentifier=" + identifier + "\nimported=true\n";
+            String content = "label=" + label + "\n"
+                + "identifier=" + identifier + "\n"
+                + "imported=true\n"
+                + "hasIcd=" + (caps.hasIcd ? "1" : "0") + "\n"
+                + "hasBcnLayer=" + (caps.hasBcnLayer ? "1" : "0") + "\n"
+                + "hasCompatLayer=" + (caps.hasCompatLayer ? "1" : "0") + "\n";
             out.write(content.getBytes());
             return true;
         }
@@ -417,7 +532,10 @@ public class WrapperManager {
             tmp.delete();
             return null;
         }
-        if (!writeMeta(identifier, label)) {
+        // Detect capabilities once (ICD / BCn layer / compat layer) and cache them in the sidecar so
+        // the driver-config dialog + XSDA activation can gate by CONTENT, not by the import's name.
+        WrapperCaps caps = scanCaps(dst);
+        if (!writeMeta(identifier, label, caps)) {
             dst.delete();
             return null;
         }
