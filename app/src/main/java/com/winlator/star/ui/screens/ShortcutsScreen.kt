@@ -3739,8 +3739,10 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
 
     // Graphics driver — bundled entries + user-imported wrappers (issue #132 Step 2), built via the
     // SHARED WrapperManager.driverEntries helper so this list matches ContainerDetailViewModel's
-    // exactly (dynamic-dropdown drift is the feature's top-ranked risk).
-    val graphicsDriverEntries = remember {
+    // exactly (dynamic-dropdown drift is the feature's top-ranked risk). Keyed on wrapperRefreshKey
+    // so a wrapper imported/deleted via the manager appears without reopening the editor.
+    var wrapperRefreshKey by remember { mutableStateOf(0) }
+    val graphicsDriverEntries = remember(wrapperRefreshKey) {
         WrapperManager.driverEntries(context, res.getStringArray(R.array.graphics_driver_entries))
     }
     var selectedGfxDriver by remember {
@@ -4242,7 +4244,10 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
                             Icon(Icons.Default.CloudDownload, contentDescription = stringResource(R.string.wrapper_manager_open))
                         }
                     }
-                    if (showWrapperManager) WrapperManagerDialog(onDismiss = { showWrapperManager = false })
+                    if (showWrapperManager) WrapperManagerDialog(onDismiss = {
+                        showWrapperManager = false
+                        wrapperRefreshKey++ // pick up a just-imported/deleted wrapper
+                    })
                     OutlinedButton(onClick = { showGfxConfig = true }, modifier = Modifier.fillMaxWidth()) {
                         Text("${stringResource(R.string.graphics_driver)}: ${GraphicsDriverConfigDialog.getVersion(graphicsDriverConfig)}")
                     }

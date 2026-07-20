@@ -504,7 +504,10 @@ private fun TopLevelFields(
                 Icon(Icons.Default.Settings, contentDescription = null)
             }
         }
-        if (showWrapperManager) WrapperManagerDialog(onDismiss = { showWrapperManager = false })
+        if (showWrapperManager) WrapperManagerDialog(onDismiss = {
+            showWrapperManager = false
+            viewModel.refreshGraphicsDriverEntries() // pick up a just-imported/deleted wrapper
+        })
         Spacer(Modifier.height(8.dp))
 
         // DX Wrapper + config button
