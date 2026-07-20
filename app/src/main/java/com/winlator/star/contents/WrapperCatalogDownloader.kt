@@ -118,7 +118,7 @@ object WrapperCatalogDownloader {
                 // Record catalog provenance for the slot override (#132). Slot overrides have no .meta,
                 // so this durable mapping is what lets the picker/manager show a persistent "Installed"
                 // state + detect a newer catalog version for a slot-installed wrapper.
-                wm.recordSlotCatalog(slotFileName, entry.id, entry.version)
+                wm.recordSlotCatalog(slotFileName, entry.id, entry.version, entry.name)
             } else {
                 Log.w(TAG, "installOverride failed for ${entry.id} -> $slotFileName")
             }

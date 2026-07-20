@@ -362,6 +362,12 @@ public class WrapperManager {
             String[] info = overridden
                 ? readVersionInfo(overrideFileFor(slot.fileName))
                 : bundledVersionInfo(slot.fileName);
+            // A catalog-installed override whose .tzst has no version.txt reads "Unknown" — fall back to
+            // the recorded catalog entry name so the slot shows what it actually is (e.g. GameNative …).
+            if (overridden && (info[0] == null || info[0].isEmpty() || "Unknown".equals(info[0]))) {
+                String cn = slotCatalogName(slot.fileName);
+                if (cn != null) info = new String[]{ cn, info.length > 1 ? info[1] : "" };
+            }
             out.add(new WrapperSlot(slot, overridden, info[0], info[1]));
         }
         return out;
@@ -465,13 +471,16 @@ public class WrapperManager {
     /** Record (upsert + persist) the catalog provenance of a slot OVERRIDE — called by the downloader
      *  after a successful {@link #installOverride} from the catalog. No-op for a blank slot/id. Never
      *  throws. */
-    public void recordSlotCatalog(String slotFileName, String catalogId, int catalogVersion) {
+    public void recordSlotCatalog(String slotFileName, String catalogId, int catalogVersion, String catalogName) {
         if (slotFileName == null || slotFileName.isEmpty() || catalogId == null || catalogId.isEmpty()) return;
         JSONObject obj = slotCatalog();
         try {
             JSONObject e = new JSONObject();
             e.put("catalogId", catalogId);
             e.put("catalogVersion", catalogVersion);
+            // Store the display name so a catalog-installed override (whose .tzst has no version.txt)
+            // shows "<catalog name>" instead of "Unknown" in the slot list (see listSlots).
+            if (catalogName != null && !catalogName.isEmpty()) e.put("catalogName", catalogName);
             obj.put(slotFileName, e);
         }
         catch (Exception ex) {
@@ -507,6 +516,16 @@ public class WrapperManager {
         if (slotFileName == null || slotFileName.isEmpty()) return 0;
         JSONObject e = slotCatalog().optJSONObject(slotFileName);
         return (e != null) ? e.optInt("catalogVersion", 0) : 0;
+    }
+
+    /** The catalog entry NAME a slot OVERRIDE was installed from, or null. Used as the slot's version
+     *  label when the override .tzst carries no version.txt. Never throws. */
+    public String slotCatalogName(String slotFileName) {
+        if (slotFileName == null || slotFileName.isEmpty()) return null;
+        JSONObject e = slotCatalog().optJSONObject(slotFileName);
+        if (e == null) return null;
+        String n = e.optString("catalogName", "");
+        return n.isEmpty() ? null : n;
     }
 
     /**

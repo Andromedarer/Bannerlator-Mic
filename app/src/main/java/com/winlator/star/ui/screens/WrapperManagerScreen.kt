@@ -219,6 +219,26 @@ fun WrapperManagerBody(modifier: Modifier = Modifier) {
         }
     }
 
+    // #132 feature-c: one-tap update of a BUNDLED/overridden slot to the newer catalog build. Installs
+    // the matched catalog entry as this slot's override (recording provenance), then refresh() re-reads
+    // the now-current slotCatalogVersion so the badge clears. Keyed by slot.fileName in updatingId.
+    fun startSlotUpdate(slot: WrapperManager.WrapperSlot, entry: WrapperCatalogEntry) {
+        updatingId = slot.fileName
+        updateProgress = 0
+        scope.launch {
+            val ok = WrapperCatalogDownloader.installToSlot(context, entry, slot.fileName) { pct ->
+                activity?.runOnUiThread { updateProgress = pct }
+            }
+            updatingId = null
+            if (ok) {
+                Toast.makeText(context, R.string.wrapper_updated_toast, Toast.LENGTH_SHORT).show()
+                refresh()
+            } else {
+                Toast.makeText(context, R.string.wrapper_invalid_toast, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
     // Single file picker, shared by slot-Update and free-form Import (importMode disambiguates).
     val filePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -287,11 +307,24 @@ fun WrapperManagerBody(modifier: Modifier = Modifier) {
 
         // Fixed bundled slots.
         slots.forEach { slot ->
+            // #132 feature-c: does the live catalog carry a newer build than this slot's installed
+            // version? An overridden slot's version comes from slot_catalog.json; a bundled slot's from
+            // bundled_wrappers.json. Read inline so an update re-reads fresh and the badge clears.
+            val slotCatId = if (slot.isOverridden) manager.slotCatalogId(slot.fileName)
+                            else manager.bundledCatalogId(slot.fileName)
+            val slotMatched = slotCatId?.let { id -> catalogEntries.firstOrNull { it.id == id } }
+            val slotInstalledVer = if (slot.isOverridden) manager.slotCatalogVersion(slot.fileName)
+                                   else manager.bundledCatalogVersion(slot.fileName)
+            val slotUpdateAvailable = slotMatched != null && slotMatched.version > slotInstalledVer
             WrapperSlotCard(
                 slot = slot,
                 caps = manager.capsFor(slot.fileName.removeSuffix(".tzst")),
                 gpu = gpu,
                 manager = manager,
+                updateAvailable = slotUpdateAvailable,
+                updating = updatingId == slot.fileName,
+                updateProgress = updateProgress,
+                onUpdateFromCatalog = { slotMatched?.let { startSlotUpdate(slot, it) } },
                 onUpdate = {
                     // Offer a source chooser (From file / From catalog) before doing anything.
                     updateChooserSlot = slot
@@ -968,10 +1001,15 @@ private fun WrapperSlotCard(
     caps: WrapperManager.WrapperCaps,
     gpu: GpuInfo,
     manager: WrapperManager,
+    updateAvailable: Boolean = false,
+    updating: Boolean = false,
+    updateProgress: Int = 0,
+    onUpdateFromCatalog: () -> Unit = {},
     onUpdate: () -> Unit,
     onReset: () -> Unit,
 ) {
     val context = LocalContext.current
+    val cs = MaterialTheme.colorScheme
     var expanded by remember { mutableStateOf(false) }
     val stateLabel = context.getString(
         if (slot.isOverridden) R.string.wrapper_updated_label else R.string.wrapper_bundled
@@ -990,6 +1028,35 @@ private fun WrapperSlotCard(
         expandable = true,
         expanded = expanded,
         onToggleExpand = { expanded = !expanded },
+        titleBadge = {
+            // #132 feature-c: a newer catalog version is available for this bundled/overridden slot
+            // (its catalogVersion is behind the live catalog). Shows progress while an update installs.
+            when {
+                updating -> {
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        context.getString(R.string.wrapper_updating_progress, updateProgress),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = cs.primary,
+                    )
+                }
+                updateAvailable -> {
+                    Spacer(Modifier.height(3.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(cs.tertiaryContainer)
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    ) {
+                        Text(
+                            context.getString(R.string.wrapper_update_available),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = cs.onTertiaryContainer,
+                        )
+                    }
+                }
+            }
+        },
         details = {
             WrapperDetailBox(
                 fileName = slot.fileName,
@@ -1015,6 +1082,14 @@ private fun WrapperSlotCard(
                     )
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    // #132 feature-c: one-tap update to the newer catalog build (only when available).
+                    if (updateAvailable && !updating) {
+                        DropdownMenuItem(
+                            text = { Text(context.getString(R.string.wrapper_update_from_catalog), color = cs.primary) },
+                            leadingIcon = { Icon(Icons.Filled.CloudDownload, contentDescription = null, tint = cs.primary, modifier = Modifier.size(20.dp)) },
+                            onClick = { menuOpen = false; onUpdateFromCatalog() },
+                        )
+                    }
                     DropdownMenuItem(
                         text = { Text(context.getString(R.string.wrapper_update)) },
                         leadingIcon = { Icon(Icons.Filled.FolderOpen, contentDescription = null, modifier = Modifier.size(20.dp)) },
