@@ -1,5 +1,17 @@
 # Star-Compose — Progress Log
 
+## 2026-07-20 — 🧩 WRAPPER VERSION MANAGER (#132) — Steps 1–3 + Step 5 catalog BUILT; catalog readability + "Update from catalog" added. CHECKPOINT (context compressing)
+
+> **Branch `feat/wrapper-manager-step1` tip `07b0d666` (pushed); off `main`, NOT merged.** Full AdrenoTools-style wrapper import/update/delete/detect manager + a curated downloadable catalog. Not device-proven for actual wrapper *effect* (Adreno device = BCn/DX12 inert by design — needs a Mali/Exynos community tester); app mechanics are Adreno-testable.
+>
+> **What's built:** import/update/delete `.tzst` wrappers with a dynamic dropdown + delete cascade; ⋮ overflow menu (bundled slot = Update / Reset / Details; imported = Edit settings / Delete / Details); **capability + GPU + env-scan auto-detection** (replaces name-gating) → dynamic "Detected settings (advanced)" from `WrapperSettingsDictionary` (~28 keys) + generic XSDA env emission; `isDebugEnvKey` hides debug plumbing from settings; per-wrapper Edit-settings (hiddenKeys in `.meta`); detail view + pre-import inspection + nested read-only env-var list; **Step 5 "Download wrappers" catalog browser** (cards = manager style, tap-to-expand). Manager REMOVED from app drawer (reached via the cloud button in container/graphics settings). Two most-recent polish items: catalog dialog **widened (0.96f) + compact download icon** so names are readable (`862f161e`); **"Update from catalog"** — bundled-slot ⋮Update opens a "From file / From catalog" chooser, catalog pick → `WrapperCatalogDownloader.installToSlot` = slot override (marker-validated) not a free-form import (`07b0d666`).
+>
+> **▶️ COMBINED BUILD RUNNING = run `29733336929`** (build-artifacts.yml, release_number=wm-catalog-update) — readability fix + update-from-catalog in one APK. Triggered right before the user lost internet driving to work; CI runs cloud-side so it completes regardless. **RESUME: online → `gh run view 29733336929`; green → stage standard APK for the user.**
+>
+> **✅ LIVE CATALOG on `The412Banner/winlator-contents`:** `wrappers.json` = 18 entries (every wrapper from every Winlator-lineage project — Bannerlator×7, WinlatorMali×5, WinNative×3, GameNative×1, Ludashi/StevenMXZ×1, Pipetto-crypto×1; project-prefixed names, byte-identity verified cmp+sha256 & noted, credited per source), 11 unique assets in the `wrappers-v1` release. Attribution fix landed: `legacy` = Pipetto-crypto Winlator Bionic.
+>
+> **NEXT:** stage combined build → (deferred) Step 4 Workbench (preset→named wrapper / compose-from-parts / curate-card, planned in `docs/WRAPPER_MANAGER_PLAN.md`); grow the dictionary (full 15MB-`.so` env-scan TIMED OUT — do bounded/hand-curate); merge to main + versionCode bump when ready; Mali device test. Full state → [[project_bannerlator_wrapper_manager]].
+
 ## 2026-07-16 (night) — ✅ RELEASE 2.6.2 SHIPPED = LATEST (fixes-and-hardening; user chose the 2.6.2 label over 2.7)
 
 > **Cut from current `main` = the eve-session accumulator below. vc**45**, tag `2.6.2` @ version-bump `380cc90a`, API-confirmed `latest=2.6.2`, prerelease=false. Release build run **29551084664** ✅. Assets = 3 flavor APKs + `update.json` (vc45/2.6.2 — in-app updater offers it). Styled body applied + README updated (`ef5b4eac`).**
