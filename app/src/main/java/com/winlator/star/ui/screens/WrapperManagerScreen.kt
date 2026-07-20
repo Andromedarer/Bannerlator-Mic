@@ -575,6 +575,9 @@ internal fun WrapperCardFrame(
     onToggleExpand: (() -> Unit)? = null,
     details: @Composable () -> Unit = {},
     trailing: @Composable () -> Unit = {},
+    // Optional small status chip rendered between the title and subtitle (e.g. "Mali only" on a catalog
+    // entry that's inert on the current GPU). Empty by default so existing cards are unchanged.
+    titleBadge: @Composable () -> Unit = {},
 ) {
     val cs = MaterialTheme.colorScheme
     val base = Modifier
@@ -614,6 +617,7 @@ internal fun WrapperCardFrame(
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    titleBadge()
                     Text(
                         text = subtitle,
                         style = MaterialTheme.typography.bodySmall,

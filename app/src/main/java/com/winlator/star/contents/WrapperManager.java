@@ -111,8 +111,8 @@ public class WrapperManager {
      * editable settings path filters. Never throws.
      */
     private static final String[] DEBUG_ENV_MARKERS = {
-        "LOG_LEVEL", "_TRACE", "TRACE_", "_DEBUG", "DEBUG_", "DIAG", "_DUMP", "DUMP_",
-        "PROFILE", "WATERMARK", "HEADLESS", "SAMPLE_GPU", "COUNTERS"
+        "LOG_LEVEL", "LOG_FILE", "_TRACE", "TRACE_", "_DEBUG", "DEBUG_", "DIAG", "_DUMP", "DUMP_",
+        "PROFILE", "WATERMARK", "MARK_BCN", "HEADLESS", "SAMPLE_GPU", "COUNTERS"
     };
 
     /** True if {@code key} is debug/diagnostics plumbing (see {@link #DEBUG_ENV_MARKERS}); such keys are

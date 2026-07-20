@@ -199,6 +199,7 @@ fun WrapperCatalogPicker(
                                 entry = entry,
                                 applicable = isApplicable(entry.gpuTargets, isQualcomm),
                                 applicabilityNote = applicabilityNote(entry.gpuTargets, isQualcomm, gpuModel),
+                                badgeLabel = applicabilityChip(entry.gpuTargets, isQualcomm),
                                 installed = entry.id in installedIds,
                                 busy = downloadingId == entry.id,
                                 anyBusy = downloadingId != null,
@@ -232,6 +233,7 @@ private fun WrapperCatalogRow(
     entry: WrapperCatalogEntry,
     applicable: Boolean,
     applicabilityNote: String?,
+    badgeLabel: String?,
     installed: Boolean,
     busy: Boolean,
     anyBusy: Boolean,
@@ -257,6 +259,25 @@ private fun WrapperCatalogRow(
             expandable = true,
             expanded = expanded,
             onToggleExpand = { expanded = !expanded },
+            titleBadge = {
+                // Small status chip under the title on GPU-inapplicable entries (e.g. "Mali only"), so
+                // the reason a row is dimmed is visible without expanding it.
+                badgeLabel?.let {
+                    Spacer(Modifier.height(3.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(cs.tertiaryContainer)
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    ) {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = cs.onTertiaryContainer,
+                        )
+                    }
+                }
+            },
             details = {
                 WrapperCatalogDetail(
                     entry = entry,
@@ -377,6 +398,18 @@ private fun LocalContextString(resId: Int): String = LocalContext.current.getStr
 private fun isApplicable(targets: List<String>, isQualcomm: Boolean): Boolean {
     if (targets.isEmpty() || targets.contains("all")) return true
     return if (isQualcomm) targets.contains("adreno") else targets.any { it != "adreno" }
+}
+
+/** A tiny chip label ("Mali only" / "Adreno only") for an entry that doesn't apply to this GPU, or
+ *  null when it applies. Uses the first non-Adreno target family so ["mali","exynos"] reads "Mali only". */
+private fun applicabilityChip(targets: List<String>, isQualcomm: Boolean): String? {
+    if (isApplicable(targets, isQualcomm)) return null
+    return if (isQualcomm) {
+        val fam = targets.firstOrNull { it != "adreno" } ?: "Mali"
+        fam.replaceFirstChar { it.uppercase() } + " only"
+    } else {
+        "Adreno only"
+    }
 }
 
 /** A short "inert on this GPU" note, or null when the entry applies (or targets "all"). */

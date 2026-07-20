@@ -82,6 +82,39 @@ object WrapperSettingsDictionary {
             "Compat layer — DX12 null-descriptor support"),
         SettingDef("COMPAT_SPARSE_COMMIT_BUDGET", Type.TEXT, "Sparse commit budget (MB)",
             "Compat layer — memory budget for D3D12 tiled/sparse resources"),
+        // --- Added from a strings-scan of the WinlatorMali / WinNative / leegao / Fcharan fork binaries
+        //     (#132 dictionary hardening). Debug/diag/profile keys these binaries also expose are left to
+        //     WrapperManager.isDebugEnvKey (hidden from settings), not curated here.
+        // BCn transcode / emulation (leegao + Fcharan BCn layer)
+        SettingDef("DISABLE_BCN", Type.TOGGLE, "Disable BCn transcode",
+            "Skip the BCn→ASTC/ETC path entirely"),
+        SettingDef("FORCE_BCN_EMULATION", Type.TOGGLE, "Force BCn emulation",
+            "Emulate BCn even when the GPU claims native support"),
+        SettingDef("BCN_TRANSCODE_TO_ETC1", Type.TOGGLE, "Transcode BCn → ETC1"),
+        SettingDef("BCN_ASTC_TRY_2P", Type.TOGGLE, "ASTC: try 2-partition blocks",
+            "Higher quality, slower transcode"),
+        SettingDef("BCN_ASTC_ONLY_2P", Type.TOGGLE, "ASTC: 2-partition only"),
+        SettingDef("ENABLE_COMPUTE_TRACKING", Type.TOGGLE, "Track compute resources"),
+        // Wrapper-side BCn acceleration (base ICD)
+        SettingDef("WRAPPER_BCN_GPU", Type.TOGGLE, "GPU-accelerated BCn decode"),
+        SettingDef("WRAPPER_BCN_GPU_CAP_MB", Type.TEXT, "BCn GPU memory cap (MB)", "number, 0 = unset"),
+        SettingDef("WRAPPER_USE_BCN_CACHE", Type.TOGGLE, "Cache transcoded BCn textures"),
+        SettingDef("WRAPPER_NO_BCN_THREAD", Type.TOGGLE, "Disable BCn worker thread",
+            "Transcode inline instead of on a background thread"),
+        SettingDef("WRAPPER_DMAHEAP_CACHED", Type.TOGGLE, "Cached DMA-heap allocations"),
+        // Shader-compat family (base ICD) — workarounds for SPIR-V/driver quirks
+        SettingDef("DISABLE_CLIP_DISTANCE", Type.TOGGLE, "Disable gl_ClipDistance"),
+        SettingDef("FORCE_CLIP_DISTANCE", Type.TOGGLE, "Force gl_ClipDistance"),
+        SettingDef("WRAPPER_NO_REMOVE_CLIP_DISTANCE", Type.TOGGLE, "Keep clip-distance in shaders"),
+        SettingDef("DISABLE_OPTIMIZATION_BARRIERS", Type.TOGGLE, "Disable optimization barriers"),
+        SettingDef("FORCE_OPTIMIZATION_BARRIERS", Type.TOGGLE, "Force optimization barriers"),
+        SettingDef("DISABLE_SPEC_COMPOSITE_CONSTANTS", Type.TOGGLE, "Disable spec composite constants"),
+        SettingDef("FORCE_SPEC_COMPOSITE_CONSTANTS", Type.TOGGLE, "Force spec composite constants"),
+        SettingDef("WRAPPER_NO_PATCH_OPCONSTCOMP", Type.TOGGLE, "Don't patch OpConstantComposite"),
+        SettingDef("DISABLE_EXTERNAL_FD", Type.TOGGLE, "Disable external FD memory"),
+        // Paths / misc (base ICD)
+        SettingDef("WRAPPER_CACHE_PATH", Type.TEXT, "Wrapper cache path", "absolute path"),
+        SettingDef("WRAPPER_RESOURCE_TYPE", Type.TEXT, "Resource type override"),
     ).associateBy { it.key }
 
     /** Dictionary hit for [key], else a generic TEXT field whose label is the raw env key. */
