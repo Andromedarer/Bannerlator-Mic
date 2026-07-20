@@ -92,6 +92,12 @@ Goal: the manager must be **very smart** — auto-detect settings, options, GPU 
 
 **Build order for the smart manager:** (a) unify branches so the BCn/compat activation + Valhall/Adreno gates exist alongside the manager; (b) capability-detect at import → `.meta`; (c) replace name-gates in `GraphicsDriverConfigDialog` with capability + GPU checks; (d) env-var scan + dictionary for the fine-grained per-setting list; (e) generic env emission driven by the resolved settings. This is the largest single piece of the whole feature.
 
+### Step 3 — Detail / inspection UI (user, 2026-07-19)
+Surface the detection results in the UI (this SITS ON TOP of the capability/GPU engine — build after it):
+- **Per-wrapper detail** — each installed-wrapper card gets an **expandable box / detail view**: version+notes (from `version.txt`), detected capabilities (ICD / BCn layer / compat layer), the settings it supports, and GPU applicability ("BCn — Mali/non-Qualcomm only; inert on this Adreno").
+- **Pre-import inspection page** — when the user picks a `.tzst` to import, show a **detail/preview screen BEFORE naming+adding**: what it is (ICD? layer bundle?), its detected settings/options, and **what may need to be created/added to use it properly** (e.g. "contains a BCn layer — will show BCn Layer Settings; requires a non-Adreno GPU to take effect", "detected settings: WRAPPER_VK_VERSION, WRAPPER_EMULATE_BCN, …", "unknown keys → add-your-own-value"). Then a Name field → Add. So the user decides with full info instead of importing blind.
+- Both read the same capability/`.meta` + env-scan data the engine produces; no new detection logic, just presentation. Lives in `WrapperManagerScreen.kt` (cards + a new inspection dialog/screen in the import flow) — disjoint from the engine's files except reading `WrapperManager.capsFor()`.
+
 ### ContentsManager alternative (considered, not chosen)
 Adding a `CONTENT_TYPE_WRAPPER` to `ContentsManager`/`ContentProfile` would give enumerate/install/remove for free, but it copies files by manifest to explicit targets (not "extract a `.tzst` into imagefs root at launch") and has no container cascade — so a bespoke `WrapperManager` mirroring `AdrenotoolsManager` is lower-risk and idiom-matching. Keep ContentsManager in mind only if we later want remote-catalog/download parity.
 
