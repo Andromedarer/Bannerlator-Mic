@@ -678,6 +678,10 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="bcn_layer_image_view_hint">On: storage image (default). Off: staging buffer.</string>
     <string name="bcn_layer_debug_log">BCn debug log</string>
     <string name="bcn_layer_debug_log_hint">Logs the BCn layer to the Wine debug log (enable Settings &#8250; Logs &#8250; Wine Debug to capture it).</string>
+    <string name="bcn_compat_sparse">Emulate sparse binding (DX12)</string>
+    <string name="bcn_compat_sparse_hint">For D3D12 games that use tiled/sparse resources. Leave off unless a DX12 title needs it.</string>
+    <string name="compat_use_gamenative">Use GameNative engine (DX12)</string>
+    <string name="compat_use_gamenative_hint">Required for DX12 games. Runs this driver on the GameNative wrapper (Vulkan 1.3 + built-in BCn) instead of the leegao layers. Off = BCn textures only (default). Valhall Mali (r32p1+) only.</string>
     <string name="opengl_version">OpenGL Version</string>
     <string name="disableVertexArrayBGRA">Disable "Vertex array BGRA"</string>
     <string name="disableKHRdebug">Disable "KHR debug"</string>

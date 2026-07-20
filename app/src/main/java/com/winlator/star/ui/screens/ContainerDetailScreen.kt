@@ -208,10 +208,15 @@ fun ContainerDetailScreen(
         )
     }
     val isVegasWrapper = StringUtils.parseIdentifier(viewModel.selectedDXWrapper ?: "").contains("vegas")
+    // Mali compat/bcn testers need DXVK 1.x reachable even with VKD3D selected, to try the
+    // 1.10.3 adapter-accept workaround (#137). Relax the #113 DXVK-2.x-only filter ONLY for the
+    // "Wrapper + compat + bcn" driver; every other driver keeps the guard unchanged.
+    val relaxDxvkFilter = StringUtils.parseIdentifier(viewModel.selectedGraphicsDriver) == "wrapper-compat-bcn"
     if (showDxvkConfig) {
         DxvkConfigDialog(
             isArm64EC = viewModel.isArm64EC,
             isVegas = isVegasWrapper,
+            relaxDxvkFilter = relaxDxvkFilter,
             refreshKey = dxvkRefreshKey,
             initialConfig = viewModel.dxWrapperConfig,
             onConfirm = { newConfig -> viewModel.dxWrapperConfig = newConfig; showDxvkConfig = false },
@@ -1615,8 +1620,8 @@ internal fun GraphicsDriverConfigDialog(
     // its .tzst at import time (libvulkan_wrapper.so / libbcn_layer.so / libdxvk_mali_compat_layer.so,
     // cached in the .meta). This reproduces every bundled driver's current gating exactly, while
     // letting an imported wrapper that actually carries a BCn layer (e.g. "112") show the same
-    // options. hasCompatLayer is detected + stored for the future DX12/compat UI (sparse binding /
-    // "Use GameNative engine"), which lives on a different branch — no compat control is built here.
+    // options. hasCompatLayer drives the DX12/compat UI (sparse binding / "Use GameNative engine")
+    // brought in from the Mali branch below.
     val caps = remember(graphicsDriver) { WrapperManager(context).capsFor(graphicsDriver) }
     val isImported = remember(graphicsDriver) { WrapperManager(context).isImported(graphicsDriver) }
     // Integrated-BCn ICD = a wrapper ICD that honors WRAPPER_BCN_ASTC. Bundled: only wrapper-gamenative
@@ -1635,6 +1640,19 @@ internal fun GraphicsDriverConfigDialog(
     // activateBcnLayer = getVendorID != 0x5143 gate so we MARK (never silently hide) those options.
     val isQualcomm = remember { GPUInformation.getVendorID(null, null) == 0x5143 }
     val gpuModel = remember { GPUInformation.extractModelName(GPUInformation.getRenderer(null, context)) ?: "" }
+    // --- Mali branch: name-based gates for the new "Wrapper + compat + bcn" (DX12) driver. Kept
+    // alongside the capability gates above — downstream UI uses BOTH (caps gates for the generic BCn
+    // panel; these for the compat-driver-specific DX12/GameNative-engine controls). ---
+    // BCn Layer (leegao bcn_layer) settings; meaningful for both the bcn_layer driver and the
+    // "Wrapper + compat + bcn" driver, which reuses the same BCn transcode panel.
+    val isBcnLayer = graphicsDriver == "wrapper-bcn_layer" || graphicsDriver == "wrapper-compat-bcn"
+    // compat_layer (DX12 feature emulation) is exclusive to "Wrapper + compat + bcn".
+    val isCompatDriver = graphicsDriver == "wrapper-compat-bcn"
+    // The integrated-BCn wrapper (Wrapper-gamenative) is the only wrapper ICD that actually honors
+    // WRAPPER_BCN_ASTC (see XServerDisplayActivity BCn env block). The older wrappers
+    // (original/leegao/legacy) ignore it, and Wrapper + bcn_layer has its own ASTC control
+    // (bcnTranscodeAstc), so the general "BCn -> ASTC transcode" toggle belongs to gamenative only.
+    val isGamenative = graphicsDriver == "wrapper-gamenative"
     var bcnSectionExpanded by remember { mutableStateOf(false) }
     // Force decode on all GPUs -> BCN_COMPUTE_AUTO=0. Default ON (the Mali force-decode fix).
     var bcnLayerAuto      by remember { mutableStateOf(cfg["bcnLayerAuto"]?.let { it == "1" } ?: true) }
@@ -1643,6 +1661,15 @@ internal fun GraphicsDriverConfigDialog(
     // Storage image path -> BCN_COMPUTE_IMAGE_VIEW=1. Default ON.
     var bcnImageView      by remember { mutableStateOf(cfg["bcnImageView"]?.let { it == "1" } ?: true) }
     var bcnDebugLog       by remember { mutableStateOf(cfg["bcnDebugLog"] == "1") }
+    // compat_layer: emulate D3D12 tiled/sparse resources (COMPAT_EMULATE_SPARSE_BINDING). Opt-in,
+    // only honored by the "Wrapper + compat + bcn" driver on a Valhall Mali. Default OFF.
+    var bcnCompatSparse   by remember { mutableStateOf(cfg["bcnCompatSparse"] == "1") }
+    // compat engine selection: OFF (default) = leegao bcn_layer + compat_layer (BCn textures only,
+    // no DX12). ON = swap the ICD base to the GameNative wrapper (wrapper-gamenative.tzst), which
+    // reports Vulkan 1.3 + emulates the promoted entrypoints so DXVK/VKD3D accept the adapter (DX12),
+    // and uses its own integrated BCn. Only for "Wrapper + compat + bcn"; a Valhall Mali (r32p1+) is
+    // required at activation time (XServerDisplayActivity gates it and falls back with a warning).
+    var compatUseGamenative by remember { mutableStateOf(cfg["compatUseGamenative"] == "1") }
 
     // --- #132 Smart Wrapper Manager, Layer 1: auto-detected settings for IMPORTED wrappers only ---
     // The env-var NAMES were scanned out of the wrapper's binaries at import and cached in its .meta.
@@ -1907,6 +1934,31 @@ internal fun GraphicsDriverConfigDialog(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        // compat_layer DX12 sparse-binding emulation — only for Wrapper + compat + bcn.
+                        if (isCompatDriver) {
+                            // Engine selector: swap the ICD base from leegao to the GameNative wrapper
+                            // for real DX12 support. Primary switch, shown above the sparse opt-in.
+                            Spacer(Modifier.height(8.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(checked = compatUseGamenative, onCheckedChange = { compatUseGamenative = it })
+                                Text(stringResource(R.string.compat_use_gamenative))
+                            }
+                            Text(
+                                stringResource(R.string.compat_use_gamenative_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(checked = bcnCompatSparse, onCheckedChange = { bcnCompatSparse = it })
+                                Text(stringResource(R.string.bcn_compat_sparse))
+                            }
+                            Text(
+                                stringResource(R.string.bcn_compat_sparse_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
 
@@ -2004,6 +2056,8 @@ internal fun GraphicsDriverConfigDialog(
                     "bcnTranscodeAstc=${if (bcnTranscodeAstc) "1" else "0"};" +
                     "bcnImageView=${if (bcnImageView) "1" else "0"};" +
                     "bcnDebugLog=${if (bcnDebugLog) "1" else "0"};" +
+                    "bcnCompatSparse=${if (bcnCompatSparse) "1" else "0"};" +
+                    "compatUseGamenative=${if (compatUseGamenative) "1" else "0"};" +
                     "gpuName=$gpuName" +
                     ";fdDevFeatures=${if (fdDevFeatures) "1" else "0"}"
                 // #132 Layer 1: append auto-detected wrapper settings under their RAW ENV KEY. Sanitise
@@ -2074,6 +2128,7 @@ internal fun ExtensionPickerDialog(
 internal fun DxvkConfigDialog(
     isArm64EC: Boolean,
     isVegas: Boolean = false,
+    relaxDxvkFilter: Boolean = false,
     refreshKey: Int = 0,
     initialConfig: String,
     onConfirm: (String) -> Unit,
@@ -2114,8 +2169,10 @@ internal fun DxvkConfigDialog(
     // VKD3D-Proton needs DXVK 2.x's DXGI; DXVK 1.x can't back it, so the DX12 test fails to start.
     // Filter the DXVK list to 2.x+ (keeping unparseable names, e.g. VEGAS) when VKD3D is enabled —
     // matches the shortcut-level dialog, which already enforces this. Fixes #113.
-    val filteredDxvk = remember(selectedVkd3d, allDxvkVersions.value) {
-        if (selectedVkd3d != "None") {
+    // Exception: the Mali "Wrapper + compat + bcn" driver (relaxDxvkFilter) shows all DXVK versions
+    // so testers can try the DXVK 1.10.3 adapter-accept workaround with VKD3D on (#137).
+    val filteredDxvk = remember(selectedVkd3d, allDxvkVersions.value, relaxDxvkFilter) {
+        if (selectedVkd3d != "None" && !relaxDxvkFilter) {
             allDxvkVersions.value.filter { v ->
                 val major = DXVKConfigDialog.tryGetMajor(v)
                 major == null || major >= 2

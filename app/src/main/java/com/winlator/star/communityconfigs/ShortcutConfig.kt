@@ -166,6 +166,12 @@ object ConfigTranslator {
                         if (eq <= 0) continue
                         dxw[part.substring(0, eq).trim()] = part.substring(eq + 1)
                     }
+                } else if (key == "bcnCompatSparse") {
+                    // A graphicsDriverConfig SUB-KEY (not a scalar): route into the gdc merge map so it
+                    // lands back inside the semicolon graphicsDriverConfig list, where the launch gate
+                    // reads it (graphicsDriverConfig.get("bcnCompatSparse")). If it went into scalars it
+                    // would be written as a top-level extra the driver never reads.
+                    gdc[key] = value
                 } else {
                     scalars[key] = value
                 }

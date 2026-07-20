@@ -4577,10 +4577,14 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
         )
     }
     val isVegasCfg = StringUtils.parseIdentifier(selectedDxWrapper).contains("vegas")
+    // See ContainerDetailScreen: relax the #113 DXVK-2.x filter only for the Mali "Wrapper + compat
+    // + bcn" driver, so per-game shortcuts can also reach the DXVK 1.10.3 workaround (#137).
+    val relaxDxvkFilter = StringUtils.parseIdentifier(selectedGfxDriver) == "wrapper-compat-bcn"
     if (showDxvkConfig) {
         DxvkConfigDialog(
             isArm64EC = isArm64EC,
             isVegas = isVegasCfg,
+            relaxDxvkFilter = relaxDxvkFilter,
             initialConfig = dxWrapperConfig,
             onConfirm = { dxWrapperConfig = it; showDxvkConfig = false },
             onDismiss = { showDxvkConfig = false },
