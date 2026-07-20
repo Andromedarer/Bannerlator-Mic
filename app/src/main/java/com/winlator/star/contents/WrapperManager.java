@@ -218,6 +218,11 @@ public class WrapperManager {
         File override = overrideFileFor(fileName);
         if (override.isFile()) {
             result = scanEnvKeys(override);
+        } else if ("leegao_bcn.tzst".equals(fileName)) {
+            // The BCn layer has no standalone bundled asset — its libbcn_layer.so (which reads the
+            // BCN_* env vars) ships INSIDE extra_libs.tzst. Scan just that entry so the slot surfaces
+            // its real knobs instead of showing nothing.
+            result = scanBundledAssetEntry("extra_libs.tzst", BCN_MARKER_ENTRY);
         } else {
             result = new ArrayList<>();
             if (!overrideDir.exists()) overrideDir.mkdirs();
@@ -238,6 +243,31 @@ public class WrapperManager {
             BUNDLED_ENV_KEYS_CACHE.put(fileName, result);
         }
         return result;
+    }
+
+    /** Scan ONE entry inside a bundled asset tar for env-var names — for a slot whose real binary lives
+     *  inside a shared payload rather than its own asset (e.g. the leegao_bcn slot's libbcn_layer.so
+     *  ships in extra_libs.tzst). Copies the asset to a temp file, scans the single entry, deletes it.
+     *  Returns an empty list on any failure; never throws. */
+    private List<String> scanBundledAssetEntry(String assetFile, String entry) {
+        List<String> keys = new ArrayList<>();
+        if (!overrideDir.exists()) overrideDir.mkdirs();
+        File tmp = new File(overrideDir, ".scan-" + assetFile + ".tmp");
+        if (tmp.exists()) tmp.delete();
+        boolean copied = false;
+        try (InputStream in = mContext.getAssets().open(ASSET_DIR + assetFile);
+             OutputStream out = new FileOutputStream(tmp)) {
+            copied = StreamUtils.copy(in, out);
+        }
+        catch (IOException e) {
+            Log.d(TAG, "scanBundledAssetEntry: copy error for " + assetFile + " — " + e.getMessage());
+        }
+        if (copied && tmp.isFile()) {
+            keys.addAll(TarCompressorUtils.scanEntryForTokens(
+                TarCompressorUtils.Type.ZSTD, tmp, entry, ENV_KEY_PATTERN, ENV_SCAN_BYTE_CAP));
+        }
+        if (tmp.exists()) tmp.delete();
+        return keys;
     }
 
     /** The updatable slots, in display order. Each may require a marker entry to validate an import.
@@ -489,7 +519,8 @@ public class WrapperManager {
     private static WrapperCaps bundledCaps(String identifier) {
         switch (identifier) {
             case "wrapper-gamenative": return new WrapperCaps(true,  true,  false);
-            case "wrapper-bcn_layer":  return new WrapperCaps(false, true,  false);
+            case "wrapper-bcn_layer":
+            case "leegao_bcn":         return new WrapperCaps(false, true,  false); // BCn overlay, no own ICD
             case "wrapper-compat-bcn": return new WrapperCaps(true,  true,  true);
             case "wrapper-original":
             case "wrapper-legacy":
