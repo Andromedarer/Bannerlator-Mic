@@ -128,6 +128,26 @@ Browse + download curated wrappers from other projects (WinlatorMali, GameNative
 
 **Effort/order:** app-side catalog+downloader+browser is a near-clone of ReShade (small-medium). Catalog content is curation + a deploy to `winlator-contents` (license review per entry). The download→import reuse means zero new detection work.
 
+## Step 6 — Beyond env vars: config-file drops + app-side hints (user, 2026-07-20)
+**Goal:** close the two wiring gaps that keep "import any wrapper from any project and it just works" from being fully true. Today the manager is a *pure env-var* engine (detect key → control → store under raw key → XSDA emits `KEY=value`). That covers the large majority of Winlator-family knobs (they're all `getenv()`), but two classes of wrapper aren't reachable:
+
+### 6a — Config-file mechanism (non-env-var settings)
+Some wrappers read a **file**, not the environment: `dxvk.conf`, a `*.ini`, or knobs baked into the ICD JSON. Wire a generic "config file" path parallel to the env path:
+- **Detection:** extend the import scan — when a wrapper archive contains a recognised config template (`dxvk.conf`, `*.conf`, `*.ini` under `usr/share` or next to the ICD), record it in `.meta` (`configFiles=`). Also allow the dictionary to mark a `SettingDef` as `target = ENV | CONFFILE(path,key)` so a curated control can write into a file instead of the environment.
+- **Storage:** keep storing values in `graphicsDriverConfig` under a namespaced key (`conf:dxvk.conf#dxgi.maxFrameLatency`) so it round-trips through the existing per-game config with zero schema change.
+- **Emission:** at launch, before the container starts, **materialise the file into the prefix** (write/patch `<prefix>/drive_c/.../dxvk.conf` or `$WINEPREFIX` root) from the stored `conf:*` values, layering over the wrapper's shipped template. Mirror the extraction-precedence idiom already in `extractGraphicsDriverFiles` (override file in `filesDir` wins). Anchor: `XServerDisplayActivity.extractGraphicsDriverFiles` / prefix setup.
+- **UI:** these show in the SAME "Detected settings" list; a `CONFFILE` def just routes on save. A raw unknown `*.conf` with no dictionary entry → a "Edit <file>" free-text pane (power users), never silently ignored.
+
+### 6b — Imports that carry app-side hints (a wrapper manifest)
+Some wrappers need **app-side plumbing**, not just an env value — e.g. the Mali DX12 stack needs the GameNative engine + `WRAPPER_DRIVER_ID` spoof + a specific renderer; adrenotools driver pairing needs a driver `.so` alongside. Let an import **declare its needs** so the manager can honour or at least warn:
+- **Manifest:** optional `wrapper.json` inside the `.tzst` (or a catalog-entry field), schema: `{ requires: { engine?: "gamenative", renderer?: "vulkan|vk-mali", driverId?: "24", minDriver?: "mali-r32p1", gpu?: ["mali","exynos"] }, recommends: { env: {K:V}, conf: {...} }, notes }`. Absent manifest → today's behaviour (pure detection), so nothing regresses.
+- **On import/activate:** the inspection page renders `requires`/`recommends` as a checklist ("This wrapper wants: GameNative engine ✅ available · Mali GPU ❌ this is Adreno — inert"). One-tap "Apply recommended" seeds the `env`/`conf` defaults. Hard-incompatible (`gpu` mismatch) keeps the existing `Mali only` chip + inert warning.
+- **On launch:** XSDA reads the manifest for the active wrapper and wires the app-side bits it owns (select renderer, set engine toggle, pass `driverId`) instead of relying on the user to have flipped three separate switches. Anchors: the existing `useGamenativeEngine`/`compatUseGamenative` + renderer selection in XSDA; `WrapperManager` `.meta` gains `manifest=` (verbatim JSON) captured at import.
+
+**Effort/order:** 6b (manifest + checklist + launch wiring) is the higher-value half — it's what makes "import the Mali DX12 wrapper and it configures itself" real, and it reuses the engine/renderer plumbing that already exists. 6a (config-file drop) is a cleaner-but-smaller win, mostly for DXVK-conf-style knobs. Both are additive: no manifest / no conf template ⇒ exactly today's pure-env-var behaviour. Ship 6b first if the driver is Mali DX12 adoption; 6a first if DXVK-conf tuning is the ask.
+
+**Risks:** (1) launch-time file materialisation must be idempotent + prefix-scoped (never leak across containers); (2) a manifest is author-supplied — treat `requires` as advisory, never auto-flip destructive app state without the "Apply recommended" tap; (3) keep the manifest OPTIONAL forever so the generic detection path stays the floor.
+
 ### ContentsManager alternative (considered, not chosen)
 Adding a `CONTENT_TYPE_WRAPPER` to `ContentsManager`/`ContentProfile` would give enumerate/install/remove for free, but it copies files by manifest to explicit targets (not "extract a `.tzst` into imagefs root at launch") and has no container cascade — so a bespoke `WrapperManager` mirroring `AdrenotoolsManager` is lower-risk and idiom-matching. Keep ContentsManager in mind only if we later want remote-catalog/download parity.
 
