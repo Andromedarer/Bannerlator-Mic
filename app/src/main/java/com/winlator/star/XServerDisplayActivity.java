@@ -3587,6 +3587,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             for (String key : wmGeneric.detectedEnvKeys(graphicsDriver)) {
                 if (WrapperManager.HANDLED_ENV_KEYS.contains(key)) continue;
                 if (WrapperManager.isDebugEnvKey(key)) continue;   // debug/diag plumbing -> never emit
+                if (WrapperManager.isDriverInternalEnvKey(key)) continue; // Mesa/adrenotools driver internals
                 if (hiddenKeys.contains(key)) continue;            // user hid it via Edit settings
                 if (envVars.has(key)) continue; // never overwrite curated env
                 String value = graphicsDriverConfig.get(key);

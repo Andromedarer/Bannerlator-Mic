@@ -1660,7 +1660,10 @@ internal fun GraphicsDriverConfigDialog(
         // Edit-settings dialog.
         val hidden = withContext(Dispatchers.IO) { wm.hiddenKeys(graphicsDriver) }
         val keys = withContext(Dispatchers.IO) { wm.detectedEnvKeys(graphicsDriver) }
-            .filter { it !in WrapperManager.HANDLED_ENV_KEYS && !WrapperManager.isDebugEnvKey(it) && it !in hidden }
+            .filter {
+                it !in WrapperManager.HANDLED_ENV_KEYS && !WrapperManager.isDebugEnvKey(it) &&
+                    !WrapperManager.isDriverInternalEnvKey(it) && it !in hidden
+            }
         keys.forEach { k ->
             val def = WrapperSettingsDictionary.defFor(k)
             // Seed from the stored config; a toggle normalises to "1"/"0", others keep the raw string.

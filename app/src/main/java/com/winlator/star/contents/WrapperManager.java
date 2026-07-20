@@ -124,6 +124,34 @@ public class WrapperManager {
         return false;
     }
 
+    /** Curated driver/loader-namespace keys we DO expose (allow-listed back past the prefix filter). */
+    private static final Set<String> DRIVER_INTERNAL_ALLOW = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
+        "MESA_VK_VERSION_OVERRIDE", "MESA_VK_WSI_PRESENT_MODE", "GALLIUM_DRIVER"
+    )));
+
+    /** Namespaces owned by the bundled GPU driver / loader, not by the wrapper author. */
+    private static final String[] DRIVER_INTERNAL_PREFIXES = {
+        "MESA_", "GALLIUM_", "DRI_", "ADRENOTOOLS_", "TU_", "RADV_", "ZINK_", "LIBGL_", "VK_", "EGL_"
+    };
+
+    /**
+     * True if {@code key} belongs to the bundled GPU driver / Vulkan-loader namespace (Mesa, Gallium,
+     * adrenotools, DRI, Turnip, RADV, Zink, the loader) rather than to the wrapper author. A wrapper that
+     * ships a Mesa/turnip runtime references THOUSANDS of these as internal string constants (e.g.
+     * {@code MESA_VK_MAX_SCISSORS}, {@code MESA_VK_COMMAND_BUFFER_STATE_*}, {@code ADRENOTOOLS_DRIVER_PATH}),
+     * many of which aren't even real env vars — so they must NOT appear as editable "Detected settings"
+     * nor be generically emitted (the app already manages the adrenotools/driver plumbing itself). The few
+     * we intentionally curate ({@link #DRIVER_INTERNAL_ALLOW}) are allow-listed back. Shared source of
+     * truth for the Kotlin dialogs AND the Java XSDA emission loop. Never throws.
+     */
+    public static boolean isDriverInternalEnvKey(String key) {
+        if (key == null || key.isEmpty()) return false;
+        String up = key.toUpperCase(Locale.ROOT);
+        if (DRIVER_INTERNAL_ALLOW.contains(up)) return false;
+        for (String prefix : DRIVER_INTERNAL_PREFIXES) if (up.startsWith(prefix)) return true;
+        return false;
+    }
+
     /**
      * "strings" a wrapper's binaries for the env-var NAMES they reference, unioned across whichever of
      * the ICD / BCn / compat .so the archive contains. Bounded ({@link #ENV_SCAN_BYTE_CAP} per .so),

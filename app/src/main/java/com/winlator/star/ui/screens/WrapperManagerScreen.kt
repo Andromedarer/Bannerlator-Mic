@@ -1086,7 +1086,8 @@ private fun EditWrapperSettingsDialog(
         val eligible = withContext(Dispatchers.IO) {
             runCatching {
                 manager.detectedEnvKeys(imported.identifier).filter {
-                    it !in WrapperManager.HANDLED_ENV_KEYS && !WrapperManager.isDebugEnvKey(it)
+                    it !in WrapperManager.HANDLED_ENV_KEYS && !WrapperManager.isDebugEnvKey(it) &&
+                        !WrapperManager.isDriverInternalEnvKey(it)
                 }
             }.getOrDefault(emptyList())
         }
