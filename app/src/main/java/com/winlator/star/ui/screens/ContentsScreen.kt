@@ -574,15 +574,20 @@ private fun ContentItem(
                 IconButton(onClick = { menuExpanded = true }) {
                     Icon(Icons.Filled.MoreVert, contentDescription = "Options", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                DropdownMenu(
+                    expanded = menuExpanded,
+                    onDismissRequest = { menuExpanded = false },
+                    modifier = Modifier.outlinedMenuCard(),
+                ) {
                     DropdownMenuItem(
                         text = { Text("Info") },
-                        leadingIcon = { Icon(Icons.Filled.Info, null) },
+                        leadingIcon = { Icon(Icons.Filled.Info, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp)) },
                         onClick = { menuExpanded = false; onInfo() },
                     )
+                    MenuItemDivider()
                     DropdownMenuItem(
                         text = { Text("Remove") },
-                        leadingIcon = { Icon(Icons.Filled.Delete, null) },
+                        leadingIcon = { Icon(Icons.Filled.Delete, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp)) },
                         onClick = { menuExpanded = false; onRemove() },
                     )
                 }

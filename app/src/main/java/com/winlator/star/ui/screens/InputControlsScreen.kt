@@ -304,11 +304,16 @@ fun InputControlsScreen() {
                     modifier = Modifier.fillMaxWidth()) {
                     Text(displayText, color = MaterialTheme.colorScheme.onBackground)
                 }
-                DropdownMenu(expanded = showProfileDropdown, onDismissRequest = { showProfileDropdown = false }) {
+                DropdownMenu(
+                    expanded = showProfileDropdown,
+                    onDismissRequest = { showProfileDropdown = false },
+                    modifier = Modifier.outlinedMenuCard(),
+                ) {
                     DropdownMenuItem(text = { Text("-- Select Profile --") }, onClick = {
                         selectedProfileIdx = 0; loadProfile(0); showProfileDropdown = false
                     })
                     profiles.forEachIndexed { i, p ->
+                        MenuItemDivider()
                         DropdownMenuItem(text = { Text(p.getName()) }, onClick = {
                             selectedProfileIdx = i + 1; loadProfile(i + 1); showProfileDropdown = false
                         })
