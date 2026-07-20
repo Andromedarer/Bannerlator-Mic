@@ -349,6 +349,10 @@ public class WrapperManager {
     public List<WrapperSlot> listSlots() {
         ArrayList<WrapperSlot> out = new ArrayList<>();
         for (Slot slot : SLOTS) {
+            // "extra_libs" is a shared-libraries payload (ReShade / Turnip driver / BCn + compat
+            // layers / GL libs shared across drivers), NOT a selectable wrapper — keep it in SLOTS for
+            // the override/extraction machinery, but hide it from the manager's user-facing list.
+            if ("extra_libs.tzst".equals(slot.fileName)) continue;
             boolean overridden = hasOverride(slot.fileName);
             String[] info = overridden
                 ? readVersionInfo(overrideFileFor(slot.fileName))
