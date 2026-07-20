@@ -63,6 +63,7 @@ import com.winlator.star.contentdialog.WineD3DConfigDialog;
 import com.winlator.star.contents.ContentProfile;
 import com.winlator.star.contents.ContentsManager;
 import com.winlator.star.contents.AdrenotoolsManager;
+import com.winlator.star.contents.WrapperManager;
 import com.winlator.star.core.AppUtils;
 import com.winlator.star.core.DefaultVersion;
 import com.winlator.star.core.EnvVars;
@@ -3250,6 +3251,19 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
     }
 
+    // Wrapper Version Manager (Step 1, issue #132): extract a bundled graphics_driver asset, but
+    // prefer a user-installed override at filesDir/graphics_driver/<assetFileName> when present.
+    // Byte-for-byte identical to the old bundled-asset extract when no override exists.
+    private void extractGraphicsAsset(String assetFileName, File rootDir) {
+        File override = new File(getFilesDir(), "graphics_driver/" + assetFileName);
+        if (override.isFile()) {
+            Log.d("GraphicsDriverExtraction", "using user override for " + assetFileName + " (" + override.getAbsolutePath() + ")");
+            TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, override, rootDir);
+        } else {
+            TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/" + assetFileName, rootDir);
+        }
+    }
+
     private void extractGraphicsDriverFiles() {
     // 1. Retrieve the selected driver name from the config
     String selectedDriver = graphicsDriverConfig.get("graphicsDriver");
@@ -3262,22 +3276,35 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     File rootDir = imageFs.getRootDir();
 
+    // Wrapper Version Manager Step 2 (issue #132): an EXACT-name override at
+    // filesDir/graphics_driver/<graphicsDriver>.tzst wins over the bundled chain. This single check
+    // resolves (a) the default "wrapper" slot override (which the startsWith chain below never
+    // handled), (b) any bundled-slot override whose graphicsDriver == its file base name, and
+    // (c) free-form IMPORTED wrappers (identifier == graphicsDriver). Bundled drivers with NO
+    // matching file — including bcn/compat (graphicsDriver "wrapper-bcn_layer", whose base archive
+    // is leegao_bcn.tzst / wrapper-leegao.tzst, not "wrapper-bcn_layer.tzst") — fall through
+    // unchanged to the per-branch chain below.
+    File userWrapper = new File(getFilesDir(), "graphics_driver/" + graphicsDriver + ".tzst");
+    if (userWrapper.isFile()) {
+        Log.d("GraphicsDriverExtraction", "Extracting user wrapper (override/import): " + userWrapper.getAbsolutePath());
+        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, userWrapper, rootDir);
+    }
     // Perform wrapper extraction based on selected version
-    if (graphicsDriver.startsWith("wrapper-original")) {
+    else if (graphicsDriver.startsWith("wrapper-original")) {
         Log.d("GraphicsDriverExtraction", "Extracting: graphics_driver/wrapper-original.tzst");
-        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/wrapper-original.tzst", rootDir);
-    } 
+        extractGraphicsAsset("wrapper-original.tzst", rootDir);
+    }
     else if (graphicsDriver.startsWith("wrapper-leegao")) {
         Log.d("GraphicsDriverExtraction", "Extracting: graphics_driver/wrapper-leegao.tzst");
-        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/wrapper-leegao.tzst", rootDir);
-    } 
+        extractGraphicsAsset("wrapper-leegao.tzst", rootDir);
+    }
     else if (graphicsDriver.startsWith("wrapper-legacy")) {
         Log.d("GraphicsDriverExtraction", "Extracting: graphics_driver/wrapper-legacy.tzst");
-        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/wrapper-legacy.tzst", rootDir);
+        extractGraphicsAsset("wrapper-legacy.tzst", rootDir);
     }
     else if (graphicsDriver.startsWith("wrapper-gamenative")) {
         Log.d("GraphicsDriverExtraction", "Extracting: graphics_driver/wrapper-gamenative.tzst");
-        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/wrapper-gamenative.tzst", rootDir);
+        extractGraphicsAsset("wrapper-gamenative.tzst", rootDir);
     }
     else if (graphicsDriver.startsWith("wrapper-bcn_layer")) {
         // Wrapper + bcn_layer == the wrapper-leegao ICD as its base, PLUS leegao's bcn_layer
@@ -3285,7 +3312,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // via the already-set VK_LAYER_PATH). Extract the SAME base wrapper as Wrapper-leegao;
         // the BCn env block below activates the layer.
         Log.d("GraphicsDriverExtraction", "Extracting: graphics_driver/wrapper-leegao.tzst (base for wrapper-bcn_layer)");
-        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/wrapper-leegao.tzst", rootDir);
+        extractGraphicsAsset("wrapper-leegao.tzst", rootDir);
     }
 
     // Original logic for DXWrapper and environment variables
@@ -3332,7 +3359,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     if (firstTimeBoot) {
         Log.d("XServerDisplayActivity", "First time container boot, re-extracting layers and extra_libs");
         TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "layers" + ".tzst", rootDir);
-        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/extra_libs.tzst", rootDir);
+        extractGraphicsAsset("extra_libs.tzst", rootDir);
         writeExtraLibsVersion(extraLibsVersionFile, EXTRA_LIBS_VERSION);
     }
     else if (!vkBasaltSo.exists() || installedExtraLibsVer != EXTRA_LIBS_VERSION) {
@@ -3340,8 +3367,18 @@ public class XServerDisplayActivity extends AppCompatActivity {
             Log.d("XServerDisplayActivity", "vkBasalt layer absent (pre-existing container) — re-extracting extra_libs");
         else
             Log.d("XServerDisplayActivity", "extra_libs outdated (installed=" + installedExtraLibsVer + " bundled=" + EXTRA_LIBS_VERSION + ") — re-extracting extra_libs");
-        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/extra_libs.tzst", rootDir);
+        extractGraphicsAsset("extra_libs.tzst", rootDir);
         writeExtraLibsVersion(extraLibsVersionFile, EXTRA_LIBS_VERSION);
+    }
+
+    // Wrapper Version Manager (#132): the leegao BCn layer (libbcn_layer.so + manifest) normally
+    // ships inside extra_libs.tzst. A user-installed "BCn layer" override (leegao_bcn.tzst) overlays
+    // a newer copy on top — extract it AFTER extra_libs so it wins, and every launch when present
+    // (small file) so it applies regardless of the extra_libs version gate above.
+    File bcnLayerOverride = new File(getFilesDir(), "graphics_driver/leegao_bcn.tzst");
+    if (bcnLayerOverride.isFile()) {
+        Log.d("GraphicsDriverExtraction", "applying user BCn layer override (leegao_bcn.tzst)");
+        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, bcnLayerOverride, rootDir);
     }
 
     // 3. Driver integration.
@@ -3420,6 +3457,19 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // check (below): activated on non-Qualcomm GPUs (Mali/Xclipse/PowerVR) which lack native BCn,
     // and skipped on Adreno/Qualcomm which has native BCn.
     boolean isBcnLayerDriver = graphicsDriver != null && graphicsDriver.startsWith("wrapper-bcn_layer");
+
+    // #132 Smart Wrapper Manager: an IMPORTED wrapper whose archive carries libbcn_layer.so also
+    // drives the implicit bcn_layer, so it must run the same activation env (below) — otherwise the
+    // BCn Layer Settings the dialog now SHOWS for that import would do nothing. Gate on the import's
+    // DETECTED caps (WrapperManager.capsFor), and only for imports: a bundled driver's behavior is
+    // decided by the name check above and is left untouched (e.g. wrapper-gamenative keeps its
+    // WRAPPER_EMULATE_BCN path even though its caps include a BCn layer). The compat_layer path is
+    // NOT activated here — that lives on feat/mali-ultimate-driver, not this branch.
+    if (!isBcnLayerDriver && graphicsDriver != null) {
+        WrapperManager wm = new WrapperManager(this);
+        if (wm.isImported(graphicsDriver) && wm.capsFor(graphicsDriver).hasBcnLayer)
+            isBcnLayerDriver = true;
+    }
 
     if (!isBcnLayerDriver) {
         String bcnEmulation = graphicsDriverConfig.get("bcnEmulation");
@@ -3520,6 +3570,33 @@ public class XServerDisplayActivity extends AppCompatActivity {
     else if (vkbasaltConfig != null && !vkbasaltConfig.isEmpty()) {
         envVars.put("ENABLE_VKBASALT", "1");
         envVars.put("VKBASALT_CONFIG", vkbasaltConfig);
+    }
+
+    // #132 Smart Wrapper Manager, Layer 1: GENERIC emission for IMPORTED wrappers. For each env-var
+    // NAME auto-detected from this wrapper's binaries (cached in its .meta), emit KEY=value from the
+    // per-game config — EXCEPT keys a curated control already drives (HANDLED_ENV_KEYS) and any key the
+    // block above already set (has() guard: belt-and-suspenders against double-emit / clobbering curated
+    // env). Toggle "0" and empty values are off/default and skipped, so we only emit what the user
+    // enabled or filled in. This is what activates an imported compat/DX12 or BCn wrapper generically
+    // (e.g. ENABLE_DXVK_MALI_COMPAT_LAYER=1 + COMPAT_*) via the already-set VK_LAYER_PATH — no hardcoded
+    // per-name logic. Bundled wrappers are untouched (isImported gate).
+    if (graphicsDriver != null) {
+        WrapperManager wmGeneric = new WrapperManager(this);
+        if (wmGeneric.isImported(graphicsDriver)) {
+            java.util.Set<String> hiddenKeys = wmGeneric.hiddenKeys(graphicsDriver);
+            for (String key : wmGeneric.detectedEnvKeys(graphicsDriver)) {
+                if (WrapperManager.HANDLED_ENV_KEYS.contains(key)) continue;
+                if (WrapperManager.isDebugEnvKey(key)) continue;   // debug/diag plumbing -> never emit
+                if (WrapperManager.isDriverInternalEnvKey(key)) continue; // Mesa/adrenotools driver internals
+                if (hiddenKeys.contains(key)) continue;            // user hid it via Edit settings
+                if (envVars.has(key)) continue; // never overwrite curated env
+                String value = graphicsDriverConfig.get(key);
+                if (value == null) continue;
+                value = value.trim();
+                if (value.isEmpty() || value.equals("0")) continue; // off / default -> don't emit
+                envVars.put(key, value);
+            }
+        }
     }
 }
     

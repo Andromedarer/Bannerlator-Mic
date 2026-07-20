@@ -17,6 +17,7 @@ import com.winlator.star.container.Container
 import com.winlator.star.container.ContainerManager
 import com.winlator.star.contents.ContentProfile
 import com.winlator.star.contents.ContentsManager
+import com.winlator.star.contents.WrapperManager
 import com.winlator.star.core.AppUtils
 import com.winlator.star.core.DefaultVersion
 import com.winlator.star.core.EnvVars
@@ -246,8 +247,14 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             wineList.add(ContentsManager.getEntryName(p))
         wineVersionEntries = wineList
 
-        graphicsDriverEntries = res.getStringArray(R.array.graphics_driver_entries).toList()
+        // Bundled entries + user-imported wrappers (issue #132 Step 2). Built via the SHARED
+        // WrapperManager.driverEntries helper so this list and the ShortcutsScreen one can never
+        // drift (the dynamic-dropdown drift is the feature's top-ranked risk).
+        graphicsDriverEntries = WrapperManager.driverEntries(
+            context, res.getStringArray(R.array.graphics_driver_entries)
+        )
         dxWrapperEntries  = res.getStringArray(R.array.dxwrapper_entries).toList()
+        // (refreshGraphicsDriverEntries below re-reads the wrapper part after an import/delete.)
         audioDriverEntries = res.getStringArray(R.array.audio_driver_entries).toList()
         emulatorEntries   = res.getStringArray(R.array.emulator_entries).toList()
         rendererEntries = listOf("OpenGL", "Vulkan", "SurfaceFlinger")
@@ -279,6 +286,14 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             sfDir.listFiles()?.forEach { midiList.add(it.name) }
         } catch (_: Exception) {}
         midiEntries = midiList
+    }
+
+    /** Re-read the Graphics Driver dropdown entries. Call after a wrapper import/delete in the
+     *  Wrapper Manager so a freshly-imported wrapper appears WITHOUT reopening the editor (#132). */
+    fun refreshGraphicsDriverEntries() {
+        graphicsDriverEntries = WrapperManager.driverEntries(
+            context, context.resources.getStringArray(R.array.graphics_driver_entries)
+        )
     }
 
     private fun loadContainerData() {

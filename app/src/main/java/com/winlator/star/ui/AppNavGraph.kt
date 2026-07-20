@@ -21,6 +21,7 @@ import com.winlator.star.ui.screens.SavesScreen
 import com.winlator.star.ui.screens.InputControlsScreen
 import com.winlator.star.ui.screens.SettingsScreen
 import com.winlator.star.ui.screens.ShortcutsScreen
+import com.winlator.star.ui.screens.WrapperManagerScreen
 
 @Composable
 fun AppNavGraph(
@@ -73,6 +74,10 @@ fun AppNavGraph(
 
         composable(Screen.AdrenoTools.route) {
             AdrenoToolsScreen()
+        }
+
+        composable(Screen.Wrappers.route) {
+            WrapperManagerScreen()
         }
 
         composable(Screen.FileManager.route) {

@@ -65,6 +65,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.ViewList
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
@@ -167,6 +168,7 @@ import com.winlator.star.container.Shortcut
 import com.winlator.star.reshade.ReshadeManager
 import com.winlator.star.contentdialog.GraphicsDriverConfigDialog
 import com.winlator.star.contents.AdrenotoolsManager
+import com.winlator.star.contents.WrapperManager
 import com.winlator.star.contents.ContentProfile
 import com.winlator.star.contents.ContentsManager
 import com.winlator.star.contents.Downloader
@@ -3735,8 +3737,14 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
         mutableStateOf(if (rawScreenSize.contains("x")) rawScreenSize.substringAfter("x") else "600")
     }
 
-    // Graphics driver
-    val graphicsDriverEntries = remember { res.getStringArray(R.array.graphics_driver_entries).toList() }
+    // Graphics driver — bundled entries + user-imported wrappers (issue #132 Step 2), built via the
+    // SHARED WrapperManager.driverEntries helper so this list matches ContainerDetailViewModel's
+    // exactly (dynamic-dropdown drift is the feature's top-ranked risk). Keyed on wrapperRefreshKey
+    // so a wrapper imported/deleted via the manager appears without reopening the editor.
+    var wrapperRefreshKey by remember { mutableStateOf(0) }
+    val graphicsDriverEntries = remember(wrapperRefreshKey) {
+        WrapperManager.driverEntries(context, res.getStringArray(R.array.graphics_driver_entries))
+    }
     var selectedGfxDriver by remember {
         val id = shortcut.getExtra("graphicsDriver", shortcut.container.graphicsDriver)
         mutableStateOf(graphicsDriverEntries.firstOrNull { StringUtils.parseIdentifier(it) == id }
@@ -4222,13 +4230,24 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
                         }
                     }
 
-                    // Graphics Driver
-                    LabeledDropdown(
-                        label = stringResource(R.string.graphics_driver),
-                        options = graphicsDriverEntries,
-                        selectedOption = selectedGfxDriver,
-                        onSelect = { selectedGfxDriver = it }
-                    )
+                    // Graphics Driver + wrapper manager (cloud)
+                    var showWrapperManager by remember { mutableStateOf(false) }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        LabeledDropdown(
+                            label = stringResource(R.string.graphics_driver),
+                            options = graphicsDriverEntries,
+                            selectedOption = selectedGfxDriver,
+                            onSelect = { selectedGfxDriver = it },
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(onClick = { showWrapperManager = true }) {
+                            Icon(Icons.Default.CloudDownload, contentDescription = stringResource(R.string.wrapper_manager_open))
+                        }
+                    }
+                    if (showWrapperManager) WrapperManagerDialog(onDismiss = {
+                        showWrapperManager = false
+                        wrapperRefreshKey++ // pick up a just-imported/deleted wrapper
+                    })
                     OutlinedButton(onClick = { showGfxConfig = true }, modifier = Modifier.fillMaxWidth()) {
                         Text("${stringResource(R.string.graphics_driver)}: ${GraphicsDriverConfigDialog.getVersion(graphicsDriverConfig)}")
                     }
