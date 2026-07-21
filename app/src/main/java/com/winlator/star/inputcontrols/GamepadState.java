@@ -30,6 +30,17 @@ public class GamepadState {
         return (byte)(dpad[0] ? -1 : (dpad[2] ? 1 : 0));
     }
 
+    public void copy(GamepadState other) {
+        thumbLX = other.thumbLX;
+        thumbLY = other.thumbLY;
+        thumbRX = other.thumbRX;
+        thumbRY = other.thumbRY;
+        triggerL = other.triggerL;
+        triggerR = other.triggerR;
+        buttons = other.buttons;
+        System.arraycopy(other.dpad, 0, dpad, 0, dpad.length);
+    }
+
     public void reset() {
         thumbLX = 0;
         thumbLY = 0;
