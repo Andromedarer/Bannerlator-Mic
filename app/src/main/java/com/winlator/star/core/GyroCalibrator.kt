@@ -69,7 +69,9 @@ object GyroCalibrator {
 
     /**
      * Fills out[0]/out[1] with the stored bias, or 0 when uncalibrated or when the stored stamp
-     * doesn't match this device. Called once at WinHandler construction — never on the sample path.
+     * doesn't match this device. Called at WinHandler construction and again when the game session
+     * comes back to the foreground (a recalibration may have happened while away) — never on the
+     * sample path.
      */
     @JvmStatic
     @JvmOverloads

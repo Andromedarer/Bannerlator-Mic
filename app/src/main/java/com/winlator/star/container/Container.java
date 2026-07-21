@@ -505,6 +505,8 @@ public class Container {
     public static final int GYRO_ACTIVATOR_R1 = 2;
     public static final int GYRO_ACTIVATOR_R3 = 3;
     public static final int GYRO_ACTIVATOR_ALWAYS = 4;
+    public static final int GYRO_ACTIVATION_HOLD = 0;
+    public static final int GYRO_ACTIVATION_TOGGLE = 1;
 
     public static final boolean GYRO_ENABLED_DEFAULT = true;
     public static final int GYRO_TARGET_DEFAULT = GYRO_TARGET_RIGHT_STICK;
@@ -512,6 +514,9 @@ public class Container {
     public static final float GYRO_SENSITIVITY_DEFAULT = 2.0f;
     public static final float GYRO_SMOOTHING_DEFAULT = 0.5f;
     public static final int GYRO_ACTIVATOR_DEFAULT = GYRO_ACTIVATOR_L1;
+    // HOLD is the default on purpose: it's what the gyro has always done, so an existing container
+    // that has never seen this key behaves exactly as before.
+    public static final int GYRO_ACTIVATION_MODE_DEFAULT = GYRO_ACTIVATION_HOLD;
     public static final boolean GYRO_INVERT_X_DEFAULT = false;
     public static final boolean GYRO_INVERT_Y_DEFAULT = false;
 
@@ -549,6 +554,20 @@ public class Container {
 
     public void setGyroActivator(int activator) {
         putExtra("gyroActivator", String.valueOf(activator));
+    }
+
+    public int getGyroActivationMode() {
+        try {
+            int m = Integer.parseInt(getExtra("gyroActivationMode", String.valueOf(GYRO_ACTIVATION_MODE_DEFAULT)));
+            return (m < GYRO_ACTIVATION_HOLD || m > GYRO_ACTIVATION_TOGGLE) ? GYRO_ACTIVATION_MODE_DEFAULT : m;
+        }
+        catch (NumberFormatException e) {
+            return GYRO_ACTIVATION_MODE_DEFAULT;
+        }
+    }
+
+    public void setGyroActivationMode(int activationMode) {
+        putExtra("gyroActivationMode", String.valueOf(activationMode));
     }
 
     public float getGyroSensitivity() {

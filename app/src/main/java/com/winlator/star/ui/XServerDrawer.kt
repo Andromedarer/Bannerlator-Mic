@@ -1533,8 +1533,11 @@ private fun VibrationModeButtons(selected: Int, enabled: Boolean = true, onSelec
 // and the aligned equal-width grid (weight(1f), short rows padded with Spacer so widths stay equal).
 // Callers build the list of currently-VISIBLE chips FIRST, then this chunks per row — so per-style
 // gating never leaves holes or misaligns the grid.
+// enabled=false greys the WHOLE grid and swallows taps, the same way VibrationModeButtons does it —
+// for rows that stay on screen because they still explain something, but can't be acted on yet.
 @Composable
-private fun ModeChipGrid(items: List<Triple<String, Boolean, () -> Unit>>, perRow: Int) {
+private fun ModeChipGrid(items: List<Triple<String, Boolean, () -> Unit>>, perRow: Int,
+                         enabled: Boolean = true) {
     val accent = MaterialTheme.colorScheme.primary
     val accentDim = LocalAccentDim.current
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1549,20 +1552,24 @@ private fun ModeChipGrid(items: List<Triple<String, Boolean, () -> Unit>>, perRo
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(if (isOn) accent else Color.Black)
+                            .background(if (isOn && enabled) accent else Color.Black)
                             .border(
                                 width = 1.dp,
-                                color = if (isOn) accent else accentDim,
+                                color = if (isOn && enabled) accent else accentDim,
                                 shape = RoundedCornerShape(8.dp)
                             )
-                            .clickable { onTap() }
+                            .clickable(enabled = enabled) { onTap() }
                             .padding(vertical = 9.dp)
                     ) {
                         Text(
                             label,
-                            color = if (isOn) Color.Black else accent,
+                            color = when {
+                                !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                                isOn     -> Color.Black
+                                else     -> accent
+                            },
                             fontSize = 12.sp,
-                            fontWeight = if (isOn) FontWeight.Bold else FontWeight.Medium
+                            fontWeight = if (isOn && enabled) FontWeight.Bold else FontWeight.Medium
                         )
                     }
                 }
@@ -2274,13 +2281,13 @@ private fun GyroSection() {
 
     HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
 
-    Text("Gyro", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+    Text(stringResource(R.string.gyro_drawer_title), color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
     Spacer(Modifier.height(4.dp))
 
     val gyroEnabled by XServerDialogState.gyroEnabled.collectAsState()
     ToggleChipGrid(
         listOf(
-            ToggleChipItem("Enabled", gyroEnabled) {
+            ToggleChipItem(stringResource(R.string.gyro_drawer_enabled), gyroEnabled) {
                 XServerDialogState.setGyroEnabled(it)
                 XServerDialogState.onGyroEnabledChanged?.invoke(it)
             }
@@ -2294,19 +2301,19 @@ private fun GyroSection() {
     val initGyroTarget by XServerDialogState.gyroTarget.collectAsState()
     var gyroTarget by remember(initGyroTarget) { mutableIntStateOf(initGyroTarget) }
     Spacer(Modifier.height(6.dp))
-    Text("Apply gyro to", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Text(stringResource(R.string.gyro_drawer_apply_to), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     Spacer(Modifier.height(4.dp))
     ModeChipGrid(
         listOf(
-            Triple("Right stick", gyroTarget == 0) { setGyroTargetLive(0) { gyroTarget = it } },
-            Triple("Left stick", gyroTarget == 1) { setGyroTargetLive(1) { gyroTarget = it } },
-            Triple("Mouse", gyroTarget == 2) { setGyroTargetLive(2) { gyroTarget = it } },
+            Triple(stringResource(R.string.gyro_drawer_target_right_stick), gyroTarget == 0) { setGyroTargetLive(0) { gyroTarget = it } },
+            Triple(stringResource(R.string.gyro_drawer_target_left_stick), gyroTarget == 1) { setGyroTargetLive(1) { gyroTarget = it } },
+            Triple(stringResource(R.string.gyro_drawer_target_mouse), gyroTarget == 2) { setGyroTargetLive(2) { gyroTarget = it } },
         ),
         perRow = 3
     )
     if (gyroTarget == 2) {
         Text(
-            "Moves the pointer instead of a stick — use for the desktop and mouse-look games.",
+            stringResource(R.string.gyro_drawer_mouse_hint),
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
             fontSize = 11.sp,
             modifier = Modifier.padding(start = 4.dp, top = 2.dp)
@@ -2317,7 +2324,7 @@ private fun GyroSection() {
     val initGyroSensitivity by XServerDialogState.gyroSensitivity.collectAsState()
     var gyroSensitivity by remember(initGyroSensitivity) { mutableFloatStateOf(initGyroSensitivity) }
     LabeledSlider(
-        label = "Sensitivity",
+        label = stringResource(R.string.gyro_sensitivity_label),
         value = gyroSensitivity,
         valueRange = 0.1f..10f,
         onValueChange = { gyroSensitivity = it },
@@ -2328,29 +2335,56 @@ private fun GyroSection() {
         format = { "%.1f".format(it) }
     )
 
-    // Which button gates the tilt while held. "Always on" removes the gate entirely — the only
-    // option that works with no controller attached (e.g. gyro-as-mouse on the Wine desktop).
+    // Which button gates the tilt. "Always on" removes the gate entirely — the only option that
+    // works with no controller attached (e.g. gyro-as-mouse on the Wine desktop).
     val initGyroActivator by XServerDialogState.gyroActivator.collectAsState()
     var gyroActivator by remember(initGyroActivator) { mutableIntStateOf(initGyroActivator) }
     Spacer(Modifier.height(2.dp))
-    Text("Activation (hold)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Text(stringResource(R.string.gyro_drawer_activation), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     Spacer(Modifier.height(4.dp))
     ModeChipGrid(
         listOf(
-            Triple("L1", gyroActivator == 0) { setGyroActivatorLive(0) { gyroActivator = it } },
-            Triple("L2", gyroActivator == 1) { setGyroActivatorLive(1) { gyroActivator = it } },
-            Triple("R1", gyroActivator == 2) { setGyroActivatorLive(2) { gyroActivator = it } },
-            Triple("R3", gyroActivator == 3) { setGyroActivatorLive(3) { gyroActivator = it } },
-            Triple("Always", gyroActivator == 4) { setGyroActivatorLive(4) { gyroActivator = it } },
+            Triple(stringResource(R.string.gyro_activator_l1), gyroActivator == 0) { setGyroActivatorLive(0) { gyroActivator = it } },
+            Triple(stringResource(R.string.gyro_activator_l2), gyroActivator == 1) { setGyroActivatorLive(1) { gyroActivator = it } },
+            Triple(stringResource(R.string.gyro_activator_r1), gyroActivator == 2) { setGyroActivatorLive(2) { gyroActivator = it } },
+            Triple(stringResource(R.string.gyro_activator_r3), gyroActivator == 3) { setGyroActivatorLive(3) { gyroActivator = it } },
+            Triple(stringResource(R.string.gyro_drawer_activator_always), gyroActivator == 4) { setGyroActivatorLive(4) { gyroActivator = it } },
         ),
         perRow = 5
     )
+
+    // Hold vs Toggle for that button. Greyed rather than hidden under "Always" — there's no button
+    // to latch, but hiding the row would make it look like the setting vanished for good.
+    val initGyroActivationMode by XServerDialogState.gyroActivationMode.collectAsState()
+    var gyroActivationMode by remember(initGyroActivationMode) { mutableIntStateOf(initGyroActivationMode) }
+    val activationModeEnabled = gyroActivator != 4
+    Spacer(Modifier.height(4.dp))
+    ModeChipGrid(
+        listOf(
+            Triple(stringResource(R.string.gyro_activation_hold), gyroActivationMode == 0) {
+                setGyroActivationModeLive(0) { gyroActivationMode = it }
+            },
+            Triple(stringResource(R.string.gyro_activation_toggle), gyroActivationMode == 1) {
+                setGyroActivationModeLive(1) { gyroActivationMode = it }
+            },
+        ),
+        perRow = 2,
+        enabled = activationModeEnabled
+    )
+    if (activationModeEnabled && gyroActivationMode == 1) {
+        Text(
+            stringResource(R.string.gyro_drawer_toggle_hint),
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+            fontSize = 11.sp,
+            modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+        )
+    }
 
     // ---- Fine tuning: set once, then forgotten. Kept last so it never crowds the controls above. ----
     val initGyroDeadzone by XServerDialogState.gyroDeadzone.collectAsState()
     var gyroDeadzone by remember(initGyroDeadzone) { mutableFloatStateOf(initGyroDeadzone) }
     LabeledSlider(
-        label = "Deadzone",
+        label = stringResource(R.string.gyro_deadzone_label),
         value = gyroDeadzone,
         valueRange = 0f..0.5f,
         onValueChange = { gyroDeadzone = it },
@@ -2364,7 +2398,7 @@ private fun GyroSection() {
     val initGyroSmoothing by XServerDialogState.gyroSmoothing.collectAsState()
     var gyroSmoothing by remember(initGyroSmoothing) { mutableFloatStateOf(initGyroSmoothing) }
     LabeledSlider(
-        label = "Smoothing",
+        label = stringResource(R.string.gyro_smoothing_label),
         value = gyroSmoothing,
         valueRange = 0f..0.95f,
         onValueChange = { gyroSmoothing = it },
@@ -2379,11 +2413,11 @@ private fun GyroSection() {
     val gyroInvertY by XServerDialogState.gyroInvertY.collectAsState()
     ToggleChipGrid(
         listOf(
-            ToggleChipItem("Invert X", gyroInvertX) {
+            ToggleChipItem(stringResource(R.string.gyro_invert_x), gyroInvertX) {
                 XServerDialogState.setGyroInvertX(it)
                 XServerDialogState.onGyroInvertXChanged?.invoke(it)
             },
-            ToggleChipItem("Invert Y", gyroInvertY) {
+            ToggleChipItem(stringResource(R.string.gyro_invert_y), gyroInvertY) {
                 XServerDialogState.setGyroInvertY(it)
                 XServerDialogState.onGyroInvertYChanged?.invoke(it)
             },
@@ -2405,6 +2439,14 @@ private fun setGyroActivatorLive(activator: Int, reflect: (Int) -> Unit) {
     reflect(activator)
     XServerDialogState.setGyroActivator(activator)
     XServerDialogState.onGyroActivatorChanged?.invoke(activator)
+}
+
+// Same deal for the activation mode: WinHandler drops the toggle latch on the way through, so
+// switching to Hold can't leave a latched-on gyro behind.
+private fun setGyroActivationModeLive(mode: Int, reflect: (Int) -> Unit) {
+    reflect(mode)
+    XServerDialogState.setGyroActivationMode(mode)
+    XServerDialogState.onGyroActivationModeChanged?.invoke(mode)
 }
 
 // ───── Advanced Tab ─────

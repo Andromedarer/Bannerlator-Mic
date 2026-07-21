@@ -150,12 +150,14 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     var vibrationIntensity by mutableStateOf(Container.VIBRATION_INTENSITY_DEFAULT)
 
     // Gyro (motion aim), per-container. Target: 0=Right stick 1=Left stick 2=Mouse; activator is the
-    // button that gates the tilt while held (4 = always on). Enabled/target/activator/sensitivity/
+    // button that gates the tilt (4 = always on), with the activation mode deciding whether that
+    // button is held or tapped to latch (0=Hold 1=Toggle). Enabled/target/activator/mode/sensitivity/
     // invert are also per-game (shortcut editor) and live-tunable in-game — this is the default a
     // shortcut inherits. Deadzone/smoothing are container-only (hand tremor / latency vs jitter).
     var gyroEnabled by mutableStateOf(Container.GYRO_ENABLED_DEFAULT)
     var gyroTarget by mutableStateOf(Container.GYRO_TARGET_DEFAULT)
     var gyroActivator by mutableStateOf(Container.GYRO_ACTIVATOR_DEFAULT)
+    var gyroActivationMode by mutableStateOf(Container.GYRO_ACTIVATION_MODE_DEFAULT)
     var gyroSensitivity by mutableStateOf(Container.GYRO_SENSITIVITY_DEFAULT)
     var gyroDeadzone by mutableStateOf(Container.GYRO_DEADZONE_DEFAULT)
     var gyroSmoothing by mutableStateOf(Container.GYRO_SMOOTHING_DEFAULT)
@@ -413,6 +415,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         gyroEnabled     = c?.isGyroEnabled() ?: Container.GYRO_ENABLED_DEFAULT
         gyroTarget      = c?.getGyroTarget() ?: Container.GYRO_TARGET_DEFAULT
         gyroActivator   = c?.getGyroActivator() ?: Container.GYRO_ACTIVATOR_DEFAULT
+        gyroActivationMode = c?.getGyroActivationMode() ?: Container.GYRO_ACTIVATION_MODE_DEFAULT
         gyroSensitivity = c?.getGyroSensitivity() ?: Container.GYRO_SENSITIVITY_DEFAULT
         gyroDeadzone    = c?.getGyroDeadzone() ?: Container.GYRO_DEADZONE_DEFAULT
         gyroSmoothing   = c?.getGyroSmoothing() ?: Container.GYRO_SMOOTHING_DEFAULT
@@ -693,6 +696,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             c.setGyroEnabled(gyroEnabled)
             c.setGyroTarget(gyroTarget)
             c.setGyroActivator(gyroActivator)
+            c.setGyroActivationMode(gyroActivationMode)
             c.setGyroSensitivity(gyroSensitivity)
             c.setGyroDeadzone(gyroDeadzone)
             c.setGyroSmoothing(gyroSmoothing)
@@ -775,6 +779,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
                     created.setGyroEnabled(gyroEnabled)
                     created.setGyroTarget(gyroTarget)
                     created.setGyroActivator(gyroActivator)
+                    created.setGyroActivationMode(gyroActivationMode)
                     created.setGyroSensitivity(gyroSensitivity)
                     created.setGyroDeadzone(gyroDeadzone)
                     created.setGyroSmoothing(gyroSmoothing)

@@ -3803,6 +3803,10 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
         mutableStateOf(shortcut.getExtra("gyroActivator",
             shortcut.container.gyroActivator.toString()).toIntOrNull() ?: Container.GYRO_ACTIVATOR_DEFAULT)
     }
+    var gyroActivationMode by remember {
+        mutableStateOf(shortcut.getExtra("gyroActivationMode",
+            shortcut.container.gyroActivationMode.toString()).toIntOrNull() ?: Container.GYRO_ACTIVATION_MODE_DEFAULT)
+    }
     var gyroSensitivity by remember {
         mutableStateOf(shortcut.getExtra("gyroSensitivity",
             shortcut.container.gyroSensitivity.toString()).toFloatOrNull() ?: Container.GYRO_SENSITIVITY_DEFAULT)
@@ -4126,6 +4130,7 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
             putExtra("gyroEnabled", if (gyroEnabled) "1" else "0")
             putExtra("gyroTarget", gyroTarget.toString())
             putExtra("gyroActivator", gyroActivator.toString())
+            putExtra("gyroActivationMode", gyroActivationMode.toString())
             putExtra("gyroSensitivity", gyroSensitivity.toString())
             putExtra("gyroInvertX", if (gyroInvertX) "1" else "0")
             putExtra("gyroInvertY", if (gyroInvertY) "1" else "0")
@@ -4568,6 +4573,22 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                                 },
                                 onSelect = { opt -> gyroActivator = gyroActivatorLabels.indexOf(opt).coerceAtLeast(0) }
                             )
+                            // Hold vs Toggle for that button — hidden under "Always On", which has no
+                            // button to latch (same call the container editor makes).
+                            if (gyroActivator != Container.GYRO_ACTIVATOR_ALWAYS) {
+                                val gyroActivationModeLabels = listOf(
+                                    stringResource(R.string.gyro_activation_hold),
+                                    stringResource(R.string.gyro_activation_toggle),
+                                )
+                                LabeledDropdown(
+                                    label = stringResource(R.string.gyro_activation_mode_label),
+                                    options = gyroActivationModeLabels,
+                                    selectedOption = gyroActivationModeLabels.getOrElse(gyroActivationMode) {
+                                        gyroActivationModeLabels[Container.GYRO_ACTIVATION_MODE_DEFAULT]
+                                    },
+                                    onSelect = { opt -> gyroActivationMode = gyroActivationModeLabels.indexOf(opt).coerceAtLeast(0) }
+                                )
+                            }
                             Text(
                                 "${stringResource(R.string.gyro_sensitivity_label)}: ${"%.1f".format(gyroSensitivity)}",
                                 style = MaterialTheme.typography.bodySmall

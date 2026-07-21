@@ -71,6 +71,7 @@ import com.winlator.star.core.DefaultVersion;
 import com.winlator.star.core.EnvVars;
 import com.winlator.star.core.FileUtils;
 import com.winlator.star.core.GPUInformation;
+import com.winlator.star.core.GyroCalibrator;
 import com.winlator.star.core.KeyValueSet;
 import com.winlator.star.core.OnExtractFileListener;
 import com.winlator.star.core.PreloaderDialog;
@@ -994,6 +995,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         boolean gyroOn = container.isGyroEnabled();
         int gyroTarget = container.getGyroTarget();
         int gyroActivator = container.getGyroActivator();
+        int gyroActivationMode = container.getGyroActivationMode();
         float gyroSensitivity = container.getGyroSensitivity();
         boolean gyroInvertX = container.isGyroInvertX();
         boolean gyroInvertY = container.isGyroInvertY();
@@ -1004,12 +1006,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
             try {
                 gyroTarget = Integer.parseInt(shortcut.getExtra("gyroTarget", String.valueOf(gyroTarget)));
                 gyroActivator = Integer.parseInt(shortcut.getExtra("gyroActivator", String.valueOf(gyroActivator)));
+                gyroActivationMode = Integer.parseInt(shortcut.getExtra("gyroActivationMode", String.valueOf(gyroActivationMode)));
             } catch (NumberFormatException e) {}
             try {
                 gyroSensitivity = Float.parseFloat(shortcut.getExtra("gyroSensitivity", String.valueOf(gyroSensitivity)));
             } catch (NumberFormatException e) {}
         }
-        winHandler.applyGyroTuning(gyroOn, gyroTarget, gyroActivator, gyroSensitivity,
+        winHandler.applyGyroTuning(gyroOn, gyroTarget, gyroActivator, gyroActivationMode, gyroSensitivity,
             container.getGyroDeadzone(), container.getGyroSmoothing(), gyroInvertX, gyroInvertY);
         // Only now is it safe to let samples in (registerGyroSensor used to run in onCreate, long
         // before the container existed, so the first few hundred ms ran on the built-in defaults).
@@ -1355,6 +1358,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
         reapplyVrr();
         // onPause() dropped the gyro listener so it can't drain the battery in the background.
         registerGyroSensor();
+        // The user may have been away recalibrating (Input Controls -> Gyroscope), which writes the
+        // bias to the global prefs. Re-read it once here, on the way back in, so a fresh calibration
+        // takes effect without relaunching the game. Deliberately NOT on the sample path.
+        reloadGyroBias();
         // Track the live panel rate again (the readout shows it while Auto is on).
         registerVrrDisplayListener();
         updateCurrentRefreshRate();
@@ -1377,6 +1384,15 @@ public class XServerDisplayActivity extends AppCompatActivity {
         handler.removeCallbacks(savePlaytimeRunnable);
         ProcessHelper.pauseAllWineProcesses();
         unregisterGyroSensor();
+    }
+
+    // Re-reads the calibration bias from the global prefs and hands it to WinHandler. GyroCalibrator
+    // still honours the device stamp, so a bias restored from another phone comes back 0.
+    private void reloadGyroBias() {
+        if (winHandler == null || gyroSensor == null) return;
+        float[] bias = new float[2];
+        GyroCalibrator.loadBias(this, bias);
+        winHandler.setGyroBias(bias[0], bias[1]);
     }
 
     // Gyro listener register/unregister — both are idempotent and a no-op without a gyroscope.
@@ -1404,6 +1420,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (sensorManager == null || !gyroListenerRegistered) return;
         sensorManager.unregisterListener(gyroListener);
         gyroListenerRegistered = false;
+        // Clear the runtime state on the way out: with the listener gone nothing arrives to un-latch a
+        // toggled-on gyro, so the overlay would stay frozen into the last gamepad state the game saw.
+        if (winHandler != null) winHandler.resetGyroRuntimeState();
     }
 
 
@@ -3015,6 +3034,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             ds.setGyroInvertX(winHandler.isGyroInvertX());
             ds.setGyroInvertY(winHandler.isGyroInvertY());
             ds.setGyroActivator(winHandler.getGyroActivator());
+            ds.setGyroActivationMode(winHandler.getGyroActivationMode());
             ds.onGyroEnabledChanged = (enabled) -> {
                 winHandler.setGyroEnabled(enabled);
                 persistGyroExtra("gyroEnabled", enabled ? "1" : "0");
@@ -3026,6 +3046,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
             ds.onGyroActivatorChanged = (index) -> {
                 winHandler.setGyroActivator(index);
                 persistGyroExtra("gyroActivator", String.valueOf(winHandler.getGyroActivator()));
+            };
+            ds.onGyroActivationModeChanged = (mode) -> {
+                winHandler.setGyroActivationMode(mode);
+                persistGyroExtra("gyroActivationMode", String.valueOf(winHandler.getGyroActivationMode()));
             };
             ds.onGyroSensitivityChanged = (value) -> {
                 winHandler.setGyroSensitivity(value);

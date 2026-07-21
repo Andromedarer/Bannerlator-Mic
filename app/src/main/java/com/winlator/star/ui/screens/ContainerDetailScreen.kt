@@ -1412,6 +1412,24 @@ private fun AdvancedTab(
                     },
                     onSelect = { opt -> viewModel.gyroActivator = gyroActivatorLabels.indexOf(opt).coerceAtLeast(0) }
                 )
+                // Hold vs Toggle for that button. Pointless with "Always On" (no button to latch), so
+                // the picker is hidden rather than greyed here — an editor row has no live state to
+                // explain, unlike the in-game drawer where the row stays visible but disabled.
+                if (viewModel.gyroActivator != Container.GYRO_ACTIVATOR_ALWAYS) {
+                    val gyroActivationModeLabels = listOf(
+                        stringResource(R.string.gyro_activation_hold),
+                        stringResource(R.string.gyro_activation_toggle),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    LabeledDropdown(
+                        label = stringResource(R.string.gyro_activation_mode_label),
+                        options = gyroActivationModeLabels,
+                        selectedOption = gyroActivationModeLabels.getOrElse(viewModel.gyroActivationMode) {
+                            gyroActivationModeLabels[Container.GYRO_ACTIVATION_MODE_DEFAULT]
+                        },
+                        onSelect = { opt -> viewModel.gyroActivationMode = gyroActivationModeLabels.indexOf(opt).coerceAtLeast(0) }
+                    )
+                }
                 Spacer(Modifier.height(8.dp))
                 Text(
                     "${stringResource(R.string.gyro_sensitivity_label)}: ${"%.1f".format(viewModel.gyroSensitivity)}",
