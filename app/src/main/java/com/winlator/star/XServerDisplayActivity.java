@@ -771,6 +771,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
         state.onMagnifier              = () -> showMagnifierOverlay();
         state.onLogs                   = () -> XServerDialogState.INSTANCE.show(XServerDialogState.ActiveDialog.DEBUG);
         state.onExit                   = () -> exit();
+        // Seed the drawer chip from the persisted preference so it reflects reality on open
+        // (state.reset() above zeroes it, so this has to come after).
+        state.setMoveCursorToTouchpoint(preferences.getBoolean("move_cursor_to_touchpoint", false));
         state.onMoveCursorToTouchpoint = () -> MoveCursorToTouchpoint();
         state.onRelativeMouseMovement  = () -> {
             isRelativeMouseMovement = !isRelativeMouseMovement;
@@ -5067,6 +5070,10 @@ return true;
         if (touchpadView != null) {
             touchpadView.setMoveCursorToTouchpoint(newValue);
         }
+
+        // Push back into the drawer so the chip renders its on/off state (matches the
+        // Relative Mouse / Disable Mouse toggles in setupUI).
+        XServerDrawerState.INSTANCE.setMoveCursorToTouchpoint(newValue);
     } // Closes MoveCursorToTouchpoint
 
     private void showActiveWindowsDialog() {
