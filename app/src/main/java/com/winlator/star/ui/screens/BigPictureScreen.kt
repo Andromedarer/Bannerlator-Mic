@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -95,6 +96,7 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
@@ -130,8 +132,8 @@ import java.net.URL
 private enum class BpZone { RAIL, PLAY, CAROUSEL }
 private enum class BpSheet { GAME_OPTIONS, TOOLS, POWER }
 
-private val CARD_WIDTH = 92.dp
-private val CARD_HEIGHT = 138.dp
+private val CARD_WIDTH = 84.dp
+private val CARD_HEIGHT = 126.dp
 
 @Composable
 fun BigPictureScreen(navController: NavController) {
@@ -153,6 +155,7 @@ fun BigPictureScreen(navController: NavController) {
 
     var zone by remember { mutableStateOf(BpZone.CAROUSEL) }
     var railIndex by remember { mutableStateOf(0) } // 0 = App Settings, 1 = Tools, 2 = Power
+    var playIndex by remember { mutableStateOf(0) } // in the PLAY zone: 0 = Play, 1 = Game options
 
     var activeSheet by remember { mutableStateOf<BpSheet?>(null) }
     var editShortcut by remember { mutableStateOf(false) }
@@ -246,7 +249,7 @@ fun BigPictureScreen(navController: NavController) {
                         when (zone) {
                             BpZone.CAROUSEL -> if (selectedIndex > 0) selectedIndex--
                             BpZone.RAIL     -> if (railIndex > 0) railIndex--
-                            else -> {}
+                            BpZone.PLAY     -> playIndex = 0   // Play
                         }
                         true
                     }
@@ -254,13 +257,13 @@ fun BigPictureScreen(navController: NavController) {
                         when (zone) {
                             BpZone.CAROUSEL -> if (selectedIndex < shortcuts.lastIndex) selectedIndex++
                             BpZone.RAIL     -> if (railIndex < 2) railIndex++
-                            else -> {}
+                            BpZone.PLAY     -> playIndex = 1   // Game options
                         }
                         true
                     }
                     Key.DirectionUp -> {
                         zone = when (zone) {
-                            BpZone.CAROUSEL -> BpZone.PLAY
+                            BpZone.CAROUSEL -> { playIndex = 0; BpZone.PLAY }
                             BpZone.PLAY     -> BpZone.RAIL
                             BpZone.RAIL     -> BpZone.RAIL
                         }
@@ -268,7 +271,7 @@ fun BigPictureScreen(navController: NavController) {
                     }
                     Key.DirectionDown -> {
                         zone = when (zone) {
-                            BpZone.RAIL     -> BpZone.PLAY
+                            BpZone.RAIL     -> { playIndex = 0; BpZone.PLAY }
                             BpZone.PLAY     -> BpZone.CAROUSEL
                             BpZone.CAROUSEL -> BpZone.CAROUSEL
                         }
@@ -276,9 +279,11 @@ fun BigPictureScreen(navController: NavController) {
                     }
                     Key.ButtonA, Key.Enter, Key.DirectionCenter -> {
                         when (zone) {
-                            // A launches the highlighted game (fastest couch path); the explicit Play
-                            // button covers the same for touch and for the PLAY zone.
-                            BpZone.PLAY, BpZone.CAROUSEL -> onLaunch()
+                            // A on the carousel launches the highlighted game (fastest couch path).
+                            BpZone.CAROUSEL -> onLaunch()
+                            // In the PLAY zone A activates whichever button is highlighted.
+                            BpZone.PLAY -> if (playIndex == 0) onLaunch()
+                                           else if (selected != null) activeSheet = BpSheet.GAME_OPTIONS
                             BpZone.RAIL -> when (railIndex) {
                                 0 -> navController.navigate(Screen.Settings.route)
                                 1 -> activeSheet = BpSheet.TOOLS
@@ -407,47 +412,56 @@ fun BigPictureScreen(navController: NavController) {
                 ) {
                     val coverH = maxHeight.coerceAtMost(260.dp)
                     val coverW = coverH * 2f / 3f            // 2:3 poster ratio
-                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        CoverCard(cover = heroCover, modifier = Modifier.width(coverW).height(coverH), selected = false)
+                    Row(modifier = Modifier.fillMaxWidth().height(coverH), verticalAlignment = Alignment.CenterVertically) {
+                        CoverCard(cover = heroCover, modifier = Modifier.width(coverW).fillMaxHeight(), selected = false)
                         Spacer(Modifier.width(24.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = selected?.name ?: "",
-                                color = Color.White,
-                                fontSize = 28.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 2,
-                            )
-                            if (!spec?.meta.isNullOrBlank()) {
-                                Spacer(Modifier.height(2.dp))
-                                Text(spec!!.meta, color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp)
-                            }
-                            Spacer(Modifier.height(4.dp))
-                            val stats = playtimeStats(context, selected?.name ?: "")
-                            Text(
-                                "Played ${stats.first}×  ·  ${stats.second}",
-                                color = Color.White.copy(alpha = 0.85f),
-                                fontSize = 13.sp,
-                            )
-                            if (chips.isNotEmpty()) {
-                                Spacer(Modifier.height(10.dp))
-                                FlowRow(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                                ) {
-                                    chips.forEach { (l, v) -> SpecChip(l, v) }
+                        Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                            // Title + spec take the space ABOVE the buttons and clip if a game has a very
+                            // long title or many chips (e.g. GTA IV's 6 chips); the buttons below are
+                            // pinned and therefore always visible — the previous overflow clipped them.
+                            Column(modifier = Modifier.weight(1f).clipToBounds()) {
+                                Text(
+                                    text = selected?.name ?: "",
+                                    color = Color.White,
+                                    fontSize = 24.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                if (!spec?.meta.isNullOrBlank()) {
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(spec!!.meta, color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp)
+                                }
+                                Spacer(Modifier.height(4.dp))
+                                val stats = playtimeStats(context, selected?.name ?: "")
+                                Text(
+                                    "Played ${stats.first}×  ·  ${stats.second}",
+                                    color = Color.White.copy(alpha = 0.85f),
+                                    fontSize = 13.sp,
+                                )
+                                if (chips.isNotEmpty()) {
+                                    Spacer(Modifier.height(10.dp))
+                                    FlowRow(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        chips.forEach { (l, v) -> SpecChip(l, v) }
+                                    }
                                 }
                             }
-                            Spacer(Modifier.height(12.dp))
+                            Spacer(Modifier.height(10.dp))
+                            // Play + Game options: pinned at the bottom of the hero. Each shows our own
+                            // focus border when it's the highlighted item in the PLAY zone (Left/Right
+                            // toggles), and both stay tappable for touch-only users.
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                // Play — touch onClick launches; the PLAY-zone highlight is our own
-                                // border (nothing here is focusable, so there is no phantom focus ring).
+                                val playFocused = zone == BpZone.PLAY && playIndex == 0
+                                val optionsFocused = zone == BpZone.PLAY && playIndex == 1
                                 Button(
-                                    onClick = { zone = BpZone.PLAY; onLaunch() },
+                                    onClick = { zone = BpZone.PLAY; playIndex = 0; onLaunch() },
                                     modifier = Modifier
                                         .height(48.dp)
                                         .then(
-                                            if (zone == BpZone.PLAY)
+                                            if (playFocused)
                                                 Modifier.border(3.dp, MaterialTheme.colorScheme.onPrimary, RoundedCornerShape(16.dp))
                                             else Modifier
                                         ),
@@ -460,8 +474,14 @@ fun BigPictureScreen(navController: NavController) {
                                 }
                                 Spacer(Modifier.width(12.dp))
                                 OutlinedButton(
-                                    onClick = { if (selected != null) activeSheet = BpSheet.GAME_OPTIONS },
-                                    modifier = Modifier.height(48.dp),
+                                    onClick = { zone = BpZone.PLAY; playIndex = 1; if (selected != null) activeSheet = BpSheet.GAME_OPTIONS },
+                                    modifier = Modifier
+                                        .height(48.dp)
+                                        .then(
+                                            if (optionsFocused)
+                                                Modifier.border(3.dp, MaterialTheme.colorScheme.onPrimary, RoundedCornerShape(16.dp))
+                                            else Modifier
+                                        ),
                                     shape = RoundedCornerShape(16.dp),
                                 ) {
                                     Icon(Icons.Filled.Tune, contentDescription = null, tint = Color.White)
