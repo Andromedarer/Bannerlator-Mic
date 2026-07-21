@@ -56,7 +56,7 @@
 |---|---|
 | **App label** | `Bannerlator Bionic` (standard) · `Bannerlator Bionic PuBG` (pubg) · `Bannerlator Bionic Ludashi` (ludashi) |
 | **Packages** | `com.winlator.banner` (standard) · `com.tencent.ig` (pubg) · `com.ludashi.benchmark` (ludashi) |
-| **Version** | Bannerlator **V 2.7.1** — built from Star **marcescence** (`versionName 2.7.1`, `versionCode 47`) |
+| **Version** | Bannerlator **V 2.8** — built from Star **marcescence** (`versionName 2.8`, `versionCode 48`) |
 | **Android SDK** | `compileSdk 34` · `targetSdk 28` · `minSdk 26` (Android 8.0+) |
 | **Lineage** | Winlator → cmod → Bionic Nightly → Star Bionic → **marcescence** → **Bannerlator** |
 
@@ -66,7 +66,7 @@
 
 - [📌 Project Notice](#-project-notice)
 - [ℹ️ Information](#ℹ️-information)
-- [🆕 What's New in 2.7.1](#-whats-new-in-271)
+- [🆕 What's New in 2.8](#-whats-new-in-28)
 - [✨ Full Features](#-full-features)
   - [🍷 Windows compatibility](#-windows-compatibility)
   - [🎨 Graphics & translation layers](#-graphics--translation-layers)
@@ -93,7 +93,22 @@
 
 ---
 
-## 🆕 What's New in 2.7.1
+## 🆕 What's New in 2.8
+
+2.8 is a **feature release** built around three big additions — **gyroscope motion aim**, a **completely rebuilt Big Picture mode**, and **PC-accurate controller vibration** — plus a reorganised in-game Controls drawer and an updated file manager. Like the last several releases it's **entirely app-side** — **no ImageFS reinstall** — your containers, themes, custom accent and per-game settings carry over untouched; just install over 2.7.1.
+
+**🎯 Gyroscope — motion aim.** Aim by tilting your device. Gyro input can drive either the **right stick** or the **mouse**, with a **Tilt-to-Aim (orientation) mode** that maps how you hold the device straight to where you're aiming. Activation is yours to choose — **Hold** a button while you tilt, or **Toggle** it on and leave it on — and there's **device-level calibration** in Input Controls (plus a live bias correction) so a phone that drifts on a table doesn't drift in-game. Every setting is **saved per container and per game**, like the rest of the presets. *(Implementation modeled on [WinNative](https://github.com/WinNative-Emu/WinNative)'s — thank you.)*
+
+**📺 Big Picture — rebuilt from scratch.** Big Picture mode is now a **full Compose rebuild**: a fluid couch launcher you can actually drive from the sofa, with **direct access to settings, features and your games**, real **per-game spec chips** showing what each title is actually set to, and **no background music**. D-pad navigation is fixed throughout — no more phantom focus rings, clipped Play buttons or hero buttons overflowing on long titles.
+
+**🎮 PC-accurate controller vibration.** Rumble now behaves like it does on a PC: **dual-motor** output (strong/weak driven independently rather than collapsed into one buzz), with a **per-container vibration mode and intensity**. Underneath, a **winebus duration patch** stops SDL rumble from auto-expiring mid-effect, so sustained rumble actually sustains — applied across **Proton 10 and 11**, on both **arm64ec and x86-64**, with a build-agnostic fallback so it keeps working on future layers. *(Duration patch from [TideGear](https://github.com/TideGear/GameHub-Vibration-Fix)'s PR #91, adopted with permission; the vibration feature itself originates from [GameNative](https://github.com/utkarshdalal/GameNative) #1214.)*
+
+**🕹️ In-game Controls drawer.** The Controls tab is split into **Touch / Mouse / Vibration / Gyro** sub-tabs instead of one long scroll, and the toggle chips are now a uniform 3-across grid with shorter labels.
+
+**📁 Banner File Manager 1.1.0.** New containers ship the updated build, replacing 1.0.0.
+
+<details>
+<summary><b>Previously in 2.7.1</b> — wrapper catalog updates, frame-gen Performance mode, Banner File Manager</summary>
 
 2.7.1 builds on 2.7's **Wrapper Version Manager** with a big round of **catalog + update improvements**, plus a frame-gen **Performance mode**, a **controller-vibration master switch**, our own **Banner File Manager** (replacing WFM), and consistent menu styling across the app. Like the last several releases it's **entirely app-side** — **no ImageFS reinstall** — your containers, themes, custom accent and per-game settings carry over untouched; just install over 2.7.
 
@@ -106,17 +121,6 @@
 **📁 Banner File Manager.** New containers now ship **[Banner File Manager](https://github.com/The412Banner/banner-file-manager)** — our own native Win32 file manager, forked from [BrunoSX's Winlator File Manager](https://github.com/brunodev85/wfm): **dual-pane split view**, **Open as administrator / Open with**, and a **native Win32 copy** that sidesteps the Proton 10.0-4 shell32 copy-paste crash. *(Applies to new containers.)*
 
 **🎨 Interface.** Every dropdown / overflow menu now shares one clean **outlined-card style** (dividers + accent icons), matching the File Manager.
-
-<details>
-<summary><b>Previously in 2.7</b> — Wrapper Version Manager + experimental Mali DX12</summary>
-
-2.7 adds the **Wrapper Version Manager** — you can now **import, update, delete and tune** any graphics wrapper, browse a **curated downloadable catalog** from across the Winlator family, and get **auto-detected settings** for every wrapper with zero setup. It also brings an **experimental, opt-in Mali DX12 driver**. Like the last several releases it's **entirely app-side** — **no ImageFS reinstall** — your containers, themes, custom accent and per-game settings carry over untouched; just install over 2.6.
-
-**🧩 Wrapper Version Manager.** Graphics wrappers are no longer a fixed list. You can **import, update and delete any `.tzst` wrapper** — from another project or your own build — and browse a **curated, downloadable catalog** of wrappers pulled from across the Winlator family, each credited to its source and flagged **"Mali only"** when it won't do anything on your GPU (with **Update** able to pull a replacement straight from the catalog). Every wrapper's **settings are auto-detected**: the manager reads what each wrapper *actually* supports and builds real toggles, sliders and dropdowns with plain-English labels — detection was ground-truthed against every wrapper's binary, so it shows genuine knobs and filters out driver internals and log noise. Each entry gets an overflow (⋮) menu — **Update / Reset / Edit settings / Delete / Details** — plus a pre-import inspection view so you can see what a wrapper is before you name it. *Requested in [#132](https://github.com/The412Banner/Bannerlator/issues/132) by [@6ui99uhkllj](https://github.com/6ui99uhkllj), modeled on [WinlatorMali](https://github.com/GunaCharanTeja/WinlatorMali)'s graphics-driver manager from [Bionic 1.1](https://github.com/GunaCharanTeja/WinlatorMali/releases/tag/bionic-mali-1.1).*
-
-**🧪 Mali DX12 — experimental, opt-in.** A new opt-in **6th graphics driver, "Wrapper + compat + bcn"**, brings [leegao](https://github.com/leegao)'s BCn transcode layer together with a **DX12 compat layer**, with a **"Use GameNative engine (DX12)"** toggle for **Valhall-class Mali** GPUs. This release folds in **leegao's layer-composition fix** so device hooks propagate correctly when both layers stack. It does nothing unless you select it and is **inert on Qualcomm / Adreno** — and DX12 on Mali is still being proven on real hardware, so treat it as a **test path** and please report back with logs.
-
-**🌐 Community — thank you.** Contributed straight to Bannerlator's own config repo: **235 games**, **274 configs**, and growing accounts — and because the in-app browser also merges the **BannerHub** catalog, the total you can browse and apply *inside the app* is bigger still. All growing. This project grows *only* because of the community's support and participation. 🙏 Browse: [Bannerlator repo](https://github.com/The412Banner/bannerlator-game-configs) · [BannerHub catalog](https://github.com/The412Banner/bannerhub-game-configs) · [online](https://the412banner.github.io/bannerlator-game-configs/).
 
 </details>
 
@@ -347,7 +351,8 @@ Everything Bannerlator offers, at a glance. No PC and no root required — it ru
 - Per-game settings including display language / locale.
 - **Customizable on-screen touch controls** and virtual gamepad overlays, which **follow your app theme** or take a **per-game custom colour** you set in the Controls editor.
 - **Physical controller** support (SDL2), plus touchpad / mouse emulation with adjustable cursor speed. The **external controller-binding screen** lists each input as a card with readable labels, and buttons you press while binding appear instantly.
-- **Controller vibration** — **per-slot** rumble toggles plus a **master switch** (in the in-game Vibration section) that silences all rumble regardless of slot, saved globally.
+- **Controller vibration** — **PC-accurate dual-motor** rumble (strong/weak driven independently) with a **per-container vibration mode and intensity**, backed by a **winebus duration patch** so sustained rumble doesn't auto-expire mid-effect (Proton 10/11, arm64ec + x86-64). Plus **per-slot** rumble toggles and a **master switch** (in the in-game Vibration section) that silences all rumble regardless of slot, saved globally.
+- **Gyroscope — motion aim** — tilt to aim, driving either the **right stick** or the **mouse**, with a **Tilt-to-Aim (orientation) mode**, **Hold or Toggle** activation, **device-level calibration** plus live bias correction, and settings **saved per container and per game**.
 
 ### 🌐 Community Configs
 Browse **community-shared, per-game / per-device tuning configs** in-app and apply a known-good setup in one tap.
@@ -396,7 +401,8 @@ Source, releases & issues: **[github.com/The412Banner/banner-file-manager](https
 - Modern **Jetpack Compose** user interface with a redesigned, icon-led navigation drawer.
 - **Theme-aware everywhere** — your selected preset / accent recolours the **whole app *and* the in-game side drawer**, including dialogs, chips, sliders and overlays.
 - **Customizable themes** — **16 presets** (AMOLED default, Classic Dark, Ocean, Forest, Sunset, Rose, Steel, plus Midnight Cobalt, Phosphor, Carbon & Ember, Amethyst, Crimson, Synthwave, Royal Gold, Frost and Monochrome) plus an **HSV custom-accent picker**.
-- In-game overlay drawer for settings, input, and quick toggles, with a Task Manager that lists processes as cards and can launch new tasks on any renderer.
+- **Big Picture mode** — a **Compose-built couch launcher** for TV / handheld use: full D-pad navigation, direct rails to your games, settings and features, and **per-game spec chips** showing what each title is actually set to.
+- In-game overlay drawer for settings, input, and quick toggles, with a Task Manager that lists processes as cards and can launch new tasks on any renderer. The **Controls tab is split into Touch / Mouse / Vibration / Gyro sub-tabs**, with a uniform 3-across grid of toggle chips.
 - **Built-in File Manager with Favorites** — bookmark folders and jump to them from a dedicated list, each labelled by storage source (Internal / SD card / a container's Drive C: or Z:) and full path. Image files show **real thumbnails**, and the File Manager doubles as the app's **file picker for every import** (WCP / ICP / wallpaper / drivers / assets) — reliable on OEM skins where Android's system picker fails, with the system picker still available as a secondary option.
 - **Performance HUD** — FPS, frame time, CPU/GPU temperature, and RAM, in vertical or horizontal layout, with its on-screen **position saved per game**.
 - **FEX runtime indicator** — a live badge in the Graphics tab shows what's actually translating the running game: **arm64ec** vs **x86-64**, the translator (**FEXCore / wowbox64 / Box64**), and — for FEXCore — whether the native **unixlib (`.so`)** or the classic **DLL** path is active. Read straight from the running process, so it reflects reality, not just the setting.
