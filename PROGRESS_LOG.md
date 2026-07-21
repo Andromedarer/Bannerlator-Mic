@@ -1,5 +1,22 @@
 # Star-Compose — Progress Log
 
+## 2026-07-21 — 🔴 VIBRATION NOT FELT — live diagnosis (UNRESOLVED, device reboot pending) + 2.7.2 release HALTED
+
+> **⏸️ 2.7.2 release halted mid-prep** on user request. **Nothing tagged, released or pushed — 2.7.1 is still Latest.** Two **uncommitted** edits remain in the working tree: `app/build.gradle` (vc 47→48, 2.7.1→2.7.2) and `README.md` (version row + contents link). Either finish the cut or `git checkout` those two files. (I recommended **2.8** — 45 commits, 3 headline features — user chose **2.7.2**; honour that.)
+>
+> **⭐ THE GYRO WORK IS EXONERATED — do not chase it.** User tested `bannerlator-main-09e9891-standard.apk` (main + Big Picture + PC-accurate vibration, **zero gyro code**) → **also no rumble**. Independently confirmed by diff: **all 116 vibration/rumble lines in `WinHandler.java` and all 28 in `XServerDisplayActivity.java` are byte-identical** between pre-gyro main (`2cca40e4`) and now.
+>
+> **Evidence gathered live over the bridge:**
+> - App gates all open: `vibration_master_enabled=true`, all 4 slots true. Live container `xuser-1 "P11 ARM"`, `vibrationMode=1` (Controller), `vibrationIntensity=65` (user believed 100; xuser-3 has 100). User later set **Both @ 100% → still nothing**.
+> - ✅ **winebus rumble patch IS applied** — byte-checked the live Proton 11 `winebus.so`: **2× `03 00 80 12`** (`mov w3,#-1`), **0×** unpatched. Delivery half is healthy.
+> - 🔑 **Vibrator calls by our app — TODAY: 0, YESTERDAY: 51.** With Both @100% today, `triggerVibration` never reached the system vibrator at all ⇒ rumble isn't arriving from the guest, upstream of every mode/intensity gate.
+> - 🔑 **All 51 yesterday: `status: forwarded_to_input_devices`, `scale: 0.00`.** Android `vibrate_input_devices = 1` hands app vibrations to connected input devices. The pad is an **X-Box 360 pad (`045e:028e`) on USB** (Bluetooth service not even running), and per **TideGear's own caveat** (author of the rumble patch we ship) *native-XInput pads rumble over Bluetooth only, NOT USB*. ⇒ nothing buzzes anywhere. **This explains "it worked before gyro" with zero code change** — the earlier dual-motor proof (2 vibrator ids) was the **Bluetooth** behaviour.
+> - `Evshim` never logged this session (checked `-b all`) despite the binary being patched — the patcher may not be running on this launch path.
+>
+> ▶️ **NEXT (post-reboot):** retest → if dead, **unplug the pad / pair over Bluetooth** and retest Device/Both (isolates the forwarding cause in seconds), or `settings put system vibrate_input_devices 0`. If still 0 vibrator calls with no pad attached, chase **guest→app rumble delivery** (`startVibrationListener` / `setFakeInputPath`) and the missing `Evshim` log. **Worth doing regardless: `triggerVibration` has NO logging** — that's why this needed a full device teardown; add a rate-limited dispatch log.
+>
+> Full detail → [[project_bannerlator_vibration_not_felt_diagnosis]]. ⚠️ Method-level `awk` range extraction gave FALSE diffs (matches call sites, not definitions) — content-diff grepped lines instead.
+
 ## 2026-07-21 — 🎛️ In-game Controls tab → segmented sub-tabs (Touch / Mouse / Vibration / Gyro), main `df419afd`
 
 > **Merged `feat/controls-subtabs` → main (`--no-ff`).** Safety tag `subtabs-premerge-backup` = `43f05635`. CI green 3 flavors (run `29825610490`), staged `bannerlator-controls-subtabs-43f0563-standard.apk`. **vc STAYS 47.**
