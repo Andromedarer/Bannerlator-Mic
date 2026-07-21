@@ -1475,6 +1475,50 @@ private fun UpscalerModeButtons(selected: Int, enabled: Boolean, onSelect: (Int)
     }
 }
 
+// Per-container rumble target picker (Off/Controller/Device/Both) — same segmented-chip style as
+// UpscalerModeButtons above, just a fixed 4-wide row instead of chunked(4). "Device" = the phone's
+// own vibrator (Container.VIBRATION_MODE_DEVICE); "Both" drives the physical controller AND the
+// phone together (Container.VIBRATION_MODE_BOTH).
+@Composable
+private fun VibrationModeButtons(selected: Int, enabled: Boolean = true, onSelect: (Int) -> Unit) {
+    val accent = MaterialTheme.colorScheme.primary
+    val accentDim = LocalAccentDim.current
+    val options = listOf(0 to "Off", 1 to "Controller", 2 to "Device", 3 to "Both")
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        options.forEach { (mode, label) ->
+            val isSel = selected == mode
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (isSel && enabled) accent else Color.Black)
+                    .border(
+                        width = 1.dp,
+                        color = if (isSel && enabled) accent else accentDim,
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                    .clickable(enabled = enabled) { onSelect(mode) }
+                    .padding(vertical = 9.dp)
+            ) {
+                Text(
+                    label,
+                    color = when {
+                        !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                        isSel    -> Color.Black
+                        else     -> accent
+                    },
+                    fontSize = 11.sp,
+                    fontWeight = if (isSel && enabled) FontWeight.Bold else FontWeight.Medium
+                )
+            }
+        }
+    }
+}
+
 // Multi-select cousin of FullscreenModeButtons: each item toggles independently, but shares the exact
 // box style (accent fill + bold black text ON; black bg + accentDim 1dp border + accent medium text OFF)
 // and the aligned equal-width grid (weight(1f), short rows padded with Spacer so widths stay equal).
@@ -2063,11 +2107,43 @@ private fun ControlsContent(state: XServerDrawerState) {
     Spacer(Modifier.height(4.dp))
 
     // Master kill-switch — off suppresses ALL controller rumble regardless of slot (and hides the
-    // per-slot rows, which are moot while it's off). Persists globally.
+    // rumble target, intensity, and per-slot rows below, which are moot while it's off). Persists
+    // globally.
     val vibrationMasterOn by XServerDialogState.vibrationMasterEnabled.collectAsState()
     ToggleRow("Controller vibration", vibrationMasterOn) {
         XServerDialogState.setVibrationMasterEnabled(it)
         XServerDialogState.onVibrationMasterChanged?.invoke(it)
+    }
+    if (vibrationMasterOn) {
+        // Per-container rumble target + intensity (PC-accurate dual-motor rumble). Keyed on the
+        // incoming config so re-opening the drawer doesn't drift from a stale capture — same pattern
+        // as the lsfg "Performance mode" toggle elsewhere in this drawer.
+        val initVibrationMode by XServerDialogState.vibrationMode.collectAsState()
+        var vibrationMode by remember(initVibrationMode) { mutableIntStateOf(initVibrationMode) }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "Rumble Target",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(4.dp))
+        VibrationModeButtons(vibrationMode) {
+            vibrationMode = it
+            XServerDialogState.setVibrationMode(it)
+            XServerDialogState.onVibrationModeChanged?.invoke(it)
+        }
+
+        if (vibrationMode != 0) {
+            val initVibrationIntensity by XServerDialogState.vibrationIntensity.collectAsState()
+            var vibrationIntensity by remember(initVibrationIntensity) { mutableIntStateOf(initVibrationIntensity) }
+            IntSlider("Intensity", vibrationIntensity, 0..100,
+                onValueChange = { vibrationIntensity = it },
+                onValueChangeFinished = {
+                    XServerDialogState.setVibrationIntensity(vibrationIntensity)
+                    XServerDialogState.onVibrationIntensityChanged?.invoke(vibrationIntensity)
+                }
+            )
+        }
     }
     val vibrationSlots by XServerDialogState.vibrationSlots.collectAsState()
     if (vibrationMasterOn) {
