@@ -8,6 +8,7 @@ import android.view.MotionEvent;
 import androidx.preference.PreferenceManager;
 
 import com.winlator.star.XServerDisplayActivity;
+import com.winlator.star.core.GyroCalibrator;
 import com.winlator.star.core.StringUtils;
 import com.winlator.star.inputcontrols.ControlsProfile;
 import com.winlator.star.inputcontrols.ExternalController;
@@ -124,6 +125,10 @@ public class WinHandler {
     private volatile boolean gyroInvertX = false;
     private volatile boolean gyroInvertY = false;
     private volatile int gyroActivator = GYRO_ACTIVATOR_DEFAULT;
+    // Zero-rate bias measured by the out-of-game calibration (Input Controls -> Gyroscope). 0 = the
+    // uncalibrated default, which makes the subtraction in updateGyroData a strict no-op.
+    private volatile float gyroBiasX = 0.0f;
+    private volatile float gyroBiasY = 0.0f;
 
     private float smoothedGyroX = 0.0f;
     private float smoothedGyroY = 0.0f;
@@ -214,6 +219,13 @@ public class WinHandler {
         gyroInvertX = preferences.getBoolean("gyro_invert_x", false);
         gyroInvertY = preferences.getBoolean("gyro_invert_y", false);
         gyroActivator = preferences.getInt("gyro_activator", GYRO_ACTIVATOR_DEFAULT);
+
+        // Calibration bias — read once here (never on the sample path). GyroCalibrator honours the
+        // device stamp, so a bias restored from another phone by Android auto-backup comes back 0.
+        float[] bias = new float[2];
+        GyroCalibrator.loadBias(activity, bias, preferences);
+        gyroBiasX = bias[0];
+        gyroBiasY = bias[1];
     }
 
     private boolean sendPacket(int port) {
@@ -872,6 +884,14 @@ public class WinHandler {
             resetGyroRuntimeState();
             return;
         }
+
+        // Calibration bias first, and deliberately so: BEFORE the deadzone (otherwise the deadzone has
+        // to exceed the bias just to hold still, which is what makes fine aim mushy), BEFORE invert
+        // (an inverted axis would subtract with the wrong sign), BEFORE sensitivity (the bias is in
+        // rad/s, sensitivity is a unitless gain) and BEFORE the low-pass (which would otherwise
+        // converge on bias*sensitivity and never let the stick recenter). Uncalibrated = 0 = no-op.
+        rawGyroX -= gyroBiasX;
+        rawGyroY -= gyroBiasY;
 
         if (Math.abs(rawGyroX) < gyroDeadzone)
             rawGyroX = 0.0f;
