@@ -14,6 +14,8 @@ import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.net.Uri;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.os.Build;
@@ -23,6 +25,7 @@ import android.os.Looper;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
+import android.view.Surface;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
@@ -62,11 +65,13 @@ import com.winlator.star.contentdialog.WineD3DConfigDialog;
 import com.winlator.star.contents.ContentProfile;
 import com.winlator.star.contents.ContentsManager;
 import com.winlator.star.contents.AdrenotoolsManager;
+import com.winlator.star.contents.WrapperManager;
 import com.winlator.star.core.AppUtils;
 import com.winlator.star.core.DefaultVersion;
 import com.winlator.star.core.EnvVars;
 import com.winlator.star.core.FileUtils;
 import com.winlator.star.core.GPUInformation;
+import com.winlator.star.core.GyroCalibrator;
 import com.winlator.star.core.KeyValueSet;
 import com.winlator.star.core.OnExtractFileListener;
 import com.winlator.star.core.PreloaderDialog;
@@ -254,6 +259,47 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     // Inside the XServerDisplayActivity class
     private SensorManager sensorManager;
+    // Gyro (motion aim) — rate samples go straight to WinHandler, which gates them on the
+    // activator button and overlays them on the right stick. Inert when the device has no gyroscope.
+    private Sensor gyroSensor;
+    // Orientation ("tilt to aim") mode reads an absolute pose instead of a rate. GAME_ROTATION_VECTOR
+    // rather than ROTATION_VECTOR on purpose: it fuses gyro + accelerometer only, so a speaker magnet
+    // or a magnetic case can't drag the aim around. ROTATION_VECTOR is the fallback for the handful of
+    // devices that only expose the magnetometer-fused one; null means orientation mode is unavailable.
+    private Sensor gyroRotationSensor;
+    private boolean gyroListenerRegistered = false;
+    // Which sensor TYPE is currently registered. Without this a mid-session mode change would hit the
+    // "already registered" early-out and silently keep feeding the wrong sensor to the wrong entry point.
+    private int registeredGyroSensorType = -1;
+    // Display rotation, cached. getDisplay().getRotation() is a binder call and the orientation remap
+    // needs it on every sample (50-200 Hz while the game renders), so it is refreshed on the events
+    // that can actually change it instead: onCreate, the config-changed path, and the display listener.
+    private volatile int cachedDisplayRotation = Surface.ROTATION_0;
+    // Scratch for the orientation math. All three SensorManager calls write into caller-supplied
+    // arrays, so these live here and the sample path allocates nothing.
+    private final float[] gyroRotationMatrix = new float[9];
+    private final float[] gyroRemappedMatrix = new float[9];
+    private final float[] gyroOrientationAngles = new float[3];
+    // getRotationMatrixFromVector throws IllegalArgumentException on some Samsung builds when the
+    // rotation vector carries more than 4 components, so anything longer is copied down into this.
+    private final float[] gyroRotationVector = new float[4];
+    private final SensorEventListener gyroListener = new SensorEventListener() {
+        @Override
+        public void onSensorChanged(SensorEvent event) {
+            if (winHandler == null) return;
+            int type = event.sensor.getType();
+            if (type == Sensor.TYPE_GYROSCOPE) {
+                winHandler.updateGyroData(event.values[0], event.values[1]);
+            }
+            else if (type == Sensor.TYPE_GAME_ROTATION_VECTOR || type == Sensor.TYPE_ROTATION_VECTOR) {
+                computeGyroOrientation(event.values);
+            }
+        }
+
+        @Override
+        public void onAccuracyChanged(Sensor sensor, int accuracy) {
+        }
+    };
 
     // Playtime stats tracking
     private long startTime;
@@ -269,7 +315,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // of silently keeping the stale one. Read the persisted marker at
     // imageFs.getLibDir()/.extra_libs_version; a mismatch (or missing marker => -1) triggers a
     // re-extract. Value 2 = the 2.2.1 patched Tier-1 libvkbasalt.so (md5 3129127c…).
-    private static final int EXTRA_LIBS_VERSION = 2;
+    private static final int EXTRA_LIBS_VERSION = 4;
 
     private Handler  timeoutHandler = new Handler(Looper.getMainLooper());
     private Runnable hideControlsRunnable;
@@ -426,6 +472,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
     @Override
     public void onConfigurationChanged(@NonNull Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
+        // The activity is sensorLandscape and a portrait-resolution container forces portrait, so the
+        // rotation really does flip under us at runtime — re-read it for the orientation remap.
+        refreshCachedDisplayRotation();
         if (configChangedCallback != null) {
             configChangedCallback.run();
             configChangedCallback = null;
@@ -490,8 +539,22 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
 
         // Initialize SensorManager
-
-
+        sensorManager = (SensorManager) getSystemService(SENSOR_SERVICE);
+        if (sensorManager != null) {
+            gyroSensor = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
+            // Orientation mode's sensor, resolved once: game rotation vector first (no magnetometer),
+            // plain rotation vector as the fallback, null when the device has neither.
+            gyroRotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR);
+            if (gyroRotationSensor == null)
+                gyroRotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);
+        }
+        Log.i("XServerGyro", "Gyroscope sensor " + (gyroSensor != null ? "found: " + gyroSensor.getName() : "not available"));
+        Log.i("XServerGyro", "Rotation-vector sensor " + (gyroRotationSensor != null ? "found: " + gyroRotationSensor.getName() : "not available"));
+        // Seed the cached rotation the orientation remap reads (see refreshCachedDisplayRotation).
+        refreshCachedDisplayRotation();
+        // NOTE: the listener is NOT registered here — the container (and so the gyro config) isn't
+        // known yet at this point. See the applyGyroTuning block below, which registers it once the
+        // resolved config is in. onResume re-registers, so nothing is lost on the way back in.
 
         // Record the start time
         startTime = System.currentTimeMillis();
@@ -635,12 +698,16 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 // lsfg-vk: rewrite its conf.toml — the fork layer watches the file mtime and reloads
                 // live (swapchain recreate). Passthrough = multiplier 1 (layer treats <=1 as off).
                 File dll = new File(getFilesDir(), "lsfg-vk/Lossless.dll");
+                // Live performance_mode: seeded from the container at launch (below), toggled live from
+                // the FG drawer. Rewriting conf.toml with it bumps the mtime so the layer re-reads.
+                boolean perfMode = s.getLsfgPerformanceMode().getValue();
                 // mult is already 0 when the in-game toggle is Off (or FG disabled). lsfg-vk treats
                 // multiplier <= 1 as passthrough, so map anything below 2 to 1 — NOT max(2,mult),
                 // which would force 2x on Off.
-                writeLsfgConfig(mult >= 2 ? mult : 1, flow, dll.getAbsolutePath());
+                writeLsfgConfig(mult >= 2 ? mult : 1, flow, dll.getAbsolutePath(), perfMode);
                 if (fgOn) container.setFrameGenMultiplier(mult);
                 container.setFrameGenFlowScale(flow);
+                container.setLsfgPerformanceMode(perfMode);
                 container.saveData();
                 // lsfg multiplier may have crossed the >=2 threshold -> re-evaluate the limiter
                 // guard (lsfgGovernsFps) so the cap steps aside / resumes without extra user action.
@@ -879,6 +946,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         XServerDrawerState.INSTANCE.setFrameGenMultiplier(0);
         XServerDrawerState.INSTANCE.setFrameGenFlowScale(container.getFrameGenFlowScale());
         XServerDrawerState.INSTANCE.setFrameGenEngine(fgEngine);
+        XServerDrawerState.INSTANCE.setLsfgPerformanceMode(container.isLsfgPerformanceMode());
         XServerDrawerState.INSTANCE.setFpsLimiterEnabled(fpsLimOn);
         XServerDrawerState.INSTANCE.setFpsLimit(resolvedFpsLimiterValue());
         XServerDrawerState.INSTANCE.setMatchRefreshRate(resolvedMatchRefreshRate());
@@ -964,6 +1032,51 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
             Log.d("XServerDisplayActivity", "XInput Disabled from Shortcut: " + xinputDisabledFromShortcut);
         }
+
+        // Gyro (motion aim) — resolve the whole config ONCE here and push it into WinHandler in a
+        // single call. enabled/target/activator/sensitivity/invertX/invertY are per-game (the
+        // shortcut extra wins, else the container value, else the GYRO_*_DEFAULT baked into the
+        // getter); deadzone/smoothing are container-only, they describe the hand and the device
+        // rather than the game. This must never move onto the sample path — Container.getExtra
+        // parses JSON and allocates, and updateGyroData runs at the sensor rate while the game
+        // renders. WinHandler keeps the resolved values in its volatile fields from here on.
+        boolean gyroOn = container.isGyroEnabled();
+        int gyroTarget = container.getGyroTarget();
+        int gyroActivator = container.getGyroActivator();
+        int gyroActivationMode = container.getGyroActivationMode();
+        int gyroMode = container.getGyroMode();
+        float gyroSensitivity = container.getGyroSensitivity();
+        boolean gyroInvertX = container.isGyroInvertX();
+        boolean gyroInvertY = container.isGyroInvertY();
+        if (shortcut != null) {
+            gyroOn = shortcut.getExtra("gyroEnabled", gyroOn ? "1" : "0").equals("1");
+            gyroInvertX = shortcut.getExtra("gyroInvertX", gyroInvertX ? "1" : "0").equals("1");
+            gyroInvertY = shortcut.getExtra("gyroInvertY", gyroInvertY ? "1" : "0").equals("1");
+            try {
+                gyroTarget = Integer.parseInt(shortcut.getExtra("gyroTarget", String.valueOf(gyroTarget)));
+                gyroActivator = Integer.parseInt(shortcut.getExtra("gyroActivator", String.valueOf(gyroActivator)));
+                gyroActivationMode = Integer.parseInt(shortcut.getExtra("gyroActivationMode", String.valueOf(gyroActivationMode)));
+                gyroMode = Integer.parseInt(shortcut.getExtra("gyroMode", String.valueOf(gyroMode)));
+            } catch (NumberFormatException e) {}
+            try {
+                gyroSensitivity = Float.parseFloat(shortcut.getExtra("gyroSensitivity", String.valueOf(gyroSensitivity)));
+            } catch (NumberFormatException e) {}
+        }
+        // Orientation mode needs a rotation-vector sensor this device may not have. Fall back to rate
+        // mode and say so once — but deliberately do NOT rewrite the stored setting: the container may
+        // be restored from a backup onto a phone that does have the sensor, and silently downgrading
+        // it here would lose the user's choice for good.
+        if (gyroMode == WinHandler.GYRO_MODE_ORIENTATION && gyroRotationSensor == null) {
+            Log.i("XServerGyro", "Gyro orientation mode requested but no rotation-vector sensor — running rate mode");
+            gyroMode = WinHandler.GYRO_MODE_RATE;
+        }
+        // The mouse target can't be driven by an absolute tilt (see WinHandler.sanitizeGyroMode);
+        // applyGyroTuning enforces that, so the mode WinHandler reports back may differ from this one.
+        winHandler.applyGyroTuning(gyroOn, gyroTarget, gyroActivator, gyroActivationMode, gyroMode,
+            gyroSensitivity, container.getGyroDeadzone(), container.getGyroSmoothing(), gyroInvertX, gyroInvertY);
+        // Only now is it safe to let samples in (registerGyroSensor used to run in onCreate, long
+        // before the container existed, so the first few hundred ms ran on the built-in defaults).
+        registerGyroSensor();
 
         // VEGAS runs its own native DLLs from vegas-<ver>.tzst — no alias to DXVK.
 
@@ -1294,6 +1407,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (isPaused) setPausedState(false);
         // Re-assert the VRR vote — onStop() released it when backgrounded.
         reapplyVrr();
+        // onPause() dropped the gyro listener so it can't drain the battery in the background.
+        registerGyroSensor();
+        // The user may have been away recalibrating (Input Controls -> Gyroscope), which writes the
+        // bias to the global prefs. Re-read it once here, on the way back in, so a fresh calibration
+        // takes effect without relaunching the game. Deliberately NOT on the sample path.
+        reloadGyroBias();
         // Track the live panel rate again (the readout shows it while Auto is on).
         registerVrrDisplayListener();
         updateCurrentRefreshRate();
@@ -1319,6 +1438,125 @@ public class XServerDisplayActivity extends AppCompatActivity {
         savePlaytimeData();
         handler.removeCallbacks(savePlaytimeRunnable);
         ProcessHelper.pauseAllWineProcesses();
+        unregisterGyroSensor();
+    }
+
+    // Re-reads the calibration bias from the global prefs and hands it to WinHandler. GyroCalibrator
+    // still honours the device stamp, so a bias restored from another phone comes back 0.
+    private void reloadGyroBias() {
+        if (winHandler == null || gyroSensor == null) return;
+        float[] bias = new float[2];
+        GyroCalibrator.loadBias(this, bias);
+        winHandler.setGyroBias(bias[0], bias[1]);
+    }
+
+    // Gyro listener register/unregister — both are idempotent and a no-op without a sensor.
+    //
+    // The mode branch lives HERE and nowhere else: rate mode registers the gyroscope and its samples
+    // land in WinHandler.updateGyroData, orientation mode registers the rotation vector and its samples
+    // land in updateGyroOrientation. Neither sample path knows the other exists.
+    //
+    // The "already registered" early-out has to compare the sensor TYPE, not just the flag: switching
+    // mode from the in-game drawer calls straight back in here, and a plain flag check would return
+    // with the previous sensor still registered — the new mode would then never receive a sample.
+    private void registerGyroSensor() {
+        if (sensorManager == null) return;
+        boolean orientationMode = winHandler != null
+            && winHandler.getGyroMode() == WinHandler.GYRO_MODE_ORIENTATION
+            && gyroRotationSensor != null;
+        Sensor sensor = orientationMode ? gyroRotationSensor : gyroSensor;
+        if (sensor == null) return;
+        if (gyroListenerRegistered && registeredGyroSensorType == sensor.getType()) return;
+        // Unregister-then-register so a rapid run of mode taps can't leak a second listener. Both calls
+        // are on the main thread, so no sample can slip in between them.
+        if (gyroListenerRegistered) sensorManager.unregisterListener(gyroListener);
+        sensorManager.registerListener(gyroListener, sensor, SensorManager.SENSOR_DELAY_GAME);
+        gyroListenerRegistered = true;
+        registeredGyroSensorType = sensor.getType();
+        // Whichever direction we switched, the deflection and the captured centre belong to the old
+        // sensor — drop both rather than carry them across.
+        if (winHandler != null) winHandler.resetGyroRuntimeState();
+    }
+
+    // Rotation-vector sample -> yaw/pitch in radians, remapped so the axes follow the SCREEN rather
+    // than the device. The remap is mandatory here (unlike rate mode, which reads raw device axes):
+    // the activity is sensorLandscape, so ROTATION_90 and ROTATION_270 both happen, and a
+    // portrait-resolution container forces portrait — all four cases are reachable.
+    private void computeGyroOrientation(float[] rotationVector) {
+        if (winHandler == null) return;
+        // Some Samsung builds hand out 5+ components and getRotationMatrixFromVector then throws
+        // IllegalArgumentException. Copy the first four into the preallocated scratch instead — a
+        // try/catch on a 200 Hz path would be the wrong shape of fix.
+        float[] vector = rotationVector;
+        if (rotationVector.length > 4) {
+            System.arraycopy(rotationVector, 0, gyroRotationVector, 0, 4);
+            vector = gyroRotationVector;
+        }
+        SensorManager.getRotationMatrixFromVector(gyroRotationMatrix, vector);
+        int axisX = SensorManager.AXIS_X;
+        int axisY = SensorManager.AXIS_Y;
+        switch (cachedDisplayRotation) {
+            case Surface.ROTATION_90:
+                axisX = SensorManager.AXIS_Y;
+                axisY = SensorManager.AXIS_MINUS_X;
+                break;
+            case Surface.ROTATION_180:
+                axisX = SensorManager.AXIS_MINUS_X;
+                axisY = SensorManager.AXIS_MINUS_Y;
+                break;
+            case Surface.ROTATION_270:
+                axisX = SensorManager.AXIS_MINUS_Y;
+                axisY = SensorManager.AXIS_X;
+                break;
+            default:
+                break;
+        }
+        SensorManager.remapCoordinateSystem(gyroRotationMatrix, axisX, axisY, gyroRemappedMatrix);
+        SensorManager.getOrientation(gyroRemappedMatrix, gyroOrientationAngles);
+        // gyroOrientationAngles = [azimuth (yaw), pitch, roll]; roll is unused.
+        winHandler.updateGyroOrientation(gyroOrientationAngles[0], gyroOrientationAngles[1]);
+    }
+
+    // Refreshed on rotation events only — never from the sample path, where it would be a binder call
+    // per sample. Volatile because the sensor callback reads it.
+    private void refreshCachedDisplayRotation() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                android.view.Display display = getDisplay();
+                if (display != null) {
+                    cachedDisplayRotation = display.getRotation();
+                    return;
+                }
+            }
+            cachedDisplayRotation = getWindowManager().getDefaultDisplay().getRotation();
+        }
+        catch (Exception e) {
+            // Leave the previous value in place; a stale remap beats a crashed activity.
+        }
+    }
+
+    // Write-back for the per-game gyro settings: the shortcut when the game was launched from one,
+    // otherwise the container. Same key on both sides, so the launch resolver reads back exactly what
+    // was written here (see the applyGyroTuning block in setupUI).
+    private void persistGyroExtra(String key, String value) {
+        if (shortcut != null) {
+            shortcut.putExtra(key, value);
+            shortcut.saveData();
+        }
+        else if (container != null) {
+            container.putExtra(key, value);
+            container.saveData();
+        }
+    }
+
+    private void unregisterGyroSensor() {
+        if (sensorManager == null || !gyroListenerRegistered) return;
+        sensorManager.unregisterListener(gyroListener);
+        gyroListenerRegistered = false;
+        registeredGyroSensorType = -1;
+        // Clear the runtime state on the way out: with the listener gone nothing arrives to un-latch a
+        // toggled-on gyro, so the overlay would stay frozen into the last gamepad state the game saw.
+        if (winHandler != null) winHandler.resetGyroRuntimeState();
     }
 
 
@@ -1350,7 +1588,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // lsfg-vk (GameNative fork) conf.toml. The layer watches this file's mtime in its present hook
     // and forces a swapchain recreate when it changes, re-reading multiplier/flow — so rewriting it
     // from the in-game menu re-applies live. exe MUST equal the LSFG_PROCESS env value.
-    void writeLsfgConfig(int multiplier, float flowScale, String dllPath) {
+    void writeLsfgConfig(int multiplier, float flowScale, String dllPath, boolean performanceMode) {
         try {
             File configDir = new File(imageFs.home_path, ".config/lsfg-vk");
             configDir.mkdirs();
@@ -1364,7 +1602,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     + "exe = \"bannerlator-lsfg\"\n"
                     + "multiplier = " + multiplier + "\n"
                     + "flow_scale = " + String.format(java.util.Locale.US, "%.2f", flowScale) + "\n"
-                    + "performance_mode = false\n"
+                    + "performance_mode = " + performanceMode + "\n"
                     + "hdr_mode = false\n"
                     + "experimental_present_mode = \"fifo\"\n";
             FileUtils.writeString(confFile, toml);
@@ -1836,6 +2074,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             inGameControlsEditor = null;
         }
         super.onDestroy();
+        unregisterGyroSensor();
         stopDxApiDetection();
         cancelLaunchTimers();
         // Drop the failure-card callbacks so this activity isn't retained via the static holder.
@@ -1917,6 +2156,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         XServerDialogState ds = XServerDialogState.INSTANCE;
         ds.setVibrationSlots(kSlots);
         ds.onVibrationSlotChanged = (slot, enabled) -> winHandler.setVibrationEnabledForSlot(slot, enabled);
+        ds.setVibrationMasterEnabled(winHandler.isVibrationMasterEnabled());
+        ds.onVibrationMasterChanged = (enabled) -> winHandler.setVibrationMasterEnabled(enabled);
         ds.show(XServerDialogState.ActiveDialog.VIBRATION);
     }
 
@@ -2154,7 +2395,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     // Start in passthrough (multiplier 1 = frame gen off). ENABLE_LSFG still loads the
                     // layer, so the FG drawer can enable it live in-session (the conf.toml mtime watch
                     // re-applies the user's multiplier without a relaunch). Container value untouched.
-                    writeLsfgConfig(1, container.getFrameGenFlowScale(), losslessDll.getAbsolutePath());
+                    writeLsfgConfig(1, container.getFrameGenFlowScale(), losslessDll.getAbsolutePath(), container.isLsfgPerformanceMode());
                     File lsfgConf = new File(imageFs.home_path, ".config/lsfg-vk/conf.toml");
                     envVars.put("ENABLE_LSFG", "1");
                     envVars.put("LSFG_CONFIG", lsfgConf.getAbsolutePath());
@@ -2890,6 +3131,114 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
             ds.setVibrationSlots(kSlots);
             ds.onVibrationSlotChanged = (slot, enabled) -> winHandler.setVibrationEnabledForSlot(slot, enabled);
+            ds.setVibrationMasterEnabled(winHandler.isVibrationMasterEnabled());
+            ds.onVibrationMasterChanged = (enabled) -> winHandler.setVibrationMasterEnabled(enabled);
+
+            // Per-container rumble mode/intensity: Container is the source of truth (persists across
+            // sessions/editor); this is called AFTER `container` is assigned (setupUI, not onCreate),
+            // so it's safe to read here — mirrors the ReShade/lsfg seed-after-container pattern.
+            int vibMode = container != null ? container.getVibrationMode() : Container.VIBRATION_MODE_DEFAULT;
+            int vibIntensity = container != null ? container.getVibrationIntensity() : Container.VIBRATION_INTENSITY_DEFAULT;
+            winHandler.setVibrationTuning(vibMode, vibIntensity);
+            ds.setVibrationMode(vibMode);
+            ds.setVibrationIntensity(vibIntensity);
+            ds.onVibrationModeChanged = (mode) -> {
+                winHandler.setVibrationTuning(mode, winHandler.getVibrationIntensity());
+                if (container != null) {
+                    container.setVibrationMode(mode);
+                    container.saveData();
+                }
+            };
+            ds.onVibrationIntensityChanged = (pct) -> {
+                winHandler.setVibrationTuning(winHandler.getVibrationMode(), pct);
+                if (container != null) {
+                    container.setVibrationIntensity(pct);
+                    container.saveData();
+                }
+            };
+
+            // Gyro (motion aim) state — WinHandler holds the live values (already resolved at launch
+            // from the shortcut/container chain), so this seeds the drawer straight off it. Each
+            // change is applied live AND written back to the SAME owner the launch seed reads from:
+            // the shortcut when the game was launched from one, else the container. Writing only to
+            // the container is what made the FPS limiter "reset every time you close the game"
+            // (issue #46) — the gyro is per-game too, so it would hit the identical bug.
+            // Deadzone/smoothing are container-only, matching the launch resolution above.
+            ds.setGyroSupported(gyroSensor != null);
+            // Separate flag: plenty of devices have a gyroscope but no rotation-vector sensor, and the
+            // Orientation chip is rendered disabled-with-a-reason rather than hidden on those.
+            ds.setGyroOrientationSupported(gyroRotationSensor != null);
+            ds.setGyroEnabled(winHandler.isGyroEnabled());
+            ds.setGyroTarget(winHandler.getGyroTarget());
+            ds.setGyroSensitivity(winHandler.getGyroSensitivity());
+            ds.setGyroDeadzone(winHandler.getGyroDeadzone());
+            ds.setGyroSmoothing(winHandler.getGyroSmoothing());
+            ds.setGyroInvertX(winHandler.isGyroInvertX());
+            ds.setGyroInvertY(winHandler.isGyroInvertY());
+            ds.setGyroActivator(winHandler.getGyroActivator());
+            ds.setGyroActivationMode(winHandler.getGyroActivationMode());
+            // Read back off WinHandler, not off the local variable: the launch resolver may have been
+            // overruled (mouse target, or no rotation-vector sensor), and the drawer must show what is
+            // actually running.
+            ds.setGyroMode(winHandler.getGyroMode());
+            ds.onGyroEnabledChanged = (enabled) -> {
+                winHandler.setGyroEnabled(enabled);
+                persistGyroExtra("gyroEnabled", enabled ? "1" : "0");
+            };
+            ds.onGyroTargetChanged = (target) -> {
+                winHandler.setGyroTarget(target);
+                persistGyroExtra("gyroTarget", String.valueOf(winHandler.getGyroTarget()));
+                // Selecting the mouse target knocks orientation mode back to rate, which means a
+                // different sensor — re-register and re-seed the chip so the drawer stays honest.
+                registerGyroSensor();
+                ds.setGyroMode(winHandler.getGyroMode());
+            };
+            ds.onGyroModeChanged = (mode) -> {
+                winHandler.setGyroMode(mode);
+                persistGyroExtra("gyroMode", String.valueOf(winHandler.getGyroMode()));
+                // Live mode switch: the OTHER sensor has to be registered before the next sample, or
+                // the newly selected entry point never sees one.
+                registerGyroSensor();
+            };
+            // Manual recenter (orientation mode). Not bound to a gamepad button on purpose — the
+            // activator already spends one — and it is the ONLY way to recentre under the "Always"
+            // activator, which never has a rising edge to auto-recentre on.
+            ds.onGyroRecenterRequested = () -> winHandler.recenterGyroOrientation();
+            ds.onGyroActivatorChanged = (index) -> {
+                winHandler.setGyroActivator(index);
+                persistGyroExtra("gyroActivator", String.valueOf(winHandler.getGyroActivator()));
+            };
+            ds.onGyroActivationModeChanged = (mode) -> {
+                winHandler.setGyroActivationMode(mode);
+                persistGyroExtra("gyroActivationMode", String.valueOf(winHandler.getGyroActivationMode()));
+            };
+            ds.onGyroSensitivityChanged = (value) -> {
+                winHandler.setGyroSensitivity(value);
+                persistGyroExtra("gyroSensitivity", String.valueOf(winHandler.getGyroSensitivity()));
+            };
+            ds.onGyroInvertXChanged = (invert) -> {
+                winHandler.setGyroInvertX(invert);
+                persistGyroExtra("gyroInvertX", invert ? "1" : "0");
+            };
+            ds.onGyroInvertYChanged = (invert) -> {
+                winHandler.setGyroInvertY(invert);
+                persistGyroExtra("gyroInvertY", invert ? "1" : "0");
+            };
+            // Container-only pair: not per-game, so these always land on the container.
+            ds.onGyroDeadzoneChanged = (value) -> {
+                winHandler.setGyroDeadzone(value);
+                if (container != null) {
+                    container.setGyroDeadzone(winHandler.getGyroDeadzone());
+                    container.saveData();
+                }
+            };
+            ds.onGyroSmoothingChanged = (value) -> {
+                winHandler.setGyroSmoothing(value);
+                if (container != null) {
+                    container.setGyroSmoothing(winHandler.getGyroSmoothing());
+                    container.saveData();
+                }
+            };
         }
 
         // Task Manager actions (End Process / Bring to Front / New Task / Set Affinity) are
@@ -3295,6 +3644,19 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
     }
 
+    // Wrapper Version Manager (Step 1, issue #132): extract a bundled graphics_driver asset, but
+    // prefer a user-installed override at filesDir/graphics_driver/<assetFileName> when present.
+    // Byte-for-byte identical to the old bundled-asset extract when no override exists.
+    private void extractGraphicsAsset(String assetFileName, File rootDir) {
+        File override = new File(getFilesDir(), "graphics_driver/" + assetFileName);
+        if (override.isFile()) {
+            Log.d("GraphicsDriverExtraction", "using user override for " + assetFileName + " (" + override.getAbsolutePath() + ")");
+            TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, override, rootDir);
+        } else {
+            TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/" + assetFileName, rootDir);
+        }
+    }
+
     private void extractGraphicsDriverFiles() {
     // 1. Retrieve the selected driver name from the config
     String selectedDriver = graphicsDriverConfig.get("graphicsDriver");
@@ -3307,22 +3669,35 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     File rootDir = imageFs.getRootDir();
 
+    // Wrapper Version Manager Step 2 (issue #132): an EXACT-name override at
+    // filesDir/graphics_driver/<graphicsDriver>.tzst wins over the bundled chain. This single check
+    // resolves (a) the default "wrapper" slot override (which the startsWith chain below never
+    // handled), (b) any bundled-slot override whose graphicsDriver == its file base name, and
+    // (c) free-form IMPORTED wrappers (identifier == graphicsDriver). Bundled drivers with NO
+    // matching file — including bcn/compat (graphicsDriver "wrapper-bcn_layer", whose base archive
+    // is leegao_bcn.tzst / wrapper-leegao.tzst, not "wrapper-bcn_layer.tzst") — fall through
+    // unchanged to the per-branch chain below.
+    File userWrapper = new File(getFilesDir(), "graphics_driver/" + graphicsDriver + ".tzst");
+    if (userWrapper.isFile()) {
+        Log.d("GraphicsDriverExtraction", "Extracting user wrapper (override/import): " + userWrapper.getAbsolutePath());
+        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, userWrapper, rootDir);
+    }
     // Perform wrapper extraction based on selected version
-    if (graphicsDriver.startsWith("wrapper-original")) {
+    else if (graphicsDriver.startsWith("wrapper-original")) {
         Log.d("GraphicsDriverExtraction", "Extracting: graphics_driver/wrapper-original.tzst");
-        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/wrapper-original.tzst", rootDir);
-    } 
+        extractGraphicsAsset("wrapper-original.tzst", rootDir);
+    }
     else if (graphicsDriver.startsWith("wrapper-leegao")) {
         Log.d("GraphicsDriverExtraction", "Extracting: graphics_driver/wrapper-leegao.tzst");
-        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/wrapper-leegao.tzst", rootDir);
-    } 
+        extractGraphicsAsset("wrapper-leegao.tzst", rootDir);
+    }
     else if (graphicsDriver.startsWith("wrapper-legacy")) {
         Log.d("GraphicsDriverExtraction", "Extracting: graphics_driver/wrapper-legacy.tzst");
-        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/wrapper-legacy.tzst", rootDir);
+        extractGraphicsAsset("wrapper-legacy.tzst", rootDir);
     }
     else if (graphicsDriver.startsWith("wrapper-gamenative")) {
         Log.d("GraphicsDriverExtraction", "Extracting: graphics_driver/wrapper-gamenative.tzst");
-        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/wrapper-gamenative.tzst", rootDir);
+        extractGraphicsAsset("wrapper-gamenative.tzst", rootDir);
     }
     else if (graphicsDriver.startsWith("wrapper-bcn_layer")) {
         // Wrapper + bcn_layer == the wrapper-leegao ICD as its base, PLUS leegao's bcn_layer
@@ -3330,7 +3705,27 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // via the already-set VK_LAYER_PATH). Extract the SAME base wrapper as Wrapper-leegao;
         // the BCn env block below activates the layer.
         Log.d("GraphicsDriverExtraction", "Extracting: graphics_driver/wrapper-leegao.tzst (base for wrapper-bcn_layer)");
-        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/wrapper-leegao.tzst", rootDir);
+        extractGraphicsAsset("wrapper-leegao.tzst", rootDir);
+    }
+    else if (graphicsDriver.startsWith("wrapper-compat-bcn")) {
+        // Wrapper + compat + bcn == the wrapper-leegao ICD base, PLUS leegao's bcn_layer AND
+        // compat_layer implicit Vulkan layers (their .so + manifest ship in extra_libs.tzst and are
+        // picked up via the already-set VK_LAYER_PATH). Extract the SAME base wrapper as Wrapper-leegao;
+        // the BCn env block below activates bcn_layer and the compat env block activates compat_layer.
+        //
+        // Per-game engine swap (config key compatUseGamenative=1): the leegao ICD reports Vulkan 1.1 on
+        // old Mali blobs and lacks the promoted 1.3 entrypoints, so DXVK/VKD3D reject the adapter (no
+        // DX12). When the tester opts in, swap the ICD base to the GameNative wrapper (Mesa-vk-runtime
+        // ICD) which reports 1.3, emulates the entrypoints and has its own integrated BCn. In that mode
+        // the leegao bcn_layer / compat_layer are left DORMANT (their enable-envs are NOT set below), so
+        // BCn is handled by the GameNative wrapper itself (WRAPPER_EMULATE_BCN).
+        if ("1".equals(graphicsDriverConfig.get("compatUseGamenative"))) {
+            Log.d("GraphicsDriverExtraction", "Extracting: graphics_driver/wrapper-gamenative.tzst (GameNative engine base for wrapper-compat-bcn; compatUseGamenative=1)");
+            TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/wrapper-gamenative.tzst", rootDir);
+        } else {
+            Log.d("GraphicsDriverExtraction", "Extracting: graphics_driver/wrapper-leegao.tzst (leegao base for wrapper-compat-bcn; compatUseGamenative off)");
+            TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/wrapper-leegao.tzst", rootDir);
+        }
     }
 
     // Original logic for DXWrapper and environment variables
@@ -3377,7 +3772,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     if (firstTimeBoot) {
         Log.d("XServerDisplayActivity", "First time container boot, re-extracting layers and extra_libs");
         TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "layers" + ".tzst", rootDir);
-        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/extra_libs.tzst", rootDir);
+        extractGraphicsAsset("extra_libs.tzst", rootDir);
         writeExtraLibsVersion(extraLibsVersionFile, EXTRA_LIBS_VERSION);
     }
     else if (!vkBasaltSo.exists() || installedExtraLibsVer != EXTRA_LIBS_VERSION) {
@@ -3385,8 +3780,18 @@ public class XServerDisplayActivity extends AppCompatActivity {
             Log.d("XServerDisplayActivity", "vkBasalt layer absent (pre-existing container) — re-extracting extra_libs");
         else
             Log.d("XServerDisplayActivity", "extra_libs outdated (installed=" + installedExtraLibsVer + " bundled=" + EXTRA_LIBS_VERSION + ") — re-extracting extra_libs");
-        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/extra_libs.tzst", rootDir);
+        extractGraphicsAsset("extra_libs.tzst", rootDir);
         writeExtraLibsVersion(extraLibsVersionFile, EXTRA_LIBS_VERSION);
+    }
+
+    // Wrapper Version Manager (#132): the leegao BCn layer (libbcn_layer.so + manifest) normally
+    // ships inside extra_libs.tzst. A user-installed "BCn layer" override (leegao_bcn.tzst) overlays
+    // a newer copy on top — extract it AFTER extra_libs so it wins, and every launch when present
+    // (small file) so it applies regardless of the extra_libs version gate above.
+    File bcnLayerOverride = new File(getFilesDir(), "graphics_driver/leegao_bcn.tzst");
+    if (bcnLayerOverride.isFile()) {
+        Log.d("GraphicsDriverExtraction", "applying user BCn layer override (leegao_bcn.tzst)");
+        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, bcnLayerOverride, rootDir);
     }
 
     // 3. Driver integration.
@@ -3464,7 +3869,29 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // the two paths can't emit contradictory values. The layer is gated by a hardcoded vendor
     // check (below): activated on non-Qualcomm GPUs (Mali/Xclipse/PowerVR) which lack native BCn,
     // and skipped on Adreno/Qualcomm which has native BCn.
-    boolean isBcnLayerDriver = graphicsDriver != null && graphicsDriver.startsWith("wrapper-bcn_layer");
+    // "Wrapper + compat + bcn" is a bcn-family driver: it reuses the entire bcn_layer / vendor-gate
+    // infrastructure below (same transcode half as "Wrapper + bcn_layer") and additionally activates
+    // leegao's compat_layer for DX12 feature emulation on Valhall Mali (see isCompatDriver block).
+    boolean isBcnLayerDriver = graphicsDriver != null
+            && (graphicsDriver.startsWith("wrapper-bcn_layer") || graphicsDriver.startsWith("wrapper-compat-bcn"));
+    boolean isCompatDriver = graphicsDriver != null && graphicsDriver.startsWith("wrapper-compat-bcn");
+    // Per-game engine swap: run "Wrapper + compat + bcn" on the GameNative wrapper ICD (extracted
+    // above) instead of the leegao ICD, to unlock DX12. When set we take the GameNative activation
+    // path below and DO NOT activate the leegao bcn_layer / compat_layer implicit layers.
+    boolean useGamenativeEngine = isCompatDriver && "1".equals(graphicsDriverConfig.get("compatUseGamenative"));
+
+    // #132 Smart Wrapper Manager: an IMPORTED wrapper whose archive carries libbcn_layer.so also
+    // drives the implicit bcn_layer, so it must run the same activation env (below) — otherwise the
+    // BCn Layer Settings the dialog now SHOWS for that import would do nothing. Gate on the import's
+    // DETECTED caps (WrapperManager.capsFor), and only for imports: a bundled driver's behavior is
+    // decided by the name check above and is left untouched (e.g. wrapper-gamenative keeps its
+    // WRAPPER_EMULATE_BCN path even though its caps include a BCn layer). The compat_layer path is
+    // NOT activated here — that lives on feat/mali-ultimate-driver, not this branch.
+    if (!isBcnLayerDriver && graphicsDriver != null) {
+        WrapperManager wm = new WrapperManager(this);
+        if (wm.isImported(graphicsDriver) && wm.capsFor(graphicsDriver).hasBcnLayer)
+            isBcnLayerDriver = true;
+    }
 
     if (!isBcnLayerDriver) {
         String bcnEmulation = graphicsDriverConfig.get("bcnEmulation");
@@ -3515,6 +3942,46 @@ public class XServerDisplayActivity extends AppCompatActivity {
         boolean activateBcnLayer = GPUInformation.getVendorID(null, null) != 0x5143;
 
         if (activateBcnLayer) {
+        if (useGamenativeEngine) {
+        // === GameNative engine (DX12) activation — Wrapper + compat + bcn, compatUseGamenative=1 ===
+        // The extraction step already swapped the ICD base to wrapper-gamenative.tzst. Here we drive
+        // that wrapper's env-var interface INSTEAD of the leegao bcn_layer/compat_layer: we deliberately
+        // do NOT set ENABLE_BCN_COMPUTE / BCN_* / ENABLE_DXVK_MALI_COMPAT_LAYER, so the leegao implicit
+        // layers (still shipping in extra_libs.tzst) stay dormant. BCn is handled by the GameNative
+        // wrapper itself via WRAPPER_EMULATE_BCN.
+        //
+        // Still gated by the Valhall Mali (r32p1+) model allowlist — same floor as leegao's compat_layer.
+        // The vendor gate (!= 0x5143, above) already excluded Adreno. On a borderline non-Valhall Mali (or
+        // other non-Qualcomm GPU) fall back with a warning and emit NO DX12 override envs.
+        String gnRenderer = GPUInformation.getRenderer(null, null);
+        if (GPUInformation.isCompatLayerSupportedGpu(gnRenderer)) {
+            // WRAPPER_VK_VERSION (=1.3.<patch>) is already set above and the GameNative wrapper reads it.
+            // WRAPPER_SAFE_CREATE_DEVICE=1 — tolerate vkCreateDevice with features the old Mali blob under
+            //   the wrapper doesn't natively expose (the wrapper emulates/masks them) so DXVK/VKD3D proceed.
+            envVars.put("WRAPPER_SAFE_CREATE_DEVICE", "1");
+            // WRAPPER_DRIVER_ID — parsed by atoi() in the shipped libvulkan_wrapper.so (getenv ->
+            //   cbz-if-null -> atoi -> store int; verified by disassembly at .text 0xf400c). It is the
+            //   NUMERIC VkDriverId enum value, NOT the name string. 24 = VK_DRIVER_ID_ARM_PROPRIETARY, so
+            //   the wrapper advertises an ARM proprietary driverID to the D3D layer.
+            envVars.put("WRAPPER_DRIVER_ID", "24");
+            // WRAPPER_EMULATE_BCN=3 — GameNative's own auto BCn transcode (non-Qualcomm auto), replacing
+            //   the leegao bcn_layer for texture decode. Values: 3=auto 2=full 1=default 0=off.
+            envVars.put("WRAPPER_EMULATE_BCN", "3");
+            // WRAPPER_DIAG=1 — the wrapper prints what it actually advertised (version/driverID/apiVersion)
+            //   to the Wine debug log. Essential for our no-Mali-device iteration: it confirms the 1.3 +
+            //   ARM_PROPRIETARY override took. Format: "[WRAPPER_DIAG] driver=%s (driverID=%u) ...".
+            envVars.put("WRAPPER_DIAG", "1");
+            Log.d("GraphicsDriverExtraction", "Wrapper + compat + bcn: GameNative engine (DX12) active on '"
+                    + gnRenderer + "' — WRAPPER_SAFE_CREATE_DEVICE=1 WRAPPER_DRIVER_ID=24(ARM_PROPRIETARY)"
+                    + " WRAPPER_EMULATE_BCN=3 WRAPPER_DIAG=1 (leegao bcn_layer/compat_layer left dormant)");
+        } else {
+            showToast(this, "Wrapper + compat + bcn: GameNative DX12 engine needs a Valhall Mali (r32p1+)"
+                    + " GPU — it is disabled on this device (" + GPUInformation.extractModelName(gnRenderer)
+                    + "). No DX12 overrides applied.");
+            Log.w("GraphicsDriverExtraction", "GameNative DX12 engine disabled: GPU '" + gnRenderer
+                    + "' is not on the Valhall (r32p1+) allowlist — no DX12 envs emitted");
+        }
+        } else {
         // ENABLE_BCN_COMPUTE is both the master switch and the loader enable-gate — always 1.
         envVars.put("ENABLE_BCN_COMPUTE", "1");
 
@@ -3546,6 +4013,32 @@ public class XServerDisplayActivity extends AppCompatActivity {
             envVars.put("BCN_LAYER_LOG_LEVEL", "info,error");
             envVars.put("BCN_PROFILE_TRANSFERS", "1");
         }
+
+        // === compat_layer activation (Wrapper + compat + bcn only) ===
+        // leegao's compat_layer emulates DX12/VKD3D feature levels down to D3D 12.0, but needs a
+        // Valhall Mali (r32p1+). The != 0x5143 vendor gate above is necessary but NOT sufficient — a
+        // Bifrost G52/G76 or sub-r32p1 part passes it yet fails compat's floor. Runtime driver-version
+        // isn't probeable, so gate on the GPU MODEL allowlist (GPUInformation.isCompatLayerSupportedGpu).
+        // On a supported GPU: enable the layer (+ optional sparse-binding). On a borderline non-Valhall
+        // Mali (or any other non-Qualcomm GPU): leave the compat enable-var OFF — the bcn transcode half
+        // above still runs exactly like "Wrapper + bcn_layer" — and warn the tester.
+        if (isCompatDriver) {
+            String renderer = GPUInformation.getRenderer(null, null);
+            if (GPUInformation.isCompatLayerSupportedGpu(renderer)) {
+                envVars.put("ENABLE_DXVK_MALI_COMPAT_LAYER", "1");
+                // Auto-detect handles push/null descriptors; only sparse binding is a user opt-in.
+                if ("1".equals(graphicsDriverConfig.get("bcnCompatSparse")))
+                    envVars.put("COMPAT_EMULATE_SPARSE_BINDING", "1");
+            }
+            else {
+                showToast(this, "Wrapper + compat + bcn: the DX12 compat layer needs a Valhall Mali (r32p1+)"
+                        + " GPU — it is disabled on this device (" + GPUInformation.extractModelName(renderer)
+                        + "). BCn texture transcode is still active.");
+                Log.w("GraphicsDriverExtraction", "compat_layer disabled: GPU '" + renderer
+                        + "' is not on the Valhall (r32p1+) allowlist");
+            }
+        }
+        } // useGamenativeEngine ? GameNative DX12 path : leegao bcn_layer/compat_layer path
         } // activateBcnLayer
     }
 
@@ -3565,6 +4058,33 @@ public class XServerDisplayActivity extends AppCompatActivity {
     else if (vkbasaltConfig != null && !vkbasaltConfig.isEmpty()) {
         envVars.put("ENABLE_VKBASALT", "1");
         envVars.put("VKBASALT_CONFIG", vkbasaltConfig);
+    }
+
+    // #132 Smart Wrapper Manager, Layer 1: GENERIC emission for IMPORTED wrappers. For each env-var
+    // NAME auto-detected from this wrapper's binaries (cached in its .meta), emit KEY=value from the
+    // per-game config — EXCEPT keys a curated control already drives (HANDLED_ENV_KEYS) and any key the
+    // block above already set (has() guard: belt-and-suspenders against double-emit / clobbering curated
+    // env). Toggle "0" and empty values are off/default and skipped, so we only emit what the user
+    // enabled or filled in. This is what activates an imported compat/DX12 or BCn wrapper generically
+    // (e.g. ENABLE_DXVK_MALI_COMPAT_LAYER=1 + COMPAT_*) via the already-set VK_LAYER_PATH — no hardcoded
+    // per-name logic. Bundled wrappers are untouched (isImported gate).
+    if (graphicsDriver != null) {
+        WrapperManager wmGeneric = new WrapperManager(this);
+        if (wmGeneric.isImported(graphicsDriver)) {
+            java.util.Set<String> hiddenKeys = wmGeneric.hiddenKeys(graphicsDriver);
+            for (String key : wmGeneric.detectedEnvKeys(graphicsDriver)) {
+                if (WrapperManager.HANDLED_ENV_KEYS.contains(key)) continue;
+                if (WrapperManager.isDebugEnvKey(key)) continue;   // debug/diag plumbing -> never emit
+                if (WrapperManager.isDriverInternalEnvKey(key)) continue; // Mesa/adrenotools driver internals
+                if (hiddenKeys.contains(key)) continue;            // user hid it via Edit settings
+                if (envVars.has(key)) continue; // never overwrite curated env
+                String value = graphicsDriverConfig.get(key);
+                if (value == null) continue;
+                value = value.trim();
+                if (value.isEmpty() || value.equals("0")) continue; // off / default -> don't emit
+                envVars.put(key, value);
+            }
+        }
     }
 }
     
@@ -4270,7 +4790,12 @@ return true;
         vrrDisplayListener = new android.hardware.display.DisplayManager.DisplayListener() {
             @Override public void onDisplayAdded(int displayId) {}
             @Override public void onDisplayRemoved(int displayId) {}
-            @Override public void onDisplayChanged(int displayId) { updateCurrentRefreshRate(); }
+            @Override public void onDisplayChanged(int displayId) {
+                updateCurrentRefreshRate();
+                // Rotation rides on the same callback, and this fires for rotations that never reach
+                // onConfigurationChanged (e.g. a 180 flip between the two landscape orientations).
+                refreshCachedDisplayRotation();
+            }
         };
         dm.registerDisplayListener(vrrDisplayListener, handler);
     }

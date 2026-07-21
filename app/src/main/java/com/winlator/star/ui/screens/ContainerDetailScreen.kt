@@ -53,6 +53,8 @@ import com.winlator.star.contentdialog.WineD3DConfigDialog
 import com.winlator.star.contents.AdrenotoolsManager
 import com.winlator.star.contents.ContentProfile
 import com.winlator.star.contents.ContentsManager
+import com.winlator.star.contents.WrapperManager
+import com.winlator.star.contents.WrapperSettingsDictionary
 import com.winlator.star.core.AppUtils
 import com.winlator.star.core.DefaultVersion
 import com.winlator.star.core.FileUtils
@@ -206,10 +208,15 @@ fun ContainerDetailScreen(
         )
     }
     val isVegasWrapper = StringUtils.parseIdentifier(viewModel.selectedDXWrapper ?: "").contains("vegas")
+    // Mali compat/bcn testers need DXVK 1.x reachable even with VKD3D selected, to try the
+    // 1.10.3 adapter-accept workaround (#137). Relax the #113 DXVK-2.x-only filter ONLY for the
+    // "Wrapper + compat + bcn" driver; every other driver keeps the guard unchanged.
+    val relaxDxvkFilter = StringUtils.parseIdentifier(viewModel.selectedGraphicsDriver) == "wrapper-compat-bcn"
     if (showDxvkConfig) {
         DxvkConfigDialog(
             isArm64EC = viewModel.isArm64EC,
             isVegas = isVegasWrapper,
+            relaxDxvkFilter = relaxDxvkFilter,
             refreshKey = dxvkRefreshKey,
             initialConfig = viewModel.dxWrapperConfig,
             onConfirm = { newConfig -> viewModel.dxWrapperConfig = newConfig; showDxvkConfig = false },
@@ -487,7 +494,8 @@ private fun TopLevelFields(
         }
         Spacer(Modifier.height(8.dp))
 
-        // Graphics Driver + config button
+        // Graphics Driver + wrapper manager (cloud) + config button
+        var showWrapperManager by remember { mutableStateOf(false) }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             LabeledDropdown(
                 label = stringResource(R.string.graphics_driver),
@@ -496,10 +504,17 @@ private fun TopLevelFields(
                 onSelect = { viewModel.selectedGraphicsDriver = it },
                 modifier = Modifier.weight(1f)
             )
+            IconButton(onClick = { showWrapperManager = true }) {
+                Icon(Icons.Default.CloudDownload, contentDescription = stringResource(R.string.wrapper_manager_open))
+            }
             IconButton(onClick = onShowGfxConfig) {
                 Icon(Icons.Default.Settings, contentDescription = null)
             }
         }
+        if (showWrapperManager) WrapperManagerDialog(onDismiss = {
+            showWrapperManager = false
+            viewModel.refreshGraphicsDriverEntries() // pick up a just-imported/deleted wrapper
+        })
         Spacer(Modifier.height(8.dp))
 
         // DX Wrapper + config button
@@ -704,6 +719,21 @@ private fun TopLevelFields(
         if (viewModel.frameGenEngine == "lsfg") {
             Text(
                 text = stringResource(R.string.frame_generation_lsfg_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 52.dp, top = 2.dp, bottom = 4.dp)
+            )
+            // lsfg-vk performance_mode: lower quality for higher FPS. Also live-toggleable in-game.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(
+                    checked = viewModel.lsfgPerformanceMode,
+                    onCheckedChange = { viewModel.lsfgPerformanceMode = it }
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.fg_performance_mode), modifier = Modifier.weight(1f))
+            }
+            Text(
+                text = stringResource(R.string.fg_performance_mode_hint),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 52.dp, top = 2.dp, bottom = 4.dp)
@@ -1308,6 +1338,174 @@ private fun AdvancedTab(
             }
         }
 
+        // Vibration section — per-container rumble target + intensity default. Also live-tunable
+        // in-game from the drawer (this is just the value a new session launches with).
+        SectionBox(title = stringResource(R.string.vibration)) {
+            val vibrationModeLabels = listOf(
+                stringResource(R.string.vibration_mode_off),
+                stringResource(R.string.vibration_mode_controller),
+                stringResource(R.string.vibration_mode_device),
+                stringResource(R.string.vibration_mode_both),
+            )
+            LabeledDropdown(
+                label = stringResource(R.string.vibration_mode_label),
+                options = vibrationModeLabels,
+                selectedOption = vibrationModeLabels.getOrElse(viewModel.vibrationMode) {
+                    vibrationModeLabels[Container.VIBRATION_MODE_DEFAULT]
+                },
+                onSelect = { opt -> viewModel.vibrationMode = vibrationModeLabels.indexOf(opt).coerceAtLeast(0) }
+            )
+            if (viewModel.vibrationMode != Container.VIBRATION_MODE_OFF) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "${stringResource(R.string.vibration_intensity_label)}: ${viewModel.vibrationIntensity}%",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Slider(
+                    value = viewModel.vibrationIntensity.toFloat(),
+                    onValueChange = { viewModel.vibrationIntensity = it.toInt() },
+                    valueRange = 0f..100f, steps = 99
+                )
+            }
+        }
+
+        // Gyro (motion aim) section — the default a session (and a new shortcut) launches with.
+        // Enabled/target/activator/sensitivity/invert can be overridden per game in the shortcut
+        // editor; deadzone/smoothing stay container-wide because they track the hand and the device,
+        // not the game. All of them are also live-tunable from the in-game drawer.
+        SectionBox(title = stringResource(R.string.gyro)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(
+                    checked = viewModel.gyroEnabled,
+                    onCheckedChange = { viewModel.gyroEnabled = it }
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.gyro_enabled), modifier = Modifier.weight(1f))
+            }
+            if (viewModel.gyroEnabled) {
+                // Rate = tilt SPEED drives the target and it recentres when you stop; Tilt to Aim =
+                // the ANGLE held drives it, so a held tilt sustains. Mutually exclusive with the Mouse
+                // target: the mouse path emits relative deltas, so a held tilt would be a constant
+                // delta and the pointer would run to a screen edge and stay there. Each selection
+                // therefore knocks the other back to a working value (WinHandler enforces the same
+                // rule at launch, so a hand-edited container JSON can't reach the broken pair either).
+                val gyroModeLabels = listOf(
+                    stringResource(R.string.gyro_mode_rate),
+                    stringResource(R.string.gyro_mode_orientation),
+                )
+                LabeledDropdown(
+                    label = stringResource(R.string.gyro_mode_label),
+                    options = gyroModeLabels,
+                    selectedOption = gyroModeLabels.getOrElse(viewModel.gyroMode) {
+                        gyroModeLabels[Container.GYRO_MODE_DEFAULT]
+                    },
+                    onSelect = { opt ->
+                        val mode = gyroModeLabels.indexOf(opt).coerceAtLeast(0)
+                        viewModel.gyroMode = mode
+                        if (mode == Container.GYRO_MODE_ORIENTATION && viewModel.gyroTarget == Container.GYRO_TARGET_MOUSE)
+                            viewModel.gyroTarget = Container.GYRO_TARGET_DEFAULT
+                    }
+                )
+                Spacer(Modifier.height(8.dp))
+                val gyroTargetLabels = listOf(
+                    stringResource(R.string.gyro_target_right_stick),
+                    stringResource(R.string.gyro_target_left_stick),
+                    stringResource(R.string.gyro_target_mouse),
+                )
+                LabeledDropdown(
+                    label = stringResource(R.string.gyro_target_label),
+                    options = gyroTargetLabels,
+                    selectedOption = gyroTargetLabels.getOrElse(viewModel.gyroTarget) {
+                        gyroTargetLabels[Container.GYRO_TARGET_DEFAULT]
+                    },
+                    onSelect = { opt ->
+                        val target = gyroTargetLabels.indexOf(opt).coerceAtLeast(0)
+                        viewModel.gyroTarget = target
+                        if (target == Container.GYRO_TARGET_MOUSE)
+                            viewModel.gyroMode = Container.GYRO_MODE_RATE
+                    }
+                )
+                val gyroActivatorLabels = listOf(
+                    stringResource(R.string.gyro_activator_l1),
+                    stringResource(R.string.gyro_activator_l2),
+                    stringResource(R.string.gyro_activator_r1),
+                    stringResource(R.string.gyro_activator_r3),
+                    stringResource(R.string.gyro_activator_always),
+                )
+                Spacer(Modifier.height(8.dp))
+                LabeledDropdown(
+                    label = stringResource(R.string.gyro_activator_label),
+                    options = gyroActivatorLabels,
+                    selectedOption = gyroActivatorLabels.getOrElse(viewModel.gyroActivator) {
+                        gyroActivatorLabels[Container.GYRO_ACTIVATOR_DEFAULT]
+                    },
+                    onSelect = { opt -> viewModel.gyroActivator = gyroActivatorLabels.indexOf(opt).coerceAtLeast(0) }
+                )
+                // Hold vs Toggle for that button. Pointless with "Always On" (no button to latch), so
+                // the picker is hidden rather than greyed here — an editor row has no live state to
+                // explain, unlike the in-game drawer where the row stays visible but disabled.
+                if (viewModel.gyroActivator != Container.GYRO_ACTIVATOR_ALWAYS) {
+                    val gyroActivationModeLabels = listOf(
+                        stringResource(R.string.gyro_activation_hold),
+                        stringResource(R.string.gyro_activation_toggle),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    LabeledDropdown(
+                        label = stringResource(R.string.gyro_activation_mode_label),
+                        options = gyroActivationModeLabels,
+                        selectedOption = gyroActivationModeLabels.getOrElse(viewModel.gyroActivationMode) {
+                            gyroActivationModeLabels[Container.GYRO_ACTIVATION_MODE_DEFAULT]
+                        },
+                        onSelect = { opt -> viewModel.gyroActivationMode = gyroActivationModeLabels.indexOf(opt).coerceAtLeast(0) }
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "${stringResource(R.string.gyro_sensitivity_label)}: ${"%.1f".format(viewModel.gyroSensitivity)}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Slider(
+                    value = viewModel.gyroSensitivity,
+                    onValueChange = { viewModel.gyroSensitivity = it },
+                    valueRange = 0.1f..10f
+                )
+                Text(
+                    "${stringResource(R.string.gyro_deadzone_label)}: ${"%.2f".format(viewModel.gyroDeadzone)}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Slider(
+                    value = viewModel.gyroDeadzone,
+                    onValueChange = { viewModel.gyroDeadzone = it },
+                    valueRange = 0f..0.5f
+                )
+                Text(
+                    "${stringResource(R.string.gyro_smoothing_label)}: ${"%.2f".format(viewModel.gyroSmoothing)}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Slider(
+                    value = viewModel.gyroSmoothing,
+                    onValueChange = { viewModel.gyroSmoothing = it },
+                    valueRange = 0f..0.95f
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Switch(
+                        checked = viewModel.gyroInvertX,
+                        onCheckedChange = { viewModel.gyroInvertX = it }
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.gyro_invert_x), modifier = Modifier.weight(1f))
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Switch(
+                        checked = viewModel.gyroInvertY,
+                        onCheckedChange = { viewModel.gyroInvertY = it }
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.gyro_invert_y), modifier = Modifier.weight(1f))
+                }
+            }
+        }
+
         // Startup Selection
         LabeledDropdown(
             label = stringResource(R.string.startup_selection),
@@ -1599,8 +1797,40 @@ internal fun GraphicsDriverConfigDialog(
     var disablePresentWait by remember { mutableStateOf(cfg["disablePresentWait"] == "1") }
     var fdDevFeatures    by remember { mutableStateOf(cfg["fdDevFeatures"] == "1") }
 
-    // --- BCn Layer (leegao bcn_layer) settings; only meaningful when driver == wrapper-bcn_layer ---
-    val isBcnLayer = graphicsDriver == "wrapper-bcn_layer"
+    // --- #132 Smart Wrapper Manager: capability + GPU gating (replaces the old exact-name gates) ---
+    // Gate the BCn options by WHAT THE WRAPPER CONTAINS, not by its identifier string. capsFor()
+    // returns a bundled driver's known caps, or — for an imported wrapper — the caps detected from
+    // its .tzst at import time (libvulkan_wrapper.so / libbcn_layer.so / libdxvk_mali_compat_layer.so,
+    // cached in the .meta). This reproduces every bundled driver's current gating exactly, while
+    // letting an imported wrapper that actually carries a BCn layer (e.g. "112") show the same
+    // options. hasCompatLayer drives the DX12/compat UI (sparse binding / "Use GameNative engine")
+    // brought in from the Mali branch below.
+    val caps = remember(graphicsDriver) { WrapperManager(context).capsFor(graphicsDriver) }
+    val isImported = remember(graphicsDriver) { WrapperManager(context).isImported(graphicsDriver) }
+    // Integrated-BCn ICD = a wrapper ICD that honors WRAPPER_BCN_ASTC. Bundled: only wrapper-gamenative
+    // (hasIcd + hasBcnLayer). For IMPORTS we can't yet tell integrated-BCn (env baked into the ICD, no
+    // separate .so) from a plain ICD without an env-scan of the binary (Step-3 Layer 1, deferred), so
+    // any imported ICD shows the toggle — a non-gamenative ICD simply ignores WRAPPER_BCN_ASTC (inert,
+    // harmless). This keeps an imported GameNative wrapper from losing its ASTC toggle.
+    val isIntegratedBcn = (caps.hasIcd && caps.hasBcnLayer) || (isImported && caps.hasIcd)
+    // Standalone BCn Layer Settings (the implicit bcn_layer overlay's env block). Bundled: only
+    // wrapper-bcn_layer (hasBcnLayer, no own ICD). For imports: any archive carrying a BCn layer.
+    // The bundled integrated-BCn ICD (gamenative, hasIcd + hasBcnLayer but NOT an import) is excluded
+    // — it drives BCn through WRAPPER_EMULATE_BCN, not the implicit-layer env — so its dialog stays
+    // byte-for-byte as today.
+    val showBcnLayerSettings = caps.hasBcnLayer && (isImported || !caps.hasIcd)
+    // GPU awareness: BCn transcode/emulation is inert on Qualcomm/Adreno (native BCn). Mirror XSDA's
+    // activateBcnLayer = getVendorID != 0x5143 gate so we MARK (never silently hide) those options.
+    val isQualcomm = remember { GPUInformation.getVendorID(null, null) == 0x5143 }
+    val gpuModel = remember { GPUInformation.extractModelName(GPUInformation.getRenderer(null, context)) ?: "" }
+    // --- Mali branch: name-based gates for the new "Wrapper + compat + bcn" (DX12) driver. Kept
+    // alongside the capability gates above — downstream UI uses BOTH (caps gates for the generic BCn
+    // panel; these for the compat-driver-specific DX12/GameNative-engine controls). ---
+    // BCn Layer (leegao bcn_layer) settings; meaningful for both the bcn_layer driver and the
+    // "Wrapper + compat + bcn" driver, which reuses the same BCn transcode panel.
+    val isBcnLayer = graphicsDriver == "wrapper-bcn_layer" || graphicsDriver == "wrapper-compat-bcn"
+    // compat_layer (DX12 feature emulation) is exclusive to "Wrapper + compat + bcn".
+    val isCompatDriver = graphicsDriver == "wrapper-compat-bcn"
     // The integrated-BCn wrapper (Wrapper-gamenative) is the only wrapper ICD that actually honors
     // WRAPPER_BCN_ASTC (see XServerDisplayActivity BCn env block). The older wrappers
     // (original/leegao/legacy) ignore it, and Wrapper + bcn_layer has its own ASTC control
@@ -1614,6 +1844,46 @@ internal fun GraphicsDriverConfigDialog(
     // Storage image path -> BCN_COMPUTE_IMAGE_VIEW=1. Default ON.
     var bcnImageView      by remember { mutableStateOf(cfg["bcnImageView"]?.let { it == "1" } ?: true) }
     var bcnDebugLog       by remember { mutableStateOf(cfg["bcnDebugLog"] == "1") }
+    // compat_layer: emulate D3D12 tiled/sparse resources (COMPAT_EMULATE_SPARSE_BINDING). Opt-in,
+    // only honored by the "Wrapper + compat + bcn" driver on a Valhall Mali. Default OFF.
+    var bcnCompatSparse   by remember { mutableStateOf(cfg["bcnCompatSparse"] == "1") }
+    // compat engine selection: OFF (default) = leegao bcn_layer + compat_layer (BCn textures only,
+    // no DX12). ON = swap the ICD base to the GameNative wrapper (wrapper-gamenative.tzst), which
+    // reports Vulkan 1.3 + emulates the promoted entrypoints so DXVK/VKD3D accept the adapter (DX12),
+    // and uses its own integrated BCn. Only for "Wrapper + compat + bcn"; a Valhall Mali (r32p1+) is
+    // required at activation time (XServerDisplayActivity gates it and falls back with a warning).
+    var compatUseGamenative by remember { mutableStateOf(cfg["compatUseGamenative"] == "1") }
+
+    // --- #132 Smart Wrapper Manager, Layer 1: auto-detected settings for IMPORTED wrappers only ---
+    // The env-var NAMES were scanned out of the wrapper's binaries at import and cached in its .meta.
+    // We only READ the .meta here (off-main via IO, keyed on the config so it can't drift), then render
+    // one control per detected key that ISN'T already exposed by a curated control above. Values live in
+    // graphicsDriverConfig under the RAW ENV KEY so they round-trip and XSDA emits them generically.
+    var detectedKeys by remember(graphicsDriver) { mutableStateOf<List<String>>(emptyList()) }
+    val detectedValues = remember(graphicsDriver) { mutableStateMapOf<String, String>() }
+    LaunchedEffect(graphicsDriver, isImported) {
+        if (!isImported) { detectedKeys = emptyList(); return@LaunchedEffect }
+        val wm = WrapperManager(context)
+        // A detected key is a settable SETTING only if it isn't already exposed by a curated control
+        // (HANDLED_ENV_KEYS), isn't debug/diagnostics plumbing (isDebugEnvKey), and hasn't been hidden
+        // for this wrapper via "Edit settings" (hiddenKeys). Same predicate as XSDA emission + the
+        // Edit-settings dialog.
+        val hidden = withContext(Dispatchers.IO) { wm.hiddenKeys(graphicsDriver) }
+        val keys = withContext(Dispatchers.IO) { wm.detectedEnvKeys(graphicsDriver) }
+            .filter {
+                it !in WrapperManager.HANDLED_ENV_KEYS && !WrapperManager.isDebugEnvKey(it) &&
+                    !WrapperManager.isDriverInternalEnvKey(it) && it !in hidden
+            }
+        keys.forEach { k ->
+            val def = WrapperSettingsDictionary.defFor(k)
+            // Seed from the stored config; a toggle normalises to "1"/"0", others keep the raw string.
+            detectedValues[k] = when (def.type) {
+                WrapperSettingsDictionary.Type.TOGGLE -> if (cfg[k] == "1") "1" else "0"
+                else -> cfg[k] ?: ""
+            }
+        }
+        detectedKeys = keys
+    }
 
     val deviceMemoryEntries = remember { context.resources.getStringArray(R.array.device_memory_entries).toList() }
     var selectedMemoryEntry by remember {
@@ -1725,20 +1995,37 @@ internal fun GraphicsDriverConfigDialog(
                 Spacer(Modifier.height(8.dp))
                 LabeledDropdown(stringResource(R.string.graphics_driver_resource_type), resourceTypeEntries, resourceType, { resourceType = it })
                 Spacer(Modifier.height(8.dp))
+                // #132 GPU-context note: BCn transcode/emulation (and the compat layers) only do
+                // anything on Mali/non-Qualcomm GPUs — Adreno has native BCn. Surface the real chip so
+                // Adreno users understand why these options are inert for them (a real point of confusion).
+                Text(
+                    (if (gpuModel.isNotEmpty()) "GPU: $gpuModel — " else "") +
+                        "BCn/compat layers apply to Mali and other non-Qualcomm GPUs",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
                 LabeledDropdown(stringResource(R.string.graphics_driver_bcn_emulation), bcnEmulationEntries, bcnEmulation, { bcnEmulation = it })
                 Spacer(Modifier.height(8.dp))
                 LabeledDropdown(stringResource(R.string.graphics_driver_bcn_emulation_type), bcnTypeEntries, bcnEmulationType, { bcnEmulationType = it })
                 Spacer(Modifier.height(8.dp))
                 LabeledDropdown(stringResource(R.string.graphics_driver_bcn_emulation_cache), bcnCacheEntries, bcnEmulationCache, { bcnEmulationCache = it })
                 Spacer(Modifier.height(8.dp))
-                // ASTC transcode is offered by the BCn-integrated wrapper (Wrapper-gamenative).
-                // The Wrapper + bcn_layer driver has its own ASTC control in its section below;
-                // the older wrappers ignore WRAPPER_BCN_ASTC entirely, so only expose it here for
-                // the gamenative integrated-BCn wrapper.
-                if (isGamenative) {
+                // ASTC transcode is offered by any integrated-BCn wrapper ICD (bundled Wrapper-
+                // gamenative, or an imported wrapper whose archive carries a BCn layer). The standalone
+                // bcn_layer driver has its own ASTC control in its section below; the older wrappers
+                // ignore WRAPPER_BCN_ASTC entirely — so gate on the detected capability, not the name.
+                if (isIntegratedBcn) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(checked = bcnEmulationAstc, onCheckedChange = { bcnEmulationAstc = it })
                         Text(stringResource(R.string.graphics_driver_bcn_emulation_astc))
+                    }
+                    if (isQualcomm) {
+                        Text(
+                            "No effect on Adreno (native BCn)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1754,8 +2041,10 @@ internal fun GraphicsDriverConfigDialog(
                     Text("OneUI / HyperOS Fix")
                 }
 
-                // BCn Layer Settings — only when the Wrapper + bcn_layer driver is selected.
-                if (isBcnLayer) {
+                // BCn Layer Settings — shown when the wrapper carries a BCn layer as an implicit
+                // overlay: bundled wrapper-bcn_layer, or an imported wrapper whose .tzst contains
+                // libbcn_layer.so (e.g. "112"). Detected via caps, not the driver name.
+                if (showBcnLayerSettings) {
                     Spacer(Modifier.height(12.dp))
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -1776,6 +2065,14 @@ internal fun GraphicsDriverConfigDialog(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        if (isQualcomm) {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "No effect on Adreno (native BCn) — these apply to Mali/non-Qualcomm GPUs",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                         Spacer(Modifier.height(8.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(checked = bcnLayerAuto, onCheckedChange = { bcnLayerAuto = it })
@@ -1820,6 +2117,105 @@ internal fun GraphicsDriverConfigDialog(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        // compat_layer DX12 sparse-binding emulation — only for Wrapper + compat + bcn.
+                        if (isCompatDriver) {
+                            // Engine selector: swap the ICD base from leegao to the GameNative wrapper
+                            // for real DX12 support. Primary switch, shown above the sparse opt-in.
+                            Spacer(Modifier.height(8.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(checked = compatUseGamenative, onCheckedChange = { compatUseGamenative = it })
+                                Text(stringResource(R.string.compat_use_gamenative))
+                            }
+                            Text(
+                                stringResource(R.string.compat_use_gamenative_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(checked = bcnCompatSparse, onCheckedChange = { bcnCompatSparse = it })
+                                Text(stringResource(R.string.bcn_compat_sparse))
+                            }
+                            Text(
+                                stringResource(R.string.bcn_compat_sparse_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
+                // --- #132 Smart Wrapper Manager, Layer 1: auto-detected settings (imports only) ---
+                // One control per env-var name scanned from THIS wrapper's binaries, minus the keys a
+                // curated control above already exposes (HANDLED_ENV_KEYS). Values are stored under the
+                // raw env key and passed to the wrapper verbatim at launch. Bundled wrappers: not shown.
+                if (isImported) {
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        "Detected settings (advanced) — from scanning this wrapper",
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        "Values are passed to the wrapper as-is; unknown ones are safe to leave blank.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    if (detectedKeys.isEmpty()) {
+                        Text(
+                            "No extra settings detected.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        detectedKeys.forEach { key ->
+                            val def = WrapperSettingsDictionary.defFor(key)
+                            val current = detectedValues[key] ?: ""
+                            when (def.type) {
+                                WrapperSettingsDictionary.Type.TOGGLE -> {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Checkbox(
+                                            checked = current == "1",
+                                            onCheckedChange = { detectedValues[key] = if (it) "1" else "0" }
+                                        )
+                                        Text(def.label)
+                                    }
+                                }
+                                WrapperSettingsDictionary.Type.DROPDOWN -> {
+                                    val selected = current.ifEmpty { def.default }.ifEmpty { def.choices.firstOrNull() ?: "" }
+                                    LabeledDropdown(def.label, def.choices, selected, { detectedValues[key] = it })
+                                }
+                                WrapperSettingsDictionary.Type.SLIDER -> {
+                                    val fv = current.toFloatOrNull() ?: def.default.toFloatOrNull() ?: def.min
+                                    Text("${def.label}: ${fv.toInt()}", style = MaterialTheme.typography.bodySmall)
+                                    Slider(
+                                        value = fv,
+                                        onValueChange = { detectedValues[key] = it.toInt().toString() },
+                                        valueRange = def.min..(if (def.max > def.min) def.max else def.min + 1f),
+                                        steps = if (def.step > 0f && def.max > def.min)
+                                            (((def.max - def.min) / def.step).toInt() - 1).coerceAtLeast(0) else 0
+                                    )
+                                }
+                                WrapperSettingsDictionary.Type.TEXT -> {
+                                    OutlinedTextField(
+                                        value = current,
+                                        onValueChange = { detectedValues[key] = it },
+                                        singleLine = true,
+                                        label = { Text(def.label) },
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                            }
+                            if (def.hint.isNotBlank()) {
+                                Text(
+                                    def.hint,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Spacer(Modifier.height(8.dp))
+                        }
                     }
                 }
             }
@@ -1843,9 +2239,17 @@ internal fun GraphicsDriverConfigDialog(
                     "bcnTranscodeAstc=${if (bcnTranscodeAstc) "1" else "0"};" +
                     "bcnImageView=${if (bcnImageView) "1" else "0"};" +
                     "bcnDebugLog=${if (bcnDebugLog) "1" else "0"};" +
+                    "bcnCompatSparse=${if (bcnCompatSparse) "1" else "0"};" +
+                    "compatUseGamenative=${if (compatUseGamenative) "1" else "0"};" +
                     "gpuName=$gpuName" +
                     ";fdDevFeatures=${if (fdDevFeatures) "1" else "0"}"
-                onConfirm(config)
+                // #132 Layer 1: append auto-detected wrapper settings under their RAW ENV KEY. Sanitise
+                // values so they can't break the ";"/"=" k=v format the config round-trips through.
+                val detectedPart = detectedKeys.joinToString("") { key ->
+                    val v = (detectedValues[key] ?: "").replace(";", "").replace("=", "")
+                    ";$key=$v"
+                }
+                onConfirm(config + detectedPart)
             }) { Text(stringResource(android.R.string.ok)) }
         },
         dismissButton = {
@@ -1907,6 +2311,7 @@ internal fun ExtensionPickerDialog(
 internal fun DxvkConfigDialog(
     isArm64EC: Boolean,
     isVegas: Boolean = false,
+    relaxDxvkFilter: Boolean = false,
     refreshKey: Int = 0,
     initialConfig: String,
     onConfirm: (String) -> Unit,
@@ -1947,8 +2352,10 @@ internal fun DxvkConfigDialog(
     // VKD3D-Proton needs DXVK 2.x's DXGI; DXVK 1.x can't back it, so the DX12 test fails to start.
     // Filter the DXVK list to 2.x+ (keeping unparseable names, e.g. VEGAS) when VKD3D is enabled —
     // matches the shortcut-level dialog, which already enforces this. Fixes #113.
-    val filteredDxvk = remember(selectedVkd3d, allDxvkVersions.value) {
-        if (selectedVkd3d != "None") {
+    // Exception: the Mali "Wrapper + compat + bcn" driver (relaxDxvkFilter) shows all DXVK versions
+    // so testers can try the DXVK 1.10.3 adapter-accept workaround with VKD3D on (#137).
+    val filteredDxvk = remember(selectedVkd3d, allDxvkVersions.value, relaxDxvkFilter) {
+        if (selectedVkd3d != "None" && !relaxDxvkFilter) {
             allDxvkVersions.value.filter { v ->
                 val major = DXVKConfigDialog.tryGetMajor(v)
                 major == null || major >= 2

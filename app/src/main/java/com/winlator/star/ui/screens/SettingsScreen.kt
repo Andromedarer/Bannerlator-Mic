@@ -521,8 +521,13 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
                     val label = box64Presets.find { it.id == selectedBox64Preset }?.name ?: selectedBox64Preset
                     Text(label, color = MaterialTheme.colorScheme.onSurface)
                 }
-                DropdownMenu(expanded = showBox64Dropdown, onDismissRequest = { showBox64Dropdown = false }) {
-                    box64Presets.forEach { preset ->
+                DropdownMenu(
+                    expanded = showBox64Dropdown,
+                    onDismissRequest = { showBox64Dropdown = false },
+                    modifier = Modifier.outlinedMenuCard()
+                ) {
+                    box64Presets.forEachIndexed { i, preset ->
+                        if (i > 0) MenuItemDivider()
                         DropdownMenuItem(
                             text = { Text(preset.name) },
                             onClick = { selectedBox64Preset = preset.id; showBox64Dropdown = false }
@@ -585,8 +590,13 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
                     val label = fexcorePresets.find { it.id == selectedFEXCorePreset }?.name ?: selectedFEXCorePreset
                     Text(label, color = MaterialTheme.colorScheme.onSurface)
                 }
-                DropdownMenu(expanded = showFEXCoreDropdown, onDismissRequest = { showFEXCoreDropdown = false }) {
-                    fexcorePresets.forEach { preset ->
+                DropdownMenu(
+                    expanded = showFEXCoreDropdown,
+                    onDismissRequest = { showFEXCoreDropdown = false },
+                    modifier = Modifier.outlinedMenuCard()
+                ) {
+                    fexcorePresets.forEachIndexed { i, preset ->
+                        if (i > 0) MenuItemDivider()
                         DropdownMenuItem(
                             text = { Text(preset.name) },
                             onClick = { selectedFEXCorePreset = preset.id; showFEXCoreDropdown = false }
@@ -649,8 +659,13 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
                         modifier = Modifier.fillMaxWidth()) {
                         Text(sfNames.getOrElse(selectedSF) { "Default" }, color = MaterialTheme.colorScheme.onSurface)
                     }
-                    DropdownMenu(expanded = showSFDropdown, onDismissRequest = { showSFDropdown = false }) {
+                    DropdownMenu(
+                        expanded = showSFDropdown,
+                        onDismissRequest = { showSFDropdown = false },
+                        modifier = Modifier.outlinedMenuCard()
+                    ) {
                         sfNames.forEachIndexed { i, name ->
+                            if (i > 0) MenuItemDivider()
                             DropdownMenuItem(
                                 text = { Text(name) },
                                 onClick = { selectedSF = i; showSFDropdown = false }
@@ -872,19 +887,26 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
                     }
                     Text(label, color = MaterialTheme.colorScheme.onSurface)
                 }
-                DropdownMenu(expanded = showLogLocationDropdown, onDismissRequest = { showLogLocationDropdown = false }) {
+                DropdownMenu(
+                    expanded = showLogLocationDropdown,
+                    onDismissRequest = { showLogLocationDropdown = false },
+                    modifier = Modifier.outlinedMenuCard()
+                ) {
                     DropdownMenuItem(
                         text = { Text("App data (default)") },
                         onClick = { logLocationMode = LogLocation.MODE_APP_DATA; showLogLocationDropdown = false }
                     )
+                    MenuItemDivider()
                     DropdownMenuItem(
                         text = { Text("Download") },
                         onClick = { logLocationMode = LogLocation.MODE_DOWNLOAD; showLogLocationDropdown = false }
                     )
+                    MenuItemDivider()
                     DropdownMenuItem(
                         text = { Text("Documents") },
                         onClick = { logLocationMode = LogLocation.MODE_DOCUMENTS; showLogLocationDropdown = false }
                     )
+                    MenuItemDivider()
                     DropdownMenuItem(
                         text = { Text("Choose folder…") },
                         onClick = {
@@ -1070,8 +1092,13 @@ private fun ImportSourceIconButton(
     var expanded by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { expanded = true }) { Icon(icon, contentDescription, tint = tint) }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.outlinedMenuCard()
+        ) {
             DropdownMenuItem(text = { Text("Browse files") }, onClick = { expanded = false; onInApp() })
+            MenuItemDivider()
             DropdownMenuItem(text = { Text("Pick via system…") }, onClick = { expanded = false; onSystem() })
         }
     }

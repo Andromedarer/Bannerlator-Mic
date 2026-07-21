@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -88,6 +89,7 @@ import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -97,6 +99,8 @@ import com.winlator.star.container.Container
 import com.winlator.star.reshade.ReshadeLoadout
 import com.winlator.star.reshade.ReshadeManager
 import com.winlator.star.ui.components.ColorPicker
+import com.winlator.star.ui.screens.MenuItemDivider
+import com.winlator.star.ui.screens.outlinedMenuCard
 import com.winlator.star.ui.theme.LocalAccentDim
 import com.winlator.star.ui.theme.WinlatorTheme
 import com.winlator.star.widget.perfhud.parseHudOutline
@@ -693,10 +697,17 @@ private fun GraphicsContent(state: XServerDrawerState) {
         LabeledSlider("Contrast", vkContrast, -100f..100f, { vkContrast = it; applyVkSe() }, enabled = true)
         LabeledSlider("Gamma", vkGamma, 0.5f..3.0f, { vkGamma = it; applyVkSe() }, enabled = true, format = { "%.2f".format(it) })
 
-        ToggleRow("FXAA", vkFxaa, true) { vkFxaa = it; applyVkSe() }
-        ToggleRow("Toon", vkToon, true) { vkToon = it; applyVkSe() }
-        ToggleRow("CRT", vkCrt, true) { vkCrt = it; applyVkSe() }
-        ToggleRow("NTSC", vkNtsc, true) { vkNtsc = it; applyVkSe() }
+        // Four independent shader flags with identical wiring — one row of chips instead of four
+        // switch rows. Same applyVkSe() round-trip as before.
+        ToggleChipGrid(
+            listOf(
+                ToggleChipItem("FXAA", vkFxaa) { vkFxaa = it; applyVkSe() },
+                ToggleChipItem("Toon", vkToon) { vkToon = it; applyVkSe() },
+                ToggleChipItem("CRT", vkCrt) { vkCrt = it; applyVkSe() },
+                ToggleChipItem("NTSC", vkNtsc) { vkNtsc = it; applyVkSe() },
+            ),
+            perRow = 4
+        )
 
         HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
     }
@@ -770,6 +781,7 @@ private fun FrameGenSection(state: XServerDrawerState) {
     val initFgFlow by state.frameGenFlowScale.collectAsState()
     val engine by state.frameGenEngine.collectAsState()
     val layerActive by state.bionicFgActive.collectAsState()
+    val initLsfgPerf by state.lsfgPerformanceMode.collectAsState()
 
     // Title on the left, engine badge on the right (green dot = engine actually running this
     // session). Replaces the old standalone "Frame Generation (AI)" header so the engine isn't
@@ -844,6 +856,25 @@ private fun FrameGenSection(state: XServerDrawerState) {
                     modifier = Modifier.padding(start = 4.dp, top = 2.dp)
                 )
             }
+        }
+
+        // lsfg-vk only: performance_mode (bionic-fg has no such setting). Toggling rewrites conf.toml
+        // via the same applyFg -> onBionicFgConfigChange path (mtime bump -> layer re-reads live) and
+        // persists to the container there.
+        if (engine == "lsfg") {
+            var lsfgPerf by remember(initLsfgPerf) { mutableStateOf(initLsfgPerf) }
+            Spacer(Modifier.height(8.dp))
+            ToggleRow("Performance mode", lsfgPerf) {
+                lsfgPerf = it
+                state.setLsfgPerformanceMode(it)
+                applyFg()
+            }
+            Text(
+                "Lower quality for higher FPS — helps on low-end devices.",
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                fontSize = 11.sp,
+                modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+            )
         }
     } else {
         Text(
@@ -1177,8 +1208,13 @@ private fun ReshadeDropdown(label: String, options: List<String>, selected: Int,
                 )
                 Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+                modifier = Modifier.outlinedMenuCard()
+            ) {
                 options.forEachIndexed { i, opt ->
+                    if (i > 0) MenuItemDivider()
                     DropdownMenuItem(text = { Text(opt) }, onClick = { onSelect(i); expanded = false })
                 }
             }
@@ -1448,26 +1484,144 @@ private fun UpscalerModeButtons(selected: Int, enabled: Boolean, onSelect: (Int)
     }
 }
 
+// Per-container rumble target picker (Off/Controller/Device/Both) — same segmented-chip style as
+// UpscalerModeButtons above, just a fixed 4-wide row instead of chunked(4). "Device" = the phone's
+// own vibrator (Container.VIBRATION_MODE_DEVICE); "Both" drives the physical controller AND the
+// phone together (Container.VIBRATION_MODE_BOTH).
+@Composable
+private fun VibrationModeButtons(selected: Int, enabled: Boolean = true, onSelect: (Int) -> Unit) {
+    val accent = MaterialTheme.colorScheme.primary
+    val accentDim = LocalAccentDim.current
+    val options = listOf(0 to "Off", 1 to "Controller", 2 to "Device", 3 to "Both")
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        options.forEach { (mode, label) ->
+            val isSel = selected == mode
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (isSel && enabled) accent else Color.Black)
+                    .border(
+                        width = 1.dp,
+                        color = if (isSel && enabled) accent else accentDim,
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                    .clickable(enabled = enabled) { onSelect(mode) }
+                    .padding(vertical = 9.dp)
+            ) {
+                Text(
+                    label,
+                    color = when {
+                        !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                        isSel    -> Color.Black
+                        else     -> accent
+                    },
+                    fontSize = 11.sp,
+                    fontWeight = if (isSel && enabled) FontWeight.Bold else FontWeight.Medium
+                )
+            }
+        }
+    }
+}
+
 // Multi-select cousin of FullscreenModeButtons: each item toggles independently, but shares the exact
 // box style (accent fill + bold black text ON; black bg + accentDim 1dp border + accent medium text OFF)
 // and the aligned equal-width grid (weight(1f), short rows padded with Spacer so widths stay equal).
 // Callers build the list of currently-VISIBLE chips FIRST, then this chunks per row — so per-style
 // gating never leaves holes or misaligns the grid.
+// enabled=false greys the WHOLE grid and swallows taps, the same way VibrationModeButtons does it —
+// for rows that stay on screen because they still explain something, but can't be acted on yet.
+// disabledIndices greys INDIVIDUAL chips (indices into the flat items list) for the case where one
+// option is unreachable in the current configuration but the rest of the row is still live — greyed
+// rather than dropped, so the row doesn't reflow and the option is visibly still a thing that exists.
 @Composable
-private fun ModeChipGrid(items: List<Triple<String, Boolean, () -> Unit>>, perRow: Int) {
+private fun ModeChipGrid(items: List<Triple<String, Boolean, () -> Unit>>, perRow: Int,
+                         enabled: Boolean = true, disabledIndices: Set<Int> = emptySet()) {
     val accent = MaterialTheme.colorScheme.primary
     val accentDim = LocalAccentDim.current
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        items.chunked(perRow).forEach { row ->
+        items.withIndex().chunked(perRow).forEach { row ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                row.forEach { (label, isOn, onTap) ->
+                row.forEach { (index, item) ->
+                    val (label, isOn, onTap) = item
+                    val chipEnabled = enabled && index !in disabledIndices
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
                             .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isOn && chipEnabled) accent else Color.Black)
+                            .border(
+                                width = 1.dp,
+                                color = if (isOn && chipEnabled) accent else accentDim,
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .clickable(enabled = chipEnabled) { onTap() }
+                            .padding(vertical = 9.dp)
+                    ) {
+                        Text(
+                            label,
+                            color = when {
+                                !chipEnabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                                isOn         -> Color.Black
+                                else         -> accent
+                            },
+                            fontSize = 12.sp,
+                            fontWeight = if (isOn && chipEnabled) FontWeight.Bold else FontWeight.Medium
+                        )
+                    }
+                }
+                // Pad short final rows so every chip keeps the same width (grid stays aligned).
+                repeat(perRow - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
+}
+
+// One on/off chip in a ToggleChipGrid. Same tuple ToggleRow takes (label + checked + enabled +
+// callback), just laid out as a chip instead of a full-width switch row.
+private data class ToggleChipItem(
+    val label: String,
+    val checked: Boolean,
+    val enabled: Boolean = true,
+    val onToggle: (Boolean) -> Unit
+)
+
+// Compact stand-in for a run of ToggleRows: same chip language as ModeChipGrid above (accent fill +
+// bold black text ON; black bg + accentDim 1dp border + accent medium text OFF, equal widths, short
+// rows padded with Spacer), but every chip toggles independently. Packing adjacent toggles 2–4 per
+// row is where the vertical space comes back — a Switch row costs ~4x the height of a chip.
+// Disabled chips keep ToggleRow's alpha-0.4 grey-out and swallow taps.
+@Composable
+private fun ToggleChipGrid(items: List<ToggleChipItem>, perRow: Int = 3) {
+    val accent = MaterialTheme.colorScheme.primary
+    val accentDim = LocalAccentDim.current
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        items.chunked(perRow).forEach { row ->
+            // IntrinsicSize.Min + fillMaxHeight keeps a row level when one label wraps to two lines.
+            Row(
+                modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                // Split the padding for a short final row across both sides so it sits CENTRED,
+                // and every chip in the grid keeps the identical width (no odd-sized leftovers).
+                val missing = perRow - row.size
+                val leading = missing / 2
+                repeat(leading) { Spacer(Modifier.weight(1f)) }
+                row.forEach { item ->
+                    val isOn = item.checked && item.enabled
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
                             .clip(RoundedCornerShape(8.dp))
                             .background(if (isOn) accent else Color.Black)
                             .border(
@@ -1475,19 +1629,23 @@ private fun ModeChipGrid(items: List<Triple<String, Boolean, () -> Unit>>, perRo
                                 color = if (isOn) accent else accentDim,
                                 shape = RoundedCornerShape(8.dp)
                             )
-                            .clickable { onTap() }
-                            .padding(vertical = 9.dp)
+                            .then(
+                                if (item.enabled) Modifier.clickable { item.onToggle(!item.checked) }
+                                else Modifier.alpha(0.4f)
+                            )
+                            .padding(horizontal = 6.dp, vertical = 9.dp)
                     ) {
                         Text(
-                            label,
+                            item.label,
                             color = if (isOn) Color.Black else accent,
                             fontSize = 12.sp,
+                            lineHeight = 14.sp,
+                            textAlign = TextAlign.Center,
                             fontWeight = if (isOn) FontWeight.Bold else FontWeight.Medium
                         )
                     }
                 }
-                // Pad short final rows so every chip keeps the same width (grid stays aligned).
-                repeat(perRow - row.size) { Spacer(Modifier.weight(1f)) }
+                repeat(missing - leading) { Spacer(Modifier.weight(1f)) }
             }
         }
     }
@@ -1914,7 +2072,23 @@ private fun ControlsContent(state: XServerDrawerState) {
 
     SectionHeader("Controls")
 
-    // Input Controls section
+    // Four unrelated feature areas live under this tab, so they're segmented rather than stacked —
+    // exactly one renders at a time. ModeChipGrid is already the drawer's segmented-control language
+    // (equal-width accent-filled chips), so the bar reads as native here instead of a new widget.
+    val subTab by state.controlsSubTab.collectAsState()
+    ModeChipGrid(
+        listOf(
+            Triple("Touch", subTab == 0) { state.setControlsSubTab(0) },
+            Triple("Mouse", subTab == 1) { state.setControlsSubTab(1) },
+            Triple("Vibration", subTab == 2) { state.setControlsSubTab(2) },
+            Triple("Gyro", subTab == 3) { state.setControlsSubTab(3) },
+        ),
+        perRow = 4
+    )
+    Spacer(Modifier.height(8.dp))
+
+    // Input Controls section — hoisted above the sub-tab switch so the in-flight profile/flag edits
+    // survive a hop to another sub-tab and back.
     var selectedIdx by remember(initProfileIdx) { mutableIntStateOf(initProfileIdx) }
     var showTouchscreen by remember(initTouchscreen) { mutableStateOf(initTouchscreen) }
     var timeoutEnabled by remember(initTimeout) { mutableStateOf(initTimeout) }
@@ -1922,123 +2096,437 @@ private fun ControlsContent(state: XServerDrawerState) {
     val allItems = listOf("-- Disabled --") + profiles
     var dropdownExpanded by remember { mutableStateOf(false) }
 
-    Text("Input Controls", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-    Spacer(Modifier.height(6.dp))
+    when (subTab) {
+        // ── Touch ──
+        0 -> {
+            Text("Input Controls", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+            Spacer(Modifier.height(6.dp))
 
-    ExposedDropdownMenuBox(expanded = dropdownExpanded, onExpandedChange = { dropdownExpanded = it }) {
-        OutlinedTextField(
-            value = allItems.getOrElse(selectedIdx) { "-- Disabled --" },
-            onValueChange = {}, readOnly = true,
-            label = { Text("Profile", color = MaterialTheme.colorScheme.onSurfaceVariant) },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = dropdownExpanded) },
-            modifier = Modifier.fillMaxWidth().menuAnchor(),
-            singleLine = true,
-        )
-        ExposedDropdownMenu(expanded = dropdownExpanded, onDismissRequest = { dropdownExpanded = false }) {
-            allItems.forEachIndexed { i, label ->
-                DropdownMenuItem(text = { Text(label) }, onClick = {
-                    selectedIdx = i
-                    dropdownExpanded = false
+            ExposedDropdownMenuBox(expanded = dropdownExpanded, onExpandedChange = { dropdownExpanded = it }) {
+                OutlinedTextField(
+                    value = allItems.getOrElse(selectedIdx) { "-- Disabled --" },
+                    onValueChange = {}, readOnly = true,
+                    label = { Text("Profile", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = dropdownExpanded) },
+                    modifier = Modifier.fillMaxWidth().menuAnchor(),
+                    singleLine = true,
+                )
+                ExposedDropdownMenu(expanded = dropdownExpanded, onDismissRequest = { dropdownExpanded = false }) {
+                    allItems.forEachIndexed { i, label ->
+                        DropdownMenuItem(text = { Text(label) }, onClick = {
+                            selectedIdx = i
+                            dropdownExpanded = false
+                            XServerDialogState.onInputControlsConfirm?.invoke(selectedIdx, showTouchscreen, timeoutEnabled, hapticsEnabled)
+                        })
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(6.dp))
+
+            // Three plain on/off flags that all round-trip through the same onInputControlsConfirm call —
+            // packed as chips rather than full-width switch rows to keep the sub-tab short.
+            ToggleChipGrid(
+                listOf(
+                    ToggleChipItem("Touch Controls", showTouchscreen) {
+                        showTouchscreen = it
+                        XServerDialogState.onInputControlsConfirm?.invoke(selectedIdx, showTouchscreen, timeoutEnabled, hapticsEnabled)
+                    },
+                    ToggleChipItem("Timeout", timeoutEnabled) {
+                        timeoutEnabled = it
+                        XServerDialogState.onInputControlsConfirm?.invoke(selectedIdx, showTouchscreen, timeoutEnabled, hapticsEnabled)
+                    },
+                    ToggleChipItem("Haptics", hapticsEnabled) {
+                        hapticsEnabled = it
+                        XServerDialogState.onInputControlsConfirm?.invoke(selectedIdx, showTouchscreen, timeoutEnabled, hapticsEnabled)
+                    },
+                ),
+                perRow = 3
+            )
+
+            // On-screen controls opacity — live, applied to the visible overlay as you drag.
+            var overlayOpacity by remember(initOverlayOpacity) { mutableFloatStateOf(initOverlayOpacity) }
+            LabeledSlider(
+                label = "Overlay Opacity",
+                value = overlayOpacity,
+                valueRange = 0f..1f,
+                onValueChange = {
+                    overlayOpacity = it
+                    state.setOverlayOpacity(it)
+                    state.onOverlayOpacityChange?.run()
+                },
+                format = { "${(it * 100).toInt()}%" },
+            )
+
+            // On-screen controls accent — per-profile override. Follow the app theme (default) or pick a
+            // custom accent for the active profile; idle controls stay white, pressed auto-brightens.
+            Spacer(Modifier.height(4.dp))
+            ToggleChipGrid(
+                listOf(
+                    ToggleChipItem("App Theme", controlsFollowTheme) {
+                        state.setControlsFollowTheme(it)
+                        state.onControlsColorChange?.run()
+                    }
+                ),
+                perRow = 3
+            )
+            if (!controlsFollowTheme) {
+                Spacer(Modifier.height(8.dp))
+                Text("Controls Accent", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                Spacer(Modifier.height(8.dp))
+                ColorPicker(
+                    initialColor = Color(initControlsAccent),
+                    onColorChanged = {
+                        state.setControlsAccentColor(it.toArgb())
+                        state.onControlsColorChange?.run()
+                    }
+                )
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            OutlinedButton(
+                onClick = {
                     XServerDialogState.onInputControlsConfirm?.invoke(selectedIdx, showTouchscreen, timeoutEnabled, hapticsEnabled)
-                })
+                    XServerDialogState.onInputControlsSettings?.invoke(selectedIdx)
+                },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(10.dp),
+            ) { Text("Profile Settings\u2026") }
+
+            Spacer(Modifier.height(4.dp))
+
+            AccentButton("Apply & Close") {
+                XServerDialogState.onInputControlsConfirm?.invoke(selectedIdx, showTouchscreen, timeoutEnabled, hapticsEnabled)
+                state.onClose?.run()
+                Unit
             }
         }
+
+        // ── Mouse ──
+        1 -> {
+            Text("Mouse & Cursor", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+            Spacer(Modifier.height(4.dp))
+
+            // Each of these flips its flag host-side and closes the drawer — the chip fires exactly the same
+            // pair of callbacks the switch row did.
+            ToggleChipGrid(
+                listOf(
+                    ToggleChipItem("Cursor to Touch", moveCursorToTouch) {
+                        state.onMoveCursorToTouchpoint?.run(); state.onClose?.run()
+                    },
+                    ToggleChipItem("Relative Mouse", isRelativeMouse) {
+                        state.onRelativeMouseMovement?.run(); state.onClose?.run()
+                    },
+                    ToggleChipItem("Disable Mouse", isMouseDisabled) {
+                        state.onDisableMouse?.run(); state.onClose?.run()
+                    },
+                ),
+                perRow = 3
+            )
+        }
+
+        // ── Vibration ──
+        2 -> {
+            Text("Vibration", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+            Spacer(Modifier.height(4.dp))
+
+            // Master kill-switch — off suppresses ALL controller rumble regardless of slot (and hides the
+            // rumble target, intensity, and per-slot rows below, which are moot while it's off). Persists
+            // globally.
+            val vibrationMasterOn by XServerDialogState.vibrationMasterEnabled.collectAsState()
+            ToggleChipGrid(
+                listOf(
+                    ToggleChipItem("Enabled", vibrationMasterOn) {
+                        XServerDialogState.setVibrationMasterEnabled(it)
+                        XServerDialogState.onVibrationMasterChanged?.invoke(it)
+                    }
+                ),
+                perRow = 3
+            )
+            if (vibrationMasterOn) {
+                // Per-container rumble target + intensity (PC-accurate dual-motor rumble). Keyed on the
+                // incoming config so re-opening the drawer doesn't drift from a stale capture — same pattern
+                // as the lsfg "Performance mode" toggle elsewhere in this drawer.
+                val initVibrationMode by XServerDialogState.vibrationMode.collectAsState()
+                var vibrationMode by remember(initVibrationMode) { mutableIntStateOf(initVibrationMode) }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Rumble Target",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(4.dp))
+                VibrationModeButtons(vibrationMode) {
+                    vibrationMode = it
+                    XServerDialogState.setVibrationMode(it)
+                    XServerDialogState.onVibrationModeChanged?.invoke(it)
+                }
+
+                if (vibrationMode != 0) {
+                    val initVibrationIntensity by XServerDialogState.vibrationIntensity.collectAsState()
+                    var vibrationIntensity by remember(initVibrationIntensity) { mutableIntStateOf(initVibrationIntensity) }
+                    IntSlider("Intensity", vibrationIntensity, 0..100,
+                        onValueChange = { vibrationIntensity = it },
+                        onValueChangeFinished = {
+                            XServerDialogState.setVibrationIntensity(vibrationIntensity)
+                            XServerDialogState.onVibrationIntensityChanged?.invoke(vibrationIntensity)
+                        }
+                    )
+                }
+            }
+            val vibrationSlots by XServerDialogState.vibrationSlots.collectAsState()
+            if (vibrationMasterOn && vibrationSlots.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                ToggleChipGrid(
+                    vibrationSlots.mapIndexed { index, slot ->
+                        ToggleChipItem(slot.first, slot.second) {
+                            XServerDialogState.updateVibrationSlot(index, it)          // reflect in the UI immediately
+                            XServerDialogState.onVibrationSlotChanged?.invoke(index, it) // persist to WinHandler
+                        }
+                    },
+                    perRow = 3
+                )
+            }
+        }
+
+        // ── Gyro ── its own branch, deliberately OUTSIDE the vibration block above: the gyro section
+        // is unrelated to rumble and must render whether or not vibration is switched on.
+        3 -> GyroSection()
+    }
+}
+
+// ───── Gyro (motion aim) section — Controls tab, "Gyro" sub-tab ─────
+// Progressive disclosure: the master chip is always visible; everything downstream only appears once
+// the gyro is on, so the tab isn't a wall of dead controls. Order is by how often a control is
+// touched — Enable, target, sensitivity, activation, then the set-once fine tuning. Hidden entirely
+// on devices with no gyroscope.
+@Composable
+private fun GyroSection() {
+    val accent = MaterialTheme.colorScheme.primary
+    val gyroSupported by XServerDialogState.gyroSupported.collectAsState()
+    if (!gyroSupported) return
+
+    Text(stringResource(R.string.gyro_drawer_title), color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+    Spacer(Modifier.height(4.dp))
+
+    val gyroEnabled by XServerDialogState.gyroEnabled.collectAsState()
+    ToggleChipGrid(
+        listOf(
+            ToggleChipItem(stringResource(R.string.gyro_drawer_enabled), gyroEnabled) {
+                XServerDialogState.setGyroEnabled(it)
+                XServerDialogState.onGyroEnabledChanged?.invoke(it)
+            }
+        ),
+        perRow = 3
+    )
+    if (!gyroEnabled) return
+
+    // Where the tilt goes. Right/Left stick overlay the gamepad; Mouse drives the pointer instead,
+    // which is the only target that does anything on a Wine desktop or in a mouse-look game.
+    val initGyroTarget by XServerDialogState.gyroTarget.collectAsState()
+    var gyroTarget by remember(initGyroTarget) { mutableIntStateOf(initGyroTarget) }
+
+    // How the tilt is READ. Rate = the tilt speed drives the stick and it recentres when you stop;
+    // Tilt to aim = the stick follows the angle you hold, so a held tilt keeps aiming. The two are
+    // mutually exclusive with the Mouse target (a held tilt would be a constant pointer delta and the
+    // pointer would run to a screen edge), so each greys the other's chip out with a reason.
+    val orientationSupported by XServerDialogState.gyroOrientationSupported.collectAsState()
+    val initGyroMode by XServerDialogState.gyroMode.collectAsState()
+    var gyroMode by remember(initGyroMode) { mutableIntStateOf(initGyroMode) }
+    val orientationBlockedByMouse = gyroTarget == 2
+    val orientationSelectable = orientationSupported && !orientationBlockedByMouse
+    Spacer(Modifier.height(6.dp))
+    Text(stringResource(R.string.gyro_drawer_mode), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Spacer(Modifier.height(4.dp))
+    ModeChipGrid(
+        listOf(
+            Triple(stringResource(R.string.gyro_drawer_mode_rate), gyroMode == 0) { setGyroModeLive(0) { gyroMode = it } },
+            Triple(stringResource(R.string.gyro_drawer_mode_orientation), gyroMode == 1) { setGyroModeLive(1) { gyroMode = it } },
+        ),
+        perRow = 2,
+        disabledIndices = if (orientationSelectable) emptySet() else setOf(1)
+    )
+    if (!orientationSupported) {
+        GyroHint(stringResource(R.string.gyro_drawer_orientation_unsupported))
+    }
+    else if (orientationBlockedByMouse) {
+        GyroHint(stringResource(R.string.gyro_drawer_orientation_mouse_hint))
+    }
+    else if (gyroMode == 1) {
+        GyroHint(stringResource(R.string.gyro_drawer_orientation_hint))
+        // Mandatory, not polish: with the "Always" activator there is never a rising edge, so this is
+        // the only way to fix a centre that has drifted. Deliberately not bound to a gamepad button —
+        // the activator already costs one.
+        Spacer(Modifier.height(6.dp))
+        AccentButton(stringResource(R.string.gyro_drawer_recenter)) {
+            XServerDialogState.onGyroRecenterRequested?.invoke()
+        }
+        GyroHint(stringResource(R.string.gyro_drawer_recenter_hint))
     }
 
     Spacer(Modifier.height(6.dp))
+    Text(stringResource(R.string.gyro_drawer_apply_to), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Spacer(Modifier.height(4.dp))
+    ModeChipGrid(
+        listOf(
+            Triple(stringResource(R.string.gyro_drawer_target_right_stick), gyroTarget == 0) { setGyroTargetLive(0) { gyroTarget = it } },
+            Triple(stringResource(R.string.gyro_drawer_target_left_stick), gyroTarget == 1) { setGyroTargetLive(1) { gyroTarget = it } },
+            Triple(stringResource(R.string.gyro_drawer_target_mouse), gyroTarget == 2) { setGyroTargetLive(2) { gyroTarget = it } },
+        ),
+        perRow = 3,
+        disabledIndices = if (gyroMode == 1) setOf(2) else emptySet()
+    )
+    if (gyroMode == 1) {
+        GyroHint(stringResource(R.string.gyro_drawer_mouse_unavailable_hint))
+    }
+    else if (gyroTarget == 2) {
+        GyroHint(stringResource(R.string.gyro_drawer_mouse_hint))
+    }
 
-    ToggleRow("Show Touchscreen Controls", showTouchscreen) {
-        showTouchscreen = it
-        XServerDialogState.onInputControlsConfirm?.invoke(selectedIdx, showTouchscreen, timeoutEnabled, hapticsEnabled)
-    }
-    ToggleRow("Enable Timeout", timeoutEnabled) {
-        timeoutEnabled = it
-        XServerDialogState.onInputControlsConfirm?.invoke(selectedIdx, showTouchscreen, timeoutEnabled, hapticsEnabled)
-    }
-    ToggleRow("Enable Haptics", hapticsEnabled) {
-        hapticsEnabled = it
-        XServerDialogState.onInputControlsConfirm?.invoke(selectedIdx, showTouchscreen, timeoutEnabled, hapticsEnabled)
-    }
-
-    // On-screen controls opacity — live, applied to the visible overlay as you drag.
-    var overlayOpacity by remember(initOverlayOpacity) { mutableFloatStateOf(initOverlayOpacity) }
+    // Sensitivity is the one knob people reach for constantly, so it sits right under the target.
+    val initGyroSensitivity by XServerDialogState.gyroSensitivity.collectAsState()
+    var gyroSensitivity by remember(initGyroSensitivity) { mutableFloatStateOf(initGyroSensitivity) }
     LabeledSlider(
-        label = "Overlay Opacity",
-        value = overlayOpacity,
-        valueRange = 0f..1f,
-        onValueChange = {
-            overlayOpacity = it
-            state.setOverlayOpacity(it)
-            state.onOverlayOpacityChange?.run()
+        label = stringResource(R.string.gyro_sensitivity_label),
+        value = gyroSensitivity,
+        valueRange = 0.1f..10f,
+        onValueChange = { gyroSensitivity = it },
+        onValueChangeFinished = {
+            XServerDialogState.setGyroSensitivity(gyroSensitivity)
+            XServerDialogState.onGyroSensitivityChanged?.invoke(gyroSensitivity)
         },
-        format = { "${(it * 100).toInt()}%" },
+        format = { "%.1f".format(it) }
     )
 
-    // On-screen controls accent — per-profile override. Follow the app theme (default) or pick a
-    // custom accent for the active profile; idle controls stay white, pressed auto-brightens.
+    // Which button gates the tilt. "Always on" removes the gate entirely — the only option that
+    // works with no controller attached (e.g. gyro-as-mouse on the Wine desktop).
+    val initGyroActivator by XServerDialogState.gyroActivator.collectAsState()
+    var gyroActivator by remember(initGyroActivator) { mutableIntStateOf(initGyroActivator) }
+    Spacer(Modifier.height(2.dp))
+    Text(stringResource(R.string.gyro_drawer_activation), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     Spacer(Modifier.height(4.dp))
-    ToggleRow("Follow app theme", controlsFollowTheme) {
-        state.setControlsFollowTheme(it)
-        state.onControlsColorChange?.run()
-    }
-    if (!controlsFollowTheme) {
-        Spacer(Modifier.height(8.dp))
-        Text("Controls Accent", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-        Spacer(Modifier.height(8.dp))
-        ColorPicker(
-            initialColor = Color(initControlsAccent),
-            onColorChanged = {
-                state.setControlsAccentColor(it.toArgb())
-                state.onControlsColorChange?.run()
-            }
-        )
+    ModeChipGrid(
+        listOf(
+            Triple(stringResource(R.string.gyro_activator_l1), gyroActivator == 0) { setGyroActivatorLive(0) { gyroActivator = it } },
+            Triple(stringResource(R.string.gyro_activator_l2), gyroActivator == 1) { setGyroActivatorLive(1) { gyroActivator = it } },
+            Triple(stringResource(R.string.gyro_activator_r1), gyroActivator == 2) { setGyroActivatorLive(2) { gyroActivator = it } },
+            Triple(stringResource(R.string.gyro_activator_r3), gyroActivator == 3) { setGyroActivatorLive(3) { gyroActivator = it } },
+            Triple(stringResource(R.string.gyro_drawer_activator_always), gyroActivator == 4) { setGyroActivatorLive(4) { gyroActivator = it } },
+        ),
+        perRow = 5
+    )
+
+    // Hold vs Toggle for that button. Greyed rather than hidden under "Always" — there's no button
+    // to latch, but hiding the row would make it look like the setting vanished for good.
+    val initGyroActivationMode by XServerDialogState.gyroActivationMode.collectAsState()
+    var gyroActivationMode by remember(initGyroActivationMode) { mutableIntStateOf(initGyroActivationMode) }
+    val activationModeEnabled = gyroActivator != 4
+    Spacer(Modifier.height(4.dp))
+    ModeChipGrid(
+        listOf(
+            Triple(stringResource(R.string.gyro_activation_hold), gyroActivationMode == 0) {
+                setGyroActivationModeLive(0) { gyroActivationMode = it }
+            },
+            Triple(stringResource(R.string.gyro_activation_toggle), gyroActivationMode == 1) {
+                setGyroActivationModeLive(1) { gyroActivationMode = it }
+            },
+        ),
+        perRow = 2,
+        enabled = activationModeEnabled
+    )
+    if (activationModeEnabled && gyroActivationMode == 1) {
+        GyroHint(stringResource(R.string.gyro_drawer_toggle_hint))
     }
 
-    Spacer(Modifier.height(8.dp))
-
-    OutlinedButton(
-        onClick = {
-            XServerDialogState.onInputControlsConfirm?.invoke(selectedIdx, showTouchscreen, timeoutEnabled, hapticsEnabled)
-            XServerDialogState.onInputControlsSettings?.invoke(selectedIdx)
+    // ---- Fine tuning: set once, then forgotten. Kept last so it never crowds the controls above. ----
+    val initGyroDeadzone by XServerDialogState.gyroDeadzone.collectAsState()
+    var gyroDeadzone by remember(initGyroDeadzone) { mutableFloatStateOf(initGyroDeadzone) }
+    LabeledSlider(
+        label = stringResource(R.string.gyro_deadzone_label),
+        value = gyroDeadzone,
+        valueRange = 0f..0.5f,
+        onValueChange = { gyroDeadzone = it },
+        onValueChangeFinished = {
+            XServerDialogState.setGyroDeadzone(gyroDeadzone)
+            XServerDialogState.onGyroDeadzoneChanged?.invoke(gyroDeadzone)
         },
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(10.dp),
-    ) { Text("Profile Settings\u2026") }
+        format = { "%.2f".format(it) }
+    )
 
-    Spacer(Modifier.height(4.dp))
+    val initGyroSmoothing by XServerDialogState.gyroSmoothing.collectAsState()
+    var gyroSmoothing by remember(initGyroSmoothing) { mutableFloatStateOf(initGyroSmoothing) }
+    LabeledSlider(
+        label = stringResource(R.string.gyro_smoothing_label),
+        value = gyroSmoothing,
+        valueRange = 0f..0.95f,
+        onValueChange = { gyroSmoothing = it },
+        onValueChangeFinished = {
+            XServerDialogState.setGyroSmoothing(gyroSmoothing)
+            XServerDialogState.onGyroSmoothingChanged?.invoke(gyroSmoothing)
+        },
+        format = { "%.2f".format(it) }
+    )
 
-    AccentButton("Apply & Close") {
-        XServerDialogState.onInputControlsConfirm?.invoke(selectedIdx, showTouchscreen, timeoutEnabled, hapticsEnabled)
-        state.onClose?.run()
-        Unit
-    }
+    val gyroInvertX by XServerDialogState.gyroInvertX.collectAsState()
+    val gyroInvertY by XServerDialogState.gyroInvertY.collectAsState()
+    ToggleChipGrid(
+        listOf(
+            ToggleChipItem(stringResource(R.string.gyro_invert_x), gyroInvertX) {
+                XServerDialogState.setGyroInvertX(it)
+                XServerDialogState.onGyroInvertXChanged?.invoke(it)
+            },
+            ToggleChipItem(stringResource(R.string.gyro_invert_y), gyroInvertY) {
+                XServerDialogState.setGyroInvertY(it)
+                XServerDialogState.onGyroInvertYChanged?.invoke(it)
+            },
+        ),
+        perRow = 3
+    )
+}
 
-    HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
+// The one hint-text treatment used throughout the gyro section: dimmed, small, tucked under the row
+// it explains. Also how a disabled chip states its reason, so "greyed out" is never unexplained.
+@Composable
+private fun GyroHint(text: String) {
+    Text(
+        text,
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+        fontSize = 11.sp,
+        modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+    )
+}
 
-    // Mouse & Cursor section
-    Text("Mouse & Cursor", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-    Spacer(Modifier.height(4.dp))
+// Target/activator changes have to hit the local picker state AND WinHandler (which resets the
+// overlay so the old stick can't stay deflected) — kept out of the composable so the chip lambdas
+// stay one-liners.
+private fun setGyroTargetLive(target: Int, reflect: (Int) -> Unit) {
+    reflect(target)
+    XServerDialogState.setGyroTarget(target)
+    XServerDialogState.onGyroTargetChanged?.invoke(target)
+}
 
-    ToggleRow("Move Cursor to Touchpoint", moveCursorToTouch) {
-        state.onMoveCursorToTouchpoint?.run()
-    }
-    ToggleRow("Relative Mouse Movement", isRelativeMouse) {
-        state.onRelativeMouseMovement?.run()
-    }
-    ToggleRow("Disable Mouse", isMouseDisabled) {
-        state.onDisableMouse?.run()
-    }
+private fun setGyroActivatorLive(activator: Int, reflect: (Int) -> Unit) {
+    reflect(activator)
+    XServerDialogState.setGyroActivator(activator)
+    XServerDialogState.onGyroActivatorChanged?.invoke(activator)
+}
 
-    HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
+// Read-mode switch. The activity re-registers the sensor on the way through (rate and orientation
+// read DIFFERENT sensors), so this is the one gyro setting whose callback has a side effect beyond
+// WinHandler's own fields.
+private fun setGyroModeLive(mode: Int, reflect: (Int) -> Unit) {
+    reflect(mode)
+    XServerDialogState.setGyroMode(mode)
+    XServerDialogState.onGyroModeChanged?.invoke(mode)
+}
 
-    // Vibration section
-    Text("Vibration", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-    Spacer(Modifier.height(4.dp))
-
-    val vibrationSlots by XServerDialogState.vibrationSlots.collectAsState()
-    vibrationSlots.forEachIndexed { index, slot ->
-        ToggleRow(slot.first, slot.second) { XServerDialogState.onVibrationSlotChanged?.invoke(index, it) }
-    }
+// Same deal for the activation mode: WinHandler drops the toggle latch on the way through, so
+// switching to Hold can't leave a latched-on gyro behind.
+private fun setGyroActivationModeLive(mode: Int, reflect: (Int) -> Unit) {
+    reflect(mode)
+    XServerDialogState.setGyroActivationMode(mode)
+    XServerDialogState.onGyroActivationModeChanged?.invoke(mode)
 }
 
 // ───── Advanced Tab ─────
@@ -2249,7 +2737,8 @@ private fun TmProcessRow(proc: XServerDialogState.TmProcess) {
             }
             DropdownMenu(
                 expanded = menuExpanded,
-                onDismissRequest = { menuExpanded = false }
+                onDismissRequest = { menuExpanded = false },
+                modifier = Modifier.outlinedMenuCard()
             ) {
                 DropdownMenuItem(
                     text = { Text("Bring to Front") },
@@ -2257,7 +2746,8 @@ private fun TmProcessRow(proc: XServerDialogState.TmProcess) {
                         Icon(
                             Icons.Default.FlipToFront,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp),
                         )
                     },
                     onClick = {
@@ -2265,6 +2755,7 @@ private fun TmProcessRow(proc: XServerDialogState.TmProcess) {
                         XServerDialogState.onTmBringToFront?.invoke(proc.name, proc.pid)
                     },
                 )
+                MenuItemDivider()
                 DropdownMenuItem(
                     text = { Text("End Process", color = MaterialTheme.colorScheme.error) },
                     leadingIcon = {
@@ -2272,6 +2763,7 @@ private fun TmProcessRow(proc: XServerDialogState.TmProcess) {
                             Icons.Default.Close,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(18.dp),
                         )
                     },
                     onClick = {

@@ -8,7 +8,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.AlertDialog
+import com.winlator.star.ui.screens.MenuItemDivider
 import com.winlator.star.ui.screens.OutlinedAlertDialog
+import com.winlator.star.ui.screens.outlinedMenuCard
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -69,9 +71,11 @@ fun InputControlsDialog(state: XServerDialogState) {
                     )
                     ExposedDropdownMenu(
                         expanded = dropdownExpanded,
-                        onDismissRequest = { dropdownExpanded = false }
+                        onDismissRequest = { dropdownExpanded = false },
+                        modifier = Modifier.outlinedMenuCard()
                     ) {
                         allItems.forEachIndexed { i, label ->
+                            if (i > 0) MenuItemDivider()
                             DropdownMenuItem(
                                 text = { Text(label) },
                                 onClick = {

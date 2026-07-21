@@ -73,6 +73,7 @@ import com.winlator.star.MainActivity
 import com.winlator.star.contentdialog.ContentDialog
 import com.winlator.star.core.AppUtils
 import com.winlator.star.core.FileUtils
+import com.winlator.star.core.GyroCalibrator
 import com.winlator.star.core.HttpUtils
 import com.winlator.star.inputcontrols.ControlsProfile
 import com.winlator.star.inputcontrols.ExternalController
@@ -80,6 +81,7 @@ import com.winlator.star.inputcontrols.InputControlsManager
 import com.winlator.star.util.InAppFilePicker
 import org.json.JSONObject
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -328,11 +330,16 @@ fun InputControlsScreen(selectedProfileId: Int = 0) {
                     modifier = Modifier.fillMaxWidth()) {
                     Text(displayText, color = MaterialTheme.colorScheme.onBackground)
                 }
-                DropdownMenu(expanded = showProfileDropdown, onDismissRequest = { showProfileDropdown = false }) {
+                DropdownMenu(
+                    expanded = showProfileDropdown,
+                    onDismissRequest = { showProfileDropdown = false },
+                    modifier = Modifier.outlinedMenuCard(),
+                ) {
                     DropdownMenuItem(text = { Text("-- Select Profile --") }, onClick = {
                         selectedProfileIdx = 0; loadProfile(0); showProfileDropdown = false
                     })
                     profiles.forEachIndexed { i, p ->
+                        MenuItemDivider()
                         DropdownMenuItem(text = { Text(p.getName()) }, onClick = {
                             selectedProfileIdx = i + 1; loadProfile(i + 1); showProfileDropdown = false
                         })
@@ -515,7 +522,106 @@ fun InputControlsScreen(selectedProfileId: Int = 0) {
             }
         }
 
+        // ── Gyroscope ───────────────────────────────────────────────
+        GyroscopeSection()
+
         Spacer(Modifier.height(8.dp))
+    }
+}
+
+/**
+ * Device-level gyroscope calibration. Only the zero-rate bias lives here — it's a property of the
+ * hardware, not of a game; sensitivity/target/activator/invert stay with the container.
+ */
+@Composable
+private fun GyroscopeSection() {
+    val context = LocalContext.current
+    val sensor = remember { GyroCalibrator.getSensor(context) }
+
+    Text("Gyroscope", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+
+    if (sensor == null) {
+        Text("No gyroscope on this device", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp)
+        return
+    }
+
+    // Stored state, re-read after every calibrate/reset so the summary line can't drift from prefs.
+    var calibrated by remember { mutableStateOf(GyroCalibrator.isCalibrated(context)) }
+    var biasX by remember { mutableStateOf(0f) }
+    var biasY by remember { mutableStateOf(0f) }
+    var status by remember { mutableStateOf("") }
+    var activeRun by remember { mutableStateOf<GyroCalibrator.Run?>(null) }
+
+    fun refreshBias() {
+        val bias = FloatArray(2)
+        GyroCalibrator.loadBias(context, bias)
+        biasX = bias[0]
+        biasY = bias[1]
+        calibrated = GyroCalibrator.isCalibrated(context)
+    }
+
+    DisposableEffect(Unit) {
+        refreshBias()
+        // A calibration left running past this screen would keep the sensor registered — and a leaked
+        // gyroscope listener drains the battery for as long as the app lives.
+        onDispose {
+            activeRun?.cancel()
+            activeRun = null
+        }
+    }
+
+    FieldSet {
+        Text(
+            "Rest the device on a flat surface and calibrate to remove the gyroscope's resting drift.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp
+        )
+        Spacer(Modifier.height(8.dp))
+
+        val summary = when {
+            !calibrated -> "Not calibrated"
+            abs(biasX) < GyroCalibrator.NEGLIGIBLE_BIAS && abs(biasY) < GyroCalibrator.NEGLIGIBLE_BIAS ->
+                "Very little drift detected — your device already compensates"
+            else -> "Bias removed: x %.4f, y %.4f rad/s".format(biasX, biasY)
+        }
+        Text(summary, color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp)
+
+        if (status.isNotEmpty()) {
+            Spacer(Modifier.height(4.dp))
+            Text(status, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+        }
+
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Button(
+                onClick = {
+                    status = "Hold still…"
+                    activeRun = GyroCalibrator.calibrate(context) { result ->
+                        activeRun = null
+                        status = when (result) {
+                            is GyroCalibrator.Result.Success ->
+                                if (result.negligible) "Calibrated — nothing to remove" else "Calibrated"
+                            GyroCalibrator.Result.Moved -> "Hold the device still and try again"
+                            GyroCalibrator.Result.NotEnoughSamples -> "Couldn't sample — try again"
+                            GyroCalibrator.Result.Unavailable -> "Gyroscope unavailable"
+                        }
+                        refreshBias()
+                    }
+                },
+                enabled = activeRun == null,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest),
+                modifier = Modifier.weight(1f)
+            ) { Text("Calibrate", color = MaterialTheme.colorScheme.onBackground, fontSize = 12.sp) }
+            Button(
+                onClick = {
+                    GyroCalibrator.clearBias(context)
+                    status = "Calibration reset"
+                    refreshBias()
+                },
+                enabled = calibrated && activeRun == null,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest),
+                modifier = Modifier.weight(1f)
+            ) { Text("Reset", color = MaterialTheme.colorScheme.onBackground, fontSize = 12.sp) }
+        }
     }
 }
 

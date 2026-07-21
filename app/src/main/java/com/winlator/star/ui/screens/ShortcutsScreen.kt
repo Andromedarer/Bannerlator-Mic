@@ -65,6 +65,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.ViewList
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
@@ -167,6 +168,7 @@ import com.winlator.star.container.Shortcut
 import com.winlator.star.reshade.ReshadeManager
 import com.winlator.star.contentdialog.GraphicsDriverConfigDialog
 import com.winlator.star.contents.AdrenotoolsManager
+import com.winlator.star.contents.WrapperManager
 import com.winlator.star.contents.ContentProfile
 import com.winlator.star.contents.ContentsManager
 import com.winlator.star.contents.Downloader
@@ -3705,8 +3707,9 @@ private fun ShortcutGridItem(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// internal (not private) so the Big Picture screen can reuse the exact same shortcut editor dialog.
 @Composable
-private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Unit) {
+internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val res = context.resources
 
@@ -3735,8 +3738,14 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
         mutableStateOf(if (rawScreenSize.contains("x")) rawScreenSize.substringAfter("x") else "600")
     }
 
-    // Graphics driver
-    val graphicsDriverEntries = remember { res.getStringArray(R.array.graphics_driver_entries).toList() }
+    // Graphics driver — bundled entries + user-imported wrappers (issue #132 Step 2), built via the
+    // SHARED WrapperManager.driverEntries helper so this list matches ContainerDetailViewModel's
+    // exactly (dynamic-dropdown drift is the feature's top-ranked risk). Keyed on wrapperRefreshKey
+    // so a wrapper imported/deleted via the manager appears without reopening the editor.
+    var wrapperRefreshKey by remember { mutableStateOf(0) }
+    val graphicsDriverEntries = remember(wrapperRefreshKey) {
+        WrapperManager.driverEntries(context, res.getStringArray(R.array.graphics_driver_entries))
+    }
     var selectedGfxDriver by remember {
         val id = shortcut.getExtra("graphicsDriver", shortcut.container.graphicsDriver)
         mutableStateOf(graphicsDriverEntries.firstOrNull { StringUtils.parseIdentifier(it) == id }
@@ -3774,6 +3783,45 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
     var sfCompatMode by remember {
         mutableStateOf(shortcut.getExtra("sfCompatMode",
             if (shortcut.container.getRendererSfCompatMode()) "1" else "0") == "1")
+    }
+
+    // Gyro (motion aim) per-game overrides — seeded from the shortcut extra, falling back to the
+    // container's value. Only the game-facing half lives here (deadzone/smoothing stay container-wide,
+    // they're hand-tremor/latency settings, not game settings). These are ALWAYS written on save —
+    // there's no "inherit" sentinel because enabled=false is a legitimate override — so once this
+    // dialog has been saved for a shortcut, changing the container's gyro defaults only affects
+    // NEW shortcuts.
+    var gyroEnabled by remember {
+        mutableStateOf(shortcut.getExtra("gyroEnabled",
+            if (shortcut.container.isGyroEnabled) "1" else "0") == "1")
+    }
+    var gyroTarget by remember {
+        mutableStateOf(shortcut.getExtra("gyroTarget",
+            shortcut.container.gyroTarget.toString()).toIntOrNull() ?: Container.GYRO_TARGET_DEFAULT)
+    }
+    var gyroActivator by remember {
+        mutableStateOf(shortcut.getExtra("gyroActivator",
+            shortcut.container.gyroActivator.toString()).toIntOrNull() ?: Container.GYRO_ACTIVATOR_DEFAULT)
+    }
+    var gyroActivationMode by remember {
+        mutableStateOf(shortcut.getExtra("gyroActivationMode",
+            shortcut.container.gyroActivationMode.toString()).toIntOrNull() ?: Container.GYRO_ACTIVATION_MODE_DEFAULT)
+    }
+    var gyroMode by remember {
+        mutableStateOf(shortcut.getExtra("gyroMode",
+            shortcut.container.gyroMode.toString()).toIntOrNull() ?: Container.GYRO_MODE_DEFAULT)
+    }
+    var gyroSensitivity by remember {
+        mutableStateOf(shortcut.getExtra("gyroSensitivity",
+            shortcut.container.gyroSensitivity.toString()).toFloatOrNull() ?: Container.GYRO_SENSITIVITY_DEFAULT)
+    }
+    var gyroInvertX by remember {
+        mutableStateOf(shortcut.getExtra("gyroInvertX",
+            if (shortcut.container.isGyroInvertX) "1" else "0") == "1")
+    }
+    var gyroInvertY by remember {
+        mutableStateOf(shortcut.getExtra("gyroInvertY",
+            if (shortcut.container.isGyroInvertY) "1" else "0") == "1")
     }
 
     // Vulkan renderer per-game overrides (native / Colors=swapRB / present mode) — default to the
@@ -4082,6 +4130,15 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
             putExtra("graphicsDriverConfig", graphicsDriverConfig)
             putExtra("renderer", StringUtils.parseIdentifier(selectedRenderer))
             putExtra("sfCompatMode", if (sfCompatMode) "1" else "0")
+            // Gyro per-game overrides (read by the launch resolver in XServerDisplayActivity).
+            putExtra("gyroEnabled", if (gyroEnabled) "1" else "0")
+            putExtra("gyroTarget", gyroTarget.toString())
+            putExtra("gyroActivator", gyroActivator.toString())
+            putExtra("gyroActivationMode", gyroActivationMode.toString())
+            putExtra("gyroMode", gyroMode.toString())
+            putExtra("gyroSensitivity", gyroSensitivity.toString())
+            putExtra("gyroInvertX", if (gyroInvertX) "1" else "0")
+            putExtra("gyroInvertY", if (gyroInvertY) "1" else "0")
             // Vulkan per-game overrides (read by resolvedRendererNative/SwapRB/PresentMode at launch).
             putExtra("native", if (vkNative) "true" else "false")
             putExtra("swapRB", if (vkSwapRB) "true" else "false")
@@ -4222,13 +4279,24 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
                         }
                     }
 
-                    // Graphics Driver
-                    LabeledDropdown(
-                        label = stringResource(R.string.graphics_driver),
-                        options = graphicsDriverEntries,
-                        selectedOption = selectedGfxDriver,
-                        onSelect = { selectedGfxDriver = it }
-                    )
+                    // Graphics Driver + wrapper manager (cloud)
+                    var showWrapperManager by remember { mutableStateOf(false) }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        LabeledDropdown(
+                            label = stringResource(R.string.graphics_driver),
+                            options = graphicsDriverEntries,
+                            selectedOption = selectedGfxDriver,
+                            onSelect = { selectedGfxDriver = it },
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(onClick = { showWrapperManager = true }) {
+                            Icon(Icons.Default.CloudDownload, contentDescription = stringResource(R.string.wrapper_manager_open))
+                        }
+                    }
+                    if (showWrapperManager) WrapperManagerDialog(onDismiss = {
+                        showWrapperManager = false
+                        wrapperRefreshKey++ // pick up a just-imported/deleted wrapper
+                    })
                     OutlinedButton(onClick = { showGfxConfig = true }, modifier = Modifier.fillMaxWidth()) {
                         Text("${stringResource(R.string.graphics_driver)}: ${GraphicsDriverConfigDialog.getVersion(graphicsDriverConfig)}")
                     }
@@ -4473,6 +4541,103 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
                             selectedOption = selectedNumControllers,
                             onSelect = { selectedNumControllers = it }
                         )
+
+                        // Gyro (motion aim) per-game override. Deadzone/smoothing are deliberately
+                        // absent — those stay on the container (Container Settings -> Gyro).
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Switch(checked = gyroEnabled, onCheckedChange = { gyroEnabled = it })
+                            Spacer(Modifier.width(8.dp))
+                            Text(stringResource(R.string.gyro_enabled), modifier = Modifier.weight(1f))
+                        }
+                        if (gyroEnabled) {
+                            // Same pairing rule as the container editor: Tilt to Aim and the Mouse
+                            // target can't coexist (a held tilt is a constant pointer delta), so each
+                            // selection knocks the other back to a working value.
+                            val gyroModeLabels = listOf(
+                                stringResource(R.string.gyro_mode_rate),
+                                stringResource(R.string.gyro_mode_orientation),
+                            )
+                            LabeledDropdown(
+                                label = stringResource(R.string.gyro_mode_label),
+                                options = gyroModeLabels,
+                                selectedOption = gyroModeLabels.getOrElse(gyroMode) {
+                                    gyroModeLabels[Container.GYRO_MODE_DEFAULT]
+                                },
+                                onSelect = { opt ->
+                                    gyroMode = gyroModeLabels.indexOf(opt).coerceAtLeast(0)
+                                    if (gyroMode == Container.GYRO_MODE_ORIENTATION && gyroTarget == Container.GYRO_TARGET_MOUSE)
+                                        gyroTarget = Container.GYRO_TARGET_DEFAULT
+                                }
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            val gyroTargetLabels = listOf(
+                                stringResource(R.string.gyro_target_right_stick),
+                                stringResource(R.string.gyro_target_left_stick),
+                                stringResource(R.string.gyro_target_mouse),
+                            )
+                            LabeledDropdown(
+                                label = stringResource(R.string.gyro_target_label),
+                                options = gyroTargetLabels,
+                                selectedOption = gyroTargetLabels.getOrElse(gyroTarget) {
+                                    gyroTargetLabels[Container.GYRO_TARGET_DEFAULT]
+                                },
+                                onSelect = { opt ->
+                                    gyroTarget = gyroTargetLabels.indexOf(opt).coerceAtLeast(0)
+                                    if (gyroTarget == Container.GYRO_TARGET_MOUSE)
+                                        gyroMode = Container.GYRO_MODE_RATE
+                                }
+                            )
+                            val gyroActivatorLabels = listOf(
+                                stringResource(R.string.gyro_activator_l1),
+                                stringResource(R.string.gyro_activator_l2),
+                                stringResource(R.string.gyro_activator_r1),
+                                stringResource(R.string.gyro_activator_r3),
+                                stringResource(R.string.gyro_activator_always),
+                            )
+                            LabeledDropdown(
+                                label = stringResource(R.string.gyro_activator_label),
+                                options = gyroActivatorLabels,
+                                selectedOption = gyroActivatorLabels.getOrElse(gyroActivator) {
+                                    gyroActivatorLabels[Container.GYRO_ACTIVATOR_DEFAULT]
+                                },
+                                onSelect = { opt -> gyroActivator = gyroActivatorLabels.indexOf(opt).coerceAtLeast(0) }
+                            )
+                            // Hold vs Toggle for that button — hidden under "Always On", which has no
+                            // button to latch (same call the container editor makes).
+                            if (gyroActivator != Container.GYRO_ACTIVATOR_ALWAYS) {
+                                val gyroActivationModeLabels = listOf(
+                                    stringResource(R.string.gyro_activation_hold),
+                                    stringResource(R.string.gyro_activation_toggle),
+                                )
+                                LabeledDropdown(
+                                    label = stringResource(R.string.gyro_activation_mode_label),
+                                    options = gyroActivationModeLabels,
+                                    selectedOption = gyroActivationModeLabels.getOrElse(gyroActivationMode) {
+                                        gyroActivationModeLabels[Container.GYRO_ACTIVATION_MODE_DEFAULT]
+                                    },
+                                    onSelect = { opt -> gyroActivationMode = gyroActivationModeLabels.indexOf(opt).coerceAtLeast(0) }
+                                )
+                            }
+                            Text(
+                                "${stringResource(R.string.gyro_sensitivity_label)}: ${"%.1f".format(gyroSensitivity)}",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Slider(
+                                value = gyroSensitivity,
+                                onValueChange = { gyroSensitivity = it },
+                                valueRange = 0.1f..10f
+                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Switch(checked = gyroInvertX, onCheckedChange = { gyroInvertX = it })
+                                Spacer(Modifier.width(8.dp))
+                                Text(stringResource(R.string.gyro_invert_x), modifier = Modifier.weight(1f))
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Switch(checked = gyroInvertY, onCheckedChange = { gyroInvertY = it })
+                                Spacer(Modifier.width(8.dp))
+                                Text(stringResource(R.string.gyro_invert_y), modifier = Modifier.weight(1f))
+                            }
+                        }
                     }
 
                     // Tabs
@@ -4558,10 +4723,14 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
         )
     }
     val isVegasCfg = StringUtils.parseIdentifier(selectedDxWrapper).contains("vegas")
+    // See ContainerDetailScreen: relax the #113 DXVK-2.x filter only for the Mali "Wrapper + compat
+    // + bcn" driver, so per-game shortcuts can also reach the DXVK 1.10.3 workaround (#137).
+    val relaxDxvkFilter = StringUtils.parseIdentifier(selectedGfxDriver) == "wrapper-compat-bcn"
     if (showDxvkConfig) {
         DxvkConfigDialog(
             isArm64EC = isArm64EC,
             isVegas = isVegasCfg,
+            relaxDxvkFilter = relaxDxvkFilter,
             initialConfig = dxWrapperConfig,
             onConfirm = { dxWrapperConfig = it; showDxvkConfig = false },
             onDismiss = { showDxvkConfig = false },

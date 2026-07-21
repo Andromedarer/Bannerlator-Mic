@@ -15,6 +15,7 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.Image
@@ -153,10 +154,6 @@ class MainActivity : AppCompatActivity() {
 
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
 
-        if (prefs.getBoolean("enable_big_picture_mode", false)) {
-            startActivity(Intent(this, BigPictureActivity::class.java))
-        }
-
         val winlatorDir = File(SettingsFragment.DEFAULT_WINLATOR_PATH)
         if (!winlatorDir.exists()) winlatorDir.mkdirs()
 
@@ -172,10 +169,15 @@ class MainActivity : AppCompatActivity() {
                 validRouteOrNull(intent.getStringExtra(EXTRA_OPEN_SCREEN))
                     ?: menuItemIdToRoute(selectedMenuItemId)
                     // User-chosen default landing screen (Settings). Only applies when nothing else
-                    // dictated the route (no deep-link / menu nav / edit-controls). Defaults to
-                    // "games" = the Game Shortcuts page, i.e. the historical default.
-                    ?: if (prefs.getString("default_landing_screen", "games") == "containers")
-                        Screen.Containers.route else Screen.Games.route
+                    // dictated the route (no deep-link / menu nav / edit-controls). Big Picture is a
+                    // couch/TV launcher shown at startup instead of the normal UI, so when its pref is
+                    // on it wins over the default landing screen. Otherwise defaults to "games" = the
+                    // Game Shortcuts page, i.e. the historical default.
+                    ?: when {
+                        prefs.getBoolean("enable_big_picture_mode", false) -> Screen.BigPicture.route
+                        prefs.getString("default_landing_screen", "games") == "containers" -> Screen.Containers.route
+                        else -> Screen.Games.route
+                    }
             }
         }
 
@@ -352,6 +354,10 @@ private fun AppShell(
     val backstackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backstackEntry?.destination?.route ?: startRoute
 
+    // Big Picture is a full-bleed couch/TV launcher: no top bar, no drawer gestures, no scaffold
+    // content padding (it draws its own immersive layout).
+    val isBigPicture = currentRoute == Screen.BigPicture.route
+
     // In-app update banner: only when a newer stable exists, notify is on, and
     // this version wasn't skipped.
     var bannerUpdate by remember { mutableStateOf<UpdateManager.UpdateInfo?>(null) }
@@ -403,7 +409,7 @@ private fun AppShell(
     CompositionLocalProvider(LocalTopBarActions provides topBarActionsState) {
     ModalNavigationDrawer(
         drawerState = drawerState,
-        gesturesEnabled = !editInputControls && !currentRoute.startsWith("container_detail"),
+        gesturesEnabled = !editInputControls && !currentRoute.startsWith("container_detail") && !isBigPicture,
         drawerContent = {
             AppDrawerContent(
                 currentRoute = currentRoute,
@@ -440,31 +446,33 @@ private fun AppShell(
         Scaffold(
             modifier = Modifier.fillMaxSize(),
             topBar = {
-                AppTopBar(
-                    title = screenTitle,
-                    showBack = editInputControls,
-                    // Signed-in + has a picture → the ☰ becomes their avatar (still opens the drawer).
-                    // Versioned URL so a live picture change refreshes the swap in lockstep with the drawer.
-                    avatarUrl = account?.displayAvatarUrl,
-                    onNavClick = {
-                        if (editInputControls) {
-                            (context as? MainActivity)?.let { activity ->
-                                activity.setResult(android.app.Activity.RESULT_OK)
-                                activity.finish()
+                if (!isBigPicture) {
+                    AppTopBar(
+                        title = screenTitle,
+                        showBack = editInputControls,
+                        // Signed-in + has a picture → the ☰ becomes their avatar (still opens the drawer).
+                        // Versioned URL so a live picture change refreshes the swap in lockstep with the drawer.
+                        avatarUrl = account?.displayAvatarUrl,
+                        onNavClick = {
+                            if (editInputControls) {
+                                (context as? MainActivity)?.let { activity ->
+                                    activity.setResult(android.app.Activity.RESULT_OK)
+                                    activity.finish()
+                                }
+                            } else {
+                                scope.launch {
+                                    if (drawerState.isOpen) drawerState.close() else drawerState.open()
+                                }
                             }
-                        } else {
-                            scope.launch {
-                                if (drawerState.isOpen) drawerState.close() else drawerState.open()
-                            }
-                        }
-                    },
-                    actions = topBarActionsState.value,
-                )
+                        },
+                        actions = topBarActionsState.value,
+                    )
+                }
             },
         ) { innerPadding ->
-            Column(modifier = Modifier.padding(innerPadding)) {
+            Column(modifier = Modifier.padding(if (isBigPicture) PaddingValues(0.dp) else innerPadding)) {
                 val upd = bannerUpdate
-                if (upd != null && !bannerDismissed && !editInputControls) {
+                if (upd != null && !bannerDismissed && !editInputControls && !isBigPicture) {
                     UpdateBanner(
                         versionName = upd.versionName,
                         onUpdate = {

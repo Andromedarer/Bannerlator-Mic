@@ -375,6 +375,60 @@
     <string name="game_controller">Game Controller</string>
     <string name="vibration">Vibration</string>
     <string name="vibration_slot">Slot %1$d</string>
+    <string name="vibration_mode_label">Rumble Target</string>
+    <string name="vibration_mode_off">Off</string>
+    <string name="vibration_mode_controller">Controller</string>
+    <string name="vibration_mode_device">Device</string>
+    <string name="vibration_mode_both">Both</string>
+    <string name="vibration_intensity_label">Rumble Intensity</string>
+
+    <string name="gyro">Gyro (Motion Aim)</string>
+    <string name="gyro_enabled">Enable Motion Aim</string>
+    <string name="gyro_mode_label">Motion Mode</string>
+    <string name="gyro_mode_rate">Rate</string>
+    <string name="gyro_mode_orientation">Tilt to Aim</string>
+    <string name="gyro_target_label">Motion Target</string>
+    <string name="gyro_target_right_stick">Right Stick</string>
+    <string name="gyro_target_left_stick">Left Stick</string>
+    <string name="gyro_target_mouse">Mouse</string>
+    <string name="gyro_activator_label">Activator Button</string>
+    <!-- The button itself no longer says "Hold": whether it's held or tapped is the activation
+         mode below, so baking "Hold" into the button name would contradict Toggle. -->
+    <string name="gyro_activator_l1">L1</string>
+    <string name="gyro_activator_l2">L2</string>
+    <string name="gyro_activator_r1">R1</string>
+    <string name="gyro_activator_r3">R3</string>
+    <string name="gyro_activator_always">Always On</string>
+    <string name="gyro_activation_mode_label">Activation</string>
+    <string name="gyro_activation_hold">Hold</string>
+    <string name="gyro_activation_toggle">Toggle</string>
+    <string name="gyro_sensitivity_label">Sensitivity</string>
+    <string name="gyro_deadzone_label">Deadzone</string>
+    <string name="gyro_smoothing_label">Smoothing</string>
+    <string name="gyro_invert_x">Invert X</string>
+    <string name="gyro_invert_y">Invert Y</string>
+
+    <!-- In-game drawer (Controls tab) gyro section. Separate from the editor strings above because
+         the drawer is a cramped overlay: short chip-sized labels, no "Enable Motion Aim" sentences. -->
+    <string name="gyro_drawer_title">Gyro</string>
+    <string name="gyro_drawer_enabled">Enabled</string>
+    <string name="gyro_drawer_mode">Motion mode</string>
+    <string name="gyro_drawer_mode_rate">Rate</string>
+    <string name="gyro_drawer_mode_orientation">Tilt to aim</string>
+    <string name="gyro_drawer_orientation_hint">The stick follows the angle you hold the device at, so a held tilt keeps aiming.</string>
+    <string name="gyro_drawer_orientation_unsupported">Not available — this device has no rotation-vector sensor.</string>
+    <string name="gyro_drawer_orientation_mouse_hint">Not available with the Mouse target — pick a stick first.</string>
+    <string name="gyro_drawer_recenter">Recenter</string>
+    <string name="gyro_drawer_recenter_hint">Makes the pose you are holding now the centre.</string>
+    <string name="gyro_drawer_mouse_unavailable_hint">Mouse is not available in Tilt to aim — a held tilt would run the pointer off screen.</string>
+    <string name="gyro_drawer_apply_to">Apply gyro to</string>
+    <string name="gyro_drawer_target_right_stick">Right stick</string>
+    <string name="gyro_drawer_target_left_stick">Left stick</string>
+    <string name="gyro_drawer_target_mouse">Mouse</string>
+    <string name="gyro_drawer_mouse_hint">Moves the pointer instead of a stick — use for the desktop and mouse-look games.</string>
+    <string name="gyro_drawer_activation">Activation</string>
+    <string name="gyro_drawer_activator_always">Always</string>
+    <string name="gyro_drawer_toggle_hint">Tap the button to turn the gyro on, tap again to turn it off.</string>
 
     <string name="experimental">Experimental</string>
     <string name="glibc_exp_edition">Based On</string>
@@ -573,6 +627,8 @@
     <string name="frame_generation_lsfg_needs_dll">lsfg-vk is unavailable — import a Lossless.dll at the bottom of Settings to enable it.</string>
     <string name="frame_generation_ingame_hint">Tune the multiplier &amp; flow scale live from the in-game side menu.</string>
     <string name="frame_generation_lsfg_hint">Uses your imported Lossless.dll (set it at the bottom of Settings). Tune the multiplier &amp; flow scale live from the in-game side menu.</string>
+    <string name="fg_performance_mode">Performance mode</string>
+    <string name="fg_performance_mode_hint">Lower quality for higher FPS — helps on low-end devices. Also toggleable live from the in-game side menu.</string>
     <string name="fps_limiter">FPS Limiter</string>
     <string name="fps_limiter_ingame_hint">Loads the limiter; set the cap (10–200) live from the in-game FPS menu.</string>
     <string name="match_refresh_rate">Match refresh rate to FPS</string>
@@ -762,6 +818,10 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="bcn_layer_image_view_hint">On: storage image (default). Off: staging buffer.</string>
     <string name="bcn_layer_debug_log">BCn debug log</string>
     <string name="bcn_layer_debug_log_hint">Logs the BCn layer to the Wine debug log (enable Settings &#8250; Logs &#8250; Wine Debug to capture it).</string>
+    <string name="bcn_compat_sparse">Emulate sparse binding (DX12)</string>
+    <string name="bcn_compat_sparse_hint">For D3D12 games that use tiled/sparse resources. Leave off unless a DX12 title needs it.</string>
+    <string name="compat_use_gamenative">Use GameNative engine (DX12)</string>
+    <string name="compat_use_gamenative_hint">Required for DX12 games. Runs this driver on the GameNative wrapper (Vulkan 1.3 + built-in BCn) instead of the leegao layers. Off = BCn textures only (default). Valhall Mali (r32p1+) only.</string>
     <string name="opengl_version">OpenGL Version</string>
     <string name="disableVertexArrayBGRA">Disable "Vertex array BGRA"</string>
     <string name="disableKHRdebug">Disable "KHR debug"</string>
@@ -824,4 +884,64 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="save_backup_format_winlator">Winlator-native .zip</string>
     <string name="save_backup_format_winlator_sub">Sibling Winlator / WinNative builds</string>
     <string name="save_backup_next">Next</string>
+
+    <!-- Wrapper Version Manager (Step 1, issue #132) -->
+    <string name="wrapper_manager_title">Manage Wrappers</string>
+    <string name="wrapper_manager_header">Replace a bundled graphics wrapper with a newer file; updates are stored on-device and used instead of the built-in one.</string>
+    <string name="wrapper_update">Update</string>
+    <string name="wrapper_update_from_file">From file</string>
+    <string name="wrapper_update_from_catalog">From catalog</string>
+    <string name="wrapper_reset">Reset</string>
+    <string name="wrapper_reset_all">Reset all</string>
+    <string name="wrapper_reset_all_confirm_title">Reset all wrappers?</string>
+    <string name="wrapper_reset_all_confirm_message">Remove every wrapper update and go back to the built-in versions?</string>
+    <string name="wrapper_select_title">Select wrapper .tzst</string>
+    <string name="wrapper_bundled">Bundled</string>
+    <string name="wrapper_updated_label">Updated</string>
+    <string name="wrapper_updated_toast">Wrapper updated</string>
+    <string name="wrapper_reset_toast">Reverted to the built-in wrapper</string>
+    <string name="wrapper_invalid_toast">That file isn\'t a valid wrapper (.tzst)</string>
+    <string name="wrapper_manager_open">Manage wrappers</string>
+    <string name="wrapper_manager_close">Close</string>
+    <!-- Step 2: free-form imported wrappers -->
+    <string name="wrapper_imported_label">Imported</string>
+    <string name="wrapper_import_title">Import wrapper…</string>
+    <string name="wrapper_import_subtitle">Add your own wrapper (.tzst). It appears in the Graphics Driver menu.</string>
+    <string name="wrapper_import_name_title">Name this wrapper</string>
+    <string name="wrapper_import_name_message">This name shows up in the Graphics Driver menu.</string>
+    <string name="wrapper_import_name_empty_toast">Enter a name for the wrapper</string>
+    <string name="wrapper_import_reserved_toast">That name is reserved for a built-in wrapper — pick another</string>
+    <string name="wrapper_imported_toast">Wrapper imported</string>
+    <string name="wrapper_delete">Delete</string>
+    <string name="wrapper_delete_confirm_title">Delete this wrapper?</string>
+    <string name="wrapper_delete_confirm_message">Remove this imported wrapper. Any container or game using it goes back to the default wrapper.</string>
+    <!-- #132: per-card overflow menu + per-wrapper Edit settings -->
+    <string name="wrapper_more_actions">More actions</string>
+    <string name="wrapper_details">Details</string>
+    <string name="wrapper_edit_settings">Edit settings</string>
+    <string name="wrapper_edit_settings_title">Edit detected settings</string>
+    <string name="wrapper_edit_settings_message">Choose which detected settings appear in this wrapper\'s Graphics Driver options. Unchecked settings are hidden.</string>
+    <string name="wrapper_edit_settings_empty">No detected settings to configure.</string>
+    <!-- #132: a catalog-installed wrapper has a newer version available in the catalog -->
+    <string name="wrapper_update_available">Update available</string>
+    <!-- #132: shown on a wrapper card while its in-place catalog update downloads (%1$d = percent) -->
+    <string name="wrapper_updating_progress">Updating… %1$d%%</string>
+    <!-- #132: persistent "Installed" state for catalog entries + "From catalog" provenance chip -->
+    <string name="wrapper_installed">Installed</string>
+    <string name="wrapper_from_catalog">From catalog</string>
+
+    <!-- Step 5 (#132): curated, downloadable wrapper catalog -->
+    <string name="wrapper_catalog_title">Download wrappers…</string>
+    <string name="wrapper_catalog_subtitle">Browse curated wrappers from other projects and download them straight into the manager.</string>
+    <string name="wrapper_catalog_dialog_title">Wrapper Catalog</string>
+    <string name="wrapper_catalog_empty">No wrappers available yet.</string>
+    <string name="wrapper_catalog_offline">Offline — connect to browse and download the catalog.</string>
+    <string name="wrapper_catalog_offline_cache">Offline — showing a cached list. Connect to download.</string>
+    <string name="wrapper_catalog_needs_connection">Needs a connection to download</string>
+    <string name="wrapper_catalog_download">Download</string>
+    <string name="wrapper_catalog_downloading">Downloading</string>
+    <string name="wrapper_catalog_installing">Installing</string>
+    <string name="wrapper_catalog_download_ok">%1$s added</string>
+    <string name="wrapper_catalog_download_failed">Couldn\'t download %1$s</string>
+    <string name="wrapper_catalog_close">Done</string>
 </resources>

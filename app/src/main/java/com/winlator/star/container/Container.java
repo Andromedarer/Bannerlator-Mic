@@ -437,6 +437,219 @@ public class Container {
         putExtra("frameGenFlowScale", String.valueOf(flowScale));
     }
 
+    // lsfg-vk "performance mode" (conf.toml performance_mode): trades interpolation quality for FPS,
+    // aimed at low-end devices. Per-container, default OFF (matches the previous hardcoded false, so
+    // existing users see no change until they flip it). Also live-toggleable from the in-game FG menu.
+    public boolean isLsfgPerformanceMode() {
+        return getExtra("lsfgPerformanceMode", "0").equals("1");
+    }
+
+    public void setLsfgPerformanceMode(boolean performanceMode) {
+        putExtra("lsfgPerformanceMode", performanceMode ? "1" : "0");
+    }
+
+    // Controller vibration (PC-accurate dual-motor rumble), per-container. Mode gates WHERE rumble
+    // goes: 0=Off 1=Controller(default, matches the pre-existing hardcoded behavior) 2=Device(phone)
+    // 3=Both. Intensity (0..100) scales amplitude on top of the master/per-slot toggles in WinHandler.
+    // Both are also live-tunable from the in-game drawer (WinHandler.setVibrationTuning), which is why
+    // these getters clamp/validate exactly like isLsfgPerformanceMode/getFrameGenMultiplier above.
+    public static final int VIBRATION_MODE_OFF = 0;
+    public static final int VIBRATION_MODE_CONTROLLER = 1;
+    public static final int VIBRATION_MODE_DEVICE = 2;
+    public static final int VIBRATION_MODE_BOTH = 3;
+    public static final int VIBRATION_MODE_DEFAULT = VIBRATION_MODE_CONTROLLER;
+    public static final int VIBRATION_INTENSITY_DEFAULT = 100;
+
+    public int getVibrationMode() {
+        try {
+            int m = Integer.parseInt(getExtra("vibrationMode", String.valueOf(VIBRATION_MODE_DEFAULT)));
+            return (m < VIBRATION_MODE_OFF || m > VIBRATION_MODE_BOTH) ? VIBRATION_MODE_DEFAULT : m;
+        }
+        catch (NumberFormatException e) {
+            return VIBRATION_MODE_DEFAULT;
+        }
+    }
+
+    public void setVibrationMode(int mode) {
+        putExtra("vibrationMode", String.valueOf(mode));
+    }
+
+    public int getVibrationIntensity() {
+        try {
+            int v = Integer.parseInt(getExtra("vibrationIntensity", String.valueOf(VIBRATION_INTENSITY_DEFAULT)));
+            return (v < 0 || v > 100) ? VIBRATION_INTENSITY_DEFAULT : v;
+        }
+        catch (NumberFormatException e) {
+            return VIBRATION_INTENSITY_DEFAULT;
+        }
+    }
+
+    public void setVibrationIntensity(int intensity) {
+        putExtra("vibrationIntensity", String.valueOf(intensity));
+    }
+
+    // Gyro (motion aim), per-container. Mirrors the WinHandler.GYRO_* constants so the editor VM and
+    // the shortcut screen can talk about targets/activators without importing winhandler (same reason
+    // the VIBRATION_MODE_* values are duplicated above). Enabled/target/sensitivity/activator/invert
+    // are ALSO per-game (the shortcut extra of the same name wins — see XServerDisplayActivity);
+    // deadzone/smoothing are container-only, they describe the hand/device, not the game.
+    // NOTE: the calibration bias is deliberately NOT here — it's a physical property of this phone's
+    // IMU and stays a global pref, so a container copy or an imported config can't carry someone
+    // else's sensor zero. The clamps below match the WinHandler setters exactly, so a hand-edited
+    // container JSON can't push e.g. smoothing >= 1.0 and make the low-pass diverge.
+    public static final int GYRO_TARGET_RIGHT_STICK = 0;
+    public static final int GYRO_TARGET_LEFT_STICK = 1;
+    public static final int GYRO_TARGET_MOUSE = 2;
+    public static final int GYRO_ACTIVATOR_L1 = 0;
+    public static final int GYRO_ACTIVATOR_L2 = 1;
+    public static final int GYRO_ACTIVATOR_R1 = 2;
+    public static final int GYRO_ACTIVATOR_R3 = 3;
+    public static final int GYRO_ACTIVATOR_ALWAYS = 4;
+    public static final int GYRO_ACTIVATION_HOLD = 0;
+    public static final int GYRO_ACTIVATION_TOGGLE = 1;
+    // How the tilt is read. RATE = the shipped behaviour (angular velocity -> stick deflection, the
+    // stick recentres the moment you stop moving). ORIENTATION = "tilt to aim": the stick follows the
+    // ANGLE you're holding the device at, so a held tilt keeps the stick deflected.
+    public static final int GYRO_MODE_RATE = 0;
+    public static final int GYRO_MODE_ORIENTATION = 1;
+
+    public static final boolean GYRO_ENABLED_DEFAULT = true;
+    public static final int GYRO_TARGET_DEFAULT = GYRO_TARGET_RIGHT_STICK;
+    public static final float GYRO_DEADZONE_DEFAULT = 0.05f;
+    public static final float GYRO_SENSITIVITY_DEFAULT = 2.0f;
+    public static final float GYRO_SMOOTHING_DEFAULT = 0.5f;
+    public static final int GYRO_ACTIVATOR_DEFAULT = GYRO_ACTIVATOR_L1;
+    // HOLD is the default on purpose: it's what the gyro has always done, so an existing container
+    // that has never seen this key behaves exactly as before.
+    public static final int GYRO_ACTIVATION_MODE_DEFAULT = GYRO_ACTIVATION_HOLD;
+    // RATE for the same reason HOLD is the activation default: it's what the gyro has always done, so
+    // a container that has never seen this key behaves exactly as it did before tilt-to-aim existed.
+    public static final int GYRO_MODE_DEFAULT = GYRO_MODE_RATE;
+    public static final boolean GYRO_INVERT_X_DEFAULT = false;
+    public static final boolean GYRO_INVERT_Y_DEFAULT = false;
+
+    public boolean isGyroEnabled() {
+        return getExtra("gyroEnabled", GYRO_ENABLED_DEFAULT ? "1" : "0").equals("1");
+    }
+
+    public void setGyroEnabled(boolean enabled) {
+        putExtra("gyroEnabled", enabled ? "1" : "0");
+    }
+
+    public int getGyroMode() {
+        try {
+            int m = Integer.parseInt(getExtra("gyroMode", String.valueOf(GYRO_MODE_DEFAULT)));
+            return (m < GYRO_MODE_RATE || m > GYRO_MODE_ORIENTATION) ? GYRO_MODE_DEFAULT : m;
+        }
+        catch (NumberFormatException e) {
+            return GYRO_MODE_DEFAULT;
+        }
+    }
+
+    public void setGyroMode(int mode) {
+        putExtra("gyroMode", String.valueOf(mode));
+    }
+
+    public int getGyroTarget() {
+        try {
+            int t = Integer.parseInt(getExtra("gyroTarget", String.valueOf(GYRO_TARGET_DEFAULT)));
+            return (t < GYRO_TARGET_RIGHT_STICK || t > GYRO_TARGET_MOUSE) ? GYRO_TARGET_DEFAULT : t;
+        }
+        catch (NumberFormatException e) {
+            return GYRO_TARGET_DEFAULT;
+        }
+    }
+
+    public void setGyroTarget(int target) {
+        putExtra("gyroTarget", String.valueOf(target));
+    }
+
+    public int getGyroActivator() {
+        try {
+            int a = Integer.parseInt(getExtra("gyroActivator", String.valueOf(GYRO_ACTIVATOR_DEFAULT)));
+            return (a < GYRO_ACTIVATOR_L1 || a > GYRO_ACTIVATOR_ALWAYS) ? GYRO_ACTIVATOR_DEFAULT : a;
+        }
+        catch (NumberFormatException e) {
+            return GYRO_ACTIVATOR_DEFAULT;
+        }
+    }
+
+    public void setGyroActivator(int activator) {
+        putExtra("gyroActivator", String.valueOf(activator));
+    }
+
+    public int getGyroActivationMode() {
+        try {
+            int m = Integer.parseInt(getExtra("gyroActivationMode", String.valueOf(GYRO_ACTIVATION_MODE_DEFAULT)));
+            return (m < GYRO_ACTIVATION_HOLD || m > GYRO_ACTIVATION_TOGGLE) ? GYRO_ACTIVATION_MODE_DEFAULT : m;
+        }
+        catch (NumberFormatException e) {
+            return GYRO_ACTIVATION_MODE_DEFAULT;
+        }
+    }
+
+    public void setGyroActivationMode(int activationMode) {
+        putExtra("gyroActivationMode", String.valueOf(activationMode));
+    }
+
+    public float getGyroSensitivity() {
+        try {
+            float v = Float.parseFloat(getExtra("gyroSensitivity", String.valueOf(GYRO_SENSITIVITY_DEFAULT)));
+            return Math.min(10.0f, Math.max(0.1f, v));
+        }
+        catch (NumberFormatException e) {
+            return GYRO_SENSITIVITY_DEFAULT;
+        }
+    }
+
+    public void setGyroSensitivity(float sensitivity) {
+        putExtra("gyroSensitivity", String.valueOf(Math.min(10.0f, Math.max(0.1f, sensitivity))));
+    }
+
+    public float getGyroDeadzone() {
+        try {
+            float v = Float.parseFloat(getExtra("gyroDeadzone", String.valueOf(GYRO_DEADZONE_DEFAULT)));
+            return Math.min(0.5f, Math.max(0.0f, v));
+        }
+        catch (NumberFormatException e) {
+            return GYRO_DEADZONE_DEFAULT;
+        }
+    }
+
+    public void setGyroDeadzone(float deadzone) {
+        putExtra("gyroDeadzone", String.valueOf(Math.min(0.5f, Math.max(0.0f, deadzone))));
+    }
+
+    public float getGyroSmoothing() {
+        try {
+            float v = Float.parseFloat(getExtra("gyroSmoothing", String.valueOf(GYRO_SMOOTHING_DEFAULT)));
+            return Math.min(0.95f, Math.max(0.0f, v));
+        }
+        catch (NumberFormatException e) {
+            return GYRO_SMOOTHING_DEFAULT;
+        }
+    }
+
+    public void setGyroSmoothing(float smoothing) {
+        putExtra("gyroSmoothing", String.valueOf(Math.min(0.95f, Math.max(0.0f, smoothing))));
+    }
+
+    public boolean isGyroInvertX() {
+        return getExtra("gyroInvertX", GYRO_INVERT_X_DEFAULT ? "1" : "0").equals("1");
+    }
+
+    public void setGyroInvertX(boolean invert) {
+        putExtra("gyroInvertX", invert ? "1" : "0");
+    }
+
+    public boolean isGyroInvertY() {
+        return getExtra("gyroInvertY", GYRO_INVERT_Y_DEFAULT ? "1" : "0").equals("1");
+    }
+
+    public void setGyroInvertY(boolean invert) {
+        putExtra("gyroInvertY", invert ? "1" : "0");
+    }
+
     // FPS limiter (implemented by the bionic-fg layer: paces the real/base frames, so with
     // frame gen on the on-screen rate is limit × multiplier). Tuned live from the in-game menu.
     public static final int FPS_LIMITER_DEFAULT = 60;

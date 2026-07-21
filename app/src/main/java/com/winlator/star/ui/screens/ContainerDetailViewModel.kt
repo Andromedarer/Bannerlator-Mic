@@ -17,6 +17,7 @@ import com.winlator.star.container.Container
 import com.winlator.star.container.ContainerManager
 import com.winlator.star.contents.ContentProfile
 import com.winlator.star.contents.ContentsManager
+import com.winlator.star.contents.WrapperManager
 import com.winlator.star.core.AppUtils
 import com.winlator.star.core.DefaultVersion
 import com.winlator.star.core.EnvVars
@@ -107,6 +108,9 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     // Frame-gen engine (per-container): "off" | "bionic" | "lsfg" (mutually exclusive).
     // multiplier & flow scale are tuned live from the in-game side menu (bionic-fg).
     var frameGenEngine by mutableStateOf("off")
+    // lsfg-vk performance_mode (per-container): lower interpolation quality for higher FPS. Also
+    // live-toggleable from the in-game FG menu. Only meaningful when frameGenEngine == "lsfg".
+    var lsfgPerformanceMode by mutableStateOf(false)
     // FPS limiter on/off (loads the layer); the cap value is set live in-game.
     var fpsLimiterEnabled by mutableStateOf(false)
     // VRR: match the display panel refresh rate to the game's FPS. Default ON (safe — no-op unless
@@ -138,6 +142,29 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     var enableXInput by mutableStateOf(true)
     var enableDInput by mutableStateOf(false)
     var exclusiveXInput by mutableStateOf(true)
+
+    // Controller vibration (PC-accurate dual-motor rumble), per-container. Mode: 0=Off 1=Controller
+    // 2=Device(phone) 3=Both (Container.VIBRATION_MODE_*). Intensity 0..100 scales amplitude. Both
+    // are also live-tunable from the in-game drawer — this is just the launch-time default.
+    var vibrationMode by mutableStateOf(Container.VIBRATION_MODE_DEFAULT)
+    var vibrationIntensity by mutableStateOf(Container.VIBRATION_INTENSITY_DEFAULT)
+
+    // Gyro (motion aim), per-container. Target: 0=Right stick 1=Left stick 2=Mouse; activator is the
+    // button that gates the tilt (4 = always on), with the activation mode deciding whether that
+    // button is held or tapped to latch (0=Hold 1=Toggle). Enabled/target/activator/mode/sensitivity/
+    // invert are also per-game (shortcut editor) and live-tunable in-game — this is the default a
+    // shortcut inherits. Deadzone/smoothing are container-only (hand tremor / latency vs jitter).
+    var gyroEnabled by mutableStateOf(Container.GYRO_ENABLED_DEFAULT)
+    var gyroTarget by mutableStateOf(Container.GYRO_TARGET_DEFAULT)
+    var gyroActivator by mutableStateOf(Container.GYRO_ACTIVATOR_DEFAULT)
+    var gyroActivationMode by mutableStateOf(Container.GYRO_ACTIVATION_MODE_DEFAULT)
+    // 0=Rate (tilt speed drives the stick) 1=Orientation / "tilt to aim" (the angle held does).
+    var gyroMode by mutableStateOf(Container.GYRO_MODE_DEFAULT)
+    var gyroSensitivity by mutableStateOf(Container.GYRO_SENSITIVITY_DEFAULT)
+    var gyroDeadzone by mutableStateOf(Container.GYRO_DEADZONE_DEFAULT)
+    var gyroSmoothing by mutableStateOf(Container.GYRO_SMOOTHING_DEFAULT)
+    var gyroInvertX by mutableStateOf(Container.GYRO_INVERT_X_DEFAULT)
+    var gyroInvertY by mutableStateOf(Container.GYRO_INVERT_Y_DEFAULT)
 
     // "Run as administrator" (default ON): ON -> EnableLUA=0 (UAC off / full admin),
     // OFF -> EnableLUA=1. Stored in the container's .wine/system.reg (source of truth); on
@@ -246,8 +273,14 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             wineList.add(ContentsManager.getEntryName(p))
         wineVersionEntries = wineList
 
-        graphicsDriverEntries = res.getStringArray(R.array.graphics_driver_entries).toList()
+        // Bundled entries + user-imported wrappers (issue #132 Step 2). Built via the SHARED
+        // WrapperManager.driverEntries helper so this list and the ShortcutsScreen one can never
+        // drift (the dynamic-dropdown drift is the feature's top-ranked risk).
+        graphicsDriverEntries = WrapperManager.driverEntries(
+            context, res.getStringArray(R.array.graphics_driver_entries)
+        )
         dxWrapperEntries  = res.getStringArray(R.array.dxwrapper_entries).toList()
+        // (refreshGraphicsDriverEntries below re-reads the wrapper part after an import/delete.)
         audioDriverEntries = res.getStringArray(R.array.audio_driver_entries).toList()
         emulatorEntries   = res.getStringArray(R.array.emulator_entries).toList()
         rendererEntries = listOf("OpenGL", "Vulkan", "SurfaceFlinger")
@@ -279,6 +312,14 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             sfDir.listFiles()?.forEach { midiList.add(it.name) }
         } catch (_: Exception) {}
         midiEntries = midiList
+    }
+
+    /** Re-read the Graphics Driver dropdown entries. Call after a wrapper import/delete in the
+     *  Wrapper Manager so a freshly-imported wrapper appears WITHOUT reopening the editor (#132). */
+    fun refreshGraphicsDriverEntries() {
+        graphicsDriverEntries = WrapperManager.driverEntries(
+            context, context.resources.getStringArray(R.array.graphics_driver_entries)
+        )
     }
 
     private fun loadContainerData() {
@@ -341,6 +382,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         fullscreenMode      = c?.getFullscreenMode() ?: Container.FULLSCREEN_OFF
 
         frameGenEngine     = c?.frameGenEngine ?: "off"
+        lsfgPerformanceMode = c?.isLsfgPerformanceMode == true
         fpsLimiterEnabled  = c?.isFpsLimiterEnabled == true
         matchRefreshRate   = c?.isMatchRefreshRate != false   // default ON for new/unset containers
         manualRefreshRate  = c?.manualRefreshRate ?: 0
@@ -369,6 +411,19 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         if (!exclusiveXInput) {
             enableXInput = true; enableDInput = true
         }
+        vibrationMode      = c?.getVibrationMode() ?: Container.VIBRATION_MODE_DEFAULT
+        vibrationIntensity = c?.getVibrationIntensity() ?: Container.VIBRATION_INTENSITY_DEFAULT
+
+        gyroEnabled     = c?.isGyroEnabled() ?: Container.GYRO_ENABLED_DEFAULT
+        gyroTarget      = c?.getGyroTarget() ?: Container.GYRO_TARGET_DEFAULT
+        gyroActivator   = c?.getGyroActivator() ?: Container.GYRO_ACTIVATOR_DEFAULT
+        gyroActivationMode = c?.getGyroActivationMode() ?: Container.GYRO_ACTIVATION_MODE_DEFAULT
+        gyroMode        = c?.getGyroMode() ?: Container.GYRO_MODE_DEFAULT
+        gyroSensitivity = c?.getGyroSensitivity() ?: Container.GYRO_SENSITIVITY_DEFAULT
+        gyroDeadzone    = c?.getGyroDeadzone() ?: Container.GYRO_DEADZONE_DEFAULT
+        gyroSmoothing   = c?.getGyroSmoothing() ?: Container.GYRO_SMOOTHING_DEFAULT
+        gyroInvertX     = c?.isGyroInvertX() ?: Container.GYRO_INVERT_X_DEFAULT
+        gyroInvertY     = c?.isGyroInvertY() ?: Container.GYRO_INVERT_Y_DEFAULT
 
         // Box64 preset
         val b64Preset = c?.box64Preset ?: prefs.getString("box64_preset", Box64Preset.COMPATIBILITY) ?: Box64Preset.COMPATIBILITY
@@ -630,6 +685,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             c.setFPSCounterConfig(fpsConfig)
             c.setFullscreenMode(fullscreenMode)
             c.setFrameGenEngine(frameGenEngine)
+            c.setLsfgPerformanceMode(lsfgPerformanceMode)
             c.setFpsLimiterEnabled(fpsLimiterEnabled)
             c.setMatchRefreshRate(matchRefreshRate)
             c.setManualRefreshRate(manualRefreshRate)
@@ -638,6 +694,18 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             c.setReshadeParams(reshadeLoadout.paramsJsonOrNull())
             c.setReshadeEffect(reshadeLoadout.firstEffectName())
             c.setExclusiveXInput(exclusiveXInput)
+            c.setVibrationMode(vibrationMode)
+            c.setVibrationIntensity(vibrationIntensity)
+            c.setGyroEnabled(gyroEnabled)
+            c.setGyroTarget(gyroTarget)
+            c.setGyroActivator(gyroActivator)
+            c.setGyroActivationMode(gyroActivationMode)
+            c.setGyroMode(gyroMode)
+            c.setGyroSensitivity(gyroSensitivity)
+            c.setGyroDeadzone(gyroDeadzone)
+            c.setGyroSmoothing(gyroSmoothing)
+            c.setGyroInvertX(gyroInvertX)
+            c.setGyroInvertY(gyroInvertY)
             c.setRenderer(StringUtils.parseIdentifier(selectedRenderer))
             c.setRendererNative(rendererNative)
             c.setRendererPresentMode(rendererPresentMode)
@@ -708,6 +776,20 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
                 container = created
                 if (created != null) {
                     created.setFrameGenEngine(frameGenEngine)
+                    created.setLsfgPerformanceMode(lsfgPerformanceMode)
+                    created.setVibrationMode(vibrationMode)
+                    created.setVibrationIntensity(vibrationIntensity)
+                    // Same set as the edit path above — a new container must not silently drop these.
+                    created.setGyroEnabled(gyroEnabled)
+                    created.setGyroTarget(gyroTarget)
+                    created.setGyroActivator(gyroActivator)
+                    created.setGyroActivationMode(gyroActivationMode)
+                    created.setGyroMode(gyroMode)
+                    created.setGyroSensitivity(gyroSensitivity)
+                    created.setGyroDeadzone(gyroDeadzone)
+                    created.setGyroSmoothing(gyroSmoothing)
+                    created.setGyroInvertX(gyroInvertX)
+                    created.setGyroInvertY(gyroInvertY)
                     created.setFpsLimiterEnabled(fpsLimiterEnabled)
                     created.setMatchRefreshRate(matchRefreshRate)
                     created.setManualRefreshRate(manualRefreshRate)
