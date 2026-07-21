@@ -2951,6 +2951,27 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     container.saveData();
                 }
             };
+
+            // Gyro (motion aim) state — WinHandler owns the values and persists them to prefs, so
+            // this only seeds the drawer and pipes each change straight back (live, no restart).
+            // Same shape as the vibration master switch above; per-container persistence comes later.
+            ds.setGyroSupported(gyroSensor != null);
+            ds.setGyroEnabled(winHandler.isGyroEnabled());
+            ds.setGyroTarget(winHandler.getGyroTarget());
+            ds.setGyroSensitivity(winHandler.getGyroSensitivity());
+            ds.setGyroDeadzone(winHandler.getGyroDeadzone());
+            ds.setGyroSmoothing(winHandler.getGyroSmoothing());
+            ds.setGyroInvertX(winHandler.isGyroInvertX());
+            ds.setGyroInvertY(winHandler.isGyroInvertY());
+            ds.setGyroActivator(winHandler.getGyroActivator());
+            ds.onGyroEnabledChanged     = (enabled) -> winHandler.setGyroEnabled(enabled);
+            ds.onGyroTargetChanged      = (target)  -> winHandler.setGyroTarget(target);
+            ds.onGyroSensitivityChanged = (value)   -> winHandler.setGyroSensitivity(value);
+            ds.onGyroDeadzoneChanged    = (value)   -> winHandler.setGyroDeadzone(value);
+            ds.onGyroSmoothingChanged   = (value)   -> winHandler.setGyroSmoothing(value);
+            ds.onGyroInvertXChanged     = (invert)  -> winHandler.setGyroInvertX(invert);
+            ds.onGyroInvertYChanged     = (invert)  -> winHandler.setGyroInvertY(invert);
+            ds.onGyroActivatorChanged   = (index)   -> winHandler.setGyroActivator(index);
         }
 
         // Task Manager actions (End Process / Bring to Front / New Task / Set Affinity) are
