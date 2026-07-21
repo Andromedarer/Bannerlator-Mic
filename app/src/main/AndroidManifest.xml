@@ -71,12 +71,6 @@
         </activity>
 
         <activity
-            android:name="com.winlator.star.BigPictureActivity"
-            android:theme="@style/Theme.AppCompat"
-            android:exported="false" />
-
-
-        <activity
             android:name="com.winlator.star.XServerDisplayActivity"
             android:theme="@style/AppThemeFullscreen"
             android:launchMode="singleTask"

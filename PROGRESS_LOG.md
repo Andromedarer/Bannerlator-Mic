@@ -1,5 +1,19 @@
 # Star-Compose — Progress Log
 
+## 2026-07-20 (later) — 🎮 BIG PICTURE MODE — full Compose rebuild (branch `feat/bigpicture-compose-rebuild`, NO vc bump)
+
+> **User ask: "totally revamp/rebuild Big Picture to be fluid and easy — no background music, easy access to app settings, features and games."** Design locked with the user: full Compose rebuild · clean **blurred-hero** background (no music, no WebView, no parallax bitmap loop) · nav rails for App Settings + Game features + Tools + Power/Exit.
+>
+> **Architecture change (the crux):** old Big Picture was a standalone Java `BigPictureActivity` launched *before* MainActivity's Compose shell — which is exactly why it could reach none of the app's screens. Rebuilt as a first-class **`Screen.BigPicture` NavHost route** inside MainActivity, so every rail is a plain `navController.navigate(...)`, game launch is unchanged, and it inherits the launch-progress overlay.
+>
+> **New** `ui/screens/BigPictureScreen.kt` (~787 lines): blurred cross-fading hero bg (selected cover, `Modifier.blur` + scrim), hero (big cover + title + playtime/play-count + spec chips driver/DXVK/audio/box64 + Play + Game-options), `LazyRow` cover carousel (focused item scales+glows, auto-centre), controller-first D-pad via root `onPreviewKeyEvent` + zone/index focus model (RAIL/PLAY/CAROUSEL; A=launch, B=stay, RB=Tools), covers via `StarLaunchBridge.sgdbFetchGridsJson` → `saveCustomCoverArt`, playtime from `playtime_stats` prefs. Sheets: Game options (Edit shortcut → reused `ShortcutSettingsDialogScreen` now `internal`; Container settings → `container_detail?id=`; change/remove cover via `InAppFilePicker`), Tools (File Manager / Manage Wrappers / Downloads), Power (Exit BP → Games; turn mode off; Quit).
+>
+> **Wiring:** `Screen.kt` +`BigPicture` (not in drawer); `AppNavGraph` route; `MainActivity` folds BP into `startRoute` (pref wins over default landing) + `AppShell` renders it full-bleed (no top bar / no drawer gestures / no padding / no update banner) + immersive system bars via `DisposableEffect` in the screen.
+>
+> **Teardown (music + jank gone):** deleted `BigPictureActivity` + `bigpicture/{BigPictureAdapter,CarouselItemDecoration,TiledBackgroundView}` (kept `bigpicture/steamgrid/`), the 3 `big_picture_*.xml` layouts, the manifest `<activity>`, `assets/default_music.mp3`, and **117 animation frames** (`ab_/ab_gear_/ab_quilt_####`, APK-size win) — `ic_stat_ab_gear_0011` + `cover_art_placeholder` preserved. Settings toggle left intact (now selects the route).
+>
+> **Verified pre-build (no local build per rule):** `material-icons-extended` dep present + all icons used elsewhere; `findActivity` (ContextExt), `InAppFilePicker.IMAGES`/`buildIntent`/`pickedUri`, `LocalLifecycleOwner` import all match real code; no lingering refs. NEXT: push → CI (3 flavors) → device couch-mode test via bridge. versionCode STAYS vc47.
+
 ## 2026-07-20 (night) — ✅ RELEASE 2.7.1 STABLE = LATEST (the post-2.7 accumulator, cut as a patch stable)
 
 > **Cut from `main`. vc47, tag `2.7.1`, API-confirmed `Latest`/not-prerelease; 3 flavor APKs + `update.json` (vc47, all flavors mapped). Release run `29785981112`; version bump `d84a502b`, README `a565e997`, PROGRESS_LOG this entry.** Patch stable (user asked "release 2.7.1"); plain numeric tag = stable per [[feedback_bannerlator_release_versioning_rule]]. **Post-publish doc touch-up (`ff29f417`): body re-applied + README updated to also mention the bundled leegao BCn+DX12 compat-layer composition fix (shipped in 2.7, surfaced in the 2.7.1 notes on user request). Main tip `ff29f417`.**

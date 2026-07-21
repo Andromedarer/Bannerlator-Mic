@@ -3707,8 +3707,9 @@ private fun ShortcutGridItem(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// internal (not private) so the Big Picture screen can reuse the exact same shortcut editor dialog.
 @Composable
-private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Unit) {
+internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val res = context.resources
 

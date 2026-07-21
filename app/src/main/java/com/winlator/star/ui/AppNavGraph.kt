@@ -13,6 +13,7 @@ import androidx.navigation.navArgument
 
 import com.winlator.star.ui.screens.AdrenoToolsScreen
 import com.winlator.star.ui.screens.AppearanceScreen
+import com.winlator.star.ui.screens.BigPictureScreen
 import com.winlator.star.ui.screens.ContainerDetailScreen
 import com.winlator.star.ui.screens.ContainersScreen
 import com.winlator.star.ui.screens.FileManagerScreen
@@ -66,6 +67,10 @@ fun AppNavGraph(
 
         composable(Screen.Games.route) {
             ShortcutsScreen()
+        }
+
+        composable(Screen.BigPicture.route) {
+            BigPictureScreen(navController = navController)
         }
 
         composable(Screen.InputControls.route) {
