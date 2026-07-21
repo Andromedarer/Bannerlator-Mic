@@ -65,6 +65,7 @@ public class PerfHudView extends View {
     // ---- Config ------------------------------------------------------------
     private boolean showEngine = true, showGpuModel = false, showGPU = true, showCPU = true;
     private boolean showRAM = true, showPower = true, showFPS = true, showGraph = false, showTemp = true;
+    private HudMetrics.TempDisplay tempDisplay = HudMetrics.TempDisplay.from(null);
     private boolean vertical = false;
     private Skin skin = Skin.CLASSIC;
     private ColorIntensity intensity = ColorIntensity.MID;
@@ -205,7 +206,14 @@ public class PerfHudView extends View {
         if (showPower) cells.add(new Cell(charging ? "CHG" : "PWR",
                                           String.format(Locale.ENGLISH, "%.1fW", powerW),
                                           charging ? C_CHG : C_PWR));
-        if (showTemp)  cells.add(new Cell("TMP", String.format(Locale.ENGLISH, "%.1f°C", tempC), C_TMP));
+        if (showTemp) {
+            // Only the CPU temp is shown in this style. Colour the whole cell by danger band; the
+            // label keeps its identity colour when banding is off.
+            HudMetrics.Thresholds t = metrics.resolveThresholds(HudMetrics.TempSensor.CPU, tempDisplay);
+            String text = HudMetrics.formatTemp(tempC, tempDisplay, true)
+                        + (HudMetrics.isRedBand(tempC, t, tempDisplay) ? " !" : "");
+            cells.add(new Cell("TMP", text, HudMetrics.tempColor(tempC, t, tempDisplay, C_TMP)));
+        }
         if (showFPS)   cells.add(new Cell("FPS", String.format(Locale.ENGLISH, "%.0f", fps), C_FPS));
         return cells;
     }
@@ -396,6 +404,7 @@ public class PerfHudView extends View {
         showRAM      = cfg.get("showRAM", "1").equals("1");
         showPower    = cfg.get("showPower", "1").equals("1");
         showTemp     = cfg.get("showTemp", "1").equals("1");
+        tempDisplay  = HudMetrics.TempDisplay.from(cfg);
         showEngine   = cfg.get("showEngine", "1").equals("1");
         showGpuModel = cfg.get("showGpuModel", "0").equals("1");
         dualBattery  = cfg.get("hudDualBattery", "0").equals("1");

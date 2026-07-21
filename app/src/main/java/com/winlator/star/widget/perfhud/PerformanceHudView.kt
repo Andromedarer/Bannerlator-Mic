@@ -91,6 +91,7 @@ class PerformanceHudView(
     private var showClockTime = false
     private var showCpuTemperature = true
     private var showGpuTemperature = false
+    private var tempDisplay = HudMetrics.TempDisplay.from(null)
     private var showFrameRateGraph = false
     private var showCpuUsageGraph = false
     private var showGpuUsageGraph = false
@@ -234,6 +235,10 @@ class PerformanceHudView(
         showEngine = cfg.get("showEngine", "1") == "1"
         showGpuModel = cfg.get("showGpuModel", "0") == "1"
 
+        // Unit + danger-band settings, shared verbatim with the classic and GameHub overlays so
+        // switching HUD style never silently switches your units or your thresholds.
+        tempDisplay = HudMetrics.TempDisplay.from(cfg)
+
         // New keys for this style's extra metrics (wired into the config UI in P3).
         showGpuTemperature = cfg.get("showGpuTemp", "0") == "1"
         showBatteryLevel = cfg.get("showBattery", "0") == "1"
@@ -319,12 +324,29 @@ class PerformanceHudView(
             battery = battery.percent?.let { "BAT $it%" },
             power = battery.watts.takeIf { it > 0f }?.let { String.format(Locale.US, "PWR %.1fW", it) },
             runtime = battery.runtimeText,
-            batteryTemp = battery.tempC?.let { "BAT TEMP ${it}°C" },
+            batteryTemp = battery.tempC?.let { "BAT TEMP ${tempText(it, HudMetrics.TempSensor.BATTERY)}" },
             clock = "TIME ${DateFormat.getTimeFormat(context).format(Date())}",
-            cpuTemp = cpuTemp?.let { "CPU TEMP ${it}°C" },
-            gpuTemp = gpuTemp?.let { "GPU TEMP ${it}°C" },
+            cpuTemp = cpuTemp?.let { "CPU TEMP ${tempText(it, HudMetrics.TempSensor.CPU)}" },
+            gpuTemp = gpuTemp?.let { "GPU TEMP ${tempText(it, HudMetrics.TempSensor.GPU)}" },
+            cpuTempC = cpuTemp?.toFloat(),
+            gpuTempC = gpuTemp?.toFloat(),
+            batteryTempC = battery.tempC?.toFloat(),
         )
     }
+
+    /**
+     * Formats in the user's unit and appends a non-colour marker in the red band — colour must never
+     * be the only signal, since red/green is the worst pair for colourblind users and this is small
+     * text over arbitrary game content.
+     */
+    private fun tempText(celsius: Int, sensor: HudMetrics.TempSensor): String {
+        val value = celsius.toFloat()
+        val marker = if (HudMetrics.isRedBand(value, thresholdsFor(sensor), tempDisplay)) " !" else ""
+        return HudMetrics.formatTemp(value, tempDisplay, false) + marker
+    }
+
+    private fun thresholdsFor(sensor: HudMetrics.TempSensor): HudMetrics.Thresholds =
+        metrics.resolveThresholds(sensor, tempDisplay)
 
     private fun renderSnapshot(snapshot: HudSnapshot) {
         lastSnapshot = snapshot
@@ -356,6 +378,18 @@ class PerformanceHudView(
         updateMetricText(clockMetric, snapshot.clock)
         updateMetricText(cpuTempMetric, snapshot.cpuTemp)
         updateMetricText(gpuTempMetric, snapshot.gpuTemp)
+        applyTempBand(cpuTempMetric, snapshot.cpuTempC, HudMetrics.TempSensor.CPU)
+        applyTempBand(gpuTempMetric, snapshot.gpuTempC, HudMetrics.TempSensor.GPU)
+        applyTempBand(batteryTempMetric, snapshot.batteryTempC, HudMetrics.TempSensor.BATTERY)
+    }
+
+    /** Recolours a temperature row for its danger band, or restores its base colour when banding is off. */
+    private fun applyTempBand(metric: MetricViews, celsius: Float?, sensor: HudMetrics.TempSensor) {
+        val tint = if (celsius == null || !tempDisplay.colorBands) null
+                   else HudMetrics.tempColor(celsius, thresholdsFor(sensor), tempDisplay, metric.baseTextColor)
+        if (metric.tintOverride == tint) return   // colour only changes when the band does
+        metric.tintOverride = tint
+        applyMetricAppearance(metric)
     }
 
     private fun updateMetricText(metric: MetricViews, text: String?) {
@@ -473,7 +507,7 @@ class PerformanceHudView(
     }
 
     private fun applyMetricAppearance(metric: MetricViews) {
-        val textColor = blendMetricColor(metric.baseTextColor)
+        val textColor = blendMetricColor(metric.tintOverride ?: metric.baseTextColor)
         metric.stackedText.setTextColor(textColor)
         metric.compactText.setTextColor(textColor)
         metric.stackedText.setPadding(0, appearance.rowVerticalPaddingDp.dp, 0, 0)
@@ -648,6 +682,9 @@ class PerformanceHudView(
         val supportsGraph: Boolean,
         val baseTextColor: Int,
         val baseGraphColor: Int?,
+        // Set per-update by the temperature rows to colour by danger band; null keeps baseTextColor.
+        // Still goes through blendMetricColor, so a banded row honours HUD opacity/theme like any other.
+        var tintOverride: Int? = null,
         val stackedText: TextView,
         val compactText: TextView,
         val stackedContainer: LinearLayout,

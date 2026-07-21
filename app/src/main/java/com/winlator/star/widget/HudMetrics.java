@@ -368,6 +368,196 @@ public class HudMetrics {
         return null;
     }
 
+    /** The first path in {@code paths} that yields a plausible reading, or null. */
+    private String resolveTempPath(List<String> paths) {
+        LinkedHashSet<String> seen = new LinkedHashSet<>();
+        for (String path : paths) {
+            if (!seen.add(path)) continue;
+            Integer raw = readIntFromLine(path);
+            if (raw == null) continue;
+            int celsius = raw > 1000 ? (raw + 500) / 1000 : raw;
+            if (celsius >= 1 && celsius <= 150) return path;
+        }
+        return null;
+    }
+
+    // =======================================================================
+    // Temperature danger bands (green / amber / red)
+    // =======================================================================
+
+    public enum TempSensor { CPU, GPU, BATTERY }
+
+    /** Amber and red onset in °C. Always °C internally — conversion happens at format time only. */
+    public static final class Thresholds {
+        public final int amberC;
+        public final int redC;
+        Thresholds(int amberC, int redC) { this.amberC = amberC; this.redC = redC; }
+    }
+
+    public static final int TEMP_COLOR_OK    = 0xFF66BB6A;
+    public static final int TEMP_COLOR_AMBER = 0xFFFFB74D;
+    public static final int TEMP_COLOR_RED   = 0xFFEF5350;
+
+    // Tier-2 fallbacks, used when the device declares no usable trip points. Battery is the only one
+    // with a well-grounded number (Li-ion); CPU/GPU vary enough between parts that these are a
+    // deliberately conservative guess — which is exactly why trip points are preferred.
+    private static final int DEFAULT_RED_CPU = 90;
+    private static final int DEFAULT_RED_GPU = 90;
+    private static final int DEFAULT_RED_BAT = 48;
+
+    /** Amber sits a proportional step below red, which scales sensibly across both CPU/GPU and battery ranges. */
+    public static int amberForRed(int redC) {
+        return Math.round(redC * 0.88f);
+    }
+
+    /** Parsed temperature display options, shared by every overlay so they can't disagree. */
+    public static final class TempDisplay {
+        public final boolean fahrenheit;
+        public final boolean colorBands;
+        public final boolean auto;
+        public final int redCpu, redGpu, redBat;
+
+        public TempDisplay(boolean fahrenheit, boolean colorBands, boolean auto,
+                           int redCpu, int redGpu, int redBat) {
+            this.fahrenheit = fahrenheit;
+            this.colorBands = colorBands;
+            this.auto = auto;
+            this.redCpu = redCpu;
+            this.redGpu = redGpu;
+            this.redBat = redBat;
+        }
+
+        public static TempDisplay from(com.winlator.star.core.KeyValueSet cfg) {
+            if (cfg == null) return new TempDisplay(false, true, true,
+                DEFAULT_RED_CPU, DEFAULT_RED_GPU, DEFAULT_RED_BAT);
+            return new TempDisplay(
+                cfg.get("tempUnit", "c").equalsIgnoreCase("f"),
+                !cfg.get("tempBands", "1").equals("0"),
+                !cfg.get("tempAuto", "1").equals("0"),
+                parseInt(cfg.get("tempRedCpu", ""), DEFAULT_RED_CPU),
+                parseInt(cfg.get("tempRedGpu", ""), DEFAULT_RED_GPU),
+                parseInt(cfg.get("tempRedBat", ""), DEFAULT_RED_BAT));
+        }
+
+        int manualRedFor(TempSensor s) {
+            switch (s) {
+                case GPU:     return redGpu;
+                case BATTERY: return redBat;
+                default:      return redCpu;
+            }
+        }
+
+        private static int parseInt(String s, int fallback) {
+            try { return s == null || s.isEmpty() ? fallback : Integer.parseInt(s.trim()); }
+            catch (NumberFormatException e) { return fallback; }
+        }
+    }
+
+    // Trip points are a device constant — resolve once per sensor and keep it.
+    private final java.util.EnumMap<TempSensor, Thresholds> autoThresholdCache =
+        new java.util.EnumMap<>(TempSensor.class);
+    private final java.util.EnumSet<TempSensor> autoThresholdResolved =
+        java.util.EnumSet.noneOf(TempSensor.class);
+
+    /**
+     * Bands for a sensor. Manual mode uses the user's red point; Auto prefers the device's OWN
+     * declared thermal trip points (per-device truth — a handheld with active cooling and a phone on
+     * the same SoC throttle at very different points) and falls back to {@link #DEFAULT_RED_CPU} etc.
+     */
+    public Thresholds resolveThresholds(TempSensor sensor, TempDisplay display) {
+        if (display != null && !display.auto) {
+            int red = display.manualRedFor(sensor);
+            return new Thresholds(amberForRed(red), red);
+        }
+        if (!autoThresholdResolved.contains(sensor)) {
+            autoThresholdResolved.add(sensor);
+            Thresholds fromDevice = readTripPointThresholds(sensor);
+            if (fromDevice != null) autoThresholdCache.put(sensor, fromDevice);
+        }
+        Thresholds cached = autoThresholdCache.get(sensor);
+        if (cached != null) return cached;
+        int red = sensor == TempSensor.GPU ? DEFAULT_RED_GPU
+                : sensor == TempSensor.BATTERY ? DEFAULT_RED_BAT
+                : DEFAULT_RED_CPU;
+        return new Thresholds(amberForRed(red), red);
+    }
+
+    /**
+     * Bands from the kernel's declared trip points for the zone we actually read this sensor from:
+     * amber ← the lowest sane {@code passive} trip, red ← the lowest sane {@code hot}/{@code critical}.
+     *
+     * <p>Returns null unless a usable red point is found. Two real traps this guards against: some
+     * zones aren't temperature sensors at all (a Snapdragon's {@code pm8550-bcl-lvl0} battery-current
+     * limiter reports {@code trip_point_0_temp = 1} with type {@code passive}), and the GPU is often
+     * read from a non-thermal_zone node ({@code /sys/class/kgsl/...}) that has no trip points.
+     */
+    private Thresholds readTripPointThresholds(TempSensor sensor) {
+        String tempPath;
+        switch (sensor) {
+            case GPU:
+                tempPath = resolveTempPath(discoverPrioritizedGpuTempPaths());
+                break;
+            case BATTERY:
+                return null; // battery temp comes from BatteryManager, not a thermal zone
+            default:
+                tempPath = resolveTempPath(discoverPrioritizedCpuTempPaths());
+        }
+        if (tempPath == null) return null;
+        File zoneDir = new File(tempPath).getParentFile();
+        if (zoneDir == null) return null;
+
+        File[] tripTemps = zoneDir.listFiles(
+            (d, name) -> name.startsWith("trip_point_") && name.endsWith("_temp"));
+        if (tripTemps == null || tripTemps.length == 0) return null;
+
+        Integer amber = null, red = null;
+        for (File tripTemp : tripTemps) {
+            Integer raw = readIntFromLine(tripTemp.getPath());
+            if (raw == null) continue;
+            int celsius = raw > 1000 ? (raw + 500) / 1000 : raw;
+            // Reject anything that isn't plausibly a thermal trip — this is what filters out the
+            // battery-current-limiter zones whose "trip point" is a level index, not a temperature.
+            if (celsius < 20 || celsius > 120) continue;
+
+            String typePath = tripTemp.getPath().replaceAll("_temp$", "_type");
+            String type = readFirstLine(typePath);
+            if (type == null) continue;
+            type = type.trim().toLowerCase(Locale.US);
+
+            if (type.contains("critical") || type.contains("hot")) {
+                if (red == null || celsius < red) red = celsius;
+            } else if (type.contains("passive")) {
+                if (amber == null || celsius < amber) amber = celsius;
+            }
+        }
+        if (red == null) return null;
+        if (amber == null || amber >= red) amber = amberForRed(red);
+        return new Thresholds(amber, red);
+    }
+
+    /** Band colour for a reading, or {@code fallbackColor} when banding is off or the value is unusable. */
+    public static int tempColor(Float celsius, Thresholds t, TempDisplay display, int fallbackColor) {
+        if (celsius == null || t == null || display == null || !display.colorBands) return fallbackColor;
+        if (celsius >= t.redC) return TEMP_COLOR_RED;
+        if (celsius >= t.amberC) return TEMP_COLOR_AMBER;
+        return TEMP_COLOR_OK;
+    }
+
+    /** True once the reading is in the red band — callers append a non-colour marker for accessibility. */
+    public static boolean isRedBand(Float celsius, Thresholds t, TempDisplay display) {
+        return celsius != null && t != null && display != null && display.colorBands && celsius >= t.redC;
+    }
+
+    /** Formats a °C reading in the user's unit. Thresholds stay °C; only display converts. */
+    public static String formatTemp(float celsius, TempDisplay display, boolean oneDecimal) {
+        boolean f = display != null && display.fahrenheit;
+        float value = f ? celsius * 9f / 5f + 32f : celsius;
+        String unit = f ? "°F" : "°C";
+        return oneDecimal
+            ? String.format(Locale.ENGLISH, "%.1f%s", value, unit)
+            : String.format(Locale.ENGLISH, "%d%s", Math.round(value), unit);
+    }
+
     // =======================================================================
     // Battery
     // =======================================================================

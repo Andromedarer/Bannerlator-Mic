@@ -39,6 +39,9 @@ public class FrameRatingHorizontal extends FrameLayout implements Runnable {
 
     // Device-complete metric readers (GPU load / CPU temp / RAM) live in the single shared collector.
     private final HudMetrics metrics;
+    private HudMetrics.TempDisplay tempDisplay = HudMetrics.TempDisplay.from(null);
+    private int defaultCpuTempColor = 0xFFFFFFFF;
+    private int defaultBatteryTempColor = 0xFFFFFFFF;
 
     private final TextView tvFPS, tvCPUTemp, tvGPULoad, tvRAM, tvBatteryTemp, tvBatteryVoltage, tvRenderer, tvLatency;
 
@@ -96,6 +99,9 @@ public class FrameRatingHorizontal extends FrameLayout implements Runnable {
         sepGPULoad = findViewById(R.id.SepGPULoad);
         sepRAM = findViewById(R.id.SepRAM);
         sepBatteryTemp = findViewById(R.id.SepBatteryTemp);
+        // Snapshot for restoring a row when danger bands are switched off (only FPS recolours here).
+        defaultCpuTempColor = tvCPUTemp != null ? tvCPUTemp.getCurrentTextColor() : 0xFFFFFFFF;
+        defaultBatteryTempColor = tvBatteryTemp != null ? tvBatteryTemp.getCurrentTextColor() : 0xFFFFFFFF;
         sepBatteryVoltage = findViewById(R.id.SepBatteryVoltage);
         sepRenderer = findViewById(R.id.SepRenderer);
 
@@ -127,6 +133,7 @@ public class FrameRatingHorizontal extends FrameLayout implements Runnable {
         setGroupVisible(groupRAM, config.get("showRAM", "0").equals("1"));
         setGroupVisible(groupBatteryVoltage, config.get("showBatteryVoltage", "0").equals("1"));
         setGroupVisible(groupBatteryTemp, config.get("showBatteryTemp", "0").equals("1"));
+        tempDisplay = HudMetrics.TempDisplay.from(config);
         setGroupVisible(groupFPS, config.get("showFPS", "1").equals("1"));
 
         updateSeparators();
@@ -200,10 +207,10 @@ public class FrameRatingHorizontal extends FrameLayout implements Runnable {
             float latencyMs = 1000.0f / Math.max(displayFps, 1.0f);
             tvLatency.setText(String.format(Locale.ENGLISH, "%.1fms", latencyMs));
         }
-        if (tvCPUTemp != null) tvCPUTemp.setText(String.format(Locale.ENGLISH, "%.1f°C", cpuTemp));
+        applyTemp(tvCPUTemp, cpuTemp, HudMetrics.TempSensor.CPU, defaultCpuTempColor);
         if (tvGPULoad != null) tvGPULoad.setText(gpuLoad + "%");
         if (tvRAM != null) tvRAM.setText(String.format(Locale.ENGLISH, "%.0f%%", metrics.getRAMPercent()));
-        if (tvBatteryTemp != null) tvBatteryTemp.setText(String.format(Locale.ENGLISH, "%.1f°C", batteryTemp));
+        applyTemp(tvBatteryTemp, batteryTemp, HudMetrics.TempSensor.BATTERY, defaultBatteryTempColor);
         if (tvBatteryVoltage != null) tvBatteryVoltage.setText(String.format(Locale.ENGLISH, "%.2fW", batteryWattage));
     }
 
@@ -239,5 +246,14 @@ public class FrameRatingHorizontal extends FrameLayout implements Runnable {
                 return true;
         }
         return super.onTouchEvent(event);
+    }
+
+    /** Writes a temperature in the user's unit and colours the row by danger band. */
+    private void applyTemp(TextView tv, float celsius, HudMetrics.TempSensor sensor, int defaultColor) {
+        if (tv == null) return;
+        HudMetrics.Thresholds t = metrics.resolveThresholds(sensor, tempDisplay);
+        tv.setText(HudMetrics.formatTemp(celsius, tempDisplay, true)
+                 + (HudMetrics.isRedBand(celsius, t, tempDisplay) ? " !" : ""));
+        tv.setTextColor(HudMetrics.tempColor(celsius, t, tempDisplay, defaultColor));
     }
 }
