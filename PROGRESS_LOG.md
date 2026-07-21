@@ -1,5 +1,18 @@
 # Star-Compose — Progress Log
 
+## 2026-07-21 — 🎛️ In-game Controls tab → segmented sub-tabs (Touch / Mouse / Vibration / Gyro), main `df419afd`
+
+> **Merged `feat/controls-subtabs` → main (`--no-ff`).** Safety tag `subtabs-premerge-backup` = `43f05635`. CI green 3 flavors (run `29825610490`), staged `bannerlator-controls-subtabs-43f0563-standard.apk`. **vc STAYS 47.**
+>
+> **Why:** the Controls tab had accumulated **four separate feature areas in one scroll** — Input Controls (profile, 4 chips, opacity, accent, 2 buttons), Mouse & Cursor (3 chips), Vibration (enabled + 4 modes + intensity + 4 slots), Gyro (~10 controls + contextual hints) — roughly **35 interactive controls**. User reported it as cluttered. I mocked up **5 layout options as an interactive HTML preview** (`/sdcard/Download/controls-layouts.html`: segmented sub-tabs · accordion w/ state summaries · category rail · status-cards drill-in · quick+advanced) and the user picked the segmented sub-tabs.
+>
+> **Implementation:** the tab bar **reuses the existing `ModeChipGrid` at `perRow = 4`** rather than a new widget — it already renders equal-width accent-filled chips, so it reads as native to the drawer. Content is gated by a `when`; sections themselves are **byte-identical** (verified by diffing the body with whitespace/comments stripped — only the tab bar, the branch braces, and 3 now-redundant separator dividers differ). No control reordered, restyled, rewired, or pref-key changed.
+> - ⚠️ **Structural hazard handled:** `GyroSection()` used to be called from *inside* the vibration area. It is now a **top-level `when` branch, sibling to vibration** — had it landed under `vibrationMasterOn`, the whole gyro UI would vanish whenever rumble was switched off. Verified on main at `XServerDrawer.kt:2295`.
+> - Selected sub-tab persists in `XServerDrawerState` across drawer close/reopen (someone tuning gyro mid-game reopens repeatedly; snapping back to Touch each time would be worse than the clutter). Cleared in `reset()`.
+> - Input-section locals hoisted above the `when` so an in-flight profile edit isn't dropped by switching sub-tabs and back. Gyro's leading divider removed (it only separated it from vibration in the old scroll).
+>
+> 💡 **Observation worth acting on later:** **Gyro is now larger than the other three areas combined.** It may have outgrown living inside Controls and could deserve its own top-level rail icon.
+
 ## 2026-07-21 — 📦 Banner File Manager **1.1.0** bundled (replaces 1.0.0) — merged to main `137cc75c`, vc47
 
 > **Merged `feat/bfm-1.1-bake` → main (`--no-ff`).** Only changed file is the asset; no code paths touched. Safety tag `bfm11-premerge-backup` = `1b8d3e41`. CI green 3 flavors (run `29822725563`). **vc STAYS 47 — this simply ships with the next stable.**
