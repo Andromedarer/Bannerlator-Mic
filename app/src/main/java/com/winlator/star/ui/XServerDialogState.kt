@@ -302,9 +302,22 @@ object XServerDialogState {
     val gyroSupported: StateFlow<Boolean> = _gyroSupported
     fun setGyroSupported(v: Boolean) { _gyroSupported.value = v }
 
+    // Separate from gyroSupported: a device can have a gyroscope but no rotation-vector sensor, in
+    // which case rate mode works and only the Orientation chip is dead. False renders that chip
+    // disabled with a reason rather than hiding it.
+    private val _gyroOrientationSupported = MutableStateFlow(false)
+    val gyroOrientationSupported: StateFlow<Boolean> = _gyroOrientationSupported
+    fun setGyroOrientationSupported(v: Boolean) { _gyroOrientationSupported.value = v }
+
     private val _gyroEnabled = MutableStateFlow(true)
     val gyroEnabled: StateFlow<Boolean> = _gyroEnabled
     fun setGyroEnabled(v: Boolean) { _gyroEnabled.value = v }
+
+    // 0 = Rate (tilt SPEED drives the stick, which recentres when you stop), 1 = Orientation /
+    // "tilt to aim" (the stick follows the ANGLE held, so a held tilt sustains). WinHandler.GYRO_MODE_*.
+    private val _gyroMode = MutableStateFlow(0)
+    val gyroMode: StateFlow<Int> = _gyroMode
+    fun setGyroMode(v: Int) { _gyroMode.value = v }
 
     // 0=Right stick 1=Left stick 2=Mouse (WinHandler.GYRO_TARGET_*).
     private val _gyroTarget = MutableStateFlow(0)
@@ -346,6 +359,7 @@ object XServerDialogState {
     fun interface GyroBoolCallback { fun invoke(value: Boolean) }
     fun interface GyroIntCallback { fun invoke(value: Int) }
     fun interface GyroFloatCallback { fun invoke(value: Float) }
+    fun interface GyroActionCallback { fun invoke() }
 
     @JvmField var onGyroEnabledChanged: GyroBoolCallback? = null
     @JvmField var onGyroTargetChanged: GyroIntCallback? = null
@@ -356,6 +370,9 @@ object XServerDialogState {
     @JvmField var onGyroInvertYChanged: GyroBoolCallback? = null
     @JvmField var onGyroActivatorChanged: GyroIntCallback? = null
     @JvmField var onGyroActivationModeChanged: GyroIntCallback? = null
+    @JvmField var onGyroModeChanged: GyroIntCallback? = null
+    // Fired by the drawer's Recenter row: the next orientation sample recaptures the pose as centre.
+    @JvmField var onGyroRecenterRequested: GyroActionCallback? = null
 
     // -------------------------------------------------------------------------
     // Debug / Logs dialog
@@ -582,7 +599,9 @@ object XServerDialogState {
         _vibrationMode.value   = 1
         _vibrationIntensity.value = 100
         _gyroSupported.value   = false
+        _gyroOrientationSupported.value = false
         _gyroEnabled.value     = true
+        _gyroMode.value        = 0
         _gyroTarget.value      = 0
         _gyroSensitivity.value = 2.0f
         _gyroDeadzone.value    = 0.05f
@@ -628,7 +647,8 @@ object XServerDialogState {
         onGyroEnabledChanged = null; onGyroTargetChanged = null
         onGyroSensitivityChanged = null; onGyroDeadzoneChanged = null; onGyroSmoothingChanged = null
         onGyroInvertXChanged = null; onGyroInvertYChanged = null; onGyroActivatorChanged = null
-        onGyroActivationModeChanged = null
+        onGyroActivationModeChanged = null; onGyroModeChanged = null
+        onGyroRecenterRequested = null
         onInputControlsConfirm = null; onInputControlsSettings = null
         onScreenEffectsApply = null; onSeAddProfile = null; onSeRemoveProfile = null
         onWindowClick = null

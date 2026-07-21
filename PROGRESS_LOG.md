@@ -1,5 +1,26 @@
 # Star-Compose — Progress Log
 
+## 2026-07-21 (morning) — 🔨 CHECKPOINT: gyro P4 Tilt-to-Aim IN FLIGHT, user offline (driving to work)
+
+> **Written mid-implementation, before the user went offline.** Main is `61bc20d3` (gyro feature complete except P4, vc47). **P4 is being implemented on branch `feat/gyro-tilt-to-aim` (off `61bc20d3`) — files were still being written when this was committed, so it is NOT reviewed, NOT built, NOT staged.** Only this file was staged in this commit; the P4 source changes are deliberately left uncommitted.
+>
+> **▶️ RESUME WHEN BACK ONLINE:** (1) review the P4 diff against the constraints below, (2) commit as The412Banner, (3) CI artifacts all 3 flavors, (4) stage the standard APK sha-verified to /sdcard/Download.
+>
+> **P4 review checklist (the constraints that matter):**
+> - ⭐ **`updateGyroData` must be TEXTUALLY UNTOUCHED** — the mode branches at *sensor-selection* time only, with orientation samples arriving through a separate `updateGyroOrientation()` entry point. That's what keeps device-proven rate mode a provable no-op at the default.
+> - Sensor is **`TYPE_GAME_ROTATION_VECTOR`** (not `ROTATION_VECTOR`); fallback chain then "unsupported" with a *disabled chip + reason*, and the launch resolver must NOT rewrite a persisted setting on an unsupported device.
+> - **Calibration bias must NOT be subtracted** in orientation mode (rad/s rate offset vs an angle; the zero-reference already cancels constants), and the calibration UI must stay visible.
+> - Display-rotation remap **cached in a volatile int** (never queried per sample), refreshed on config change + the VRR DisplayListener; all four rotations reachable (`sensorLandscape` + portrait containers).
+> - Samsung `getRotationMatrixFromVector` guard (preallocated `float[4]` when `values.length > 4`); gimbal guard at `|pitch| > 1.3`.
+> - **Mouse + Orientation blocked** in UI *and* forced to RATE in the resolver/setters (a held tilt would peg the pointer at a screen edge).
+> - **Recenter**: auto on the activation rising edge (hook in `updateGyroActivation`) **plus a manual drawer row — mandatory**, because the ALWAYS activator has no rising edge ever.
+> - The **sensor re-registration fix**: `registerGyroSensor()` guards only on "already registered", so a mid-session mode change would keep the WRONG sensor registered.
+> - Hot path allocation-free (preallocated `float[9]/[9]/[3]/[4]`); vibration + calibration + Hold/Toggle intact; **vc stays 47**.
+>
+> ⚠️ **Also still unverified on hardware:** the Hold/Toggle **un-latch fix** merged in `55eb19ca` (latch on → tilt to full deflection → tap off → the stick must recentre immediately). Staged build `bannerlator-gyro-toggle-08422bb-standard.apk`; revert tag `gyro-calib-premerge-backup` = `08422bbd`.
+>
+> **Other parked work:** the input-driven **FPS-drop fix** (Phase-0 probe first) → [[project_bannerlator_input_fps_drop]].
+
 ## 2026-07-21 — ✅ GYROSCOPE FEATURE COMPLETE — merged to main `55eb19ca` (vc47)
 
 > **Merged `feat/gyro-calibration` → main (`--no-ff`), 12 files, +1219/-65.** Verified non-destructive: all vibration files unchanged vs pre-merge main, zero rumble lines removed from `WinHandler.java`, Big Picture intact, **vc STAYS 47**. Safety tag `gyro-calib-premerge-backup` = `08422bbd`; branch not deleted.

@@ -1383,6 +1383,30 @@ private fun AdvancedTab(
                 Text(stringResource(R.string.gyro_enabled), modifier = Modifier.weight(1f))
             }
             if (viewModel.gyroEnabled) {
+                // Rate = tilt SPEED drives the target and it recentres when you stop; Tilt to Aim =
+                // the ANGLE held drives it, so a held tilt sustains. Mutually exclusive with the Mouse
+                // target: the mouse path emits relative deltas, so a held tilt would be a constant
+                // delta and the pointer would run to a screen edge and stay there. Each selection
+                // therefore knocks the other back to a working value (WinHandler enforces the same
+                // rule at launch, so a hand-edited container JSON can't reach the broken pair either).
+                val gyroModeLabels = listOf(
+                    stringResource(R.string.gyro_mode_rate),
+                    stringResource(R.string.gyro_mode_orientation),
+                )
+                LabeledDropdown(
+                    label = stringResource(R.string.gyro_mode_label),
+                    options = gyroModeLabels,
+                    selectedOption = gyroModeLabels.getOrElse(viewModel.gyroMode) {
+                        gyroModeLabels[Container.GYRO_MODE_DEFAULT]
+                    },
+                    onSelect = { opt ->
+                        val mode = gyroModeLabels.indexOf(opt).coerceAtLeast(0)
+                        viewModel.gyroMode = mode
+                        if (mode == Container.GYRO_MODE_ORIENTATION && viewModel.gyroTarget == Container.GYRO_TARGET_MOUSE)
+                            viewModel.gyroTarget = Container.GYRO_TARGET_DEFAULT
+                    }
+                )
+                Spacer(Modifier.height(8.dp))
                 val gyroTargetLabels = listOf(
                     stringResource(R.string.gyro_target_right_stick),
                     stringResource(R.string.gyro_target_left_stick),
@@ -1394,7 +1418,12 @@ private fun AdvancedTab(
                     selectedOption = gyroTargetLabels.getOrElse(viewModel.gyroTarget) {
                         gyroTargetLabels[Container.GYRO_TARGET_DEFAULT]
                     },
-                    onSelect = { opt -> viewModel.gyroTarget = gyroTargetLabels.indexOf(opt).coerceAtLeast(0) }
+                    onSelect = { opt ->
+                        val target = gyroTargetLabels.indexOf(opt).coerceAtLeast(0)
+                        viewModel.gyroTarget = target
+                        if (target == Container.GYRO_TARGET_MOUSE)
+                            viewModel.gyroMode = Container.GYRO_MODE_RATE
+                    }
                 )
                 val gyroActivatorLabels = listOf(
                     stringResource(R.string.gyro_activator_l1),

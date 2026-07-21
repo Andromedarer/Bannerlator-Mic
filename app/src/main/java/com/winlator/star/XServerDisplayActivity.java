@@ -25,6 +25,7 @@ import android.os.Looper;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
+import android.view.Surface;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
@@ -259,12 +260,38 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // Gyro (motion aim) — rate samples go straight to WinHandler, which gates them on the
     // activator button and overlays them on the right stick. Inert when the device has no gyroscope.
     private Sensor gyroSensor;
+    // Orientation ("tilt to aim") mode reads an absolute pose instead of a rate. GAME_ROTATION_VECTOR
+    // rather than ROTATION_VECTOR on purpose: it fuses gyro + accelerometer only, so a speaker magnet
+    // or a magnetic case can't drag the aim around. ROTATION_VECTOR is the fallback for the handful of
+    // devices that only expose the magnetometer-fused one; null means orientation mode is unavailable.
+    private Sensor gyroRotationSensor;
     private boolean gyroListenerRegistered = false;
+    // Which sensor TYPE is currently registered. Without this a mid-session mode change would hit the
+    // "already registered" early-out and silently keep feeding the wrong sensor to the wrong entry point.
+    private int registeredGyroSensorType = -1;
+    // Display rotation, cached. getDisplay().getRotation() is a binder call and the orientation remap
+    // needs it on every sample (50-200 Hz while the game renders), so it is refreshed on the events
+    // that can actually change it instead: onCreate, the config-changed path, and the display listener.
+    private volatile int cachedDisplayRotation = Surface.ROTATION_0;
+    // Scratch for the orientation math. All three SensorManager calls write into caller-supplied
+    // arrays, so these live here and the sample path allocates nothing.
+    private final float[] gyroRotationMatrix = new float[9];
+    private final float[] gyroRemappedMatrix = new float[9];
+    private final float[] gyroOrientationAngles = new float[3];
+    // getRotationMatrixFromVector throws IllegalArgumentException on some Samsung builds when the
+    // rotation vector carries more than 4 components, so anything longer is copied down into this.
+    private final float[] gyroRotationVector = new float[4];
     private final SensorEventListener gyroListener = new SensorEventListener() {
         @Override
         public void onSensorChanged(SensorEvent event) {
-            if (winHandler == null || event.sensor.getType() != Sensor.TYPE_GYROSCOPE) return;
-            winHandler.updateGyroData(event.values[0], event.values[1]);
+            if (winHandler == null) return;
+            int type = event.sensor.getType();
+            if (type == Sensor.TYPE_GYROSCOPE) {
+                winHandler.updateGyroData(event.values[0], event.values[1]);
+            }
+            else if (type == Sensor.TYPE_GAME_ROTATION_VECTOR || type == Sensor.TYPE_ROTATION_VECTOR) {
+                computeGyroOrientation(event.values);
+            }
         }
 
         @Override
@@ -443,6 +470,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
     @Override
     public void onConfigurationChanged(@NonNull Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
+        // The activity is sensorLandscape and a portrait-resolution container forces portrait, so the
+        // rotation really does flip under us at runtime — re-read it for the orientation remap.
+        refreshCachedDisplayRotation();
         if (configChangedCallback != null) {
             configChangedCallback.run();
             configChangedCallback = null;
@@ -504,8 +534,18 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         // Initialize SensorManager
         sensorManager = (SensorManager) getSystemService(SENSOR_SERVICE);
-        if (sensorManager != null) gyroSensor = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
+        if (sensorManager != null) {
+            gyroSensor = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
+            // Orientation mode's sensor, resolved once: game rotation vector first (no magnetometer),
+            // plain rotation vector as the fallback, null when the device has neither.
+            gyroRotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR);
+            if (gyroRotationSensor == null)
+                gyroRotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);
+        }
         Log.i("XServerGyro", "Gyroscope sensor " + (gyroSensor != null ? "found: " + gyroSensor.getName() : "not available"));
+        Log.i("XServerGyro", "Rotation-vector sensor " + (gyroRotationSensor != null ? "found: " + gyroRotationSensor.getName() : "not available"));
+        // Seed the cached rotation the orientation remap reads (see refreshCachedDisplayRotation).
+        refreshCachedDisplayRotation();
         // NOTE: the listener is NOT registered here — the container (and so the gyro config) isn't
         // known yet at this point. See the applyGyroTuning block below, which registers it once the
         // resolved config is in. onResume re-registers, so nothing is lost on the way back in.
@@ -996,6 +1036,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         int gyroTarget = container.getGyroTarget();
         int gyroActivator = container.getGyroActivator();
         int gyroActivationMode = container.getGyroActivationMode();
+        int gyroMode = container.getGyroMode();
         float gyroSensitivity = container.getGyroSensitivity();
         boolean gyroInvertX = container.isGyroInvertX();
         boolean gyroInvertY = container.isGyroInvertY();
@@ -1007,13 +1048,24 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 gyroTarget = Integer.parseInt(shortcut.getExtra("gyroTarget", String.valueOf(gyroTarget)));
                 gyroActivator = Integer.parseInt(shortcut.getExtra("gyroActivator", String.valueOf(gyroActivator)));
                 gyroActivationMode = Integer.parseInt(shortcut.getExtra("gyroActivationMode", String.valueOf(gyroActivationMode)));
+                gyroMode = Integer.parseInt(shortcut.getExtra("gyroMode", String.valueOf(gyroMode)));
             } catch (NumberFormatException e) {}
             try {
                 gyroSensitivity = Float.parseFloat(shortcut.getExtra("gyroSensitivity", String.valueOf(gyroSensitivity)));
             } catch (NumberFormatException e) {}
         }
-        winHandler.applyGyroTuning(gyroOn, gyroTarget, gyroActivator, gyroActivationMode, gyroSensitivity,
-            container.getGyroDeadzone(), container.getGyroSmoothing(), gyroInvertX, gyroInvertY);
+        // Orientation mode needs a rotation-vector sensor this device may not have. Fall back to rate
+        // mode and say so once — but deliberately do NOT rewrite the stored setting: the container may
+        // be restored from a backup onto a phone that does have the sensor, and silently downgrading
+        // it here would lose the user's choice for good.
+        if (gyroMode == WinHandler.GYRO_MODE_ORIENTATION && gyroRotationSensor == null) {
+            Log.i("XServerGyro", "Gyro orientation mode requested but no rotation-vector sensor — running rate mode");
+            gyroMode = WinHandler.GYRO_MODE_RATE;
+        }
+        // The mouse target can't be driven by an absolute tilt (see WinHandler.sanitizeGyroMode);
+        // applyGyroTuning enforces that, so the mode WinHandler reports back may differ from this one.
+        winHandler.applyGyroTuning(gyroOn, gyroTarget, gyroActivator, gyroActivationMode, gyroMode,
+            gyroSensitivity, container.getGyroDeadzone(), container.getGyroSmoothing(), gyroInvertX, gyroInvertY);
         // Only now is it safe to let samples in (registerGyroSensor used to run in onCreate, long
         // before the container existed, so the first few hundred ms ran on the built-in defaults).
         registerGyroSensor();
@@ -1395,11 +1447,89 @@ public class XServerDisplayActivity extends AppCompatActivity {
         winHandler.setGyroBias(bias[0], bias[1]);
     }
 
-    // Gyro listener register/unregister — both are idempotent and a no-op without a gyroscope.
+    // Gyro listener register/unregister — both are idempotent and a no-op without a sensor.
+    //
+    // The mode branch lives HERE and nowhere else: rate mode registers the gyroscope and its samples
+    // land in WinHandler.updateGyroData, orientation mode registers the rotation vector and its samples
+    // land in updateGyroOrientation. Neither sample path knows the other exists.
+    //
+    // The "already registered" early-out has to compare the sensor TYPE, not just the flag: switching
+    // mode from the in-game drawer calls straight back in here, and a plain flag check would return
+    // with the previous sensor still registered — the new mode would then never receive a sample.
     private void registerGyroSensor() {
-        if (sensorManager == null || gyroSensor == null || gyroListenerRegistered) return;
-        sensorManager.registerListener(gyroListener, gyroSensor, SensorManager.SENSOR_DELAY_GAME);
+        if (sensorManager == null) return;
+        boolean orientationMode = winHandler != null
+            && winHandler.getGyroMode() == WinHandler.GYRO_MODE_ORIENTATION
+            && gyroRotationSensor != null;
+        Sensor sensor = orientationMode ? gyroRotationSensor : gyroSensor;
+        if (sensor == null) return;
+        if (gyroListenerRegistered && registeredGyroSensorType == sensor.getType()) return;
+        // Unregister-then-register so a rapid run of mode taps can't leak a second listener. Both calls
+        // are on the main thread, so no sample can slip in between them.
+        if (gyroListenerRegistered) sensorManager.unregisterListener(gyroListener);
+        sensorManager.registerListener(gyroListener, sensor, SensorManager.SENSOR_DELAY_GAME);
         gyroListenerRegistered = true;
+        registeredGyroSensorType = sensor.getType();
+        // Whichever direction we switched, the deflection and the captured centre belong to the old
+        // sensor — drop both rather than carry them across.
+        if (winHandler != null) winHandler.resetGyroRuntimeState();
+    }
+
+    // Rotation-vector sample -> yaw/pitch in radians, remapped so the axes follow the SCREEN rather
+    // than the device. The remap is mandatory here (unlike rate mode, which reads raw device axes):
+    // the activity is sensorLandscape, so ROTATION_90 and ROTATION_270 both happen, and a
+    // portrait-resolution container forces portrait — all four cases are reachable.
+    private void computeGyroOrientation(float[] rotationVector) {
+        if (winHandler == null) return;
+        // Some Samsung builds hand out 5+ components and getRotationMatrixFromVector then throws
+        // IllegalArgumentException. Copy the first four into the preallocated scratch instead — a
+        // try/catch on a 200 Hz path would be the wrong shape of fix.
+        float[] vector = rotationVector;
+        if (rotationVector.length > 4) {
+            System.arraycopy(rotationVector, 0, gyroRotationVector, 0, 4);
+            vector = gyroRotationVector;
+        }
+        SensorManager.getRotationMatrixFromVector(gyroRotationMatrix, vector);
+        int axisX = SensorManager.AXIS_X;
+        int axisY = SensorManager.AXIS_Y;
+        switch (cachedDisplayRotation) {
+            case Surface.ROTATION_90:
+                axisX = SensorManager.AXIS_Y;
+                axisY = SensorManager.AXIS_MINUS_X;
+                break;
+            case Surface.ROTATION_180:
+                axisX = SensorManager.AXIS_MINUS_X;
+                axisY = SensorManager.AXIS_MINUS_Y;
+                break;
+            case Surface.ROTATION_270:
+                axisX = SensorManager.AXIS_MINUS_Y;
+                axisY = SensorManager.AXIS_X;
+                break;
+            default:
+                break;
+        }
+        SensorManager.remapCoordinateSystem(gyroRotationMatrix, axisX, axisY, gyroRemappedMatrix);
+        SensorManager.getOrientation(gyroRemappedMatrix, gyroOrientationAngles);
+        // gyroOrientationAngles = [azimuth (yaw), pitch, roll]; roll is unused.
+        winHandler.updateGyroOrientation(gyroOrientationAngles[0], gyroOrientationAngles[1]);
+    }
+
+    // Refreshed on rotation events only — never from the sample path, where it would be a binder call
+    // per sample. Volatile because the sensor callback reads it.
+    private void refreshCachedDisplayRotation() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                android.view.Display display = getDisplay();
+                if (display != null) {
+                    cachedDisplayRotation = display.getRotation();
+                    return;
+                }
+            }
+            cachedDisplayRotation = getWindowManager().getDefaultDisplay().getRotation();
+        }
+        catch (Exception e) {
+            // Leave the previous value in place; a stale remap beats a crashed activity.
+        }
     }
 
     // Write-back for the per-game gyro settings: the shortcut when the game was launched from one,
@@ -1420,6 +1550,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (sensorManager == null || !gyroListenerRegistered) return;
         sensorManager.unregisterListener(gyroListener);
         gyroListenerRegistered = false;
+        registeredGyroSensorType = -1;
         // Clear the runtime state on the way out: with the listener gone nothing arrives to un-latch a
         // toggled-on gyro, so the overlay would stay frozen into the last gamepad state the game saw.
         if (winHandler != null) winHandler.resetGyroRuntimeState();
@@ -3026,6 +3157,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // (issue #46) — the gyro is per-game too, so it would hit the identical bug.
             // Deadzone/smoothing are container-only, matching the launch resolution above.
             ds.setGyroSupported(gyroSensor != null);
+            // Separate flag: plenty of devices have a gyroscope but no rotation-vector sensor, and the
+            // Orientation chip is rendered disabled-with-a-reason rather than hidden on those.
+            ds.setGyroOrientationSupported(gyroRotationSensor != null);
             ds.setGyroEnabled(winHandler.isGyroEnabled());
             ds.setGyroTarget(winHandler.getGyroTarget());
             ds.setGyroSensitivity(winHandler.getGyroSensitivity());
@@ -3035,6 +3169,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
             ds.setGyroInvertY(winHandler.isGyroInvertY());
             ds.setGyroActivator(winHandler.getGyroActivator());
             ds.setGyroActivationMode(winHandler.getGyroActivationMode());
+            // Read back off WinHandler, not off the local variable: the launch resolver may have been
+            // overruled (mouse target, or no rotation-vector sensor), and the drawer must show what is
+            // actually running.
+            ds.setGyroMode(winHandler.getGyroMode());
             ds.onGyroEnabledChanged = (enabled) -> {
                 winHandler.setGyroEnabled(enabled);
                 persistGyroExtra("gyroEnabled", enabled ? "1" : "0");
@@ -3042,7 +3180,22 @@ public class XServerDisplayActivity extends AppCompatActivity {
             ds.onGyroTargetChanged = (target) -> {
                 winHandler.setGyroTarget(target);
                 persistGyroExtra("gyroTarget", String.valueOf(winHandler.getGyroTarget()));
+                // Selecting the mouse target knocks orientation mode back to rate, which means a
+                // different sensor — re-register and re-seed the chip so the drawer stays honest.
+                registerGyroSensor();
+                ds.setGyroMode(winHandler.getGyroMode());
             };
+            ds.onGyroModeChanged = (mode) -> {
+                winHandler.setGyroMode(mode);
+                persistGyroExtra("gyroMode", String.valueOf(winHandler.getGyroMode()));
+                // Live mode switch: the OTHER sensor has to be registered before the next sample, or
+                // the newly selected entry point never sees one.
+                registerGyroSensor();
+            };
+            // Manual recenter (orientation mode). Not bound to a gamepad button on purpose — the
+            // activator already spends one — and it is the ONLY way to recentre under the "Always"
+            // activator, which never has a rising edge to auto-recentre on.
+            ds.onGyroRecenterRequested = () -> winHandler.recenterGyroOrientation();
             ds.onGyroActivatorChanged = (index) -> {
                 winHandler.setGyroActivator(index);
                 persistGyroExtra("gyroActivator", String.valueOf(winHandler.getGyroActivator()));
@@ -4584,7 +4737,12 @@ return true;
         vrrDisplayListener = new android.hardware.display.DisplayManager.DisplayListener() {
             @Override public void onDisplayAdded(int displayId) {}
             @Override public void onDisplayRemoved(int displayId) {}
-            @Override public void onDisplayChanged(int displayId) { updateCurrentRefreshRate(); }
+            @Override public void onDisplayChanged(int displayId) {
+                updateCurrentRefreshRate();
+                // Rotation rides on the same callback, and this fires for rotations that never reach
+                // onConfigurationChanged (e.g. a 180 flip between the two landscape orientations).
+                refreshCachedDisplayRotation();
+            }
         };
         dm.registerDisplayListener(vrrDisplayListener, handler);
     }

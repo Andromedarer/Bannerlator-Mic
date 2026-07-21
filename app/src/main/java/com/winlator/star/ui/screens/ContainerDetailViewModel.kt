@@ -158,6 +158,8 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     var gyroTarget by mutableStateOf(Container.GYRO_TARGET_DEFAULT)
     var gyroActivator by mutableStateOf(Container.GYRO_ACTIVATOR_DEFAULT)
     var gyroActivationMode by mutableStateOf(Container.GYRO_ACTIVATION_MODE_DEFAULT)
+    // 0=Rate (tilt speed drives the stick) 1=Orientation / "tilt to aim" (the angle held does).
+    var gyroMode by mutableStateOf(Container.GYRO_MODE_DEFAULT)
     var gyroSensitivity by mutableStateOf(Container.GYRO_SENSITIVITY_DEFAULT)
     var gyroDeadzone by mutableStateOf(Container.GYRO_DEADZONE_DEFAULT)
     var gyroSmoothing by mutableStateOf(Container.GYRO_SMOOTHING_DEFAULT)
@@ -416,6 +418,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         gyroTarget      = c?.getGyroTarget() ?: Container.GYRO_TARGET_DEFAULT
         gyroActivator   = c?.getGyroActivator() ?: Container.GYRO_ACTIVATOR_DEFAULT
         gyroActivationMode = c?.getGyroActivationMode() ?: Container.GYRO_ACTIVATION_MODE_DEFAULT
+        gyroMode        = c?.getGyroMode() ?: Container.GYRO_MODE_DEFAULT
         gyroSensitivity = c?.getGyroSensitivity() ?: Container.GYRO_SENSITIVITY_DEFAULT
         gyroDeadzone    = c?.getGyroDeadzone() ?: Container.GYRO_DEADZONE_DEFAULT
         gyroSmoothing   = c?.getGyroSmoothing() ?: Container.GYRO_SMOOTHING_DEFAULT
@@ -697,6 +700,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             c.setGyroTarget(gyroTarget)
             c.setGyroActivator(gyroActivator)
             c.setGyroActivationMode(gyroActivationMode)
+            c.setGyroMode(gyroMode)
             c.setGyroSensitivity(gyroSensitivity)
             c.setGyroDeadzone(gyroDeadzone)
             c.setGyroSmoothing(gyroSmoothing)
@@ -780,6 +784,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
                     created.setGyroTarget(gyroTarget)
                     created.setGyroActivator(gyroActivator)
                     created.setGyroActivationMode(gyroActivationMode)
+                    created.setGyroMode(gyroMode)
                     created.setGyroSensitivity(gyroSensitivity)
                     created.setGyroDeadzone(gyroDeadzone)
                     created.setGyroSmoothing(gyroSmoothing)
