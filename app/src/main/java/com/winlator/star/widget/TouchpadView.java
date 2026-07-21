@@ -49,6 +49,33 @@ public class TouchpadView extends View {
     private final float[] xform = XForm.getInstance();
     private boolean moveCursorToTouchpoint = false; //
     private boolean simTouchScreen = false;
+    // ── Cursor-to-Touch gestures ──
+    // With Cursor to Touch on the pointer is absolutely positioned under the finger, which makes a
+    // touchscreen-style gesture set meaningful: drag = band select, hold = right click, pinch = wheel.
+    // These only apply in that mode — under plain relative touchpad input there is no "where the
+    // cursor is" for a gesture to act on, and in simTouchScreen mode the tap-drag path already owns
+    // the finger. Thresholds follow gamehub-lite's RTS controls (Producdevity/gamehub-lite#73).
+    private static final short LONG_PRESS_MILLISECONDS = 300;
+    private static final short PINCH_WHEEL_STEP = 40;
+    private boolean dragSelecting = false;
+    private boolean longPressFired = false;
+    private float pinchAccum = 0;
+    private float lastPinchDistance = 0;
+    // The finger that opened the current gesture. Not necessarily fingers[0] — when a finger is already
+    // resting on an InputControl overlay, TouchpadView's first pointer id can be 1 (see ACTION_DOWN).
+    private Finger gestureFinger;
+    private final Runnable longPressRunnable = new Runnable() {
+        @Override
+        public void run() {
+            Finger finger = gestureFinger;
+            // Still one finger, still parked where it went down, and it hasn't turned into a drag.
+            if (finger == null || numFingers != 1 || dragSelecting) return;
+            if (finger.travelDistance() >= MAX_TAP_TRAVEL_DISTANCE) return;
+            xServer.injectPointerMove(finger.x, finger.y);
+            pressPointerButtonRight(finger);
+            longPressFired = true;
+        }
+    };
     private boolean continueClick = true;
     private int lastTouchedPosX;
     private int lastTouchedPosY;
@@ -291,6 +318,20 @@ public class TouchpadView extends View {
                 xServer.injectPointerMove(fingers[0].x, fingers[0].y);
             }
 
+            if (gesturesEnabled()) {
+                if (actionMasked == MotionEvent.ACTION_DOWN) {
+                    // First finger down starts a fresh gesture; arm the hold-for-right-click timer.
+                    resetGestureState();
+                    gestureFinger = fingers[pointerId];
+                    postDelayed(longPressRunnable, LONG_PRESS_MILLISECONDS);
+                } else {
+                    // A second finger means this is a pinch/pan, never a hold or a band select.
+                    removeCallbacks(longPressRunnable);
+                    lastPinchDistance = 0;
+                    pinchAccum = 0;
+                }
+            }
+
             if (simTouchScreen) {
                 final Runnable clickDelay = () -> {
                     if (continueClick) {
@@ -355,6 +396,12 @@ public class TouchpadView extends View {
         case MotionEvent.ACTION_CANCEL:
             for (byte i = 0; i < MAX_FINGERS; i++) fingers[i] = null;
             numFingers = 0;
+            if (gesturesEnabled()) {
+                // Cancel can strand a held button — the finger-up path never runs for it.
+                if (dragSelecting) xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_LEFT);
+                if (longPressFired) xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_RIGHT);
+                resetGestureState();
+            }
             break;
     }
 
@@ -459,6 +506,19 @@ public class TouchpadView extends View {
 
 
     private void handleFingerUp(Finger finger1) {
+        if (gesturesEnabled()) {
+            removeCallbacks(longPressRunnable);
+            // A finished drag-select or hold has already delivered its press; the tap/two-finger
+            // handling below would stack a second, spurious click on top of it.
+            if (dragSelecting || longPressFired) {
+                releasePointerButtonLeft(finger1);
+                releasePointerButtonRight(finger1);
+                if (numFingers <= 1) resetGestureState();
+                return;
+            }
+            if (numFingers <= 1) resetGestureState();
+        }
+
         switch (numFingers) {
             case 1:
                 if (simTouchScreen) {
@@ -496,7 +556,35 @@ public class TouchpadView extends View {
             final float resolutionScale = 1000.0f / Math.min(xServer.screenInfo.width, xServer.screenInfo.height);
             float currDistance = (float)Math.hypot(finger1.x - finger2.x, finger1.y - finger2.y) * resolutionScale;
 
-            if (currDistance < MAX_TWO_FINGERS_SCROLL_DISTANCE) {
+            // Pinch-to-zoom: the change in SPREAD between the two fingers drives the wheel, which is
+            // what strategy games bind camera zoom to. Two-finger pan still scrolls — whichever of the
+            // two moved more this frame wins, so a slightly-drifting pinch doesn't also scroll.
+            boolean pinchHandled = false;
+            if (gesturesEnabled()) {
+                if (lastPinchDistance == 0) lastPinchDistance = currDistance;
+                float pinchDelta = currDistance - lastPinchDistance;
+                float panDelta = ((finger1.y + finger2.y) * 0.5f) - (finger1.lastY + finger2.lastY) * 0.5f;
+                lastPinchDistance = currDistance;
+
+                if (Math.abs(pinchDelta) > Math.abs(panDelta)) {
+                    pinchAccum += pinchDelta;
+                    // Spreading apart = zoom in = wheel up. Emit every whole step so a fast pinch
+                    // doesn't quantise down to a single notch.
+                    while (Math.abs(pinchAccum) >= PINCH_WHEEL_STEP) {
+                        boolean zoomIn = pinchAccum > 0;
+                        Pointer.Button button = zoomIn ? Pointer.Button.BUTTON_SCROLL_UP
+                                                       : Pointer.Button.BUTTON_SCROLL_DOWN;
+                        xServer.injectPointerButtonPress(button);
+                        xServer.injectPointerButtonRelease(button);
+                        pinchAccum += zoomIn ? -PINCH_WHEEL_STEP : PINCH_WHEEL_STEP;
+                    }
+                    scrolling = true;
+                    pinchHandled = true;
+                }
+            }
+
+            // A frame the pinch consumed must not also scroll or arm the legacy spread-drag.
+            if (!pinchHandled && currDistance < MAX_TWO_FINGERS_SCROLL_DISTANCE) {
                 scrollAccumY += ((finger1.y + finger2.y) * 0.5f) - (finger1.lastY + finger2.lastY) * 0.5f;
 
                 if (scrollAccumY < -100) {
@@ -511,11 +599,37 @@ public class TouchpadView extends View {
                 }
                 scrolling = true;
             }
-            else if (currDistance >= MAX_TWO_FINGERS_SCROLL_DISTANCE && !xServer.pointer.isButtonPressed(Pointer.Button.BUTTON_LEFT) &&
+            // Legacy hold-two-fingers-wide-apart drag. Suppressed under the gesture set: a wide spread
+            // is a zoom-out there, and single-finger drag-select already covers holding LMB.
+            else if (!pinchHandled && !gesturesEnabled() &&
+                     currDistance >= MAX_TWO_FINGERS_SCROLL_DISTANCE && !xServer.pointer.isButtonPressed(Pointer.Button.BUTTON_LEFT) &&
                      finger2.travelDistance() < MAX_TAP_TRAVEL_DISTANCE) {
                 pressPointerButtonLeft(finger1);
                 skipPointerMove = true;
             }
+        }
+
+        // Drag for box selection: once one finger travels past the tap threshold, hold LMB and track
+        // it absolutely, so the selection rectangle's far corner sits under the finger. Relative
+        // deltas would drift the corner away from the fingertip over a long drag — the whole point of
+        // Cursor to Touch is that the two stay together.
+        if (gesturesEnabled() && numFingers == 1 && finger2 == null && !longPressFired) {
+            if (!dragSelecting && finger1.travelDistance() >= MAX_TAP_TRAVEL_DISTANCE) {
+                removeCallbacks(longPressRunnable);
+                xServer.injectPointerMove(finger1.startX, finger1.startY);
+                pressPointerButtonLeft(finger1);
+                dragSelecting = true;
+            }
+            if (dragSelecting) {
+                xServer.injectPointerMove(finger1.x, finger1.y);
+                return;
+            }
+        }
+        // A hold that became a right-click still steers the pointer, but must not fall through to the
+        // relative-delta path below and fight the absolute position it was placed at.
+        if (gesturesEnabled() && longPressFired && numFingers == 1) {
+            xServer.injectPointerMove(finger1.x, finger1.y);
+            return;
         }
 
         if (!scrolling && numFingers <= 2 && !skipPointerMove) {
@@ -532,6 +646,20 @@ public class TouchpadView extends View {
             }
             else xServer.injectPointerMoveDelta(dx, dy);
         }
+    }
+
+    /** Cursor-to-Touch gesture set is live: absolute positioning, and not the simTouchScreen path. */
+    private boolean gesturesEnabled() {
+        return moveCursorToTouchpoint && !simTouchScreen;
+    }
+
+    private void resetGestureState() {
+        removeCallbacks(longPressRunnable);
+        dragSelecting = false;
+        longPressFired = false;
+        pinchAccum = 0;
+        lastPinchDistance = 0;
+        gestureFinger = null;
     }
 
     private Finger findSecondFinger(Finger finger) {
@@ -722,6 +850,11 @@ public class TouchpadView extends View {
 
     public void setMoveCursorToTouchpoint(boolean moveCursorToTouchpoint) {
         this.moveCursorToTouchpoint = moveCursorToTouchpoint; //
+        // Toggled live from the in-game drawer, possibly with a gesture in flight — a drag-select or
+        // hold that loses its handler mid-press would leave the button stuck down in the guest.
+        if (dragSelecting) xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_LEFT);
+        if (longPressFired) xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_RIGHT);
+        resetGestureState();
     }
 }
 

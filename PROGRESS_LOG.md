@@ -4476,3 +4476,22 @@ Resume recipe: launch GL container xuser-3 -> AIO DX11 cube -> enable perf HUD -
 5. **Keep-alive ping + connect watchdog** — cheap, prevents idle CM drops (GameNative pingInterval 15s :3456 + post-connect BAD-CM watchdog :3563). We're TCP-only so add the watchdog; investigate a TCP heartbeat.
 
 **Guardrails:** Do 1+2 first (biggest ROI). Do NOT start editing until today's `c72d943` (CI run `28685150972`) is DEVICE-CONFIRMED on HL2 — don't stack unproven changes. One item per commit, device-verify each. Branch `feat/steam-goldberg-patcher`. Also-deferred #5 = wire the dead `updateNotification` (cosmetic).
+
+
+## 👆 CURSOR-TO-TOUCH FIX + RTS TOUCH GESTURES (2026-07-21) — branch `feat/touch-gestures`
+**Reported:** device screenshot — enabling "Cursor to Touch" (Controls > Mouse) never lights the chip.
+
+**Root cause:** `XServerDrawerState.setMoveCursorToTouchpoint()` had ZERO callers. `XServerDisplayActivity.MoveCursorToTouchpoint()` flipped the `move_cursor_to_touchpoint` pref + pushed to `TouchpadView`, but never wrote back to the StateFlow the drawer collects — so the chip was pinned false forever. The feature itself worked all along; purely a UI desync. Sibling toggles (Relative Mouse / Disable Mouse) DO call their `state.setX()`, which is why only this one looked dead.
+
+**Fixed:** push-back after the touchpad update + seed from `preferences` at wiring time (must come after `state.reset()` at :604). **Audited every other drawer toggle for the same failure mode — all clean** (Native Rendering is the best-behaved; Touch/Vibration/Gyro all seed from XServerDialogState + write their setter inline). Also dropped `state.onClose?.run()` from all 3 Controls>Mouse chips so the drawer stays open and the flip is visible.
+
+**Feature (same cut):** RTS-style gestures folded INTO the Cursor to Touch toggle (user's explicit choice over a separate/per-gesture chip), gated on `gesturesEnabled()` = `moveCursorToTouchpoint && !simTouchScreen`. Inspired by `Producdevity/gamehub-lite#73` — **nothing was code-portable** (that PR is ~40 smali patches against a decompiled closed-source APK); behaviour spec + thresholds only.
+- **Drag → box select**: past `MAX_TAP_TRAVEL_DISTANCE`, warp back to the start point, hold LMB, track ABSOLUTELY (relative deltas run through sensitivity+acceleration and would drift the selection corner off the fingertip).
+- **Long-press 300ms → RMB**: cancelled by 2nd finger / travel / finger-up. Tracks `gestureFinger`, NOT `fingers[0]` — first pointer id can be 1 when a finger rests on an InputControls overlay.
+- **Pinch → wheel**: spread-delta vs pan-delta per frame, larger wins; emits every whole `PINCH_WHEEL_STEP` (40). Spread = zoom in = SCROLL_UP. Legacy two-fingers-wide-apart LMB drag suppressed when gestures are on.
+- Stranded-button cleanup in 3 places: ACTION_CANCEL, live toggle-off mid-drag, and the finger-up short-circuit (stops a finished drag stacking a spurious tap-click).
+- **NOT done on purpose:** double-tap→double-click (free — identical warp coord means two taps already coalesce guest-side) and the configurable gesture-mapping dialog (~4000 of that PR's lines).
+
+**Branch note:** cut off `origin/main` @ `8521a4b2`, NOT off `feat/displayx-renderer` (which was checked out at the time and is unrelated). versionCode stays vc48/"2.8".
+
+**Status:** code complete, inspection-only — pushing to CI now. **NEXT (device-test once green):** verify the chip lights up, then drag-select in an RTS, long-press RMB, pinch-zoom. Highest-risk untested area = drag-select vs the InputControls overlay pointer-id case.

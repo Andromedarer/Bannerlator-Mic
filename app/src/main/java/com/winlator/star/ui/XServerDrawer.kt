@@ -2208,18 +2208,18 @@ private fun ControlsContent(state: XServerDrawerState) {
             Text("Mouse & Cursor", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
             Spacer(Modifier.height(4.dp))
 
-            // Each of these flips its flag host-side and closes the drawer — the chip fires exactly the same
-            // pair of callbacks the switch row did.
+            // Each of these flips its flag host-side and stays open — like the fullscreen selector, the
+            // drawer keeps rendering so the chip's new on/off state is visible where you tapped it.
             ToggleChipGrid(
                 listOf(
                     ToggleChipItem("Cursor to Touch", moveCursorToTouch) {
-                        state.onMoveCursorToTouchpoint?.run(); state.onClose?.run()
+                        state.onMoveCursorToTouchpoint?.run()
                     },
                     ToggleChipItem("Relative Mouse", isRelativeMouse) {
-                        state.onRelativeMouseMovement?.run(); state.onClose?.run()
+                        state.onRelativeMouseMovement?.run()
                     },
                     ToggleChipItem("Disable Mouse", isMouseDisabled) {
-                        state.onDisableMouse?.run(); state.onClose?.run()
+                        state.onDisableMouse?.run()
                     },
                 ),
                 perRow = 3
