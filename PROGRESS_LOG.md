@@ -1,5 +1,15 @@
 # Star-Compose — Progress Log
 
+## 2026-07-21 — 📖 Gyro guide `docs/gyro-controls-guide.md` + linked from README and the 2.8 release (`fe20174f`)
+
+> **312-line plain-English guide written from the CODE, not the changelog** — `GyroCalibrator.kt`, `WinHandler.updateGyroData` / `updateGyroOrientation` / `updateGyroMouse`, `Container.java` GYRO_* defaults, `InputControlsScreen.kt`, and the `gyro_*` strings.
+>
+> Covers: requirements (gyro + rotation-vector for Tilt to Aim) · the 4 setting locations · **Rate vs Tilt to Aim** (what each is for, why Rate is the default) · **3 targets — right / left stick / mouse** · activator (L1/L2/R1/R3/Always) + **Hold vs Toggle** · Sensitivity / Deadzone / Smoothing / Invert with a tuning order and defaults (2.0 / 0.05 / 0.5) · **calibration** (why bias is subtracted before the deadzone; per-device stamping; refuses to store while moving) · **Recenter** · the two intentionally-blocked combos (Mouse + Tilt to Aim; no rotation-vector) · troubleshooting · pipeline order · WinNative credit.
+>
+> **⚠️ Two release-note inaccuracies found and FIXED while writing it:** the notes said gyro drives "the right stick or the mouse" — **`GYRO_TARGET_LEFT_STICK` also exists and is exposed** (`gyro_target_left_stick`); and the two motion modes weren't explained at all. Both corrected in the live 2.8 body.
+>
+> **Linked from 3 places:** README What's New (callout under the gyro paragraph), README Full Features gyro bullet (also rewritten to list all 3 targets + both modes + activator choices), and the **2.8 release body** gyro section (absolute URL, verified 200 + present in the live body).
+
 ## 2026-07-21 — 🏁 **2.8 STABLE RELEASED = LATEST** (vc48, tag `2.8` @ `5f63103b`, run `29833848658`) (vc48, bump `c8de4b5d`, run `29833269026`)
 
 > **Version bump + README committed and pushed to main; `release.yml` dispatched for tag `2.8`** (`release_number=2.8`, `make_prerelease=false`). The halted 2.7.2 prep was **retargeted to 2.8** on user instruction ("you talked me into 2.8") — the two uncommitted working-tree edits were rewritten from 2.7.2/vc48 to **2.8/vc48** (versionCode was already 48, so no further tick) and committed as `c8de4b5d`.
