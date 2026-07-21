@@ -442,8 +442,8 @@ fun BigPictureScreen(navController: NavController) {
                                 if (chips.isNotEmpty()) {
                                     Spacer(Modifier.height(10.dp))
                                     FlowRow(
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp),
                                     ) {
                                         chips.forEach { (l, v) -> SpecChip(l, v) }
                                     }
@@ -648,13 +648,15 @@ private fun CoverCard(
 
 @Composable
 private fun SpecChip(label: String, value: String) {
+    // Compact so the full spec (up to 6 chips, e.g. GTA IV) packs into at most two short rows that
+    // clear the pinned Play / Game-options buttons instead of getting clipped.
     Surface(
         shape = RoundedCornerShape(8.dp),
         color = Color.White.copy(alpha = 0.12f),
     ) {
-        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
-            Text(label, color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
-            Text(value, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        Column(modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)) {
+            Text(label, color = Color.White.copy(alpha = 0.6f), fontSize = 9.sp, lineHeight = 11.sp)
+            Text(value, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium, lineHeight = 14.sp)
         }
     }
 }
