@@ -273,6 +273,24 @@ object XServerDialogState {
     fun interface VibrationMasterCallback { fun invoke(enabled: Boolean) }
     @JvmField var onVibrationMasterChanged: VibrationMasterCallback? = null
 
+    // Per-container rumble MODE (0=Off 1=Controller 2=Device 3=Both) + INTENSITY (0..100). Seeded
+    // from Container in setupUI (after the container is assigned — seeding earlier would read a
+    // still-null container) and pushed live to WinHandler + persisted to Container on every change,
+    // same round-trip as the lsfg "Performance mode" toggle.
+    private val _vibrationMode = MutableStateFlow(1) // Container.VIBRATION_MODE_DEFAULT (Controller)
+    val vibrationMode: StateFlow<Int> = _vibrationMode
+    fun setVibrationMode(v: Int) { _vibrationMode.value = v }
+
+    private val _vibrationIntensity = MutableStateFlow(100)
+    val vibrationIntensity: StateFlow<Int> = _vibrationIntensity
+    fun setVibrationIntensity(v: Int) { _vibrationIntensity.value = v }
+
+    fun interface VibrationModeCallback { fun invoke(mode: Int) }
+    @JvmField var onVibrationModeChanged: VibrationModeCallback? = null
+
+    fun interface VibrationIntensityCallback { fun invoke(intensity: Int) }
+    @JvmField var onVibrationIntensityChanged: VibrationIntensityCallback? = null
+
     // -------------------------------------------------------------------------
     // Debug / Logs dialog
     // -------------------------------------------------------------------------
@@ -495,6 +513,8 @@ object XServerDialogState {
         _reshadeLivePreview.value = false
         _paused.value          = false
         _vibrationSlots.value  = emptyList()
+        _vibrationMode.value   = 1
+        _vibrationIntensity.value = 100
         _logLines.value        = emptyList()
         _logPaused.value       = false
         _inputProfiles.value   = emptyList()
@@ -528,6 +548,7 @@ object XServerDialogState {
         onReshadeLivePreviewChange = null
         onRequestResume = null
         onVibrationSlotChanged = null
+        onVibrationModeChanged = null; onVibrationIntensityChanged = null
         onInputControlsConfirm = null; onInputControlsSettings = null
         onScreenEffectsApply = null; onSeAddProfile = null; onSeRemoveProfile = null
         onWindowClick = null

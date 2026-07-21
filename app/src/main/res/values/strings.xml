@@ -295,6 +295,12 @@
     <string name="game_controller">Game Controller</string>
     <string name="vibration">Vibration</string>
     <string name="vibration_slot">Slot %1$d</string>
+    <string name="vibration_mode_label">Rumble Target</string>
+    <string name="vibration_mode_off">Off</string>
+    <string name="vibration_mode_controller">Controller</string>
+    <string name="vibration_mode_device">Device</string>
+    <string name="vibration_mode_both">Both</string>
+    <string name="vibration_intensity_label">Rumble Intensity</string>
 
     <string name="experimental">Experimental</string>
     <string name="glibc_exp_edition">Based On</string>

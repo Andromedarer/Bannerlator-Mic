@@ -79,6 +79,16 @@ public class WinHandler {
     private boolean[] vibrationEnabledSlots = new boolean[MAX_CONTROLLERS]; // per-slot vibration toggle
     private boolean vibrationMasterEnabled = true; // master switch — off = NO controller vibration at all
 
+    // Per-container rumble tuning, pushed from XServerDisplayActivity.setupUI (once the Container is
+    // resolved) and re-pushed live from the in-game drawer. Mirrors Container.getVibrationMode()/
+    // getVibrationIntensity() — see those for the mode values (0=Off 1=Controller 2=Device 3=Both).
+    public static final int VIBRATION_MODE_OFF = 0;
+    public static final int VIBRATION_MODE_CONTROLLER = 1;
+    public static final int VIBRATION_MODE_DEVICE = 2;
+    public static final int VIBRATION_MODE_BOTH = 3;
+    private volatile int vibrationMode = VIBRATION_MODE_CONTROLLER;
+    private volatile int vibrationIntensity = 100;
+
     private boolean xinputDisabled;
     private boolean xinputDisabledInitialized = false;
 
@@ -369,12 +379,35 @@ public class WinHandler {
         if (!vibrationMasterEnabled)
             return;
 
+        // Per-container mode: Off short-circuits everything below (per-slot gate, dispatch).
+        int mode = vibrationMode;
+        if (mode == VIBRATION_MODE_OFF)
+            return;
+
         // Check if vibration is enabled for this slot
         if (slot >= 0 && slot < MAX_CONTROLLERS && !vibrationEnabledSlots[slot])
             return;
 
-        Vibrator vibrator = null;
+        int duration = Math.max(1, durationMs);
+        boolean stopping = strong <= 0 && weak <= 0;
 
+        // Controller (physical, or OSC/phone-fallback exactly as before) — Controller and Both modes.
+        if (mode == VIBRATION_MODE_CONTROLLER || mode == VIBRATION_MODE_BOTH) {
+            dispatchControllerVibration(strong, weak, duration, slot, stopping);
+        }
+        // Phone's own vibrator, independent of slot mapping — Device and Both modes.
+        if (mode == VIBRATION_MODE_DEVICE || mode == VIBRATION_MODE_BOTH) {
+            dispatchDeviceVibration(strong, weak, duration, stopping);
+        }
+    }
+
+    /**
+     * Controller-mode dispatch: resolves the same deviceId-owns-slot / OSC-or-no-vibrator phone
+     * fallback that this method always used, then delivers via independent low/high motors
+     * (VibratorManager, API 31+) when the target exposes ≥1 vibrator id, blending to one motor
+     * otherwise. Below API 31 this always blends — identical to the pre-dual-motor behavior.
+     */
+    private void dispatchControllerVibration(int strong, int weak, int duration, int slot, boolean stopping) {
         // Find which deviceId owns this slot
         Integer deviceId = null;
         for (Map.Entry<Integer, Integer> entry : deviceToSlot.entrySet()) {
@@ -384,42 +417,160 @@ public class WinHandler {
             }
         }
 
+        android.view.InputDevice device = null;
+        Vibrator fallbackVibrator = null;
+
         if (deviceId != null && deviceId == OSC_DEVICE_ID) {
             // OSC is mapped to this slot — use the phone vibrator
-            vibrator = (Vibrator) activity.getSystemService(Context.VIBRATOR_SERVICE);
+            fallbackVibrator = (Vibrator) activity.getSystemService(Context.VIBRATOR_SERVICE);
         } else if (deviceId != null) {
             // Physical controller
-            android.view.InputDevice device = android.view.InputDevice.getDevice(deviceId);
-            if (device != null) {
-                vibrator = device.getVibrator();
-                // Check if the physical controller has vibration capabilities
-                if (vibrator == null || !vibrator.hasVibrator()) {
+            android.view.InputDevice candidate = android.view.InputDevice.getDevice(deviceId);
+            if (candidate != null) {
+                Vibrator v = candidate.getVibrator();
+                if (v != null && v.hasVibrator()) {
+                    device = candidate;
+                } else {
                     // Fallback to phone vibrator if OSC is off and no other controller has fallen back
                     if (!deviceToSlot.containsKey(OSC_DEVICE_ID) && (fallbackSlot == -1 || fallbackSlot == slot)) {
-                        vibrator = (Vibrator) activity.getSystemService(Context.VIBRATOR_SERVICE);
+                        fallbackVibrator = (Vibrator) activity.getSystemService(Context.VIBRATOR_SERVICE);
                         fallbackSlot = slot;
                     }
-                    else vibrator = null;
                 }
             }
         }
 
+        if (stopping) {
+            if (device != null) stopVibrationTarget(device);
+            if (fallbackVibrator != null) fallbackVibrator.cancel();
+            return;
+        }
+
+        if (device != null) {
+            if (!dispatchDualMotor(device, strong, weak, duration)) {
+                Vibrator v = device.getVibrator();
+                if (v != null && v.hasVibrator()) {
+                    vibrateBlended(v, strong, weak, duration);
+                }
+            }
+            return;
+        }
+
+        if (fallbackVibrator != null && fallbackVibrator.hasVibrator()) {
+            vibrateBlended(fallbackVibrator, strong, weak, duration);
+        }
+    }
+
+    /** Device-mode dispatch: always the phone's own vibrator, regardless of which slot/controller
+     *  triggered the rumble. Single-motor blend — phones don't expose independent XInput motors. */
+    private void dispatchDeviceVibration(int strong, int weak, int duration, boolean stopping) {
+        Vibrator vibrator = (Vibrator) activity.getSystemService(Context.VIBRATOR_SERVICE);
         if (vibrator == null || !vibrator.hasVibrator())
             return;
 
-        if (strong > 0 || weak > 0) {
-            int intensity = Math.max(strong, weak);
-            int amplitude = Math.min(255, Math.max(1, (int) ((intensity / 65535.0f) * 255)));
-            int duration = Math.max(1, durationMs);
-
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                vibrator.vibrate(VibrationEffect.createOneShot(duration, amplitude));
-            } else {
-                vibrator.vibrate(duration);
-            }
-        } else {
+        if (stopping) {
             vibrator.cancel();
+        } else {
+            vibrateBlended(vibrator, strong, weak, duration);
         }
+    }
+
+    /**
+     * Dual-motor delivery for a physical controller on API 31+: strong (low-frequency) drives the
+     * first vibrator id, weak (high-frequency) drives the second, dispatched together via
+     * CombinedVibration so both motors start in the same frame. Falls back to a single blended
+     * motor when the device exposes exactly one vibrator id. Returns false (caller should fall
+     * back to {@link #vibrateBlended}) when below API 31, the device has no VibratorManager, or
+     * both scaled amplitudes are zero.
+     */
+    private boolean dispatchDualMotor(android.view.InputDevice device, int strong, int weak, long duration) {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S)
+            return false;
+
+        android.os.VibratorManager vm = device.getVibratorManager();
+        if (vm == null)
+            return false;
+
+        int[] ids = vm.getVibratorIds();
+        if (ids == null || ids.length == 0)
+            return false;
+
+        // Sort ascending for a deterministic "low motor = ids[0], high motor = ids[1]" assignment.
+        int[] sortedIds = ids.clone();
+        java.util.Arrays.sort(sortedIds);
+
+        int strongAmp = rawToAmplitude(strong);
+        int weakAmp = rawToAmplitude(weak);
+        if (strongAmp == 0 && weakAmp == 0)
+            return false;
+
+        if (sortedIds.length == 1) {
+            Vibrator only = vm.getVibrator(sortedIds[0]);
+            if (only == null) return false;
+            // strongAmp/weakAmp are already intensity-scaled (rawToAmplitude) — just take the max,
+            // no further intensity scaling here.
+            int blended = Math.min(255, Math.max(1, Math.max(strongAmp, weakAmp)));
+            only.vibrate(VibrationEffect.createOneShot(duration, blended));
+            return true;
+        }
+
+        android.os.CombinedVibration.ParallelCombination combo = android.os.CombinedVibration.startParallel();
+        boolean any = false;
+        if (strongAmp > 0) {
+            combo.addVibrator(sortedIds[0], VibrationEffect.createOneShot(duration, strongAmp));
+            any = true;
+        }
+        if (weakAmp > 0) {
+            combo.addVibrator(sortedIds[1], VibrationEffect.createOneShot(duration, weakAmp));
+            any = true;
+        }
+        if (!any) return false;
+
+        vm.vibrate(combo.combine());
+        return true;
+    }
+
+    /** Stops an in-flight dual-motor rumble on a physical controller (VibratorManager cancel on
+     *  API 31+, single-Vibrator cancel otherwise). */
+    private void stopVibrationTarget(android.view.InputDevice device) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            android.os.VibratorManager vm = device.getVibratorManager();
+            if (vm != null) {
+                vm.cancel();
+                return;
+            }
+        }
+        Vibrator v = device.getVibrator();
+        if (v != null) v.cancel();
+    }
+
+    /** Single-motor blend of strong+weak using the pre-dual-motor formula (max of the two, scaled to
+     *  0..255), then applies the per-container intensity. Used for the API<31 fallback and for any
+     *  single-vibrator target (phone, or a controller with exactly one motor id). */
+    private void vibrateBlended(Vibrator vibrator, int strong, int weak, long duration) {
+        int intensity = Math.max(strong, weak);
+        int amplitude = Math.min(255, Math.max(1, (int) ((intensity / 65535.0f) * 255)));
+        int scaled = applyIntensity(amplitude);
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            vibrator.vibrate(VibrationEffect.createOneShot(duration, scaled));
+        } else {
+            vibrator.vibrate(duration);
+        }
+    }
+
+    /** Raw XInput amplitude (0..65535) -> 0..255, then scaled by the per-container intensity
+     *  (floored at 1 so a non-zero input never quantises away to silence, 0 stays 0). */
+    private int rawToAmplitude(int raw) {
+        if (raw <= 0) return 0;
+        int amplitude = Math.min(255, Math.max(1, (int) ((raw / 65535.0f) * 255)));
+        return applyIntensity(amplitude);
+    }
+
+    /** Applies the per-container intensity (0..100) to an already-0..255 amplitude. */
+    private int applyIntensity(int amplitude255) {
+        if (amplitude255 <= 0 || vibrationIntensity <= 0) return 0;
+        int scaled = (amplitude255 * vibrationIntensity) / 100;
+        return Math.min(255, Math.max(1, scaled));
     }
 
     public boolean isVibrationEnabledForSlot(int slot) {
@@ -443,6 +594,25 @@ public class WinHandler {
     public void setVibrationMasterEnabled(boolean enabled) {
         vibrationMasterEnabled = enabled;
         preferences.edit().putBoolean("vibration_master_enabled", enabled).apply();
+    }
+
+    /** Per-container rumble mode/intensity, pushed once at launch (setupUI, after the Container is
+     *  resolved) and again live from the in-game drawer / container editor. NOT persisted here —
+     *  Container.setVibrationMode/setVibrationIntensity is the source of truth; this is just the
+     *  live cache triggerVibration reads on the dispatch thread. Invalid mode falls back to
+     *  Controller (matches Container's own default) rather than silently doing nothing.
+     */
+    public void setVibrationTuning(int mode, int intensity) {
+        vibrationMode = (mode < VIBRATION_MODE_OFF || mode > VIBRATION_MODE_BOTH) ? VIBRATION_MODE_CONTROLLER : mode;
+        vibrationIntensity = Math.min(100, Math.max(0, intensity));
+    }
+
+    public int getVibrationMode() {
+        return vibrationMode;
+    }
+
+    public int getVibrationIntensity() {
+        return vibrationIntensity;
     }
 
     public int getMaxControllers() {

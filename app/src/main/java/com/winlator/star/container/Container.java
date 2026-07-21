@@ -448,6 +448,46 @@ public class Container {
         putExtra("lsfgPerformanceMode", performanceMode ? "1" : "0");
     }
 
+    // Controller vibration (PC-accurate dual-motor rumble), per-container. Mode gates WHERE rumble
+    // goes: 0=Off 1=Controller(default, matches the pre-existing hardcoded behavior) 2=Device(phone)
+    // 3=Both. Intensity (0..100) scales amplitude on top of the master/per-slot toggles in WinHandler.
+    // Both are also live-tunable from the in-game drawer (WinHandler.setVibrationTuning), which is why
+    // these getters clamp/validate exactly like isLsfgPerformanceMode/getFrameGenMultiplier above.
+    public static final int VIBRATION_MODE_OFF = 0;
+    public static final int VIBRATION_MODE_CONTROLLER = 1;
+    public static final int VIBRATION_MODE_DEVICE = 2;
+    public static final int VIBRATION_MODE_BOTH = 3;
+    public static final int VIBRATION_MODE_DEFAULT = VIBRATION_MODE_CONTROLLER;
+    public static final int VIBRATION_INTENSITY_DEFAULT = 100;
+
+    public int getVibrationMode() {
+        try {
+            int m = Integer.parseInt(getExtra("vibrationMode", String.valueOf(VIBRATION_MODE_DEFAULT)));
+            return (m < VIBRATION_MODE_OFF || m > VIBRATION_MODE_BOTH) ? VIBRATION_MODE_DEFAULT : m;
+        }
+        catch (NumberFormatException e) {
+            return VIBRATION_MODE_DEFAULT;
+        }
+    }
+
+    public void setVibrationMode(int mode) {
+        putExtra("vibrationMode", String.valueOf(mode));
+    }
+
+    public int getVibrationIntensity() {
+        try {
+            int v = Integer.parseInt(getExtra("vibrationIntensity", String.valueOf(VIBRATION_INTENSITY_DEFAULT)));
+            return (v < 0 || v > 100) ? VIBRATION_INTENSITY_DEFAULT : v;
+        }
+        catch (NumberFormatException e) {
+            return VIBRATION_INTENSITY_DEFAULT;
+        }
+    }
+
+    public void setVibrationIntensity(int intensity) {
+        putExtra("vibrationIntensity", String.valueOf(intensity));
+    }
+
     // FPS limiter (implemented by the bionic-fg layer: paces the real/base frames, so with
     // frame gen on the on-screen rate is limit × multiplier). Tuned live from the in-game menu.
     public static final int FPS_LIMITER_DEFAULT = 60;

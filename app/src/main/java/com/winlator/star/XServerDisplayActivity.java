@@ -2892,6 +2892,29 @@ public class XServerDisplayActivity extends AppCompatActivity {
             ds.onVibrationSlotChanged = (slot, enabled) -> winHandler.setVibrationEnabledForSlot(slot, enabled);
             ds.setVibrationMasterEnabled(winHandler.isVibrationMasterEnabled());
             ds.onVibrationMasterChanged = (enabled) -> winHandler.setVibrationMasterEnabled(enabled);
+
+            // Per-container rumble mode/intensity: Container is the source of truth (persists across
+            // sessions/editor); this is called AFTER `container` is assigned (setupUI, not onCreate),
+            // so it's safe to read here — mirrors the ReShade/lsfg seed-after-container pattern.
+            int vibMode = container != null ? container.getVibrationMode() : Container.VIBRATION_MODE_DEFAULT;
+            int vibIntensity = container != null ? container.getVibrationIntensity() : Container.VIBRATION_INTENSITY_DEFAULT;
+            winHandler.setVibrationTuning(vibMode, vibIntensity);
+            ds.setVibrationMode(vibMode);
+            ds.setVibrationIntensity(vibIntensity);
+            ds.onVibrationModeChanged = (mode) -> {
+                winHandler.setVibrationTuning(mode, winHandler.getVibrationIntensity());
+                if (container != null) {
+                    container.setVibrationMode(mode);
+                    container.saveData();
+                }
+            };
+            ds.onVibrationIntensityChanged = (pct) -> {
+                winHandler.setVibrationTuning(winHandler.getVibrationMode(), pct);
+                if (container != null) {
+                    container.setVibrationIntensity(pct);
+                    container.saveData();
+                }
+            };
         }
 
         // Task Manager actions (End Process / Bring to Front / New Task / Set Affinity) are
