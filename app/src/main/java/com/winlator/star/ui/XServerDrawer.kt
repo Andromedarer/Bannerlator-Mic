@@ -2208,22 +2208,27 @@ private fun ControlsContent(state: XServerDrawerState) {
             Text("Mouse & Cursor", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
             Spacer(Modifier.height(4.dp))
 
-            // Each of these flips its flag host-side and closes the drawer — the chip fires exactly the same
-            // pair of callbacks the switch row did.
+            // Each of these flips its flag host-side and stays open — like the fullscreen selector, the
+            // drawer keeps rendering so the chip's new on/off state is visible where you tapped it.
             ToggleChipGrid(
                 listOf(
                     ToggleChipItem("Cursor to Touch", moveCursorToTouch) {
-                        state.onMoveCursorToTouchpoint?.run(); state.onClose?.run()
+                        state.onMoveCursorToTouchpoint?.run()
                     },
                     ToggleChipItem("Relative Mouse", isRelativeMouse) {
-                        state.onRelativeMouseMovement?.run(); state.onClose?.run()
+                        state.onRelativeMouseMovement?.run()
                     },
                     ToggleChipItem("Disable Mouse", isMouseDisabled) {
-                        state.onDisableMouse?.run(); state.onClose?.run()
+                        state.onDisableMouse?.run()
                     },
                 ),
                 perRow = 3
             )
+
+            // Tied directly to the toggle: the gestures only exist in absolute-cursor mode, so the
+            // pane appears as part of switching Cursor to Touch on and leaves with it. No cog — one
+            // less tap, and turning the mode on now shows you exactly what you turned on.
+            if (moveCursorToTouch) TouchGestureSettings(state)
         }
 
         // ── Vibration ──
@@ -2293,6 +2298,54 @@ private fun ControlsContent(state: XServerDrawerState) {
         // ── Gyro ── its own branch, deliberately OUTSIDE the vibration block above: the gyro section
         // is unrelated to rumble and must render whether or not vibration is switched on.
         3 -> GyroSection()
+    }
+}
+
+// ───── Touch gesture settings — Controls > Mouse, shown while Cursor to Touch is on ─────
+// These gestures only exist in absolute-cursor mode, so the pane lives and dies with that toggle
+// rather than behind its own control. Each gesture is independently switchable because the right set
+// is per-game: an RTS wants both, a mouse-look shooter wants neither stealing its drags. Changes
+// apply to the live touchpad immediately and persist, so a game can be tuned without relaunching.
+// There is no pinch-to-zoom — two-finger pan already emits the same wheel events.
+@Composable
+private fun TouchGestureSettings(state: XServerDrawerState) {
+    val accent = MaterialTheme.colorScheme.primary
+    val dragSelect by state.gestureDragSelect.collectAsState()
+    val longPress by state.gestureLongPressRightClick.collectAsState()
+
+    Spacer(Modifier.height(10.dp))
+    Text("Touch Gestures", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+    Spacer(Modifier.height(2.dp))
+    Text(
+        "Drag to box-select, hold for right click. Two-finger drag scrolls the wheel.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    Spacer(Modifier.height(6.dp))
+
+    ToggleChipGrid(
+        listOf(
+            ToggleChipItem("Box Select", dragSelect) {
+                state.setGestureDragSelect(it); state.onGestureConfigChange?.run()
+            },
+            ToggleChipItem("Hold = Right", longPress) {
+                state.setGestureLongPressRightClick(it); state.onGestureConfigChange?.run()
+            },
+        ),
+        perRow = 2
+    )
+
+    // The slider only exists while its gesture does — a hold delay with holds switched off is the
+    // kind of dead control the sub-tab split was meant to get rid of.
+    if (longPress) {
+        val initHoldMs by state.gestureLongPressMs.collectAsState()
+        var holdMs by remember(initHoldMs) { mutableIntStateOf(initHoldMs) }
+        IntSlider("Hold Delay", holdMs, 150..800,
+            onValueChange = { holdMs = it },
+            onValueChangeFinished = {
+                state.setGestureLongPressMs(holdMs); state.onGestureConfigChange?.run()
+            }
+        )
     }
 }
 

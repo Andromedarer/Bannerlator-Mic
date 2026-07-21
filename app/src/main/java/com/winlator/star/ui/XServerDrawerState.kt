@@ -35,6 +35,18 @@ object XServerDrawerState {
     private val _moveCursorToTouchpoint  = MutableStateFlow(false)
     val moveCursorToTouchpoint: StateFlow<Boolean> = _moveCursorToTouchpoint
 
+    // Per-gesture config, shown in the Controls > Mouse pane whenever Cursor to Touch is on. Each
+    // gesture is independently switchable because which of them is welcome is per-game: an RTS wants
+    // both, a mouse-look shooter wants neither. Seeded from prefs and pushed to TouchpadView live.
+    private val _gestureDragSelect = MutableStateFlow(true)
+    val gestureDragSelect: StateFlow<Boolean> = _gestureDragSelect
+
+    private val _gestureLongPressRightClick = MutableStateFlow(true)
+    val gestureLongPressRightClick: StateFlow<Boolean> = _gestureLongPressRightClick
+
+    private val _gestureLongPressMs = MutableStateFlow(300)
+    val gestureLongPressMs: StateFlow<Int> = _gestureLongPressMs
+
     private val _showLogs                = MutableStateFlow(false)
     val showLogs: StateFlow<Boolean>     = _showLogs
 
@@ -157,6 +169,9 @@ object XServerDrawerState {
     @JvmField var onLogs:                   Runnable? = null
     @JvmField var onExit:                   Runnable? = null
     @JvmField var onMoveCursorToTouchpoint: Runnable? = null
+    // Fired when any gesture chip/slider under the Cursor to Touch cog changes; the activity reads
+    // the flows above, persists them, and pushes the set to the live TouchpadView.
+    @JvmField var onGestureConfigChange:    Runnable? = null
     @JvmField var onRelativeMouseMovement:  Runnable? = null
     @JvmField var onDisableMouse:           Runnable? = null
     @JvmField var onNativeRenderingToggle: Runnable? = null
@@ -200,6 +215,12 @@ object XServerDrawerState {
     fun setIsRelativeMouseMovement(v: Boolean) { _isRelativeMouseMovement.value = v }
     fun setIsMouseDisabled(v: Boolean)         { _isMouseDisabled.value = v }
     fun setMoveCursorToTouchpoint(v: Boolean)  { _moveCursorToTouchpoint.value = v }
+    fun setGestureDragSelect(v: Boolean)          { _gestureDragSelect.value = v }
+    fun setGestureLongPressRightClick(v: Boolean) { _gestureLongPressRightClick.value = v }
+    fun setGestureLongPressMs(v: Int)             { _gestureLongPressMs.value = v }
+    fun getGestureDragSelectValue(): Boolean          = _gestureDragSelect.value
+    fun getGestureLongPressRightClickValue(): Boolean = _gestureLongPressRightClick.value
+    fun getGestureLongPressMsValue(): Int             = _gestureLongPressMs.value
     fun setShowLogs(v: Boolean)                { _showLogs.value = v }
     fun setShowMagnifier(v: Boolean)           { _showMagnifier.value = v }
     fun setCursorExpanded(v: Boolean)          { _cursorExpanded.value = v }
@@ -248,6 +269,9 @@ object XServerDrawerState {
         _isRelativeMouseMovement.value = false
         _isMouseDisabled.value = false
         _moveCursorToTouchpoint.value = false
+        _gestureDragSelect.value = true
+        _gestureLongPressRightClick.value = true
+        _gestureLongPressMs.value = 300
         _showLogs.value = false
         _showMagnifier.value = true
         _nativeRenderingEnabled.value = false
@@ -276,7 +300,7 @@ object XServerDrawerState {
         onScreenEffects = null; onGraphicEngine = null; onVibration = null
         onToggleFullscreen = null; onSetFullscreenMode = null; onPauseResume = null; onPipMode = null
         onActiveWindows = null; onTaskManager = null; onMagnifier = null
-        onLogs = null; onExit = null; onMoveCursorToTouchpoint = null
+        onLogs = null; onExit = null; onMoveCursorToTouchpoint = null; onGestureConfigChange = null
         onRelativeMouseMovement = null; onDisableMouse = null
         onNativeRenderingToggle = null; onFpsConfigApply = null
         onBionicFgConfigChange = null; onFpsLimitChange = null

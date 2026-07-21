@@ -771,7 +771,17 @@ public class XServerDisplayActivity extends AppCompatActivity {
         state.onMagnifier              = () -> showMagnifierOverlay();
         state.onLogs                   = () -> XServerDialogState.INSTANCE.show(XServerDialogState.ActiveDialog.DEBUG);
         state.onExit                   = () -> exit();
+        // Seed the drawer chip from the persisted preference so it reflects reality on open
+        // (state.reset() above zeroes it, so this has to come after).
+        state.setMoveCursorToTouchpoint(preferences.getBoolean("move_cursor_to_touchpoint", false));
         state.onMoveCursorToTouchpoint = () -> MoveCursorToTouchpoint();
+        // Per-gesture config shown under the Cursor to Touch toggle. Seed from prefs; the push to the
+        // touchpad happens in setupUI, which is where that view is actually built.
+        state.setGestureDragSelect(preferences.getBoolean("gesture_drag_select", true));
+        state.setGestureLongPressRightClick(preferences.getBoolean("gesture_long_press_rmb", true));
+        state.setGestureLongPressMs(preferences.getInt("gesture_long_press_ms",
+            TouchpadView.DEFAULT_LONG_PRESS_MILLISECONDS));
+        state.onGestureConfigChange = this::applyGestureConfig;
         state.onRelativeMouseMovement  = () -> {
             isRelativeMouseMovement = !isRelativeMouseMovement;
             state.setIsRelativeMouseMovement(isRelativeMouseMovement);
@@ -2704,6 +2714,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
         touchpadView.setFourFingersTapCallback(() -> {
             if (!drawerLayout.isDrawerOpen(GravityCompat.START)) drawerLayout.openDrawer(GravityCompat.START);
         });
+        // The preference persists across launches but was never restored onto the view, so
+        // Cursor to Touch silently reverted to off every session until it was toggled again.
+        touchpadView.setMoveCursorToTouchpoint(preferences.getBoolean("move_cursor_to_touchpoint", false));
+        applyGestureConfig(); // wiring ran before this view existed; push the seeded set now
         rootView.addView(touchpadView);
 
         inputControlsView = new InputControlsView(this, timeoutHandler, hideControlsRunnable);
@@ -5067,7 +5081,28 @@ return true;
         if (touchpadView != null) {
             touchpadView.setMoveCursorToTouchpoint(newValue);
         }
+
+        // Push back into the drawer so the chip renders its on/off state (matches the
+        // Relative Mouse / Disable Mouse toggles in setupUI).
+        XServerDrawerState.INSTANCE.setMoveCursorToTouchpoint(newValue);
     } // Closes MoveCursorToTouchpoint
+
+    /** Persist the drawer's gesture settings and apply them to the live touchpad. */
+    private void applyGestureConfig() {
+        XServerDrawerState state = XServerDrawerState.INSTANCE;
+        boolean dragSelect = state.getGestureDragSelectValue();
+        boolean longPress = state.getGestureLongPressRightClickValue();
+        int longPressMs = state.getGestureLongPressMsValue();
+
+        preferences.edit()
+            .putBoolean("gesture_drag_select", dragSelect)
+            .putBoolean("gesture_long_press_rmb", longPress)
+            .putInt("gesture_long_press_ms", longPressMs)
+            .apply();
+
+        if (touchpadView != null)
+            touchpadView.setGestureConfig(dragSelect, longPress, longPressMs);
+    }
 
     private void showActiveWindowsDialog() {
         ArrayList<com.winlator.star.xserver.Window> activeWindows = new ArrayList<>();
