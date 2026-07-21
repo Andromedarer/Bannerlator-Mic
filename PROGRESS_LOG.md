@@ -1,6 +1,6 @@
 # Star-Compose — Progress Log
 
-## 2026-07-21 — 🏁 **2.8 STABLE CUT — release build dispatched** (vc48, bump `c8de4b5d`, run `29833269026`)
+## 2026-07-21 — 🏁 **2.8 STABLE RELEASED = LATEST** (vc48, tag `2.8` @ `5f63103b`, run `29833848658`) (vc48, bump `c8de4b5d`, run `29833269026`)
 
 > **Version bump + README committed and pushed to main; `release.yml` dispatched for tag `2.8`** (`release_number=2.8`, `make_prerelease=false`). The halted 2.7.2 prep was **retargeted to 2.8** on user instruction ("you talked me into 2.8") — the two uncommitted working-tree edits were rewritten from 2.7.2/vc48 to **2.8/vc48** (versionCode was already 48, so no further tick) and committed as `c8de4b5d`.
 >
@@ -15,7 +15,13 @@
 >
 > **Release body staged** in the 2.7.1 layout (logo → badges → title → tagline → bold summary → `<details>` full feature list → What's New → `<details>` Previously in 2.7.1 → Community → Downloads → Credits → Notes), to be applied via `gh release edit --notes-file` once CI publishes. Live community counts refreshed: **249 games / 291 configs**. WinNative + TideGear added as lead credits.
 >
-> ▶️ **PENDING:** CI green (3 flavors + `update.json` vc48) → `gh release edit --notes-file` → verify `Latest`/not-prerelease via API → checkpoint memory.
+
+> ### ✅ PUBLISHED — and one recovered mis-cut worth remembering
+> **Final: tag `2.8` → `5f63103b`, run `29833848658`, 3 flavor APKs + `update.json` (vc48/"2.8"), `prerelease=false`, API-confirmed `Latest`.** Body applied via `gh release edit --notes-file` in the 2.7.1 layout; live counts 249 games / 291 configs; WinNative + TideGear promoted to lead credits; TideGear #91 link corrected to `TideGear/GameHub-Vibration-Fix`; stale "Reports & requests this cycle" relabelled.
+>
+> ⚠️ **FIRST ATTEMPT (run `29833269026`) BUILT THE WRONG COMMIT — deleted and redone.** `git push && gh workflow run --ref main` in one command raced: the run's `headSha` was **`59bc9ea7`**, the commit *before* the bump. Result: **green CI, correct tag, but APKs + `update.json` advertising vc47 / "2.7.1"** — i.e. the in-app updater would have offered nothing to anyone. Caught only by curling the published `update.json`.
+> **Recovery:** re-dispatched from the corrected `main` → `gh release delete 2.8 --yes` (kept the tag, already correct) → in-flight run recreated the release with correct assets. Deleting reverted `releases/latest` to 2.7.1 so no user was served the broken build. (A `releases/latest` **404 right after deletion is transient** — GitHub recomputing; `gh release list` showed all 30 releases intact.)
+> **New standing rule → [[feedback_dispatch_after_push_race]]:** assert `run.headSha == git rev-parse HEAD` after dispatch, and **always curl `update.json` before calling a release done.**
 
 ## 2026-07-21 — 🔴 VIBRATION NOT FELT — live diagnosis (UNRESOLVED, device reboot pending) + 2.7.2 release HALTED
 
