@@ -24,6 +24,7 @@ import com.winlator.star.core.KeyValueSet;
 import com.winlator.star.core.ProcessHelper;
 import com.winlator.star.core.TarCompressorUtils;
 import com.winlator.star.core.WineInfo;
+import com.winlator.star.core.WinebusRumblePatcher;
 import com.winlator.star.fexcore.FEXCoreManager;
 import com.winlator.star.fexcore.FEXCorePreset;
 import com.winlator.star.fexcore.FEXCorePresetManager;
@@ -224,7 +225,30 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
             else
                 extractBox64Files();
             checkDependencies();
+            patchWinebusRumbleDuration();
             pid = execGuestProgram();
+        }
+    }
+
+    /**
+     * Force SDL rumble to never auto-expire (TideGear #91 duration patch), applied to the
+     * winebus.so wine actually loads for THIS launch's selected Proton/arch. Resolved from
+     * the container's live wine selection ({@code imageFs.getWinePath()} == {@code wineInfo.path}
+     * == {@code <imagefs>/opt/proton-<version>-<arch>}, pinned at
+     * {@code XServerDisplayActivity.setWinePath(wineInfo.path)}), so it tracks Proton 9/10/11
+     * automatically instead of hardcoding a version. Runs on every start right before the guest
+     * process is spawned; {@link WinebusRumblePatcher#patchDuration} is idempotent and
+     * exact-count-guarded, so re-running is cheap and a no-op once patched.
+     */
+    private void patchWinebusRumbleDuration() {
+        try {
+            String archDir = wineInfo.isArm64EC() ? "aarch64-unix" : "x86_64-unix";
+            File winebus = new File(environment.getImageFs().getWinePath(),
+                    "lib/wine/" + archDir + "/winebus.so");
+            WinebusRumblePatcher.patchDuration(winebus, archDir);
+        } catch (Exception e) {
+            // Never let a cosmetic rumble tweak block a game launch.
+            Log.w("GuestProgramLauncherComponent", "winebus rumble patch skipped: " + e.getMessage());
         }
     }
 

@@ -143,6 +143,12 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     var enableDInput by mutableStateOf(false)
     var exclusiveXInput by mutableStateOf(true)
 
+    // Controller vibration (PC-accurate dual-motor rumble), per-container. Mode: 0=Off 1=Controller
+    // 2=Device(phone) 3=Both (Container.VIBRATION_MODE_*). Intensity 0..100 scales amplitude. Both
+    // are also live-tunable from the in-game drawer — this is just the launch-time default.
+    var vibrationMode by mutableStateOf(Container.VIBRATION_MODE_DEFAULT)
+    var vibrationIntensity by mutableStateOf(Container.VIBRATION_INTENSITY_DEFAULT)
+
     // "Run as administrator" (default ON): ON -> EnableLUA=0 (UAC off / full admin),
     // OFF -> EnableLUA=1. Stored in the container's .wine/system.reg (source of truth); on
     // create it's threaded through the createContainerAsync data flag, on edit it's read/written
@@ -388,6 +394,8 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         if (!exclusiveXInput) {
             enableXInput = true; enableDInput = true
         }
+        vibrationMode      = c?.getVibrationMode() ?: Container.VIBRATION_MODE_DEFAULT
+        vibrationIntensity = c?.getVibrationIntensity() ?: Container.VIBRATION_INTENSITY_DEFAULT
 
         // Box64 preset
         val b64Preset = c?.box64Preset ?: prefs.getString("box64_preset", Box64Preset.COMPATIBILITY) ?: Box64Preset.COMPATIBILITY
@@ -658,6 +666,8 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             c.setReshadeParams(reshadeLoadout.paramsJsonOrNull())
             c.setReshadeEffect(reshadeLoadout.firstEffectName())
             c.setExclusiveXInput(exclusiveXInput)
+            c.setVibrationMode(vibrationMode)
+            c.setVibrationIntensity(vibrationIntensity)
             c.setRenderer(StringUtils.parseIdentifier(selectedRenderer))
             c.setRendererNative(rendererNative)
             c.setRendererPresentMode(rendererPresentMode)
@@ -729,6 +739,8 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
                 if (created != null) {
                     created.setFrameGenEngine(frameGenEngine)
                     created.setLsfgPerformanceMode(lsfgPerformanceMode)
+                    created.setVibrationMode(vibrationMode)
+                    created.setVibrationIntensity(vibrationIntensity)
                     created.setFpsLimiterEnabled(fpsLimiterEnabled)
                     created.setMatchRefreshRate(matchRefreshRate)
                     created.setManualRefreshRate(manualRefreshRate)

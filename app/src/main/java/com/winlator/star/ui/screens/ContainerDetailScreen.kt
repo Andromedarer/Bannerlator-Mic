@@ -1338,6 +1338,37 @@ private fun AdvancedTab(
             }
         }
 
+        // Vibration section — per-container rumble target + intensity default. Also live-tunable
+        // in-game from the drawer (this is just the value a new session launches with).
+        SectionBox(title = stringResource(R.string.vibration)) {
+            val vibrationModeLabels = listOf(
+                stringResource(R.string.vibration_mode_off),
+                stringResource(R.string.vibration_mode_controller),
+                stringResource(R.string.vibration_mode_device),
+                stringResource(R.string.vibration_mode_both),
+            )
+            LabeledDropdown(
+                label = stringResource(R.string.vibration_mode_label),
+                options = vibrationModeLabels,
+                selectedOption = vibrationModeLabels.getOrElse(viewModel.vibrationMode) {
+                    vibrationModeLabels[Container.VIBRATION_MODE_DEFAULT]
+                },
+                onSelect = { opt -> viewModel.vibrationMode = vibrationModeLabels.indexOf(opt).coerceAtLeast(0) }
+            )
+            if (viewModel.vibrationMode != Container.VIBRATION_MODE_OFF) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "${stringResource(R.string.vibration_intensity_label)}: ${viewModel.vibrationIntensity}%",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Slider(
+                    value = viewModel.vibrationIntensity.toFloat(),
+                    onValueChange = { viewModel.vibrationIntensity = it.toInt() },
+                    valueRange = 0f..100f, steps = 99
+                )
+            }
+        }
+
         // Startup Selection
         LabeledDropdown(
             label = stringResource(R.string.startup_selection),
