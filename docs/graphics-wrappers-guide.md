@@ -47,10 +47,9 @@ how the finished image gets on screen. Different setting, different job.
 
 | Your GPU | Use this | Why |
 |---|---|---|
-| **Qualcomm Adreno** (Snapdragon) | **Wrapper** (default) + a **Turnip** driver | Adreno decodes BC textures in hardware. Nothing extra needed — and BCn emulation is *automatically disabled* on Adreno, because forcing it only costs performance. |
+| **Qualcomm Adreno** (Snapdragon) | **Wrapper** (default) + a **Turnip** driver (`turnip-sdk36`, or a newer one you install) | Adreno decodes BC textures in hardware. Nothing extra needed — and BCn emulation is *automatically disabled* on Adreno, because forcing it only costs performance. |
 | **ARM Mali** / **Samsung Xclipse** / **PowerVR** | **Wrapper + bcn_layer** | These GPUs have **no hardware BC-texture support**. Without transcoding, many DirectX games crash, run out of VRAM, or show black/missing textures. |
 | **Valhall-class Mali** wanting **DX12** | **Wrapper + compat + bcn** *(experimental)* | Adds leegao's DX12 compat layer on top. See the hardware list below — it's genuinely restricted. |
-| Very old Android (10 / pre-11) on Adreno | **turnip-26.1.0** as a direct ICD | Loads as a plain system Vulkan ICD instead of through adrenotools. |
 | Nothing renders at all | **VirGL** | OpenGL fallback. Slow, but a useful "does anything work?" test. |
 
 **How do I know which GPU I have?** The in-game performance HUD can show your GPU model, and the
@@ -67,9 +66,12 @@ The standard Bionic Vulkan wrapper. Works on everything; the right starting poin
 
 ### 🟢 Turnip
 Mesa's open-source **Adreno** driver, loaded via adrenotools — often a large win over the stock
-Qualcomm driver for DXVK/VKD3D. Adreno only. Bannerlator ships multiple Turnip builds, plus
-`turnip-26.1.0` as a **direct ICD** for Android 10 / pre-11 devices where adrenotools loading isn't
-available.
+Qualcomm driver for DXVK/VKD3D. Adreno only.
+
+Bannerlator bundles Turnip builds (**`turnip-sdk36`** is the Adreno default), and you can **install
+newer ones yourself** from the driver repos listed in-app under the Adrenotools driver picker —
+including [Banners-Turnip](https://github.com/The412Banner/Banners-Turnip). If a game misbehaves on
+the bundled build, trying a newer Turnip is usually the first thing worth doing on Adreno.
 
 ### 🟡 Wrapper + bcn_layer — *the Mali/Xclipse fix*
 The leegao ICD **plus** leegao's BCn transcode layer, which decodes BC textures on the GPU at
