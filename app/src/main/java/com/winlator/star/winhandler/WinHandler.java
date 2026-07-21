@@ -125,6 +125,9 @@ public class WinHandler {
     private volatile boolean gyroInvertX = false;
     private volatile boolean gyroInvertY = false;
     private volatile int gyroActivator = GYRO_ACTIVATOR_DEFAULT;
+    // False until the launch-time container/shortcut resolution lands (applyGyroTuning). The sample
+    // path is a strict no-op while it's false, so the gyro never runs on values the user didn't pick.
+    private volatile boolean gyroConfigApplied = false;
     // Zero-rate bias measured by the out-of-game calibration (Input Controls -> Gyroscope). 0 = the
     // uncalibrated default, which makes the subtraction in updateGyroData a strict no-op.
     private volatile float gyroBiasX = 0.0f;
@@ -208,17 +211,10 @@ public class WinHandler {
         // Master switch (default: enabled) — a single kill-switch for ALL controller vibration.
         vibrationMasterEnabled = preferences.getBoolean("vibration_master_enabled", true);
 
-        // Gyro settings — global prefs (same pref-backed lifecycle as the vibration master switch).
-        // The defaults reproduce the original hardcoded behaviour, so an untouched install behaves
-        // exactly as before: enabled, right stick, sens 2.0 / deadzone 0.05 / smoothing 0.5, hold L1.
-        gyroEnabled = preferences.getBoolean("gyro_enabled", GYRO_ENABLED_DEFAULT);
-        gyroTarget = preferences.getInt("gyro_target", GYRO_TARGET_DEFAULT);
-        gyroDeadzone = preferences.getFloat("gyro_deadzone", GYRO_DEADZONE_DEFAULT);
-        gyroSensitivity = preferences.getFloat("gyro_sensitivity", GYRO_SENSITIVITY_DEFAULT);
-        gyroSmoothing = preferences.getFloat("gyro_smoothing", GYRO_SMOOTHING_DEFAULT);
-        gyroInvertX = preferences.getBoolean("gyro_invert_x", false);
-        gyroInvertY = preferences.getBoolean("gyro_invert_y", false);
-        gyroActivator = preferences.getInt("gyro_activator", GYRO_ACTIVATOR_DEFAULT);
+        // Gyro tuning is NOT read here any more — it lives on the container (and, for the game-facing
+        // half, on the shortcut). XServerDisplayActivity resolves the chain once at launch and pushes
+        // it in via applyGyroTuning; until then the pipeline stays inert (gyroConfigApplied == false),
+        // so a sample arriving before the container is known can't act on stale defaults.
 
         // Calibration bias — read once here (never on the sample path). GyroCalibrator honours the
         // device stamp, so a bias restored from another phone by Android auto-backup comes back 0.
@@ -880,7 +876,7 @@ public class WinHandler {
      * extra synchronization.
      */
     public void updateGyroData(float rawGyroX, float rawGyroY) {
-        if (!gyroEnabled) {
+        if (!gyroConfigApplied || !gyroEnabled) {
             resetGyroRuntimeState();
             return;
         }
@@ -1090,7 +1086,11 @@ public class WinHandler {
         return outputGamepadState;
     }
 
-    // ---- Gyro settings (global prefs; per-container persistence is a later phase) ----
+    // ---- Gyro settings (runtime mirror only — the container/shortcut owns persistence) ----
+    //
+    // These fields are written exactly twice per session: once by applyGyroTuning at launch, then by
+    // the in-game drawer callbacks (which persist to the shortcut/container themselves). Nothing on
+    // the sample path ever reads the container, so updateGyroData stays allocation-free.
 
     public boolean isGyroEnabled()      { return gyroEnabled; }
     public int getGyroTarget()          { return gyroTarget; }
@@ -1101,11 +1101,32 @@ public class WinHandler {
     public boolean isGyroInvertY()      { return gyroInvertY; }
     public int getGyroActivator()       { return gyroActivator; }
 
+    /**
+     * Applies the whole resolved gyro configuration in one shot (launch time, from
+     * XServerDisplayActivity once the container/shortcut chain is known) and arms the sample path.
+     * Same clamps as the individual setters below, so a hand-edited container JSON can't get through.
+     */
+    public void applyGyroTuning(boolean enabled, int target, int activator, float sensitivity,
+                                float deadzone, float smoothing, boolean invertX, boolean invertY) {
+        gyroEnabled = enabled;
+        gyroTarget = (target < GYRO_TARGET_RIGHT_STICK || target > GYRO_TARGET_MOUSE)
+                ? GYRO_TARGET_DEFAULT : target;
+        gyroActivator = (activator < GYRO_ACTIVATOR_L1 || activator > GYRO_ACTIVATOR_ALWAYS)
+                ? GYRO_ACTIVATOR_DEFAULT : activator;
+        gyroSensitivity = clamp(sensitivity, 0.1f, 10.0f);
+        gyroDeadzone = clamp(deadzone, 0.0f, 0.5f);
+        gyroSmoothing = clamp(smoothing, 0.0f, 0.95f);
+        gyroInvertX = invertX;
+        gyroInvertY = invertY;
+        // Target may have changed under us — drop any stale deflection before arming.
+        resetGyroRuntimeState();
+        gyroConfigApplied = true;
+    }
+
     public void setGyroEnabled(boolean enabled) {
         gyroEnabled = enabled;
         if (!enabled)
             resetGyroRuntimeState();
-        preferences.edit().putBoolean("gyro_enabled", enabled).apply();
     }
 
     /** Switching target must drop the old overlay, or the previous stick stays deflected forever. */
@@ -1113,39 +1134,32 @@ public class WinHandler {
         gyroTarget = (target < GYRO_TARGET_RIGHT_STICK || target > GYRO_TARGET_MOUSE)
                 ? GYRO_TARGET_DEFAULT : target;
         resetGyroRuntimeState();
-        preferences.edit().putInt("gyro_target", gyroTarget).apply();
     }
 
     public void setGyroSensitivity(float sensitivity) {
         gyroSensitivity = clamp(sensitivity, 0.1f, 10.0f);
-        preferences.edit().putFloat("gyro_sensitivity", gyroSensitivity).apply();
     }
 
     public void setGyroDeadzone(float deadzone) {
         gyroDeadzone = clamp(deadzone, 0.0f, 0.5f);
-        preferences.edit().putFloat("gyro_deadzone", gyroDeadzone).apply();
     }
 
     public void setGyroSmoothing(float smoothing) {
         gyroSmoothing = clamp(smoothing, 0.0f, 0.95f);
-        preferences.edit().putFloat("gyro_smoothing", gyroSmoothing).apply();
     }
 
     public void setGyroInvertX(boolean invert) {
         gyroInvertX = invert;
-        preferences.edit().putBoolean("gyro_invert_x", invert).apply();
     }
 
     public void setGyroInvertY(boolean invert) {
         gyroInvertY = invert;
-        preferences.edit().putBoolean("gyro_invert_y", invert).apply();
     }
 
     public void setGyroActivator(int activator) {
         gyroActivator = (activator < GYRO_ACTIVATOR_L1 || activator > GYRO_ACTIVATOR_ALWAYS)
                 ? GYRO_ACTIVATOR_DEFAULT : activator;
         resetGyroRuntimeState();
-        preferences.edit().putInt("gyro_activator", gyroActivator).apply();
     }
 
     private static float clamp(float value, float min, float max) {

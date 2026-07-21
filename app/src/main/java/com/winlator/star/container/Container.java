@@ -488,6 +488,127 @@ public class Container {
         putExtra("vibrationIntensity", String.valueOf(intensity));
     }
 
+    // Gyro (motion aim), per-container. Mirrors the WinHandler.GYRO_* constants so the editor VM and
+    // the shortcut screen can talk about targets/activators without importing winhandler (same reason
+    // the VIBRATION_MODE_* values are duplicated above). Enabled/target/sensitivity/activator/invert
+    // are ALSO per-game (the shortcut extra of the same name wins — see XServerDisplayActivity);
+    // deadzone/smoothing are container-only, they describe the hand/device, not the game.
+    // NOTE: the calibration bias is deliberately NOT here — it's a physical property of this phone's
+    // IMU and stays a global pref, so a container copy or an imported config can't carry someone
+    // else's sensor zero. The clamps below match the WinHandler setters exactly, so a hand-edited
+    // container JSON can't push e.g. smoothing >= 1.0 and make the low-pass diverge.
+    public static final int GYRO_TARGET_RIGHT_STICK = 0;
+    public static final int GYRO_TARGET_LEFT_STICK = 1;
+    public static final int GYRO_TARGET_MOUSE = 2;
+    public static final int GYRO_ACTIVATOR_L1 = 0;
+    public static final int GYRO_ACTIVATOR_L2 = 1;
+    public static final int GYRO_ACTIVATOR_R1 = 2;
+    public static final int GYRO_ACTIVATOR_R3 = 3;
+    public static final int GYRO_ACTIVATOR_ALWAYS = 4;
+
+    public static final boolean GYRO_ENABLED_DEFAULT = true;
+    public static final int GYRO_TARGET_DEFAULT = GYRO_TARGET_RIGHT_STICK;
+    public static final float GYRO_DEADZONE_DEFAULT = 0.05f;
+    public static final float GYRO_SENSITIVITY_DEFAULT = 2.0f;
+    public static final float GYRO_SMOOTHING_DEFAULT = 0.5f;
+    public static final int GYRO_ACTIVATOR_DEFAULT = GYRO_ACTIVATOR_L1;
+    public static final boolean GYRO_INVERT_X_DEFAULT = false;
+    public static final boolean GYRO_INVERT_Y_DEFAULT = false;
+
+    public boolean isGyroEnabled() {
+        return getExtra("gyroEnabled", GYRO_ENABLED_DEFAULT ? "1" : "0").equals("1");
+    }
+
+    public void setGyroEnabled(boolean enabled) {
+        putExtra("gyroEnabled", enabled ? "1" : "0");
+    }
+
+    public int getGyroTarget() {
+        try {
+            int t = Integer.parseInt(getExtra("gyroTarget", String.valueOf(GYRO_TARGET_DEFAULT)));
+            return (t < GYRO_TARGET_RIGHT_STICK || t > GYRO_TARGET_MOUSE) ? GYRO_TARGET_DEFAULT : t;
+        }
+        catch (NumberFormatException e) {
+            return GYRO_TARGET_DEFAULT;
+        }
+    }
+
+    public void setGyroTarget(int target) {
+        putExtra("gyroTarget", String.valueOf(target));
+    }
+
+    public int getGyroActivator() {
+        try {
+            int a = Integer.parseInt(getExtra("gyroActivator", String.valueOf(GYRO_ACTIVATOR_DEFAULT)));
+            return (a < GYRO_ACTIVATOR_L1 || a > GYRO_ACTIVATOR_ALWAYS) ? GYRO_ACTIVATOR_DEFAULT : a;
+        }
+        catch (NumberFormatException e) {
+            return GYRO_ACTIVATOR_DEFAULT;
+        }
+    }
+
+    public void setGyroActivator(int activator) {
+        putExtra("gyroActivator", String.valueOf(activator));
+    }
+
+    public float getGyroSensitivity() {
+        try {
+            float v = Float.parseFloat(getExtra("gyroSensitivity", String.valueOf(GYRO_SENSITIVITY_DEFAULT)));
+            return Math.min(10.0f, Math.max(0.1f, v));
+        }
+        catch (NumberFormatException e) {
+            return GYRO_SENSITIVITY_DEFAULT;
+        }
+    }
+
+    public void setGyroSensitivity(float sensitivity) {
+        putExtra("gyroSensitivity", String.valueOf(Math.min(10.0f, Math.max(0.1f, sensitivity))));
+    }
+
+    public float getGyroDeadzone() {
+        try {
+            float v = Float.parseFloat(getExtra("gyroDeadzone", String.valueOf(GYRO_DEADZONE_DEFAULT)));
+            return Math.min(0.5f, Math.max(0.0f, v));
+        }
+        catch (NumberFormatException e) {
+            return GYRO_DEADZONE_DEFAULT;
+        }
+    }
+
+    public void setGyroDeadzone(float deadzone) {
+        putExtra("gyroDeadzone", String.valueOf(Math.min(0.5f, Math.max(0.0f, deadzone))));
+    }
+
+    public float getGyroSmoothing() {
+        try {
+            float v = Float.parseFloat(getExtra("gyroSmoothing", String.valueOf(GYRO_SMOOTHING_DEFAULT)));
+            return Math.min(0.95f, Math.max(0.0f, v));
+        }
+        catch (NumberFormatException e) {
+            return GYRO_SMOOTHING_DEFAULT;
+        }
+    }
+
+    public void setGyroSmoothing(float smoothing) {
+        putExtra("gyroSmoothing", String.valueOf(Math.min(0.95f, Math.max(0.0f, smoothing))));
+    }
+
+    public boolean isGyroInvertX() {
+        return getExtra("gyroInvertX", GYRO_INVERT_X_DEFAULT ? "1" : "0").equals("1");
+    }
+
+    public void setGyroInvertX(boolean invert) {
+        putExtra("gyroInvertX", invert ? "1" : "0");
+    }
+
+    public boolean isGyroInvertY() {
+        return getExtra("gyroInvertY", GYRO_INVERT_Y_DEFAULT ? "1" : "0").equals("1");
+    }
+
+    public void setGyroInvertY(boolean invert) {
+        putExtra("gyroInvertY", invert ? "1" : "0");
+    }
+
     // FPS limiter (implemented by the bionic-fg layer: paces the real/base frames, so with
     // frame gen on the on-screen rate is limit × multiplier). Tuned live from the in-game menu.
     public static final int FPS_LIMITER_DEFAULT = 60;

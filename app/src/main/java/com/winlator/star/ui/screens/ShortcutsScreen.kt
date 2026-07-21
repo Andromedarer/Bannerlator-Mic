@@ -3785,6 +3785,37 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
             if (shortcut.container.getRendererSfCompatMode()) "1" else "0") == "1")
     }
 
+    // Gyro (motion aim) per-game overrides — seeded from the shortcut extra, falling back to the
+    // container's value. Only the game-facing half lives here (deadzone/smoothing stay container-wide,
+    // they're hand-tremor/latency settings, not game settings). These are ALWAYS written on save —
+    // there's no "inherit" sentinel because enabled=false is a legitimate override — so once this
+    // dialog has been saved for a shortcut, changing the container's gyro defaults only affects
+    // NEW shortcuts.
+    var gyroEnabled by remember {
+        mutableStateOf(shortcut.getExtra("gyroEnabled",
+            if (shortcut.container.isGyroEnabled) "1" else "0") == "1")
+    }
+    var gyroTarget by remember {
+        mutableStateOf(shortcut.getExtra("gyroTarget",
+            shortcut.container.gyroTarget.toString()).toIntOrNull() ?: Container.GYRO_TARGET_DEFAULT)
+    }
+    var gyroActivator by remember {
+        mutableStateOf(shortcut.getExtra("gyroActivator",
+            shortcut.container.gyroActivator.toString()).toIntOrNull() ?: Container.GYRO_ACTIVATOR_DEFAULT)
+    }
+    var gyroSensitivity by remember {
+        mutableStateOf(shortcut.getExtra("gyroSensitivity",
+            shortcut.container.gyroSensitivity.toString()).toFloatOrNull() ?: Container.GYRO_SENSITIVITY_DEFAULT)
+    }
+    var gyroInvertX by remember {
+        mutableStateOf(shortcut.getExtra("gyroInvertX",
+            if (shortcut.container.isGyroInvertX) "1" else "0") == "1")
+    }
+    var gyroInvertY by remember {
+        mutableStateOf(shortcut.getExtra("gyroInvertY",
+            if (shortcut.container.isGyroInvertY) "1" else "0") == "1")
+    }
+
     // Vulkan renderer per-game overrides (native / Colors=swapRB / present mode) — default to the
     // container's values; only shown + relevant when this shortcut runs on the Vulkan renderer.
     // Stored via the same "native"/"swapRB"/"presentMode" extras the launch resolver reads.
@@ -4091,6 +4122,13 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
             putExtra("graphicsDriverConfig", graphicsDriverConfig)
             putExtra("renderer", StringUtils.parseIdentifier(selectedRenderer))
             putExtra("sfCompatMode", if (sfCompatMode) "1" else "0")
+            // Gyro per-game overrides (read by the launch resolver in XServerDisplayActivity).
+            putExtra("gyroEnabled", if (gyroEnabled) "1" else "0")
+            putExtra("gyroTarget", gyroTarget.toString())
+            putExtra("gyroActivator", gyroActivator.toString())
+            putExtra("gyroSensitivity", gyroSensitivity.toString())
+            putExtra("gyroInvertX", if (gyroInvertX) "1" else "0")
+            putExtra("gyroInvertY", if (gyroInvertY) "1" else "0")
             // Vulkan per-game overrides (read by resolvedRendererNative/SwapRB/PresentMode at launch).
             putExtra("native", if (vkNative) "true" else "false")
             putExtra("swapRB", if (vkSwapRB) "true" else "false")
@@ -4493,6 +4531,63 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                             selectedOption = selectedNumControllers,
                             onSelect = { selectedNumControllers = it }
                         )
+
+                        // Gyro (motion aim) per-game override. Deadzone/smoothing are deliberately
+                        // absent — those stay on the container (Container Settings -> Gyro).
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Switch(checked = gyroEnabled, onCheckedChange = { gyroEnabled = it })
+                            Spacer(Modifier.width(8.dp))
+                            Text(stringResource(R.string.gyro_enabled), modifier = Modifier.weight(1f))
+                        }
+                        if (gyroEnabled) {
+                            val gyroTargetLabels = listOf(
+                                stringResource(R.string.gyro_target_right_stick),
+                                stringResource(R.string.gyro_target_left_stick),
+                                stringResource(R.string.gyro_target_mouse),
+                            )
+                            LabeledDropdown(
+                                label = stringResource(R.string.gyro_target_label),
+                                options = gyroTargetLabels,
+                                selectedOption = gyroTargetLabels.getOrElse(gyroTarget) {
+                                    gyroTargetLabels[Container.GYRO_TARGET_DEFAULT]
+                                },
+                                onSelect = { opt -> gyroTarget = gyroTargetLabels.indexOf(opt).coerceAtLeast(0) }
+                            )
+                            val gyroActivatorLabels = listOf(
+                                stringResource(R.string.gyro_activator_l1),
+                                stringResource(R.string.gyro_activator_l2),
+                                stringResource(R.string.gyro_activator_r1),
+                                stringResource(R.string.gyro_activator_r3),
+                                stringResource(R.string.gyro_activator_always),
+                            )
+                            LabeledDropdown(
+                                label = stringResource(R.string.gyro_activator_label),
+                                options = gyroActivatorLabels,
+                                selectedOption = gyroActivatorLabels.getOrElse(gyroActivator) {
+                                    gyroActivatorLabels[Container.GYRO_ACTIVATOR_DEFAULT]
+                                },
+                                onSelect = { opt -> gyroActivator = gyroActivatorLabels.indexOf(opt).coerceAtLeast(0) }
+                            )
+                            Text(
+                                "${stringResource(R.string.gyro_sensitivity_label)}: ${"%.1f".format(gyroSensitivity)}",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Slider(
+                                value = gyroSensitivity,
+                                onValueChange = { gyroSensitivity = it },
+                                valueRange = 0.1f..10f
+                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Switch(checked = gyroInvertX, onCheckedChange = { gyroInvertX = it })
+                                Spacer(Modifier.width(8.dp))
+                                Text(stringResource(R.string.gyro_invert_x), modifier = Modifier.weight(1f))
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Switch(checked = gyroInvertY, onCheckedChange = { gyroInvertY = it })
+                                Spacer(Modifier.width(8.dp))
+                                Text(stringResource(R.string.gyro_invert_y), modifier = Modifier.weight(1f))
+                            }
+                        }
                     }
 
                     // Tabs

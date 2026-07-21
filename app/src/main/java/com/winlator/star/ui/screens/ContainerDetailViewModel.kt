@@ -149,6 +149,19 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     var vibrationMode by mutableStateOf(Container.VIBRATION_MODE_DEFAULT)
     var vibrationIntensity by mutableStateOf(Container.VIBRATION_INTENSITY_DEFAULT)
 
+    // Gyro (motion aim), per-container. Target: 0=Right stick 1=Left stick 2=Mouse; activator is the
+    // button that gates the tilt while held (4 = always on). Enabled/target/activator/sensitivity/
+    // invert are also per-game (shortcut editor) and live-tunable in-game — this is the default a
+    // shortcut inherits. Deadzone/smoothing are container-only (hand tremor / latency vs jitter).
+    var gyroEnabled by mutableStateOf(Container.GYRO_ENABLED_DEFAULT)
+    var gyroTarget by mutableStateOf(Container.GYRO_TARGET_DEFAULT)
+    var gyroActivator by mutableStateOf(Container.GYRO_ACTIVATOR_DEFAULT)
+    var gyroSensitivity by mutableStateOf(Container.GYRO_SENSITIVITY_DEFAULT)
+    var gyroDeadzone by mutableStateOf(Container.GYRO_DEADZONE_DEFAULT)
+    var gyroSmoothing by mutableStateOf(Container.GYRO_SMOOTHING_DEFAULT)
+    var gyroInvertX by mutableStateOf(Container.GYRO_INVERT_X_DEFAULT)
+    var gyroInvertY by mutableStateOf(Container.GYRO_INVERT_Y_DEFAULT)
+
     // "Run as administrator" (default ON): ON -> EnableLUA=0 (UAC off / full admin),
     // OFF -> EnableLUA=1. Stored in the container's .wine/system.reg (source of truth); on
     // create it's threaded through the createContainerAsync data flag, on edit it's read/written
@@ -396,6 +409,15 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         }
         vibrationMode      = c?.getVibrationMode() ?: Container.VIBRATION_MODE_DEFAULT
         vibrationIntensity = c?.getVibrationIntensity() ?: Container.VIBRATION_INTENSITY_DEFAULT
+
+        gyroEnabled     = c?.isGyroEnabled() ?: Container.GYRO_ENABLED_DEFAULT
+        gyroTarget      = c?.getGyroTarget() ?: Container.GYRO_TARGET_DEFAULT
+        gyroActivator   = c?.getGyroActivator() ?: Container.GYRO_ACTIVATOR_DEFAULT
+        gyroSensitivity = c?.getGyroSensitivity() ?: Container.GYRO_SENSITIVITY_DEFAULT
+        gyroDeadzone    = c?.getGyroDeadzone() ?: Container.GYRO_DEADZONE_DEFAULT
+        gyroSmoothing   = c?.getGyroSmoothing() ?: Container.GYRO_SMOOTHING_DEFAULT
+        gyroInvertX     = c?.isGyroInvertX() ?: Container.GYRO_INVERT_X_DEFAULT
+        gyroInvertY     = c?.isGyroInvertY() ?: Container.GYRO_INVERT_Y_DEFAULT
 
         // Box64 preset
         val b64Preset = c?.box64Preset ?: prefs.getString("box64_preset", Box64Preset.COMPATIBILITY) ?: Box64Preset.COMPATIBILITY
@@ -668,6 +690,14 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             c.setExclusiveXInput(exclusiveXInput)
             c.setVibrationMode(vibrationMode)
             c.setVibrationIntensity(vibrationIntensity)
+            c.setGyroEnabled(gyroEnabled)
+            c.setGyroTarget(gyroTarget)
+            c.setGyroActivator(gyroActivator)
+            c.setGyroSensitivity(gyroSensitivity)
+            c.setGyroDeadzone(gyroDeadzone)
+            c.setGyroSmoothing(gyroSmoothing)
+            c.setGyroInvertX(gyroInvertX)
+            c.setGyroInvertY(gyroInvertY)
             c.setRenderer(StringUtils.parseIdentifier(selectedRenderer))
             c.setRendererNative(rendererNative)
             c.setRendererPresentMode(rendererPresentMode)
@@ -741,6 +771,15 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
                     created.setLsfgPerformanceMode(lsfgPerformanceMode)
                     created.setVibrationMode(vibrationMode)
                     created.setVibrationIntensity(vibrationIntensity)
+                    // Same set as the edit path above — a new container must not silently drop these.
+                    created.setGyroEnabled(gyroEnabled)
+                    created.setGyroTarget(gyroTarget)
+                    created.setGyroActivator(gyroActivator)
+                    created.setGyroSensitivity(gyroSensitivity)
+                    created.setGyroDeadzone(gyroDeadzone)
+                    created.setGyroSmoothing(gyroSmoothing)
+                    created.setGyroInvertX(gyroInvertX)
+                    created.setGyroInvertY(gyroInvertY)
                     created.setFpsLimiterEnabled(fpsLimiterEnabled)
                     created.setMatchRefreshRate(matchRefreshRate)
                     created.setManualRefreshRate(manualRefreshRate)

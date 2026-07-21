@@ -1,10 +1,13 @@
 package com.winlator.star.container;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
+
+import androidx.preference.PreferenceManager;
 
 import com.winlator.star.R;
 import com.winlator.star.contents.ContentsManager;
@@ -40,7 +43,60 @@ public class ContainerManager {
         File rootDir = ImageFs.find(context).getRootDir();
         homeDir = new File(rootDir, "home");
         loadContainers();
+        migrateGyroPrefsToContainers();
         isInitialized = true;
+    }
+
+    // One-shot migration of the old GLOBAL gyro prefs onto every container. The gyro settings used to
+    // live in SharedPreferences; they're per-container (and partly per-game) now, so without this a
+    // user who had tuned them would silently get the defaults back. Runs at most once, keyed on
+    // "gyro_migrated_to_container", and removes the old keys afterwards so it can't re-fire.
+    // gyro_bias_* is deliberately NOT touched — the calibration bias is a property of this phone's
+    // IMU and stays global (see GyroCalibrator).
+    private void migrateGyroPrefsToContainers() {
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+        if (prefs.getBoolean("gyro_migrated_to_container", false)) return;
+
+        boolean hasOldKeys = prefs.contains("gyro_enabled") || prefs.contains("gyro_target")
+                || prefs.contains("gyro_activator") || prefs.contains("gyro_sensitivity")
+                || prefs.contains("gyro_deadzone") || prefs.contains("gyro_smoothing")
+                || prefs.contains("gyro_invert_x") || prefs.contains("gyro_invert_y");
+
+        if (hasOldKeys) {
+            boolean enabled = prefs.getBoolean("gyro_enabled", Container.GYRO_ENABLED_DEFAULT);
+            int target = prefs.getInt("gyro_target", Container.GYRO_TARGET_DEFAULT);
+            int activator = prefs.getInt("gyro_activator", Container.GYRO_ACTIVATOR_DEFAULT);
+            float sensitivity = prefs.getFloat("gyro_sensitivity", Container.GYRO_SENSITIVITY_DEFAULT);
+            float deadzone = prefs.getFloat("gyro_deadzone", Container.GYRO_DEADZONE_DEFAULT);
+            float smoothing = prefs.getFloat("gyro_smoothing", Container.GYRO_SMOOTHING_DEFAULT);
+            boolean invertX = prefs.getBoolean("gyro_invert_x", Container.GYRO_INVERT_X_DEFAULT);
+            boolean invertY = prefs.getBoolean("gyro_invert_y", Container.GYRO_INVERT_Y_DEFAULT);
+
+            for (Container container : containers) {
+                container.setGyroEnabled(enabled);
+                container.setGyroTarget(target);
+                container.setGyroActivator(activator);
+                container.setGyroSensitivity(sensitivity);
+                container.setGyroDeadzone(deadzone);
+                container.setGyroSmoothing(smoothing);
+                container.setGyroInvertX(invertX);
+                container.setGyroInvertY(invertY);
+                container.saveData();
+            }
+            Log.i("ContainerManager", "Migrated global gyro settings onto " + containers.size() + " container(s)");
+        }
+
+        prefs.edit()
+            .remove("gyro_enabled")
+            .remove("gyro_target")
+            .remove("gyro_activator")
+            .remove("gyro_sensitivity")
+            .remove("gyro_deadzone")
+            .remove("gyro_smoothing")
+            .remove("gyro_invert_x")
+            .remove("gyro_invert_y")
+            .putBoolean("gyro_migrated_to_container", true)
+            .apply();
     }
 
     // Check if the ContainerManager is fully initialized

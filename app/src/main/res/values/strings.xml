@@ -302,6 +302,24 @@
     <string name="vibration_mode_both">Both</string>
     <string name="vibration_intensity_label">Rumble Intensity</string>
 
+    <string name="gyro">Gyro (Motion Aim)</string>
+    <string name="gyro_enabled">Enable Motion Aim</string>
+    <string name="gyro_target_label">Motion Target</string>
+    <string name="gyro_target_right_stick">Right Stick</string>
+    <string name="gyro_target_left_stick">Left Stick</string>
+    <string name="gyro_target_mouse">Mouse</string>
+    <string name="gyro_activator_label">Activator Button</string>
+    <string name="gyro_activator_l1">Hold L1</string>
+    <string name="gyro_activator_l2">Hold L2</string>
+    <string name="gyro_activator_r1">Hold R1</string>
+    <string name="gyro_activator_r3">Hold R3</string>
+    <string name="gyro_activator_always">Always On</string>
+    <string name="gyro_sensitivity_label">Sensitivity</string>
+    <string name="gyro_deadzone_label">Deadzone</string>
+    <string name="gyro_smoothing_label">Smoothing</string>
+    <string name="gyro_invert_x">Invert X</string>
+    <string name="gyro_invert_y">Invert Y</string>
+
     <string name="experimental">Experimental</string>
     <string name="glibc_exp_edition">Based On</string>
     <string name="enabled_async">Enable Async</string>
