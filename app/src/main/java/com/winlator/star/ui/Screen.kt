@@ -19,6 +19,10 @@ sealed class Screen(val route: String, val label: String, val iconName: String) 
 
     object ContainerDetail : Screen("container_detail?id={id}", "Container", "")
 
+    // Couch/TV launcher shown at startup instead of the normal UI when enable_big_picture_mode is on.
+    // Registered as a route (see AppNavGraph) but intentionally NOT listed in the drawer.
+    object BigPicture : Screen("big_picture", "Big Picture", "sports_esports")
+
     companion object {
         val drawerItems by lazy {
             // Screen.Wrappers stays registered as a route (the wrapper manager is now reached via the
