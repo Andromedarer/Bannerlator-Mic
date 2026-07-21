@@ -543,11 +543,6 @@ public class HudMetrics {
         return TEMP_COLOR_OK;
     }
 
-    /** True once the reading is in the red band — callers append a non-colour marker for accessibility. */
-    public static boolean isRedBand(Float celsius, Thresholds t, TempDisplay display) {
-        return celsius != null && t != null && display != null && display.colorBands && celsius >= t.redC;
-    }
-
     /** Formats a °C reading in the user's unit. Thresholds stay °C; only display converts. */
     public static String formatTemp(float celsius, TempDisplay display, boolean oneDecimal) {
         boolean f = display != null && display.fahrenheit;

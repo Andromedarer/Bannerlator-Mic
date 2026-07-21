@@ -324,26 +324,18 @@ class PerformanceHudView(
             battery = battery.percent?.let { "BAT $it%" },
             power = battery.watts.takeIf { it > 0f }?.let { String.format(Locale.US, "PWR %.1fW", it) },
             runtime = battery.runtimeText,
-            batteryTemp = battery.tempC?.let { "BAT TEMP ${tempText(it, HudMetrics.TempSensor.BATTERY)}" },
+            batteryTemp = battery.tempC?.let { "BAT TEMP ${tempText(it)}" },
             clock = "TIME ${DateFormat.getTimeFormat(context).format(Date())}",
-            cpuTemp = cpuTemp?.let { "CPU TEMP ${tempText(it, HudMetrics.TempSensor.CPU)}" },
-            gpuTemp = gpuTemp?.let { "GPU TEMP ${tempText(it, HudMetrics.TempSensor.GPU)}" },
+            cpuTemp = cpuTemp?.let { "CPU TEMP ${tempText(it)}" },
+            gpuTemp = gpuTemp?.let { "GPU TEMP ${tempText(it)}" },
             cpuTempC = cpuTemp?.toFloat(),
             gpuTempC = gpuTemp?.toFloat(),
             batteryTempC = battery.tempC?.toFloat(),
         )
     }
 
-    /**
-     * Formats in the user's unit and appends a non-colour marker in the red band — colour must never
-     * be the only signal, since red/green is the worst pair for colourblind users and this is small
-     * text over arbitrary game content.
-     */
-    private fun tempText(celsius: Int, sensor: HudMetrics.TempSensor): String {
-        val value = celsius.toFloat()
-        val marker = if (HudMetrics.isRedBand(value, thresholdsFor(sensor), tempDisplay)) " !" else ""
-        return HudMetrics.formatTemp(value, tempDisplay, false) + marker
-    }
+    private fun tempText(celsius: Int): String =
+        HudMetrics.formatTemp(celsius.toFloat(), tempDisplay, false)
 
     private fun thresholdsFor(sensor: HudMetrics.TempSensor): HudMetrics.Thresholds =
         metrics.resolveThresholds(sensor, tempDisplay)

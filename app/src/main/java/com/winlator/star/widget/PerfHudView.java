@@ -210,9 +210,8 @@ public class PerfHudView extends View {
             // Only the CPU temp is shown in this style. Colour the whole cell by danger band; the
             // label keeps its identity colour when banding is off.
             HudMetrics.Thresholds t = metrics.resolveThresholds(HudMetrics.TempSensor.CPU, tempDisplay);
-            String text = HudMetrics.formatTemp(tempC, tempDisplay, true)
-                        + (HudMetrics.isRedBand(tempC, t, tempDisplay) ? " !" : "");
-            cells.add(new Cell("TMP", text, HudMetrics.tempColor(tempC, t, tempDisplay, C_TMP)));
+            cells.add(new Cell("TMP", HudMetrics.formatTemp(tempC, tempDisplay, true),
+                               HudMetrics.tempColor(tempC, t, tempDisplay, C_TMP)));
         }
         if (showFPS)   cells.add(new Cell("FPS", String.format(Locale.ENGLISH, "%.0f", fps), C_FPS));
         return cells;

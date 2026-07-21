@@ -298,8 +298,7 @@ public class FrameRating extends FrameLayout implements Runnable {
     private void applyTemp(TextView tv, float celsius, HudMetrics.TempSensor sensor, int defaultColor) {
         if (tv == null) return;
         HudMetrics.Thresholds t = metrics.resolveThresholds(sensor, tempDisplay);
-        tv.setText(HudMetrics.formatTemp(celsius, tempDisplay, true)
-                 + (HudMetrics.isRedBand(celsius, t, tempDisplay) ? " !" : ""));
+        tv.setText(HudMetrics.formatTemp(celsius, tempDisplay, true));
         tv.setTextColor(HudMetrics.tempColor(celsius, t, tempDisplay, defaultColor));
     }
 }
