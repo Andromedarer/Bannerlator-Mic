@@ -8,6 +8,7 @@ import android.view.MotionEvent;
 import androidx.preference.PreferenceManager;
 
 import com.winlator.star.XServerDisplayActivity;
+import com.winlator.star.core.GyroCalibrator;
 import com.winlator.star.core.StringUtils;
 import com.winlator.star.inputcontrols.ControlsProfile;
 import com.winlator.star.inputcontrols.ExternalController;
@@ -103,6 +104,11 @@ public class WinHandler {
     public static final int GYRO_ACTIVATOR_R1 = 2;
     public static final int GYRO_ACTIVATOR_R3 = 3;
     public static final int GYRO_ACTIVATOR_ALWAYS = 4;
+    // How the activator gates the gyro. HOLD = the original behaviour (gyro runs while the button is
+    // down); TOGGLE = a tap latches the gyro on until the next tap. Meaningless with ALWAYS, which has
+    // no button to latch, so the gate below ignores the mode in that case.
+    public static final int GYRO_ACTIVATION_HOLD = 0;
+    public static final int GYRO_ACTIVATION_TOGGLE = 1;
 
     public static final boolean GYRO_ENABLED_DEFAULT = true;
     public static final int GYRO_TARGET_DEFAULT = GYRO_TARGET_RIGHT_STICK;
@@ -110,6 +116,7 @@ public class WinHandler {
     public static final float GYRO_SENSITIVITY_DEFAULT = 2.0f;  // rad/s -> stick deflection gain
     public static final float GYRO_SMOOTHING_DEFAULT = 0.5f;    // 0 = raw, ->1 = heavier low-pass
     public static final int GYRO_ACTIVATOR_DEFAULT = GYRO_ACTIVATOR_L1;
+    public static final int GYRO_ACTIVATION_MODE_DEFAULT = GYRO_ACTIVATION_HOLD;
 
     private static final float GYRO_AXIS_EPSILON = 0.001f; // don't re-inject for sub-noise changes
     // rad/s * sensitivity -> pixels per sensor sample in mouse mode. Picked so sensitivity 2.0 gives
@@ -124,11 +131,24 @@ public class WinHandler {
     private volatile boolean gyroInvertX = false;
     private volatile boolean gyroInvertY = false;
     private volatile int gyroActivator = GYRO_ACTIVATOR_DEFAULT;
+    private volatile int gyroActivationMode = GYRO_ACTIVATION_MODE_DEFAULT;
+    // False until the launch-time container/shortcut resolution lands (applyGyroTuning). The sample
+    // path is a strict no-op while it's false, so the gyro never runs on values the user didn't pick.
+    private volatile boolean gyroConfigApplied = false;
+    // Zero-rate bias measured by the out-of-game calibration (Input Controls -> Gyroscope). 0 = the
+    // uncalibrated default, which makes the subtraction in updateGyroData a strict no-op.
+    private volatile float gyroBiasX = 0.0f;
+    private volatile float gyroBiasY = 0.0f;
 
     private float smoothedGyroX = 0.0f;
     private float smoothedGyroY = 0.0f;
     private float currentGyroStickX = 0.0f;
     private float currentGyroStickY = 0.0f;
+    // Toggle-mode latch plus the previous activator level it edge-detects against. Both are touched
+    // ONLY from the sensor path (updateGyroActivation) and the reset/config helpers, all on the main
+    // thread, so plain fields are enough — no volatile, no lock on a 50-200 Hz path.
+    private boolean gyroToggleLatched = false;
+    private boolean gyroActivatorWasPressed = false;
     // Sub-pixel carry for mouse mode, so slow tilts still move the pointer instead of rounding to 0.
     private float accumulatedGyroMouseX = 0.0f;
     private float accumulatedGyroMouseY = 0.0f;
@@ -203,17 +223,17 @@ public class WinHandler {
         // Master switch (default: enabled) — a single kill-switch for ALL controller vibration.
         vibrationMasterEnabled = preferences.getBoolean("vibration_master_enabled", true);
 
-        // Gyro settings — global prefs (same pref-backed lifecycle as the vibration master switch).
-        // The defaults reproduce the original hardcoded behaviour, so an untouched install behaves
-        // exactly as before: enabled, right stick, sens 2.0 / deadzone 0.05 / smoothing 0.5, hold L1.
-        gyroEnabled = preferences.getBoolean("gyro_enabled", GYRO_ENABLED_DEFAULT);
-        gyroTarget = preferences.getInt("gyro_target", GYRO_TARGET_DEFAULT);
-        gyroDeadzone = preferences.getFloat("gyro_deadzone", GYRO_DEADZONE_DEFAULT);
-        gyroSensitivity = preferences.getFloat("gyro_sensitivity", GYRO_SENSITIVITY_DEFAULT);
-        gyroSmoothing = preferences.getFloat("gyro_smoothing", GYRO_SMOOTHING_DEFAULT);
-        gyroInvertX = preferences.getBoolean("gyro_invert_x", false);
-        gyroInvertY = preferences.getBoolean("gyro_invert_y", false);
-        gyroActivator = preferences.getInt("gyro_activator", GYRO_ACTIVATOR_DEFAULT);
+        // Gyro tuning is NOT read here any more — it lives on the container (and, for the game-facing
+        // half, on the shortcut). XServerDisplayActivity resolves the chain once at launch and pushes
+        // it in via applyGyroTuning; until then the pipeline stays inert (gyroConfigApplied == false),
+        // so a sample arriving before the container is known can't act on stale defaults.
+
+        // Calibration bias — read once here (never on the sample path). GyroCalibrator honours the
+        // device stamp, so a bias restored from another phone by Android auto-backup comes back 0.
+        float[] bias = new float[2];
+        GyroCalibrator.loadBias(activity, bias, preferences);
+        gyroBiasX = bias[0];
+        gyroBiasY = bias[1];
     }
 
     private boolean sendPacket(int port) {
@@ -868,10 +888,30 @@ public class WinHandler {
      * extra synchronization.
      */
     public void updateGyroData(float rawGyroX, float rawGyroY) {
-        if (!gyroEnabled) {
+        if (!gyroConfigApplied || !gyroEnabled) {
             resetGyroRuntimeState();
             return;
         }
+
+        // Calibration bias first, and deliberately so: BEFORE the deadzone (otherwise the deadzone has
+        // to exceed the bias just to hold still, which is what makes fine aim mushy), BEFORE invert
+        // (an inverted axis would subtract with the wrong sign), BEFORE sensitivity (the bias is in
+        // rad/s, sensitivity is a unitless gain) and BEFORE the low-pass (which would otherwise
+        // converge on bias*sensitivity and never let the stick recenter). Uncalibrated = 0 = no-op.
+        rawGyroX -= gyroBiasX;
+        rawGyroY -= gyroBiasY;
+
+        // Toggle-mode edge, evaluated HERE and nowhere else. Two reasons it can't move:
+        //  - not into sendGamepadState(): it has several call sites and the gyro re-enters it itself
+        //    (pushGyroToActiveTarget), and the raw/remapped split means one physical press can arrive
+        //    twice — the latch would flip twice and land back where it started.
+        //  - not below the deadzone block: with the device held still both axes deadzone to zero and
+        //    this method returns early further down, so a tap made while holding still would never be
+        //    seen at all.
+        // Caveat by design: the edge is sampled at the sensor rate (SENSOR_DELAY_GAME, ~50 Hz worst
+        // case), so a sub-20ms tap can slip between samples. Real presses run 60-150ms, so this is
+        // fine — don't "fix" it by moving the edge into the input event path.
+        updateGyroActivation();
 
         if (Math.abs(rawGyroX) < gyroDeadzone)
             rawGyroX = 0.0f;
@@ -918,17 +958,77 @@ public class WinHandler {
      */
     private void pushGyroToActiveTarget() {
         ExternalController controller = gyroTargetController;
-        if (controller != null && (isGyroActivatorPressed(controller.state)
-                || isGyroActivatorPressed(controller.remappedState))) {
+        if (controller != null && (isGyroTargetActive(controller.state)
+                || isGyroTargetActive(controller.remappedState))) {
             sendGamepadState(controller);
             return;
         }
         if (activity.getInputControlsView() == null)
             return;
         ControlsProfile profile = activity.getInputControlsView().getProfile();
-        if (profile != null && isGyroActivatorPressed(profile.getGamepadState())) {
+        if (profile != null && isGyroTargetActive(profile.getGamepadState())) {
             sendGamepadState();
         }
+    }
+
+    /**
+     * Same walk as pushGyroToActiveTarget, but WITHOUT the activation gate. Used the moment the toggle
+     * un-latches: the button press that turned it off was injected while the latch was still on (the
+     * edge is detected here on the sensor path, not in the event path), so the game is holding a state
+     * that still carries the gyro deflection and the gated push would refuse to correct it.
+     */
+    private void pushGyroClearToLastTarget() {
+        ExternalController controller = gyroTargetController;
+        if (controller != null) {
+            sendGamepadState(controller);
+            return;
+        }
+        if (activity.getInputControlsView() == null)
+            return;
+        if (activity.getInputControlsView().getProfile() != null)
+            sendGamepadState();
+    }
+
+    /**
+     * Toggle-mode edge detect — called exactly once per gyro sample from updateGyroData. Reads the
+     * activator off the same sources isGyroActivatorHeld() walks (the target controller's raw and
+     * remapped state, then the on-screen-controls profile), so the latch responds to whichever one the
+     * user is actually pressing. Hold mode and "Always" leave immediately: nothing to latch, and the
+     * early-out keeps the hot path exactly as cheap as it was before toggle existed.
+     */
+    private void updateGyroActivation() {
+        if (gyroActivationMode != GYRO_ACTIVATION_TOGGLE || gyroActivator == GYRO_ACTIVATOR_ALWAYS)
+            return;
+
+        // OR across every source, exactly as isGyroActivatorHeld does — a pad can be connected without
+        // being the thing the user is pressing, so falling through to the on-screen controls matters.
+        boolean pressed = false;
+        ExternalController controller = gyroTargetController;
+        if (controller != null && (isGyroActivatorPressed(controller.state)
+                || isGyroActivatorPressed(controller.remappedState))) {
+            pressed = true;
+        }
+        if (!pressed && activity.getInputControlsView() != null) {
+            ControlsProfile profile = activity.getInputControlsView().getProfile();
+            pressed = profile != null && isGyroActivatorPressed(profile.getGamepadState());
+        }
+
+        if (pressed && !gyroActivatorWasPressed) {
+            gyroToggleLatched = !gyroToggleLatched;
+            if (!gyroToggleLatched) {
+                // Latched off: drop the deflection and the filter/carry state, then push once through
+                // the ungated path so the stick actually recenters instead of waiting for whatever
+                // controller event happens to come next.
+                currentGyroStickX = 0.0f;
+                currentGyroStickY = 0.0f;
+                smoothedGyroX = 0.0f;
+                smoothedGyroY = 0.0f;
+                accumulatedGyroMouseX = 0.0f;
+                accumulatedGyroMouseY = 0.0f;
+                pushGyroClearToLastTarget();
+            }
+        }
+        gyroActivatorWasPressed = pressed;
     }
 
     /**
@@ -996,19 +1096,44 @@ public class WinHandler {
         pushGyroToActiveTarget();
     }
 
-    /** Full runtime reset — used when the gyro is switched off or re-pointed at another target. */
-    private void resetGyroRuntimeState() {
+    /**
+     * Full runtime reset — used when the gyro is switched off, re-pointed at another target or
+     * re-configured, when the target controller disappears, and when the activity drops the sensor
+     * listener. Public because XServerDisplayActivity has to be able to clear a toggle latch on
+     * pause: no samples arrive in the background, so a latched-on overlay would otherwise stay frozen
+     * into the last written gamepad state.
+     */
+    public void resetGyroRuntimeState() {
         smoothedGyroX = 0.0f;
         smoothedGyroY = 0.0f;
         accumulatedGyroMouseX = 0.0f;
         accumulatedGyroMouseY = 0.0f;
+        // Overlay first, THEN the latch: clearGyroStickOverlay re-pushes through the activation gate,
+        // and dropping the latch ahead of it would gate that clean push away — freezing the last
+        // deflected state into the game, which is the exact bug this method exists to prevent.
         clearGyroStickOverlay();
+        gyroToggleLatched = false;
+        gyroActivatorWasPressed = false;
+    }
+
+    /**
+     * The one activation gate: in toggle mode the latch IS the state, in hold mode it's the live
+     * button. "Always" keeps ignoring the mode — there's no button to tap, so the gate always passes.
+     */
+    private boolean isGyroTargetActive(GamepadState state) {
+        if (gyroActivationMode == GYRO_ACTIVATION_TOGGLE && gyroActivator != GYRO_ACTIVATOR_ALWAYS)
+            return gyroToggleLatched;
+        return isGyroActivatorPressed(state);
     }
 
     /** True when the activator is held on any live target (or the user chose "Always on"). */
     private boolean isGyroActivatorHeld() {
         if (gyroActivator == GYRO_ACTIVATOR_ALWAYS)
             return true;
+        // Toggle mode: the latch is the whole answer, so short-circuit before walking the targets.
+        // That's also how the mouse path inherits the latch without any plumbing of its own.
+        if (gyroActivationMode == GYRO_ACTIVATION_TOGGLE)
+            return gyroToggleLatched;
         ExternalController controller = gyroTargetController;
         if (controller != null && (isGyroActivatorPressed(controller.state)
                 || isGyroActivatorPressed(controller.remappedState)))
@@ -1050,7 +1175,7 @@ public class WinHandler {
             return baseState;
         if (gyroTarget == GYRO_TARGET_MOUSE)
             return baseState;
-        if (!isGyroActivatorPressed(baseState))
+        if (!isGyroTargetActive(baseState))
             return baseState;
 
         outputGamepadState.copy(baseState);
@@ -1070,7 +1195,11 @@ public class WinHandler {
         return outputGamepadState;
     }
 
-    // ---- Gyro settings (global prefs; per-container persistence is a later phase) ----
+    // ---- Gyro settings (runtime mirror only — the container/shortcut owns persistence) ----
+    //
+    // These fields are written exactly twice per session: once by applyGyroTuning at launch, then by
+    // the in-game drawer callbacks (which persist to the shortcut/container themselves). Nothing on
+    // the sample path ever reads the container, so updateGyroData stays allocation-free.
 
     public boolean isGyroEnabled()      { return gyroEnabled; }
     public int getGyroTarget()          { return gyroTarget; }
@@ -1080,12 +1209,37 @@ public class WinHandler {
     public boolean isGyroInvertX()      { return gyroInvertX; }
     public boolean isGyroInvertY()      { return gyroInvertY; }
     public int getGyroActivator()       { return gyroActivator; }
+    public int getGyroActivationMode()  { return gyroActivationMode; }
+
+    /**
+     * Applies the whole resolved gyro configuration in one shot (launch time, from
+     * XServerDisplayActivity once the container/shortcut chain is known) and arms the sample path.
+     * Same clamps as the individual setters below, so a hand-edited container JSON can't get through.
+     */
+    public void applyGyroTuning(boolean enabled, int target, int activator, int activationMode,
+                                float sensitivity, float deadzone, float smoothing,
+                                boolean invertX, boolean invertY) {
+        gyroEnabled = enabled;
+        gyroTarget = (target < GYRO_TARGET_RIGHT_STICK || target > GYRO_TARGET_MOUSE)
+                ? GYRO_TARGET_DEFAULT : target;
+        gyroActivator = (activator < GYRO_ACTIVATOR_L1 || activator > GYRO_ACTIVATOR_ALWAYS)
+                ? GYRO_ACTIVATOR_DEFAULT : activator;
+        gyroActivationMode = (activationMode < GYRO_ACTIVATION_HOLD || activationMode > GYRO_ACTIVATION_TOGGLE)
+                ? GYRO_ACTIVATION_MODE_DEFAULT : activationMode;
+        gyroSensitivity = clamp(sensitivity, 0.1f, 10.0f);
+        gyroDeadzone = clamp(deadzone, 0.0f, 0.5f);
+        gyroSmoothing = clamp(smoothing, 0.0f, 0.95f);
+        gyroInvertX = invertX;
+        gyroInvertY = invertY;
+        // Target may have changed under us — drop any stale deflection before arming.
+        resetGyroRuntimeState();
+        gyroConfigApplied = true;
+    }
 
     public void setGyroEnabled(boolean enabled) {
         gyroEnabled = enabled;
         if (!enabled)
             resetGyroRuntimeState();
-        preferences.edit().putBoolean("gyro_enabled", enabled).apply();
     }
 
     /** Switching target must drop the old overlay, or the previous stick stays deflected forever. */
@@ -1093,39 +1247,49 @@ public class WinHandler {
         gyroTarget = (target < GYRO_TARGET_RIGHT_STICK || target > GYRO_TARGET_MOUSE)
                 ? GYRO_TARGET_DEFAULT : target;
         resetGyroRuntimeState();
-        preferences.edit().putInt("gyro_target", gyroTarget).apply();
     }
 
     public void setGyroSensitivity(float sensitivity) {
         gyroSensitivity = clamp(sensitivity, 0.1f, 10.0f);
-        preferences.edit().putFloat("gyro_sensitivity", gyroSensitivity).apply();
     }
 
     public void setGyroDeadzone(float deadzone) {
         gyroDeadzone = clamp(deadzone, 0.0f, 0.5f);
-        preferences.edit().putFloat("gyro_deadzone", gyroDeadzone).apply();
     }
 
     public void setGyroSmoothing(float smoothing) {
         gyroSmoothing = clamp(smoothing, 0.0f, 0.95f);
-        preferences.edit().putFloat("gyro_smoothing", gyroSmoothing).apply();
     }
 
     public void setGyroInvertX(boolean invert) {
         gyroInvertX = invert;
-        preferences.edit().putBoolean("gyro_invert_x", invert).apply();
     }
 
     public void setGyroInvertY(boolean invert) {
         gyroInvertY = invert;
-        preferences.edit().putBoolean("gyro_invert_y", invert).apply();
     }
 
     public void setGyroActivator(int activator) {
         gyroActivator = (activator < GYRO_ACTIVATOR_L1 || activator > GYRO_ACTIVATOR_ALWAYS)
                 ? GYRO_ACTIVATOR_DEFAULT : activator;
         resetGyroRuntimeState();
-        preferences.edit().putInt("gyro_activator", gyroActivator).apply();
+    }
+
+    /** Changing the mode has to drop the latch too, or a toggled-on gyro survives the switch to hold. */
+    public void setGyroActivationMode(int activationMode) {
+        gyroActivationMode = (activationMode < GYRO_ACTIVATION_HOLD || activationMode > GYRO_ACTIVATION_TOGGLE)
+                ? GYRO_ACTIVATION_MODE_DEFAULT : activationMode;
+        resetGyroRuntimeState();
+    }
+
+    /**
+     * Pushes a freshly measured calibration bias in (Input Controls -> Gyroscope, then back to the
+     * running session). Both fields are volatile and the sample path only reads them, so this stays a
+     * plain assignment — the bias is never re-read from prefs on the sample path.
+     */
+    public void setGyroBias(float biasX, float biasY) {
+        gyroBiasX = biasX;
+        gyroBiasY = biasY;
     }
 
     private static float clamp(float value, float min, float max) {
@@ -1167,6 +1331,9 @@ public class WinHandler {
             usedSlots.remove(slot);
             if (gyroTargetController != null && gyroTargetController.getDeviceId() == deviceId) {
                 gyroTargetController = null;
+                // Worst case for toggle mode: latched on and then the pad is unplugged, leaving no
+                // button anywhere to tap it back off. Drop the latch along with the device.
+                resetGyroRuntimeState();
             }
             controllers.remove(deviceId);
             Log.d("WinHandler", "Device " + deviceId + " disconnected (or OSC disabled). Slot released: " + slot);

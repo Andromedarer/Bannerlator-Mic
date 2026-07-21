@@ -1369,6 +1369,114 @@ private fun AdvancedTab(
             }
         }
 
+        // Gyro (motion aim) section — the default a session (and a new shortcut) launches with.
+        // Enabled/target/activator/sensitivity/invert can be overridden per game in the shortcut
+        // editor; deadzone/smoothing stay container-wide because they track the hand and the device,
+        // not the game. All of them are also live-tunable from the in-game drawer.
+        SectionBox(title = stringResource(R.string.gyro)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(
+                    checked = viewModel.gyroEnabled,
+                    onCheckedChange = { viewModel.gyroEnabled = it }
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.gyro_enabled), modifier = Modifier.weight(1f))
+            }
+            if (viewModel.gyroEnabled) {
+                val gyroTargetLabels = listOf(
+                    stringResource(R.string.gyro_target_right_stick),
+                    stringResource(R.string.gyro_target_left_stick),
+                    stringResource(R.string.gyro_target_mouse),
+                )
+                LabeledDropdown(
+                    label = stringResource(R.string.gyro_target_label),
+                    options = gyroTargetLabels,
+                    selectedOption = gyroTargetLabels.getOrElse(viewModel.gyroTarget) {
+                        gyroTargetLabels[Container.GYRO_TARGET_DEFAULT]
+                    },
+                    onSelect = { opt -> viewModel.gyroTarget = gyroTargetLabels.indexOf(opt).coerceAtLeast(0) }
+                )
+                val gyroActivatorLabels = listOf(
+                    stringResource(R.string.gyro_activator_l1),
+                    stringResource(R.string.gyro_activator_l2),
+                    stringResource(R.string.gyro_activator_r1),
+                    stringResource(R.string.gyro_activator_r3),
+                    stringResource(R.string.gyro_activator_always),
+                )
+                Spacer(Modifier.height(8.dp))
+                LabeledDropdown(
+                    label = stringResource(R.string.gyro_activator_label),
+                    options = gyroActivatorLabels,
+                    selectedOption = gyroActivatorLabels.getOrElse(viewModel.gyroActivator) {
+                        gyroActivatorLabels[Container.GYRO_ACTIVATOR_DEFAULT]
+                    },
+                    onSelect = { opt -> viewModel.gyroActivator = gyroActivatorLabels.indexOf(opt).coerceAtLeast(0) }
+                )
+                // Hold vs Toggle for that button. Pointless with "Always On" (no button to latch), so
+                // the picker is hidden rather than greyed here — an editor row has no live state to
+                // explain, unlike the in-game drawer where the row stays visible but disabled.
+                if (viewModel.gyroActivator != Container.GYRO_ACTIVATOR_ALWAYS) {
+                    val gyroActivationModeLabels = listOf(
+                        stringResource(R.string.gyro_activation_hold),
+                        stringResource(R.string.gyro_activation_toggle),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    LabeledDropdown(
+                        label = stringResource(R.string.gyro_activation_mode_label),
+                        options = gyroActivationModeLabels,
+                        selectedOption = gyroActivationModeLabels.getOrElse(viewModel.gyroActivationMode) {
+                            gyroActivationModeLabels[Container.GYRO_ACTIVATION_MODE_DEFAULT]
+                        },
+                        onSelect = { opt -> viewModel.gyroActivationMode = gyroActivationModeLabels.indexOf(opt).coerceAtLeast(0) }
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "${stringResource(R.string.gyro_sensitivity_label)}: ${"%.1f".format(viewModel.gyroSensitivity)}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Slider(
+                    value = viewModel.gyroSensitivity,
+                    onValueChange = { viewModel.gyroSensitivity = it },
+                    valueRange = 0.1f..10f
+                )
+                Text(
+                    "${stringResource(R.string.gyro_deadzone_label)}: ${"%.2f".format(viewModel.gyroDeadzone)}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Slider(
+                    value = viewModel.gyroDeadzone,
+                    onValueChange = { viewModel.gyroDeadzone = it },
+                    valueRange = 0f..0.5f
+                )
+                Text(
+                    "${stringResource(R.string.gyro_smoothing_label)}: ${"%.2f".format(viewModel.gyroSmoothing)}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Slider(
+                    value = viewModel.gyroSmoothing,
+                    onValueChange = { viewModel.gyroSmoothing = it },
+                    valueRange = 0f..0.95f
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Switch(
+                        checked = viewModel.gyroInvertX,
+                        onCheckedChange = { viewModel.gyroInvertX = it }
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.gyro_invert_x), modifier = Modifier.weight(1f))
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Switch(
+                        checked = viewModel.gyroInvertY,
+                        onCheckedChange = { viewModel.gyroInvertY = it }
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.gyro_invert_y), modifier = Modifier.weight(1f))
+                }
+            }
+        }
+
         // Startup Selection
         LabeledDropdown(
             label = stringResource(R.string.startup_selection),

@@ -71,6 +71,7 @@ import com.winlator.star.core.DefaultVersion;
 import com.winlator.star.core.EnvVars;
 import com.winlator.star.core.FileUtils;
 import com.winlator.star.core.GPUInformation;
+import com.winlator.star.core.GyroCalibrator;
 import com.winlator.star.core.KeyValueSet;
 import com.winlator.star.core.OnExtractFileListener;
 import com.winlator.star.core.PreloaderDialog;
@@ -505,7 +506,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
         sensorManager = (SensorManager) getSystemService(SENSOR_SERVICE);
         if (sensorManager != null) gyroSensor = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
         Log.i("XServerGyro", "Gyroscope sensor " + (gyroSensor != null ? "found: " + gyroSensor.getName() : "not available"));
-        registerGyroSensor();
+        // NOTE: the listener is NOT registered here — the container (and so the gyro config) isn't
+        // known yet at this point. See the applyGyroTuning block below, which registers it once the
+        // resolved config is in. onResume re-registers, so nothing is lost on the way back in.
 
         // Record the start time
         startTime = System.currentTimeMillis();
@@ -982,6 +985,39 @@ public class XServerDisplayActivity extends AppCompatActivity {
             Log.d("XServerDisplayActivity", "XInput Disabled from Shortcut: " + xinputDisabledFromShortcut);
         }
 
+        // Gyro (motion aim) — resolve the whole config ONCE here and push it into WinHandler in a
+        // single call. enabled/target/activator/sensitivity/invertX/invertY are per-game (the
+        // shortcut extra wins, else the container value, else the GYRO_*_DEFAULT baked into the
+        // getter); deadzone/smoothing are container-only, they describe the hand and the device
+        // rather than the game. This must never move onto the sample path — Container.getExtra
+        // parses JSON and allocates, and updateGyroData runs at the sensor rate while the game
+        // renders. WinHandler keeps the resolved values in its volatile fields from here on.
+        boolean gyroOn = container.isGyroEnabled();
+        int gyroTarget = container.getGyroTarget();
+        int gyroActivator = container.getGyroActivator();
+        int gyroActivationMode = container.getGyroActivationMode();
+        float gyroSensitivity = container.getGyroSensitivity();
+        boolean gyroInvertX = container.isGyroInvertX();
+        boolean gyroInvertY = container.isGyroInvertY();
+        if (shortcut != null) {
+            gyroOn = shortcut.getExtra("gyroEnabled", gyroOn ? "1" : "0").equals("1");
+            gyroInvertX = shortcut.getExtra("gyroInvertX", gyroInvertX ? "1" : "0").equals("1");
+            gyroInvertY = shortcut.getExtra("gyroInvertY", gyroInvertY ? "1" : "0").equals("1");
+            try {
+                gyroTarget = Integer.parseInt(shortcut.getExtra("gyroTarget", String.valueOf(gyroTarget)));
+                gyroActivator = Integer.parseInt(shortcut.getExtra("gyroActivator", String.valueOf(gyroActivator)));
+                gyroActivationMode = Integer.parseInt(shortcut.getExtra("gyroActivationMode", String.valueOf(gyroActivationMode)));
+            } catch (NumberFormatException e) {}
+            try {
+                gyroSensitivity = Float.parseFloat(shortcut.getExtra("gyroSensitivity", String.valueOf(gyroSensitivity)));
+            } catch (NumberFormatException e) {}
+        }
+        winHandler.applyGyroTuning(gyroOn, gyroTarget, gyroActivator, gyroActivationMode, gyroSensitivity,
+            container.getGyroDeadzone(), container.getGyroSmoothing(), gyroInvertX, gyroInvertY);
+        // Only now is it safe to let samples in (registerGyroSensor used to run in onCreate, long
+        // before the container existed, so the first few hundred ms ran on the built-in defaults).
+        registerGyroSensor();
+
         // VEGAS runs its own native DLLs from vegas-<ver>.tzst — no alias to DXVK.
 
         this.graphicsDriverConfig = GraphicsDriverConfigDialog.parseGraphicsDriverConfig(graphicsDriverConfig);
@@ -1322,6 +1358,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
         reapplyVrr();
         // onPause() dropped the gyro listener so it can't drain the battery in the background.
         registerGyroSensor();
+        // The user may have been away recalibrating (Input Controls -> Gyroscope), which writes the
+        // bias to the global prefs. Re-read it once here, on the way back in, so a fresh calibration
+        // takes effect without relaunching the game. Deliberately NOT on the sample path.
+        reloadGyroBias();
         // Track the live panel rate again (the readout shows it while Auto is on).
         registerVrrDisplayListener();
         updateCurrentRefreshRate();
@@ -1346,6 +1386,15 @@ public class XServerDisplayActivity extends AppCompatActivity {
         unregisterGyroSensor();
     }
 
+    // Re-reads the calibration bias from the global prefs and hands it to WinHandler. GyroCalibrator
+    // still honours the device stamp, so a bias restored from another phone comes back 0.
+    private void reloadGyroBias() {
+        if (winHandler == null || gyroSensor == null) return;
+        float[] bias = new float[2];
+        GyroCalibrator.loadBias(this, bias);
+        winHandler.setGyroBias(bias[0], bias[1]);
+    }
+
     // Gyro listener register/unregister — both are idempotent and a no-op without a gyroscope.
     private void registerGyroSensor() {
         if (sensorManager == null || gyroSensor == null || gyroListenerRegistered) return;
@@ -1353,10 +1402,27 @@ public class XServerDisplayActivity extends AppCompatActivity {
         gyroListenerRegistered = true;
     }
 
+    // Write-back for the per-game gyro settings: the shortcut when the game was launched from one,
+    // otherwise the container. Same key on both sides, so the launch resolver reads back exactly what
+    // was written here (see the applyGyroTuning block in setupUI).
+    private void persistGyroExtra(String key, String value) {
+        if (shortcut != null) {
+            shortcut.putExtra(key, value);
+            shortcut.saveData();
+        }
+        else if (container != null) {
+            container.putExtra(key, value);
+            container.saveData();
+        }
+    }
+
     private void unregisterGyroSensor() {
         if (sensorManager == null || !gyroListenerRegistered) return;
         sensorManager.unregisterListener(gyroListener);
         gyroListenerRegistered = false;
+        // Clear the runtime state on the way out: with the listener gone nothing arrives to un-latch a
+        // toggled-on gyro, so the overlay would stay frozen into the last gamepad state the game saw.
+        if (winHandler != null) winHandler.resetGyroRuntimeState();
     }
 
 
@@ -2952,9 +3018,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 }
             };
 
-            // Gyro (motion aim) state — WinHandler owns the values and persists them to prefs, so
-            // this only seeds the drawer and pipes each change straight back (live, no restart).
-            // Same shape as the vibration master switch above; per-container persistence comes later.
+            // Gyro (motion aim) state — WinHandler holds the live values (already resolved at launch
+            // from the shortcut/container chain), so this seeds the drawer straight off it. Each
+            // change is applied live AND written back to the SAME owner the launch seed reads from:
+            // the shortcut when the game was launched from one, else the container. Writing only to
+            // the container is what made the FPS limiter "reset every time you close the game"
+            // (issue #46) — the gyro is per-game too, so it would hit the identical bug.
+            // Deadzone/smoothing are container-only, matching the launch resolution above.
             ds.setGyroSupported(gyroSensor != null);
             ds.setGyroEnabled(winHandler.isGyroEnabled());
             ds.setGyroTarget(winHandler.getGyroTarget());
@@ -2964,14 +3034,50 @@ public class XServerDisplayActivity extends AppCompatActivity {
             ds.setGyroInvertX(winHandler.isGyroInvertX());
             ds.setGyroInvertY(winHandler.isGyroInvertY());
             ds.setGyroActivator(winHandler.getGyroActivator());
-            ds.onGyroEnabledChanged     = (enabled) -> winHandler.setGyroEnabled(enabled);
-            ds.onGyroTargetChanged      = (target)  -> winHandler.setGyroTarget(target);
-            ds.onGyroSensitivityChanged = (value)   -> winHandler.setGyroSensitivity(value);
-            ds.onGyroDeadzoneChanged    = (value)   -> winHandler.setGyroDeadzone(value);
-            ds.onGyroSmoothingChanged   = (value)   -> winHandler.setGyroSmoothing(value);
-            ds.onGyroInvertXChanged     = (invert)  -> winHandler.setGyroInvertX(invert);
-            ds.onGyroInvertYChanged     = (invert)  -> winHandler.setGyroInvertY(invert);
-            ds.onGyroActivatorChanged   = (index)   -> winHandler.setGyroActivator(index);
+            ds.setGyroActivationMode(winHandler.getGyroActivationMode());
+            ds.onGyroEnabledChanged = (enabled) -> {
+                winHandler.setGyroEnabled(enabled);
+                persistGyroExtra("gyroEnabled", enabled ? "1" : "0");
+            };
+            ds.onGyroTargetChanged = (target) -> {
+                winHandler.setGyroTarget(target);
+                persistGyroExtra("gyroTarget", String.valueOf(winHandler.getGyroTarget()));
+            };
+            ds.onGyroActivatorChanged = (index) -> {
+                winHandler.setGyroActivator(index);
+                persistGyroExtra("gyroActivator", String.valueOf(winHandler.getGyroActivator()));
+            };
+            ds.onGyroActivationModeChanged = (mode) -> {
+                winHandler.setGyroActivationMode(mode);
+                persistGyroExtra("gyroActivationMode", String.valueOf(winHandler.getGyroActivationMode()));
+            };
+            ds.onGyroSensitivityChanged = (value) -> {
+                winHandler.setGyroSensitivity(value);
+                persistGyroExtra("gyroSensitivity", String.valueOf(winHandler.getGyroSensitivity()));
+            };
+            ds.onGyroInvertXChanged = (invert) -> {
+                winHandler.setGyroInvertX(invert);
+                persistGyroExtra("gyroInvertX", invert ? "1" : "0");
+            };
+            ds.onGyroInvertYChanged = (invert) -> {
+                winHandler.setGyroInvertY(invert);
+                persistGyroExtra("gyroInvertY", invert ? "1" : "0");
+            };
+            // Container-only pair: not per-game, so these always land on the container.
+            ds.onGyroDeadzoneChanged = (value) -> {
+                winHandler.setGyroDeadzone(value);
+                if (container != null) {
+                    container.setGyroDeadzone(winHandler.getGyroDeadzone());
+                    container.saveData();
+                }
+            };
+            ds.onGyroSmoothingChanged = (value) -> {
+                winHandler.setGyroSmoothing(value);
+                if (container != null) {
+                    container.setGyroSmoothing(winHandler.getGyroSmoothing());
+                    container.saveData();
+                }
+            };
         }
 
         // Task Manager actions (End Process / Bring to Front / New Task / Set Affinity) are

@@ -337,6 +337,12 @@ object XServerDialogState {
     val gyroActivator: StateFlow<Int> = _gyroActivator
     fun setGyroActivator(v: Int) { _gyroActivator.value = v }
 
+    // 0 = Hold (gyro runs while the activator is down), 1 = Toggle (a tap latches it on until the
+    // next tap). Ignored when the activator is "Always" — there's no button to latch.
+    private val _gyroActivationMode = MutableStateFlow(0)
+    val gyroActivationMode: StateFlow<Int> = _gyroActivationMode
+    fun setGyroActivationMode(v: Int) { _gyroActivationMode.value = v }
+
     fun interface GyroBoolCallback { fun invoke(value: Boolean) }
     fun interface GyroIntCallback { fun invoke(value: Int) }
     fun interface GyroFloatCallback { fun invoke(value: Float) }
@@ -349,6 +355,7 @@ object XServerDialogState {
     @JvmField var onGyroInvertXChanged: GyroBoolCallback? = null
     @JvmField var onGyroInvertYChanged: GyroBoolCallback? = null
     @JvmField var onGyroActivatorChanged: GyroIntCallback? = null
+    @JvmField var onGyroActivationModeChanged: GyroIntCallback? = null
 
     // -------------------------------------------------------------------------
     // Debug / Logs dialog
@@ -583,6 +590,7 @@ object XServerDialogState {
         _gyroInvertX.value     = false
         _gyroInvertY.value     = false
         _gyroActivator.value   = 0
+        _gyroActivationMode.value = 0
         _logLines.value        = emptyList()
         _logPaused.value       = false
         _inputProfiles.value   = emptyList()
@@ -620,6 +628,7 @@ object XServerDialogState {
         onGyroEnabledChanged = null; onGyroTargetChanged = null
         onGyroSensitivityChanged = null; onGyroDeadzoneChanged = null; onGyroSmoothingChanged = null
         onGyroInvertXChanged = null; onGyroInvertYChanged = null; onGyroActivatorChanged = null
+        onGyroActivationModeChanged = null
         onInputControlsConfirm = null; onInputControlsSettings = null
         onScreenEffectsApply = null; onSeAddProfile = null; onSeRemoveProfile = null
         onWindowClick = null
