@@ -2072,7 +2072,23 @@ private fun ControlsContent(state: XServerDrawerState) {
 
     SectionHeader("Controls")
 
-    // Input Controls section
+    // Four unrelated feature areas live under this tab, so they're segmented rather than stacked —
+    // exactly one renders at a time. ModeChipGrid is already the drawer's segmented-control language
+    // (equal-width accent-filled chips), so the bar reads as native here instead of a new widget.
+    val subTab by state.controlsSubTab.collectAsState()
+    ModeChipGrid(
+        listOf(
+            Triple("Touch", subTab == 0) { state.setControlsSubTab(0) },
+            Triple("Mouse", subTab == 1) { state.setControlsSubTab(1) },
+            Triple("Vibration", subTab == 2) { state.setControlsSubTab(2) },
+            Triple("Gyro", subTab == 3) { state.setControlsSubTab(3) },
+        ),
+        perRow = 4
+    )
+    Spacer(Modifier.height(8.dp))
+
+    // Input Controls section — hoisted above the sub-tab switch so the in-flight profile/flag edits
+    // survive a hop to another sub-tab and back.
     var selectedIdx by remember(initProfileIdx) { mutableIntStateOf(initProfileIdx) }
     var showTouchscreen by remember(initTouchscreen) { mutableStateOf(initTouchscreen) }
     var timeoutEnabled by remember(initTimeout) { mutableStateOf(initTimeout) }
@@ -2080,200 +2096,207 @@ private fun ControlsContent(state: XServerDrawerState) {
     val allItems = listOf("-- Disabled --") + profiles
     var dropdownExpanded by remember { mutableStateOf(false) }
 
-    Text("Input Controls", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-    Spacer(Modifier.height(6.dp))
+    when (subTab) {
+        // ── Touch ──
+        0 -> {
+            Text("Input Controls", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+            Spacer(Modifier.height(6.dp))
 
-    ExposedDropdownMenuBox(expanded = dropdownExpanded, onExpandedChange = { dropdownExpanded = it }) {
-        OutlinedTextField(
-            value = allItems.getOrElse(selectedIdx) { "-- Disabled --" },
-            onValueChange = {}, readOnly = true,
-            label = { Text("Profile", color = MaterialTheme.colorScheme.onSurfaceVariant) },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = dropdownExpanded) },
-            modifier = Modifier.fillMaxWidth().menuAnchor(),
-            singleLine = true,
-        )
-        ExposedDropdownMenu(expanded = dropdownExpanded, onDismissRequest = { dropdownExpanded = false }) {
-            allItems.forEachIndexed { i, label ->
-                DropdownMenuItem(text = { Text(label) }, onClick = {
-                    selectedIdx = i
-                    dropdownExpanded = false
-                    XServerDialogState.onInputControlsConfirm?.invoke(selectedIdx, showTouchscreen, timeoutEnabled, hapticsEnabled)
-                })
-            }
-        }
-    }
-
-    Spacer(Modifier.height(6.dp))
-
-    // Three plain on/off flags that all round-trip through the same onInputControlsConfirm call —
-    // packed 2-per-row as chips so the tab has room for the Gyro section below.
-    ToggleChipGrid(
-        listOf(
-            ToggleChipItem("Touch Controls", showTouchscreen) {
-                showTouchscreen = it
-                XServerDialogState.onInputControlsConfirm?.invoke(selectedIdx, showTouchscreen, timeoutEnabled, hapticsEnabled)
-            },
-            ToggleChipItem("Timeout", timeoutEnabled) {
-                timeoutEnabled = it
-                XServerDialogState.onInputControlsConfirm?.invoke(selectedIdx, showTouchscreen, timeoutEnabled, hapticsEnabled)
-            },
-            ToggleChipItem("Haptics", hapticsEnabled) {
-                hapticsEnabled = it
-                XServerDialogState.onInputControlsConfirm?.invoke(selectedIdx, showTouchscreen, timeoutEnabled, hapticsEnabled)
-            },
-        ),
-        perRow = 3
-    )
-
-    // On-screen controls opacity — live, applied to the visible overlay as you drag.
-    var overlayOpacity by remember(initOverlayOpacity) { mutableFloatStateOf(initOverlayOpacity) }
-    LabeledSlider(
-        label = "Overlay Opacity",
-        value = overlayOpacity,
-        valueRange = 0f..1f,
-        onValueChange = {
-            overlayOpacity = it
-            state.setOverlayOpacity(it)
-            state.onOverlayOpacityChange?.run()
-        },
-        format = { "${(it * 100).toInt()}%" },
-    )
-
-    // On-screen controls accent — per-profile override. Follow the app theme (default) or pick a
-    // custom accent for the active profile; idle controls stay white, pressed auto-brightens.
-    Spacer(Modifier.height(4.dp))
-    ToggleChipGrid(
-        listOf(
-            ToggleChipItem("App Theme", controlsFollowTheme) {
-                state.setControlsFollowTheme(it)
-                state.onControlsColorChange?.run()
-            }
-        ),
-        perRow = 3
-    )
-    if (!controlsFollowTheme) {
-        Spacer(Modifier.height(8.dp))
-        Text("Controls Accent", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-        Spacer(Modifier.height(8.dp))
-        ColorPicker(
-            initialColor = Color(initControlsAccent),
-            onColorChanged = {
-                state.setControlsAccentColor(it.toArgb())
-                state.onControlsColorChange?.run()
-            }
-        )
-    }
-
-    Spacer(Modifier.height(8.dp))
-
-    OutlinedButton(
-        onClick = {
-            XServerDialogState.onInputControlsConfirm?.invoke(selectedIdx, showTouchscreen, timeoutEnabled, hapticsEnabled)
-            XServerDialogState.onInputControlsSettings?.run()
-        },
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(10.dp),
-    ) { Text("Profile Settings\u2026") }
-
-    Spacer(Modifier.height(4.dp))
-
-    AccentButton("Apply & Close") {
-        XServerDialogState.onInputControlsConfirm?.invoke(selectedIdx, showTouchscreen, timeoutEnabled, hapticsEnabled)
-        state.onClose?.run()
-        Unit
-    }
-
-    HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
-
-    // Mouse & Cursor section
-    Text("Mouse & Cursor", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-    Spacer(Modifier.height(4.dp))
-
-    // Each of these flips its flag host-side and closes the drawer — the chip fires exactly the same
-    // pair of callbacks the switch row did.
-    ToggleChipGrid(
-        listOf(
-            ToggleChipItem("Cursor to Touch", moveCursorToTouch) {
-                state.onMoveCursorToTouchpoint?.run(); state.onClose?.run()
-            },
-            ToggleChipItem("Relative Mouse", isRelativeMouse) {
-                state.onRelativeMouseMovement?.run(); state.onClose?.run()
-            },
-            ToggleChipItem("Disable Mouse", isMouseDisabled) {
-                state.onDisableMouse?.run(); state.onClose?.run()
-            },
-        ),
-        perRow = 3
-    )
-
-    HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
-
-    // Vibration section
-    Text("Vibration", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-    Spacer(Modifier.height(4.dp))
-
-    // Master kill-switch — off suppresses ALL controller rumble regardless of slot (and hides the
-    // rumble target, intensity, and per-slot rows below, which are moot while it's off). Persists
-    // globally.
-    val vibrationMasterOn by XServerDialogState.vibrationMasterEnabled.collectAsState()
-    ToggleChipGrid(
-        listOf(
-            ToggleChipItem("Enabled", vibrationMasterOn) {
-                XServerDialogState.setVibrationMasterEnabled(it)
-                XServerDialogState.onVibrationMasterChanged?.invoke(it)
-            }
-        ),
-        perRow = 3
-    )
-    if (vibrationMasterOn) {
-        // Per-container rumble target + intensity (PC-accurate dual-motor rumble). Keyed on the
-        // incoming config so re-opening the drawer doesn't drift from a stale capture — same pattern
-        // as the lsfg "Performance mode" toggle elsewhere in this drawer.
-        val initVibrationMode by XServerDialogState.vibrationMode.collectAsState()
-        var vibrationMode by remember(initVibrationMode) { mutableIntStateOf(initVibrationMode) }
-        Spacer(Modifier.height(6.dp))
-        Text(
-            "Rumble Target",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(Modifier.height(4.dp))
-        VibrationModeButtons(vibrationMode) {
-            vibrationMode = it
-            XServerDialogState.setVibrationMode(it)
-            XServerDialogState.onVibrationModeChanged?.invoke(it)
-        }
-
-        if (vibrationMode != 0) {
-            val initVibrationIntensity by XServerDialogState.vibrationIntensity.collectAsState()
-            var vibrationIntensity by remember(initVibrationIntensity) { mutableIntStateOf(initVibrationIntensity) }
-            IntSlider("Intensity", vibrationIntensity, 0..100,
-                onValueChange = { vibrationIntensity = it },
-                onValueChangeFinished = {
-                    XServerDialogState.setVibrationIntensity(vibrationIntensity)
-                    XServerDialogState.onVibrationIntensityChanged?.invoke(vibrationIntensity)
+            ExposedDropdownMenuBox(expanded = dropdownExpanded, onExpandedChange = { dropdownExpanded = it }) {
+                OutlinedTextField(
+                    value = allItems.getOrElse(selectedIdx) { "-- Disabled --" },
+                    onValueChange = {}, readOnly = true,
+                    label = { Text("Profile", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = dropdownExpanded) },
+                    modifier = Modifier.fillMaxWidth().menuAnchor(),
+                    singleLine = true,
+                )
+                ExposedDropdownMenu(expanded = dropdownExpanded, onDismissRequest = { dropdownExpanded = false }) {
+                    allItems.forEachIndexed { i, label ->
+                        DropdownMenuItem(text = { Text(label) }, onClick = {
+                            selectedIdx = i
+                            dropdownExpanded = false
+                            XServerDialogState.onInputControlsConfirm?.invoke(selectedIdx, showTouchscreen, timeoutEnabled, hapticsEnabled)
+                        })
+                    }
                 }
+            }
+
+            Spacer(Modifier.height(6.dp))
+
+            // Three plain on/off flags that all round-trip through the same onInputControlsConfirm call —
+            // packed as chips rather than full-width switch rows to keep the sub-tab short.
+            ToggleChipGrid(
+                listOf(
+                    ToggleChipItem("Touch Controls", showTouchscreen) {
+                        showTouchscreen = it
+                        XServerDialogState.onInputControlsConfirm?.invoke(selectedIdx, showTouchscreen, timeoutEnabled, hapticsEnabled)
+                    },
+                    ToggleChipItem("Timeout", timeoutEnabled) {
+                        timeoutEnabled = it
+                        XServerDialogState.onInputControlsConfirm?.invoke(selectedIdx, showTouchscreen, timeoutEnabled, hapticsEnabled)
+                    },
+                    ToggleChipItem("Haptics", hapticsEnabled) {
+                        hapticsEnabled = it
+                        XServerDialogState.onInputControlsConfirm?.invoke(selectedIdx, showTouchscreen, timeoutEnabled, hapticsEnabled)
+                    },
+                ),
+                perRow = 3
+            )
+
+            // On-screen controls opacity — live, applied to the visible overlay as you drag.
+            var overlayOpacity by remember(initOverlayOpacity) { mutableFloatStateOf(initOverlayOpacity) }
+            LabeledSlider(
+                label = "Overlay Opacity",
+                value = overlayOpacity,
+                valueRange = 0f..1f,
+                onValueChange = {
+                    overlayOpacity = it
+                    state.setOverlayOpacity(it)
+                    state.onOverlayOpacityChange?.run()
+                },
+                format = { "${(it * 100).toInt()}%" },
+            )
+
+            // On-screen controls accent — per-profile override. Follow the app theme (default) or pick a
+            // custom accent for the active profile; idle controls stay white, pressed auto-brightens.
+            Spacer(Modifier.height(4.dp))
+            ToggleChipGrid(
+                listOf(
+                    ToggleChipItem("App Theme", controlsFollowTheme) {
+                        state.setControlsFollowTheme(it)
+                        state.onControlsColorChange?.run()
+                    }
+                ),
+                perRow = 3
+            )
+            if (!controlsFollowTheme) {
+                Spacer(Modifier.height(8.dp))
+                Text("Controls Accent", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                Spacer(Modifier.height(8.dp))
+                ColorPicker(
+                    initialColor = Color(initControlsAccent),
+                    onColorChanged = {
+                        state.setControlsAccentColor(it.toArgb())
+                        state.onControlsColorChange?.run()
+                    }
+                )
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            OutlinedButton(
+                onClick = {
+                    XServerDialogState.onInputControlsConfirm?.invoke(selectedIdx, showTouchscreen, timeoutEnabled, hapticsEnabled)
+                    XServerDialogState.onInputControlsSettings?.run()
+                },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(10.dp),
+            ) { Text("Profile Settings\u2026") }
+
+            Spacer(Modifier.height(4.dp))
+
+            AccentButton("Apply & Close") {
+                XServerDialogState.onInputControlsConfirm?.invoke(selectedIdx, showTouchscreen, timeoutEnabled, hapticsEnabled)
+                state.onClose?.run()
+                Unit
+            }
+        }
+
+        // ── Mouse ──
+        1 -> {
+            Text("Mouse & Cursor", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+            Spacer(Modifier.height(4.dp))
+
+            // Each of these flips its flag host-side and closes the drawer — the chip fires exactly the same
+            // pair of callbacks the switch row did.
+            ToggleChipGrid(
+                listOf(
+                    ToggleChipItem("Cursor to Touch", moveCursorToTouch) {
+                        state.onMoveCursorToTouchpoint?.run(); state.onClose?.run()
+                    },
+                    ToggleChipItem("Relative Mouse", isRelativeMouse) {
+                        state.onRelativeMouseMovement?.run(); state.onClose?.run()
+                    },
+                    ToggleChipItem("Disable Mouse", isMouseDisabled) {
+                        state.onDisableMouse?.run(); state.onClose?.run()
+                    },
+                ),
+                perRow = 3
             )
         }
-    }
-    val vibrationSlots by XServerDialogState.vibrationSlots.collectAsState()
-    if (vibrationMasterOn && vibrationSlots.isNotEmpty()) {
-        Spacer(Modifier.height(6.dp))
-        ToggleChipGrid(
-            vibrationSlots.mapIndexed { index, slot ->
-                ToggleChipItem(slot.first, slot.second) {
-                    XServerDialogState.updateVibrationSlot(index, it)          // reflect in the UI immediately
-                    XServerDialogState.onVibrationSlotChanged?.invoke(index, it) // persist to WinHandler
-                }
-            },
-            perRow = 3
-        )
-    }
 
-    GyroSection()
+        // ── Vibration ──
+        2 -> {
+            Text("Vibration", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+            Spacer(Modifier.height(4.dp))
+
+            // Master kill-switch — off suppresses ALL controller rumble regardless of slot (and hides the
+            // rumble target, intensity, and per-slot rows below, which are moot while it's off). Persists
+            // globally.
+            val vibrationMasterOn by XServerDialogState.vibrationMasterEnabled.collectAsState()
+            ToggleChipGrid(
+                listOf(
+                    ToggleChipItem("Enabled", vibrationMasterOn) {
+                        XServerDialogState.setVibrationMasterEnabled(it)
+                        XServerDialogState.onVibrationMasterChanged?.invoke(it)
+                    }
+                ),
+                perRow = 3
+            )
+            if (vibrationMasterOn) {
+                // Per-container rumble target + intensity (PC-accurate dual-motor rumble). Keyed on the
+                // incoming config so re-opening the drawer doesn't drift from a stale capture — same pattern
+                // as the lsfg "Performance mode" toggle elsewhere in this drawer.
+                val initVibrationMode by XServerDialogState.vibrationMode.collectAsState()
+                var vibrationMode by remember(initVibrationMode) { mutableIntStateOf(initVibrationMode) }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Rumble Target",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(4.dp))
+                VibrationModeButtons(vibrationMode) {
+                    vibrationMode = it
+                    XServerDialogState.setVibrationMode(it)
+                    XServerDialogState.onVibrationModeChanged?.invoke(it)
+                }
+
+                if (vibrationMode != 0) {
+                    val initVibrationIntensity by XServerDialogState.vibrationIntensity.collectAsState()
+                    var vibrationIntensity by remember(initVibrationIntensity) { mutableIntStateOf(initVibrationIntensity) }
+                    IntSlider("Intensity", vibrationIntensity, 0..100,
+                        onValueChange = { vibrationIntensity = it },
+                        onValueChangeFinished = {
+                            XServerDialogState.setVibrationIntensity(vibrationIntensity)
+                            XServerDialogState.onVibrationIntensityChanged?.invoke(vibrationIntensity)
+                        }
+                    )
+                }
+            }
+            val vibrationSlots by XServerDialogState.vibrationSlots.collectAsState()
+            if (vibrationMasterOn && vibrationSlots.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                ToggleChipGrid(
+                    vibrationSlots.mapIndexed { index, slot ->
+                        ToggleChipItem(slot.first, slot.second) {
+                            XServerDialogState.updateVibrationSlot(index, it)          // reflect in the UI immediately
+                            XServerDialogState.onVibrationSlotChanged?.invoke(index, it) // persist to WinHandler
+                        }
+                    },
+                    perRow = 3
+                )
+            }
+        }
+
+        // ── Gyro ── its own branch, deliberately OUTSIDE the vibration block above: the gyro section
+        // is unrelated to rumble and must render whether or not vibration is switched on.
+        3 -> GyroSection()
+    }
 }
 
-// ───── Gyro (motion aim) section — Controls tab, directly under Vibration ─────
+// ───── Gyro (motion aim) section — Controls tab, "Gyro" sub-tab ─────
 // Progressive disclosure: the master chip is always visible; everything downstream only appears once
 // the gyro is on, so the tab isn't a wall of dead controls. Order is by how often a control is
 // touched — Enable, target, sensitivity, activation, then the set-once fine tuning. Hidden entirely
@@ -2283,8 +2306,6 @@ private fun GyroSection() {
     val accent = MaterialTheme.colorScheme.primary
     val gyroSupported by XServerDialogState.gyroSupported.collectAsState()
     if (!gyroSupported) return
-
-    HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
 
     Text(stringResource(R.string.gyro_drawer_title), color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
     Spacer(Modifier.height(4.dp))

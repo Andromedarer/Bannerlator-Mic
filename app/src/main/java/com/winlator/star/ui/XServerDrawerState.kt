@@ -14,6 +14,15 @@ object XServerDrawerState {
 
     fun selectTab(tab: TabType) { _selectedTab.value = tab }
 
+    // Which of the Controls tab's segmented sub-tabs is showing: 0 = Touch, 1 = Mouse,
+    // 2 = Vibration, 3 = Gyro. Lives here (not in a local remember) so it survives the drawer being
+    // closed and reopened — mid-game tuning means reopening the same area over and over, and
+    // snapping back to Touch each time is worse than the single long scroll it replaced.
+    private val _controlsSubTab = MutableStateFlow(0)
+    val controlsSubTab: StateFlow<Int> = _controlsSubTab
+
+    fun setControlsSubTab(v: Int) { _controlsSubTab.value = v }
+
     private val _isPaused                = MutableStateFlow(false)
     val isPaused: StateFlow<Boolean>     = _isPaused
 
@@ -234,6 +243,7 @@ object XServerDrawerState {
 
     fun reset() {
         _selectedTab.value = TabType.GRAPHICS
+        _controlsSubTab.value = 0
         _isPaused.value = false
         _isRelativeMouseMovement.value = false
         _isMouseDisabled.value = false
