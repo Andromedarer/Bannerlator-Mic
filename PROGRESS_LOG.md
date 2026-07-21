@@ -1,5 +1,17 @@
 # Star-Compose — Progress Log
 
+## 2026-07-21 — 📖 Graphics wrapper & driver selection guide `docs/graphics-wrappers-guide.md` (`41d5c706`)
+
+> **No user-facing wrapper doc existed** (only the internal `WRAPPER_MANAGER_PLAN.md`). Written from live sources: the **live catalog** `raw.githubusercontent.com/The412Banner/winlator-contents/main/wrappers.json` (**18 entries**, per the sync-repo rule — not a local clone), `bundled_wrappers.json`, `WrapperCatalog.kt`, `XServerDisplayActivity` driver-extraction + env gating, and `GPUInformation.isCompatLayerSupportedGpu`.
+>
+> Covers: what a wrapper is (DX→DXVK→wrapper→GPU chain, and that it's NOT the renderer) · **pick-by-GPU table** · all built-in drivers (Wrapper / Turnip / +bcn_layer / -gamenative / +compat+bcn / VirGL) · all 18 catalog entries grouped by upstream with author + GitHub links · **the BCn-layer slot is a layer, not an ICD** · import/update/delete · troubleshooting · credits.
+>
+> **Hardware gating documented exactly as coded:** Qualcomm `0x5143` → BCn emulation forced OFF (native BC; the pre-2.6.1 always-on bug is explained); bcn_layer activates on any non-Qualcomm; **compat_layer DX12 gated on the Valhall model allowlist** — G57/G68/G77/G78/G310/G610/G615/G710/G715/G720/G925 + Immortalis-G715/G720/G925, Bifrost/Midgard deliberately excluded.
+>
+> ⭐ **Most useful section — "Many of these are literally the same file":** the catalog's own descriptions record byte-identity across projects. Documented the 4 identical groups (default = WinlatorMali Wrapper = Ludashi Steven; original = WMali v2 = WinNative Wrapper; legacy = Pipetto Bionic; BL GameNative = WMali GameNative) and the ones that genuinely differ (3 distinct leegao builds, WinNative's GameNative, upstream GameNative 20260719, leegao BCn vs Fcharan fork) — so users stop A/B-testing identical bytes.
+>
+> **Linked from README twice:** a callout under "🎨 Graphics & translation layers" and on the Wrapper Version Manager Full-Features bullet. ⚠️ Fcharan / WinMali-Dev has **no recorded upstream URL** — credited by name only, deliberately not fabricated.
+
 ## 2026-07-21 — 📖 Gyro guide `docs/gyro-controls-guide.md` + linked from README and the 2.8 release (`fe20174f`)
 
 > **312-line plain-English guide written from the CODE, not the changelog** — `GyroCalibrator.kt`, `WinHandler.updateGyroData` / `updateGyroOrientation` / `updateGyroMouse`, `Container.java` GYRO_* defaults, `InputControlsScreen.kt`, and the `gyro_*` strings.
