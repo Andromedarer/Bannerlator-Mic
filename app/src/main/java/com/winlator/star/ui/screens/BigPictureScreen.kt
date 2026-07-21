@@ -1,4 +1,7 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@file:OptIn(
+    androidx.compose.material3.ExperimentalMaterial3Api::class,
+    androidx.compose.foundation.layout.ExperimentalLayoutApi::class,
+)
 
 package com.winlator.star.ui.screens
 
@@ -20,6 +23,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -71,6 +75,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
@@ -125,8 +130,8 @@ import java.net.URL
 private enum class BpZone { RAIL, PLAY, CAROUSEL }
 private enum class BpSheet { GAME_OPTIONS, TOOLS, POWER }
 
-private val CARD_WIDTH = 100.dp
-private val CARD_HEIGHT = 150.dp
+private val CARD_WIDTH = 92.dp
+private val CARD_HEIGHT = 138.dp
 
 @Composable
 fun BigPictureScreen(navController: NavController) {
@@ -218,7 +223,6 @@ fun BigPictureScreen(navController: NavController) {
     }
 
     val selected = shortcuts.getOrNull(selectedIndex)
-    val container = selected?.let { manager.getContainerForShortcut(it) }
     val heroCover = selected?.let { coverCache[it.name] }
 
     val onLaunch: () -> Unit = { selected?.let { runShortcut(activity, it) } }
@@ -335,19 +339,14 @@ fun BigPictureScreen(navController: NavController) {
                 )
         )
 
-        // 2. Foreground. Height-aware so the hero cover always fits between the top rail and the
-        // bottom carousel (the old fixed 330dp cover overflowed on landscape phones and clipped the
-        // Play / Game-options buttons off-screen).
-        BoxWithConstraints(modifier = Modifier.fillMaxSize().padding(24.dp)) {
-            val railH = 52.dp
-            val carouselStripH = CARD_HEIGHT + 32.dp   // card + its vertical content padding + scale headroom
-            // Cover fills the band left between the rail and the carousel, clamped to a sane range.
-            val coverH = (maxHeight - railH - carouselStripH - 16.dp).coerceIn(150.dp, 300.dp)
-            val coverW = coverH * 2f / 3f               // 2:3 poster ratio
-
+        // 2. Foreground: rail on top, hero fills the middle as a WEIGHTED sibling, carousel is a
+        // compact bottom strip. Column stacking (not overlapping alignment) guarantees the hero's
+        // Play / Game-options buttons can never be drawn under the carousel — the earlier version
+        // reserved carousel space with bottom-padding, which overflowed and clipped them.
+        Column(modifier = Modifier.fillMaxSize().padding(20.dp)) {
             // Global rail (top-end).
             Row(
-                modifier = Modifier.fillMaxWidth().align(Alignment.TopEnd),
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
             ) {
                 RailButton(
@@ -375,83 +374,111 @@ fun BigPictureScreen(navController: NavController) {
             if (shortcuts.isEmpty()) {
                 // Empty state.
                 Column(
-                    modifier = Modifier.align(Alignment.Center),
+                    modifier = Modifier.fillMaxWidth().weight(1f),
                     horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
                 ) {
                     Text("No games yet", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(16.dp))
                     Button(onClick = { navController.navigate(Screen.Games.route) }) { Text("Add games") }
                 }
             } else {
-                // Hero — vertically centred in the band between the rail and the carousel.
-                Row(
-                    modifier = Modifier
-                        .align(Alignment.CenterStart)
-                        .padding(top = railH, bottom = carouselStripH),
-                    verticalAlignment = Alignment.CenterVertically,
+                // Hero — fills the band between the rail and the carousel (a weighted sibling, so its
+                // buttons can never render under the carousel). Cover scales to the band, capped so it
+                // doesn't get huge on tablets.
+                // Per-game spec = the SAME resolved settings the game cards and the pre-launch screen
+                // show (buildLaunchSpec: renderer / driver / DXVK / VKD3D / frame-gen / x86 backend),
+                // so Big Picture matches the rest of the app instead of the old wrapper/box64 chips.
+                val spec = selected?.let { buildLaunchSpec(it, context.resources) }
+                val chips = spec?.let {
+                    listOf(
+                        "Renderer" to it.rendererLabel,
+                        "Driver" to it.driverLabel,
+                        "DXVK" to it.dxvkVersion,
+                        "VKD3D" to it.vkd3dVersion,
+                        "Frame Gen" to it.frameGenLabel,
+                        "x86" to it.backendLabel,
+                    ).filter { p -> p.second.isNotBlank() }
+                }.orEmpty()
+
+                BoxWithConstraints(
+                    modifier = Modifier.fillMaxWidth().weight(1f).clipToBounds(),
+                    contentAlignment = Alignment.CenterStart,
                 ) {
-                    CoverCard(cover = heroCover, modifier = Modifier.width(coverW).height(coverH), selected = false)
-                    Spacer(Modifier.width(24.dp))
-                    Column {
-                        Text(
-                            text = selected?.name ?: "",
-                            color = Color.White,
-                            fontSize = 30.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 2,
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        val stats = playtimeStats(context, selected?.name ?: "")
-                        Text("Times Played: ${stats.first}", color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp)
-                        Text("Playtime: ${stats.second}", color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp)
-                        Spacer(Modifier.height(12.dp))
-                        // Spec chips (shortcut extra wins over container, else "Not Set").
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            SpecChip("Graphics", resolveSpec(selected?.getExtra("graphicsDriver"), container?.graphicsDriver))
-                            SpecChip("DXWrapper", resolveSpec(selected?.getExtra("dxwrapper"), container?.getDXWrapper()))
-                            SpecChip("Audio", resolveSpec(selected?.getExtra("audioDriver"), container?.audioDriver))
-                            SpecChip("box64", resolveSpec(selected?.getExtra("box64Preset"), container?.box64Preset))
-                        }
-                        Spacer(Modifier.height(16.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            // Play — touch onClick launches; the PLAY zone highlight is our own border
-                            // (nothing here is focusable, so there is no phantom Compose focus ring).
-                            Button(
-                                onClick = { zone = BpZone.PLAY; onLaunch() },
-                                modifier = Modifier
-                                    .height(52.dp)
-                                    .then(
-                                        if (zone == BpZone.PLAY)
-                                            Modifier.border(3.dp, MaterialTheme.colorScheme.onPrimary, RoundedCornerShape(16.dp))
-                                        else Modifier
-                                    ),
-                                shape = RoundedCornerShape(16.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                            ) {
-                                Icon(Icons.Filled.PlayArrow, contentDescription = null)
-                                Spacer(Modifier.width(8.dp))
-                                Text("Play", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    val coverH = maxHeight.coerceAtMost(260.dp)
+                    val coverW = coverH * 2f / 3f            // 2:3 poster ratio
+                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        CoverCard(cover = heroCover, modifier = Modifier.width(coverW).height(coverH), selected = false)
+                        Spacer(Modifier.width(24.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = selected?.name ?: "",
+                                color = Color.White,
+                                fontSize = 28.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 2,
+                            )
+                            if (!spec?.meta.isNullOrBlank()) {
+                                Spacer(Modifier.height(2.dp))
+                                Text(spec!!.meta, color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp)
                             }
-                            Spacer(Modifier.width(14.dp))
-                            OutlinedButton(
-                                onClick = { if (selected != null) activeSheet = BpSheet.GAME_OPTIONS },
-                                modifier = Modifier.height(52.dp),
-                                shape = RoundedCornerShape(16.dp),
-                            ) {
-                                Icon(Icons.Filled.Tune, contentDescription = null, tint = Color.White)
-                                Spacer(Modifier.width(8.dp))
-                                Text("Game options", color = Color.White)
+                            Spacer(Modifier.height(4.dp))
+                            val stats = playtimeStats(context, selected?.name ?: "")
+                            Text(
+                                "Played ${stats.first}×  ·  ${stats.second}",
+                                color = Color.White.copy(alpha = 0.85f),
+                                fontSize = 13.sp,
+                            )
+                            if (chips.isNotEmpty()) {
+                                Spacer(Modifier.height(10.dp))
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    chips.forEach { (l, v) -> SpecChip(l, v) }
+                                }
+                            }
+                            Spacer(Modifier.height(12.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                // Play — touch onClick launches; the PLAY-zone highlight is our own
+                                // border (nothing here is focusable, so there is no phantom focus ring).
+                                Button(
+                                    onClick = { zone = BpZone.PLAY; onLaunch() },
+                                    modifier = Modifier
+                                        .height(48.dp)
+                                        .then(
+                                            if (zone == BpZone.PLAY)
+                                                Modifier.border(3.dp, MaterialTheme.colorScheme.onPrimary, RoundedCornerShape(16.dp))
+                                            else Modifier
+                                        ),
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                ) {
+                                    Icon(Icons.Filled.PlayArrow, contentDescription = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Play", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                                }
+                                Spacer(Modifier.width(12.dp))
+                                OutlinedButton(
+                                    onClick = { if (selected != null) activeSheet = BpSheet.GAME_OPTIONS },
+                                    modifier = Modifier.height(48.dp),
+                                    shape = RoundedCornerShape(16.dp),
+                                ) {
+                                    Icon(Icons.Filled.Tune, contentDescription = null, tint = Color.White)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Game options", color = Color.White)
+                                }
                             }
                         }
                     }
                 }
 
-                // Carousel (bottom).
+                // Carousel — compact bottom strip.
                 LazyRow(
                     state = listState,
-                    modifier = Modifier.fillMaxWidth().align(Alignment.BottomStart),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                    contentPadding = PaddingValues(vertical = 14.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     itemsIndexed(shortcuts) { index, s ->
@@ -715,13 +742,6 @@ private fun SheetRow(icon: androidx.compose.ui.graphics.vector.ImageVector, labe
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
-
-// Shortcut extra wins over the container value, else "Not Set" (mirrors the old loadShortcutData).
-private fun resolveSpec(shortcutValue: String?, containerValue: String?): String = when {
-    !shortcutValue.isNullOrEmpty() -> shortcutValue
-    !containerValue.isNullOrEmpty() -> containerValue
-    else -> "Not Set"
-}
 
 // (play count, formatted playtime) from the same prefs XServerDisplayActivity writes.
 private fun playtimeStats(context: Context, name: String): Pair<Int, String> {
