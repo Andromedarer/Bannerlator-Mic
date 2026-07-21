@@ -1,5 +1,17 @@
 # Star-Compose — Progress Log
 
+## 2026-07-21 — ✅ GYRO P2 DEVICE-PROVEN + drawer chip restyle (branch `feat/gyro-controls`, NOT merged, vc47)
+
+> **User-confirmed on device: gyro DIRECTION is correct (no sign flip needed) and MOUSE MODE works.** Both flagged unknowns retired. Commit `9caa95e1`, CI-green 3 flavors (run `29797680278`), staged `bannerlator-gyro-p2b-9caa95e-standard.apk`.
+>
+> **Gyro section** in the in-game drawer Controls tab, below Vibration, with progressive disclosure (dependent controls only compose when enabled; whole section hidden on devices with no gyroscope): Enabled → Apply gyro to (Right stick / Left stick / **Mouse**) → Sensitivity → Activation (L1/L2/R1/R3/**Always**) → Deadzone / Smoothing / Invert X/Y. Pref-backed (`gyro_*`), wired through `XServerDialogState` mirroring the vibration master switch. Defaults reproduce P1 exactly so it can't regress.
+>
+> **Mouse mode is real injection and beats the reference:** absolute X pointer via `XServer.injectPointerMoveDelta` when the mouse isn't captured (works on the Wine DESKTOP — WinNative's gyro-mouse always uses the relative packet, so theirs does nothing there), relative motion via the winhandler packet when captured (mouse-look games). Proportional deltas with a carried fractional remainder; allocation-free coalescing via one preallocated Runnable (deliberate — input-path cost is implicated in the separate FPS-drop bug).
+>
+> **Chip restyle** — new `ToggleChipGrid` modelled on the existing `ModeChipGrid` (the scale/effect button look), to free vertical space in the Controls tab for gyro. Converted the plain on/off toggles (Controls, Mouse & Cursor, Vibration master + per-slot rows, Vulkan screen effects); toggles that gate a dependent slider/pane stay `ToggleRow` on purpose (13 callers remain). **Layout rule that worked: `perRow = 3`, every chip an identical 1/3 width, short final rows CENTRED (padding spacers split across both sides, not trailing-only), and labels shortened so none wrap to two lines** — the 2-line wraps were what made rows uneven. Presentation only, no behaviour or pref-key changes.
+>
+> **Vibration untouched throughout** (re-verified: no rumble lines changed in `WinHandler.java`). ▶️ REMAINING before merge: **WinNative attribution in the README Credits table** (the code is derived from their gyro implementation — same courtesy we just did for TideGear). Optional later phases: P3 calibration, P4 Tilt-to-Aim (`TYPE_ROTATION_VECTOR`), P5 per-container/per-game persistence, P6 localization.
+
 ## 2026-07-21 — 🎯 GYRO P1 DEVICE-PROVEN (branch `feat/gyro-controls`, NOT merged, vc47)
 
 > **Motion-aim MVP works on device (Pocket FIT, GTA IV).** Hold **L1** + tilt → camera pans. Commit `7cf04b57`, CI-green 3 flavors (run `29795316889`), staged `bannerlator-gyro-p1-7cf04b5-standard.apk` (sha `3cc09922…`).
