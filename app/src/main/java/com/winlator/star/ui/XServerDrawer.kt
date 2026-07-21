@@ -1906,6 +1906,15 @@ private fun HudContent(state: XServerDrawerState) {
     var showClock by remember(cfg) { mutableStateOf(b("showClock", "showClock", "0")) }
     var showCpuGraph by remember(cfg) { mutableStateOf(b("showCPUGraph", "showCPUGraph", "0")) }
     var showGpuGraph by remember(cfg) { mutableStateOf(b("showGPUGraph", "showGPUGraph", "0")) }
+    // Temperature display: unit, plus danger bands as a single 3-way (Off / Auto / Manual) rather
+    // than two toggles — "banding on but auto off" and "banding off but auto on" aren't distinct
+    // states worth exposing. Auto reads the device's own thermal trip points.
+    var tempUnitF by remember(cfg) { mutableStateOf(cfg.getOrDefault("tempUnit", "c").equals("f", true)) }
+    var tempBands by remember(cfg) { mutableStateOf(cfg.getOrDefault("tempBands", "1") != "0") }
+    var tempAuto by remember(cfg) { mutableStateOf(cfg.getOrDefault("tempAuto", "1") != "0") }
+    var tempRedCpu by remember(cfg) { mutableFloatStateOf(cfg.getOrDefault("tempRedCpu", "90").toFloatOrNull() ?: 90f) }
+    var tempRedGpu by remember(cfg) { mutableFloatStateOf(cfg.getOrDefault("tempRedGpu", "90").toFloatOrNull() ?: 90f) }
+    var tempRedBat by remember(cfg) { mutableFloatStateOf(cfg.getOrDefault("tempRedBat", "48").toFloatOrNull() ?: 48f) }
 
     var scaleValue by remember(cfg) { mutableFloatStateOf(cfg.getOrDefault("hudScale", Container.DEFAULT_HUD_SCALE.toString()).toFloatOrNull() ?: Container.DEFAULT_HUD_SCALE.toFloat()) }
     var opacityValue by remember(cfg) { mutableFloatStateOf(cfg.getOrDefault("hudOpacity", "80").toFloatOrNull() ?: 80f) }
@@ -1944,6 +1953,12 @@ private fun HudContent(state: XServerDrawerState) {
         "showClock=${i(showClock)}",
         "showCPUGraph=${i(showCpuGraph)}",
         "showGPUGraph=${i(showGpuGraph)}",
+        "tempUnit=${if (tempUnitF) "f" else "c"}",
+        "tempBands=${i(tempBands)}",
+        "tempAuto=${i(tempAuto)}",
+        "tempRedCpu=${tempRedCpu.toInt()}",
+        "tempRedGpu=${tempRedGpu.toInt()}",
+        "tempRedBat=${tempRedBat.toInt()}",
         "hudSkin=$skin",
         "hudColor=$color",
         "hudOutline=${outlineValue.toInt()}",
@@ -2002,6 +2017,37 @@ private fun HudContent(state: XServerDrawerState) {
         if (gameHub) add(Triple("Dual battery", dualBattery) { dualBattery = !dualBattery; apply() })
     }
     ModeChipGrid(metricChips, perRow = 3)
+
+    // ── Temperature display ── only worth showing when a temperature is actually on screen.
+    if (showTemp || (gameNative && (showGpuTemp || showBattery))) {
+        HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
+        HudChipRow("Temp unit", listOf("°C", "°F"), if (tempUnitF) 1 else 0) {
+            tempUnitF = it == 1; apply()
+        }
+        val bandMode = if (!tempBands) 0 else if (tempAuto) 1 else 2
+        HudChipRow("Danger colors", listOf("Off", "Auto", "Manual"), bandMode) {
+            tempBands = it != 0
+            tempAuto = it != 2
+            apply()
+        }
+        Text(
+            when (bandMode) {
+                0 -> "Temperatures use their normal color."
+                1 -> "Thresholds read from your device's own thermal trip points, falling back to safe defaults."
+                else -> "Set the red point per sensor; amber sits just below it."
+            },
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), fontSize = 11.sp,
+            modifier = Modifier.padding(start = 4.dp, top = 2.dp, bottom = 4.dp)
+        )
+        if (bandMode == 2) {
+            // Only the red point is exposed; amber is derived. Nobody knows their preferred amber
+            // in the abstract, and three sliders beat six. Values are always °C.
+            LabeledSlider("CPU red at", tempRedCpu, 50f..110f, { tempRedCpu = it }, { apply() }, format = { "${it.toInt()}°C" })
+            if (gameNative && showGpuTemp)
+                LabeledSlider("GPU red at", tempRedGpu, 50f..110f, { tempRedGpu = it }, { apply() }, format = { "${it.toInt()}°C" })
+            LabeledSlider("Battery red at", tempRedBat, 35f..60f, { tempRedBat = it }, { apply() }, format = { "${it.toInt()}°C" })
+        }
+    }
 
     if (gameHub) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
