@@ -38,6 +38,10 @@ don't. If yours doesn't, the gyro controls simply stay inert — nothing breaks,
 greyed out with *"Not available — this device has no rotation-vector sensor."* Everything else still
 works.
 
+> Bannerlator prefers the **game** rotation vector, which fuses only the gyroscope and accelerometer — so a
+> speaker magnet or a magnetic case can't drag your aim around. It falls back to the standard
+> (compass-assisted) rotation vector on the handful of devices that don't offer the game one.
+
 Motion aim is **on by default**, but it does nothing until you hold its activator button — out of
 the box, that's **L1**. So if you've never touched it, nothing has changed for you.
 
@@ -153,7 +157,7 @@ already your aim-down-sights trigger — gyro then switches on exactly when you'
 
 > **In-app description:** *"Tap the button to turn the gyro on, tap again to turn it off."*
 
-Activation has no effect when the Activator is **Always On** — there's nothing to gate.
+Activation is **greyed out** when the Activator is **Always On** — there's no button to hold or latch. It's greyed rather than hidden so it's clear the setting still exists and comes back when you pick a button again.
 
 **Note on Toggle:** the button press is detected on the sensor's own timing, so an extremely fast tap
 (under ~20 ms) can occasionally be missed. Normal presses run 60–150 ms, so in practice you won't
