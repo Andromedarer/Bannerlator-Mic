@@ -8,6 +8,7 @@ import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.StateListDrawable;
 import android.util.Log;
 import android.os.Handler;
+import android.view.HapticFeedbackConstants;
 import android.view.InputDevice;
 import android.view.MotionEvent;
 import android.view.PointerIcon;
@@ -51,24 +52,20 @@ public class TouchpadView extends View {
     private boolean simTouchScreen = false;
     // ── Cursor-to-Touch gestures ──
     // With Cursor to Touch on the pointer is absolutely positioned under the finger, which makes a
-    // touchscreen-style gesture set meaningful: drag = band select, hold = right click, pinch = wheel.
+    // touchscreen-style gesture set meaningful: drag = band select, hold = right click.
     // These only apply in that mode — under plain relative touchpad input there is no "where the
     // cursor is" for a gesture to act on, and in simTouchScreen mode the tap-drag path already owns
     // the finger. Thresholds follow gamehub-lite's RTS controls (Producdevity/gamehub-lite#73).
     public static final short DEFAULT_LONG_PRESS_MILLISECONDS = 300;
-    public static final short DEFAULT_PINCH_WHEEL_STEP = 40;
-    // Individually switchable from the drawer's gesture-settings cog, because which of these is
-    // welcome depends entirely on the game: an RTS wants all three, a mouse-look shooter wants none
-    // of them stealing its drags.
+    // Individually switchable from the drawer, because which of these is welcome depends entirely on
+    // the game: an RTS wants both, a mouse-look shooter wants neither stealing its drags.
+    // (There is deliberately no pinch-to-zoom: two-finger pan already emits the same wheel events,
+    // so a pinch gesture would only compete with a path that works.)
     private boolean gestureDragSelect = true;
     private boolean gestureLongPressRightClick = true;
-    private boolean gesturePinchZoom = true;
     private int longPressDelayMs = DEFAULT_LONG_PRESS_MILLISECONDS;
-    private int pinchWheelStep = DEFAULT_PINCH_WHEEL_STEP;
     private boolean dragSelecting = false;
     private boolean longPressFired = false;
-    private float pinchAccum = 0;
-    private float lastPinchDistance = 0;
     // The finger that opened the current gesture. Not necessarily fingers[0] — when a finger is already
     // resting on an InputControl overlay, TouchpadView's first pointer id can be 1 (see ACTION_DOWN).
     private Finger gestureFinger;
@@ -82,6 +79,10 @@ public class TouchpadView extends View {
             xServer.injectPointerMove(finger.x, finger.y);
             pressPointerButtonRight(finger);
             longPressFired = true;
+            // A timed gesture with no feedback is guesswork — you cannot see the guest cursor's button
+            // state under your fingertip. Respects the existing touchscreen haptics preference.
+            if (preferences.getBoolean("touchscreen_haptics_enabled", false))
+                performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
         }
     };
     private boolean continueClick = true;
@@ -333,10 +334,8 @@ public class TouchpadView extends View {
                     gestureFinger = fingers[pointerId];
                     if (gestureLongPressRightClick) postDelayed(longPressRunnable, longPressDelayMs);
                 } else {
-                    // A second finger means this is a pinch/pan, never a hold or a band select.
+                    // A second finger means this is a two-finger pan, never a hold or a band select.
                     removeCallbacks(longPressRunnable);
-                    lastPinchDistance = 0;
-                    pinchAccum = 0;
                 }
             }
 
@@ -564,35 +563,9 @@ public class TouchpadView extends View {
             final float resolutionScale = 1000.0f / Math.min(xServer.screenInfo.width, xServer.screenInfo.height);
             float currDistance = (float)Math.hypot(finger1.x - finger2.x, finger1.y - finger2.y) * resolutionScale;
 
-            // Pinch-to-zoom: the change in SPREAD between the two fingers drives the wheel, which is
-            // what strategy games bind camera zoom to. Two-finger pan still scrolls — whichever of the
-            // two moved more this frame wins, so a slightly-drifting pinch doesn't also scroll.
-            boolean pinchHandled = false;
-            if (gesturesEnabled() && gesturePinchZoom) {
-                if (lastPinchDistance == 0) lastPinchDistance = currDistance;
-                float pinchDelta = currDistance - lastPinchDistance;
-                float panDelta = ((finger1.y + finger2.y) * 0.5f) - (finger1.lastY + finger2.lastY) * 0.5f;
-                lastPinchDistance = currDistance;
-
-                if (Math.abs(pinchDelta) > Math.abs(panDelta)) {
-                    pinchAccum += pinchDelta;
-                    // Spreading apart = zoom in = wheel up. Emit every whole step so a fast pinch
-                    // doesn't quantise down to a single notch.
-                    while (Math.abs(pinchAccum) >= pinchWheelStep) {
-                        boolean zoomIn = pinchAccum > 0;
-                        Pointer.Button button = zoomIn ? Pointer.Button.BUTTON_SCROLL_UP
-                                                       : Pointer.Button.BUTTON_SCROLL_DOWN;
-                        xServer.injectPointerButtonPress(button);
-                        xServer.injectPointerButtonRelease(button);
-                        pinchAccum += zoomIn ? -pinchWheelStep : pinchWheelStep;
-                    }
-                    scrolling = true;
-                    pinchHandled = true;
-                }
-            }
-
-            // A frame the pinch consumed must not also scroll or arm the legacy spread-drag.
-            if (!pinchHandled && currDistance < MAX_TWO_FINGERS_SCROLL_DISTANCE) {
+            // Two-finger pan → wheel. In a strategy game this IS camera zoom, which is why no separate
+            // pinch gesture exists: it would compete with this for the same events.
+            if (currDistance < MAX_TWO_FINGERS_SCROLL_DISTANCE) {
                 scrollAccumY += ((finger1.y + finger2.y) * 0.5f) - (finger1.lastY + finger2.lastY) * 0.5f;
 
                 if (scrollAccumY < -100) {
@@ -607,9 +580,9 @@ public class TouchpadView extends View {
                 }
                 scrolling = true;
             }
-            // Legacy hold-two-fingers-wide-apart drag. Suppressed under the gesture set: a wide spread
-            // is a zoom-out there, and single-finger drag-select already covers holding LMB.
-            else if (!pinchHandled && !(gesturesEnabled() && gestureDragSelect) &&
+            // Legacy hold-two-fingers-wide-apart drag. Suppressed while Box Select is on, which covers
+            // holding LMB with a gesture that doesn't need a second finger parked on the screen.
+            else if (!(gesturesEnabled() && gestureDragSelect) &&
                      currDistance >= MAX_TWO_FINGERS_SCROLL_DISTANCE && !xServer.pointer.isButtonPressed(Pointer.Button.BUTTON_LEFT) &&
                      finger2.travelDistance() < MAX_TAP_TRAVEL_DISTANCE) {
                 pressPointerButtonLeft(finger1);
@@ -665,8 +638,6 @@ public class TouchpadView extends View {
         removeCallbacks(longPressRunnable);
         dragSelecting = false;
         longPressFired = false;
-        pinchAccum = 0;
-        lastPinchDistance = 0;
         gestureFinger = null;
     }
 
@@ -865,14 +836,11 @@ public class TouchpadView extends View {
         resetGestureState();
     }
 
-    /** Per-gesture config from the drawer's gesture-settings cog. Applied live, mid-session. */
-    public void setGestureConfig(boolean dragSelect, boolean longPressRightClick, boolean pinchZoom,
-                                 int longPressMs, int pinchStep) {
+    /** Per-gesture config from the drawer. Applied live, mid-session. */
+    public void setGestureConfig(boolean dragSelect, boolean longPressRightClick, int longPressMs) {
         this.gestureDragSelect = dragSelect;
         this.gestureLongPressRightClick = longPressRightClick;
-        this.gesturePinchZoom = pinchZoom;
         this.longPressDelayMs = longPressMs;
-        this.pinchWheelStep = Math.max(1, pinchStep);
         // Same stranded-button hazard as toggling the feature itself: a gesture turned off underneath
         // an in-flight press would never reach its release.
         if (dragSelecting && !dragSelect) xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_LEFT);

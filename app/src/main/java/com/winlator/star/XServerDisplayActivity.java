@@ -775,17 +775,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // (state.reset() above zeroes it, so this has to come after).
         state.setMoveCursorToTouchpoint(preferences.getBoolean("move_cursor_to_touchpoint", false));
         state.onMoveCursorToTouchpoint = () -> MoveCursorToTouchpoint();
-        // Per-gesture config behind the Cursor to Touch cog. Seed from prefs, then push the seeded set
-        // straight to the touchpad so a fresh launch honours it without the user opening the drawer.
+        // Per-gesture config shown under the Cursor to Touch toggle. Seed from prefs; the push to the
+        // touchpad happens in setupUI, which is where that view is actually built.
         state.setGestureDragSelect(preferences.getBoolean("gesture_drag_select", true));
         state.setGestureLongPressRightClick(preferences.getBoolean("gesture_long_press_rmb", true));
-        state.setGesturePinchZoom(preferences.getBoolean("gesture_pinch_zoom", true));
         state.setGestureLongPressMs(preferences.getInt("gesture_long_press_ms",
             TouchpadView.DEFAULT_LONG_PRESS_MILLISECONDS));
-        state.setGesturePinchStep(preferences.getInt("gesture_pinch_step",
-            TouchpadView.DEFAULT_PINCH_WHEEL_STEP));
         state.onGestureConfigChange = this::applyGestureConfig;
-        applyGestureConfig();
         state.onRelativeMouseMovement  = () -> {
             isRelativeMouseMovement = !isRelativeMouseMovement;
             state.setIsRelativeMouseMovement(isRelativeMouseMovement);
@@ -5096,20 +5092,16 @@ return true;
         XServerDrawerState state = XServerDrawerState.INSTANCE;
         boolean dragSelect = state.getGestureDragSelectValue();
         boolean longPress = state.getGestureLongPressRightClickValue();
-        boolean pinchZoom = state.getGesturePinchZoomValue();
         int longPressMs = state.getGestureLongPressMsValue();
-        int pinchStep = state.getGesturePinchStepValue();
 
         preferences.edit()
             .putBoolean("gesture_drag_select", dragSelect)
             .putBoolean("gesture_long_press_rmb", longPress)
-            .putBoolean("gesture_pinch_zoom", pinchZoom)
             .putInt("gesture_long_press_ms", longPressMs)
-            .putInt("gesture_pinch_step", pinchStep)
             .apply();
 
         if (touchpadView != null)
-            touchpadView.setGestureConfig(dragSelect, longPress, pinchZoom, longPressMs, pinchStep);
+            touchpadView.setGestureConfig(dragSelect, longPress, longPressMs);
     }
 
     private void showActiveWindowsDialog() {
