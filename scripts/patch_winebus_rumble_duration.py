@@ -3,7 +3,7 @@
 Patch Wine's winebus.so so SDL rumble does not auto-expire after the short
 duration Wine passes through from the guest force-feedback path
 ("TideGear #91 / preload-free winebus duration patch", re-derived for
-Bannerlator's own Proton 9.0 arm64ec build).
+Bannerlator's own Proton arm64ec builds).
 
 winebus' sdl_device_haptics_start() drives SDL_JoystickRumble and
 SDL_JoystickRumbleTriggers through pointers it dlsym'd out of SDL2, so each
@@ -11,24 +11,38 @@ rumble call is INDIRECT. SDL2 auto-stops the effect after the caller-supplied
 duration_ms (~1s here), which is what we defeat by forcing that 4th arg to
 0xffffffff (-1, ~50 days).
 
-aarch64-unix  (VERIFIED against our winebus.so, 220176 bytes, Proton 9.0 arm64ec)
---------------------------------------------------------------------------------
-Bannerlator's build sets the 4th integer arg from a saved register, NOT from a
+aarch64-unix  (VERIFIED against three real arm64ec winebus.so builds)
+---------------------------------------------------------------------
+Bannerlator's builds set the 4th integer arg from a saved register, NOT from a
 stack slot the way BannerHub's GameHub build does (that one emits
-`ldur w3,[x29,#-0x14]`). Ours, at BOTH call sites inside sdl_device_haptics_start:
+`ldur w3,[x29,#-0x14]`). At BOTH call sites inside sdl_device_haptics_start:
 
-    ; SDL_JoystickRumble            |  ; SDL_JoystickRumbleTriggers
-    ldr  x8,[x8,#0x878]  ; ptr      |  ldr  x8,[x8,#0x880]  ; ptr
-    mov  w2,w21          ; arg3     |  mov  w2,w23          ; arg3
-    mov  w3,w20          ; arg4 dur |  mov  w3,w20          ; arg4 dur   <-- target
+    ; SDL_JoystickRumble            |  ; SDL_JoystickRumbleTriggers (guarded by cbz x8)
+    ldr  x8,[x8,#off]    ; ptr      |  ldr  x8,[x8,#off]    ; ptr
+    mov  w2,wA           ; arg3     |  mov  w2,wB           ; arg3
+    mov  w3,wN           ; arg4 dur |  mov  w3,wN           ; arg4 dur   <-- target
     blr  x8              ; indirect |  blr  x8              ; indirect
 
-The 8-byte window {mov w3,w20 ; blr x8} = e3 03 14 2a 00 01 3f d6 matches
-EXACTLY these 2 sites. (`mov w3,w20` alone = 2a1403e3 matches 4 sites in the
-file; the trailing `blr x8` is what disambiguates the two rumble duration
-loads from unrelated argument moves and keeps the zero-duration haptics-stop
-path untouched.) We rewrite `mov w3,w20` -> `mov w3,#-1` (movn w3,#0 =
-0x12800003 = 03 00 80 12), leaving `blr x8` intact.
+The 8-byte window {mov w3,wN ; blr x8} (mov = ORR-shifted-reg into w3) matches
+EXACTLY the 2 rumble sites in each build. We rewrite `mov w3,wN` -> `mov w3,#-1`
+(movn w3,#0 = 0x12800003 = 03 00 80 12), leaving `blr x8` intact. Exact
+per-build fingerprints (source register differs by build):
+
+    Proton 9.0 arm64ec (bundled, 220176 B): mov w3,w20  e3 03 14 2a 00 01 3f d6  x2
+    Proton 10.0-x arm64ec (content pack):   mov w3,w19  e3 03 13 2a 00 01 3f d6  x2
+    Proton 11.0-x arm64ec (content pack):   mov w3,w19  e3 03 13 2a 00 01 3f d6  x2
+
+P10 and P11 share identical rumble-site bytes; each exact pattern matches its 2
+sites and 0 in the other builds (cross-checked).
+
+Build-agnostic structural fallback: to avoid hand-deriving a pattern for every
+future Proton / GE variant / imported wrapper, if none of the exact patterns
+matches exactly 2 sites we scan for the masked shape {mov w3,w<0..30> ; blr x8}
+(source register wildcarded, wzr=31 excluded so the zero-duration stop shape is
+never touched) and apply it ONLY when it matches EXACTLY 2 sites. This same shape
+yields exactly 2 sites on P9/P10/P11. Residual risk (accepted): a build with two
+unrelated `mov w3,w<reg>; blr x8` would be mis-patched; exact patterns are tried
+first and the ==2 guard is the mitigation.
 
 x86_64-unix  (NOT VERIFIED for this repo)
 -----------------------------------------
@@ -60,12 +74,32 @@ from pathlib import Path
 # aarch64 (verified)
 # ---------------------------------------------------------------------------
 
-AARCH64_ORIGINAL_DURATION_LOAD = bytes.fromhex("e3 03 14 2a")  # mov w3, w20
 AARCH64_INDIRECT_CALL_X8       = bytes.fromhex("00 01 3f d6")  # blr x8
 AARCH64_PATCHED_DURATION_LOAD  = bytes.fromhex("03 00 80 12")  # mov w3, #-1 (movn w3,#0)
-
-AARCH64_ORIGINAL_SITE = AARCH64_ORIGINAL_DURATION_LOAD + AARCH64_INDIRECT_CALL_X8
 AARCH64_PATCHED_SITE  = AARCH64_PATCHED_DURATION_LOAD + AARCH64_INDIRECT_CALL_X8
+
+# Exact per-build fingerprints: (name, "mov w3,wN") -> full "mov w3,wN ; blr x8" window.
+AARCH64_EXACT_SIGS = [
+    ("Proton 10/11 (mov w3,w19)", bytes.fromhex("e3 03 13 2a")),
+    ("Proton 9.0 (mov w3,w20)",   bytes.fromhex("e3 03 14 2a")),
+]
+
+
+def _aarch64_structural_sites(blob: bytes) -> list:
+    """Offsets of 'mov w3,w<0..30> ; blr x8' (ORR-shifted-reg into w3, wzr excluded)."""
+    hits = []
+    n = len(blob)
+    for i in range(n - 8 + 1):
+        if blob[i] != 0xe3 or blob[i + 1] != 0x03 or blob[i + 3] != 0x2a:
+            continue
+        rm = blob[i + 2]
+        if rm & 0xe0:            # bits 23:21 must be 0 (plain LSL#0 ORR)
+            continue
+        if (rm & 0x1f) == 0x1f:  # exclude wzr (zero duration / stop shape)
+            continue
+        if blob[i + 4:i + 8] == AARCH64_INDIRECT_CALL_X8:
+            hits.append(i)
+    return hits
 
 
 # ---------------------------------------------------------------------------
@@ -123,42 +157,44 @@ def winebus_targets(path: Path) -> list:
     raise FileNotFoundError(path)
 
 
-def patch_aarch64(path: Path, blob: bytes, *, dry_run: bool) -> bool:
-    original_hits = find_all(blob, AARCH64_ORIGINAL_SITE)
-    patched_hits = find_all(blob, AARCH64_PATCHED_SITE)
-
-    if not original_hits:
-        if len(patched_hits) == 2:
-            print(f"OK: {path} already patched (aarch64) at "
-                  f"{', '.join(hex(x) for x in patched_hits)}")
-            return False
-        raise ValueError(
-            f"{path}: expected 2 original aarch64 rumble call sites, "
-            f"found 0 original and {len(patched_hits)} patched (ambiguous, skipped)"
-        )
-
-    if len(original_hits) != 2:
-        raise ValueError(
-            f"{path}: expected exactly 2 original aarch64 rumble call sites, "
-            f"found {len(original_hits)} at {', '.join(hex(x) for x in original_hits)}"
-        )
-
-    print(f"PATCH (aarch64): {path}")
-    for off in original_hits:
-        print(f"  file+{off:#x}: mov w3, w20 -> mov w3, #-1")
-
+def _aarch64_apply(path: Path, blob: bytes, sites: list, how: str, *, dry_run: bool) -> bool:
+    print(f"PATCH (aarch64, {how}): {path}")
+    for off in sites:
+        print(f"  file+{off:#x}: mov w3, w<reg> -> mov w3, #-1")
     if dry_run:
         return True
-
     mutable = bytearray(blob)
-    for off in original_hits:
+    for off in sites:
         mutable[off:off + len(AARCH64_PATCHED_DURATION_LOAD)] = AARCH64_PATCHED_DURATION_LOAD
     path.write_bytes(mutable)
-
     verify = path.read_bytes()
-    if find_all(verify, AARCH64_ORIGINAL_SITE) or len(find_all(verify, AARCH64_PATCHED_SITE)) != 2:
+    if len(find_all(verify, AARCH64_PATCHED_SITE)) != 2:
         raise RuntimeError(f"{path}: aarch64 verification failed after write")
     return True
+
+
+def patch_aarch64(path: Path, blob: bytes, *, dry_run: bool) -> bool:
+    patched_hits = find_all(blob, AARCH64_PATCHED_SITE)
+    if len(patched_hits) == 2:
+        print(f"OK: {path} already patched (aarch64) at "
+              f"{', '.join(hex(x) for x in patched_hits)}")
+        return False
+
+    # 1) Exact per-build patterns: apply the FIRST that matches exactly 2 sites.
+    for name, mov in AARCH64_EXACT_SIGS:
+        hits = find_all(blob, mov + AARCH64_INDIRECT_CALL_X8)
+        if len(hits) == 2:
+            return _aarch64_apply(path, blob, hits, name, dry_run=dry_run)
+
+    # 2) Build-agnostic structural fallback: only if it matches exactly 2 sites.
+    sites = _aarch64_structural_sites(blob)
+    if len(sites) == 2:
+        return _aarch64_apply(path, blob, sites, "structural fallback", dry_run=dry_run)
+
+    raise ValueError(
+        f"{path}: no exact pattern matched 2 sites and structural fallback found "
+        f"{len(sites)} (patched={len(patched_hits)}) - ambiguous/unknown, skipped"
+    )
 
 
 def patch_x86_64(path: Path, blob: bytes, *, dry_run: bool) -> bool:
