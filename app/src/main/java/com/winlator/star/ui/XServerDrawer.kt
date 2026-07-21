@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.FlipToFront
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
@@ -2205,7 +2206,28 @@ private fun ControlsContent(state: XServerDrawerState) {
 
         // ── Mouse ──
         1 -> {
-            Text("Mouse & Cursor", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+            // The cog only appears once Cursor to Touch is on — the gestures it configures don't
+            // exist in relative-pointer mode, so the settings would be dead controls.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Mouse & Cursor", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp,
+                    modifier = Modifier.weight(1f)
+                )
+                if (moveCursorToTouch) {
+                    val gestureSettingsOpen by state.gestureSettingsExpanded.collectAsState()
+                    IconButton(
+                        onClick = { state.toggleGestureSettingsExpanded() },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Settings,
+                            contentDescription = "Touch gesture settings",
+                            tint = if (gestureSettingsOpen) accent else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
             Spacer(Modifier.height(4.dp))
 
             // Each of these flips its flag host-side and stays open — like the fullscreen selector, the
@@ -2224,6 +2246,9 @@ private fun ControlsContent(state: XServerDrawerState) {
                 ),
                 perRow = 3
             )
+
+            val gestureSettingsOpen by state.gestureSettingsExpanded.collectAsState()
+            if (moveCursorToTouch && gestureSettingsOpen) TouchGestureSettings(state)
         }
 
         // ── Vibration ──
@@ -2295,6 +2320,74 @@ private fun ControlsContent(state: XServerDrawerState) {
         3 -> GyroSection()
     }
 }
+
+// ───── Touch gesture settings — behind the cog next to "Mouse & Cursor" ─────
+// Only reachable with Cursor to Touch on, which is the mode these gestures live in. Each is
+// independently switchable because the right set is per-game: an RTS wants all three, a mouse-look
+// shooter wants none of them stealing its drags. Every change applies to the live touchpad
+// immediately and persists, so you can tune mid-game without a relaunch.
+@Composable
+private fun TouchGestureSettings(state: XServerDrawerState) {
+    val accent = MaterialTheme.colorScheme.primary
+    val dragSelect by state.gestureDragSelect.collectAsState()
+    val longPress by state.gestureLongPressRightClick.collectAsState()
+    val pinchZoom by state.gesturePinchZoom.collectAsState()
+
+    Spacer(Modifier.height(10.dp))
+    Text("Touch Gestures", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+    Spacer(Modifier.height(2.dp))
+    Text(
+        "Drag to box-select, hold for right click, pinch to zoom.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    Spacer(Modifier.height(6.dp))
+
+    ToggleChipGrid(
+        listOf(
+            ToggleChipItem("Box Select", dragSelect) {
+                state.setGestureDragSelect(it); state.onGestureConfigChange?.run()
+            },
+            ToggleChipItem("Hold = Right", longPress) {
+                state.setGestureLongPressRightClick(it); state.onGestureConfigChange?.run()
+            },
+            ToggleChipItem("Pinch Zoom", pinchZoom) {
+                state.setGesturePinchZoom(it); state.onGestureConfigChange?.run()
+            },
+        ),
+        perRow = 3
+    )
+
+    // Sliders only for the gestures that are actually on — a hold delay with holds switched off is
+    // the kind of dead control the sub-tab split was meant to get rid of.
+    if (longPress) {
+        val initHoldMs by state.gestureLongPressMs.collectAsState()
+        var holdMs by remember(initHoldMs) { mutableIntStateOf(initHoldMs) }
+        IntSlider("Hold Delay", holdMs, 150..800,
+            onValueChange = { holdMs = it },
+            onValueChangeFinished = {
+                state.setGestureLongPressMs(holdMs); state.onGestureConfigChange?.run()
+            }
+        )
+    }
+
+    if (pinchZoom) {
+        // Presented inverted: the underlying step is guest-space pinch travel per wheel notch, so a
+        // SMALLER step is a MORE sensitive zoom. Users think in sensitivity, not in step size.
+        val initStep by state.gesturePinchStep.collectAsState()
+        var sensitivity by remember(initStep) { mutableIntStateOf(PINCH_STEP_MAX - initStep) }
+        IntSlider("Zoom Sensitivity", sensitivity, 1..(PINCH_STEP_MAX - PINCH_STEP_MIN),
+            onValueChange = { sensitivity = it },
+            onValueChangeFinished = {
+                state.setGesturePinchStep(PINCH_STEP_MAX - sensitivity)
+                state.onGestureConfigChange?.run()
+            }
+        )
+    }
+}
+
+private const val PINCH_STEP_MIN = 10
+private const val PINCH_STEP_MAX = 100
 
 // ───── Gyro (motion aim) section — Controls tab, "Gyro" sub-tab ─────
 // Progressive disclosure: the master chip is always visible; everything downstream only appears once

@@ -55,8 +55,16 @@ public class TouchpadView extends View {
     // These only apply in that mode — under plain relative touchpad input there is no "where the
     // cursor is" for a gesture to act on, and in simTouchScreen mode the tap-drag path already owns
     // the finger. Thresholds follow gamehub-lite's RTS controls (Producdevity/gamehub-lite#73).
-    private static final short LONG_PRESS_MILLISECONDS = 300;
-    private static final short PINCH_WHEEL_STEP = 40;
+    public static final short DEFAULT_LONG_PRESS_MILLISECONDS = 300;
+    public static final short DEFAULT_PINCH_WHEEL_STEP = 40;
+    // Individually switchable from the drawer's gesture-settings cog, because which of these is
+    // welcome depends entirely on the game: an RTS wants all three, a mouse-look shooter wants none
+    // of them stealing its drags.
+    private boolean gestureDragSelect = true;
+    private boolean gestureLongPressRightClick = true;
+    private boolean gesturePinchZoom = true;
+    private int longPressDelayMs = DEFAULT_LONG_PRESS_MILLISECONDS;
+    private int pinchWheelStep = DEFAULT_PINCH_WHEEL_STEP;
     private boolean dragSelecting = false;
     private boolean longPressFired = false;
     private float pinchAccum = 0;
@@ -323,7 +331,7 @@ public class TouchpadView extends View {
                     // First finger down starts a fresh gesture; arm the hold-for-right-click timer.
                     resetGestureState();
                     gestureFinger = fingers[pointerId];
-                    postDelayed(longPressRunnable, LONG_PRESS_MILLISECONDS);
+                    if (gestureLongPressRightClick) postDelayed(longPressRunnable, longPressDelayMs);
                 } else {
                     // A second finger means this is a pinch/pan, never a hold or a band select.
                     removeCallbacks(longPressRunnable);
@@ -560,7 +568,7 @@ public class TouchpadView extends View {
             // what strategy games bind camera zoom to. Two-finger pan still scrolls — whichever of the
             // two moved more this frame wins, so a slightly-drifting pinch doesn't also scroll.
             boolean pinchHandled = false;
-            if (gesturesEnabled()) {
+            if (gesturesEnabled() && gesturePinchZoom) {
                 if (lastPinchDistance == 0) lastPinchDistance = currDistance;
                 float pinchDelta = currDistance - lastPinchDistance;
                 float panDelta = ((finger1.y + finger2.y) * 0.5f) - (finger1.lastY + finger2.lastY) * 0.5f;
@@ -570,13 +578,13 @@ public class TouchpadView extends View {
                     pinchAccum += pinchDelta;
                     // Spreading apart = zoom in = wheel up. Emit every whole step so a fast pinch
                     // doesn't quantise down to a single notch.
-                    while (Math.abs(pinchAccum) >= PINCH_WHEEL_STEP) {
+                    while (Math.abs(pinchAccum) >= pinchWheelStep) {
                         boolean zoomIn = pinchAccum > 0;
                         Pointer.Button button = zoomIn ? Pointer.Button.BUTTON_SCROLL_UP
                                                        : Pointer.Button.BUTTON_SCROLL_DOWN;
                         xServer.injectPointerButtonPress(button);
                         xServer.injectPointerButtonRelease(button);
-                        pinchAccum += zoomIn ? -PINCH_WHEEL_STEP : PINCH_WHEEL_STEP;
+                        pinchAccum += zoomIn ? -pinchWheelStep : pinchWheelStep;
                     }
                     scrolling = true;
                     pinchHandled = true;
@@ -601,7 +609,7 @@ public class TouchpadView extends View {
             }
             // Legacy hold-two-fingers-wide-apart drag. Suppressed under the gesture set: a wide spread
             // is a zoom-out there, and single-finger drag-select already covers holding LMB.
-            else if (!pinchHandled && !gesturesEnabled() &&
+            else if (!pinchHandled && !(gesturesEnabled() && gestureDragSelect) &&
                      currDistance >= MAX_TWO_FINGERS_SCROLL_DISTANCE && !xServer.pointer.isButtonPressed(Pointer.Button.BUTTON_LEFT) &&
                      finger2.travelDistance() < MAX_TAP_TRAVEL_DISTANCE) {
                 pressPointerButtonLeft(finger1);
@@ -613,7 +621,7 @@ public class TouchpadView extends View {
         // it absolutely, so the selection rectangle's far corner sits under the finger. Relative
         // deltas would drift the corner away from the fingertip over a long drag — the whole point of
         // Cursor to Touch is that the two stay together.
-        if (gesturesEnabled() && numFingers == 1 && finger2 == null && !longPressFired) {
+        if (gesturesEnabled() && gestureDragSelect && numFingers == 1 && finger2 == null && !longPressFired) {
             if (!dragSelecting && finger1.travelDistance() >= MAX_TAP_TRAVEL_DISTANCE) {
                 removeCallbacks(longPressRunnable);
                 xServer.injectPointerMove(finger1.startX, finger1.startY);
@@ -854,6 +862,21 @@ public class TouchpadView extends View {
         // hold that loses its handler mid-press would leave the button stuck down in the guest.
         if (dragSelecting) xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_LEFT);
         if (longPressFired) xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_RIGHT);
+        resetGestureState();
+    }
+
+    /** Per-gesture config from the drawer's gesture-settings cog. Applied live, mid-session. */
+    public void setGestureConfig(boolean dragSelect, boolean longPressRightClick, boolean pinchZoom,
+                                 int longPressMs, int pinchStep) {
+        this.gestureDragSelect = dragSelect;
+        this.gestureLongPressRightClick = longPressRightClick;
+        this.gesturePinchZoom = pinchZoom;
+        this.longPressDelayMs = longPressMs;
+        this.pinchWheelStep = Math.max(1, pinchStep);
+        // Same stranded-button hazard as toggling the feature itself: a gesture turned off underneath
+        // an in-flight press would never reach its release.
+        if (dragSelecting && !dragSelect) xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_LEFT);
+        if (longPressFired && !longPressRightClick) xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_RIGHT);
         resetGestureState();
     }
 }
