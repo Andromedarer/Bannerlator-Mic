@@ -18,6 +18,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -124,8 +125,8 @@ import java.net.URL
 private enum class BpZone { RAIL, PLAY, CAROUSEL }
 private enum class BpSheet { GAME_OPTIONS, TOOLS, POWER }
 
-private val CARD_WIDTH = 120.dp
-private val CARD_HEIGHT = 180.dp
+private val CARD_WIDTH = 100.dp
+private val CARD_HEIGHT = 150.dp
 
 @Composable
 fun BigPictureScreen(navController: NavController) {
@@ -145,26 +146,18 @@ fun BigPictureScreen(navController: NavController) {
 
     val listState = rememberLazyListState()
 
-    // Focus lives on always-composed containers (rail / Play / carousel) so key capture never breaks
-    // on LazyRow item recycling; the visible "focus" is our own zone + index state.
-    val railFocus = remember { FocusRequester() }
-    val playFocus = remember { FocusRequester() }
-    val carouselFocus = remember { FocusRequester() }
     var zone by remember { mutableStateOf(BpZone.CAROUSEL) }
     var railIndex by remember { mutableStateOf(0) } // 0 = App Settings, 1 = Tools, 2 = Power
 
     var activeSheet by remember { mutableStateOf<BpSheet?>(null) }
     var editShortcut by remember { mutableStateOf(false) }
 
-    val requestZoneFocus: () -> Unit = {
-        runCatching {
-            when (zone) {
-                BpZone.RAIL     -> railFocus.requestFocus()
-                BpZone.PLAY     -> playFocus.requestFocus()
-                BpZone.CAROUSEL -> carouselFocus.requestFocus()
-            }
-        }
-    }
+    // A SINGLE focus target on the root Box. No sub-element (rail / Play / carousel) is focusable, so
+    // Compose never paints its own default focus ring — every "focus" you see is our own zone/index
+    // state drawn as borders. This is what kills the phantom highlight that used to appear over the
+    // spec chips when pressing D-pad up.
+    val rootFocus = remember { FocusRequester() }
+    val grabFocus: () -> Unit = { runCatching { rootFocus.requestFocus() } }
 
     // Lazily resolve a cover for a shortcut: custom path first, then SteamGridDB (saved as the custom
     // cover so it persists), mirroring the Shortcuts screen scrape flow.
@@ -196,18 +189,18 @@ fun BigPictureScreen(navController: NavController) {
             if (event == Lifecycle.Event.ON_RESUME) {
                 shortcuts = manager.loadShortcuts()
                 if (selectedIndex > shortcuts.lastIndex) selectedIndex = shortcuts.lastIndex.coerceAtLeast(0)
-                requestZoneFocus()
+                grabFocus()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // Move (our) focus whenever the zone changes; also seeds the initial focus on the carousel.
-    LaunchedEffect(zone) { requestZoneFocus() }
+    // Seed the root focus once so key events route to us from the first frame.
+    LaunchedEffect(Unit) { grabFocus() }
 
-    // Re-grab focus after a sheet closes so D-pad keeps working.
-    LaunchedEffect(activeSheet) { if (activeSheet == null) requestZoneFocus() }
+    // Re-grab focus after a sheet / dialog closes so D-pad keeps working.
+    LaunchedEffect(activeSheet, editShortcut) { if (activeSheet == null && !editShortcut) grabFocus() }
 
     // Preload the selected cover so the hero + blurred background are ready.
     LaunchedEffect(selectedIndex, shortcuts) {
@@ -233,6 +226,8 @@ fun BigPictureScreen(navController: NavController) {
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .focusRequester(rootFocus)
+            .focusable()
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 // While a sheet is up, only handle the close gesture; everything else is the sheet's.
@@ -277,14 +272,20 @@ fun BigPictureScreen(navController: NavController) {
                     }
                     Key.ButtonA, Key.Enter, Key.DirectionCenter -> {
                         when (zone) {
-                            BpZone.PLAY     -> onLaunch()
-                            BpZone.CAROUSEL -> if (selected != null) activeSheet = BpSheet.GAME_OPTIONS
+                            // A launches the highlighted game (fastest couch path); the explicit Play
+                            // button covers the same for touch and for the PLAY zone.
+                            BpZone.PLAY, BpZone.CAROUSEL -> onLaunch()
                             BpZone.RAIL -> when (railIndex) {
                                 0 -> navController.navigate(Screen.Settings.route)
                                 1 -> activeSheet = BpSheet.TOOLS
                                 2 -> activeSheet = BpSheet.POWER
                             }
                         }
+                        true
+                    }
+                    // Y = game options for the selected game (from carousel or the hero).
+                    Key.ButtonY -> {
+                        if (selected != null && zone != BpZone.RAIL) activeSheet = BpSheet.GAME_OPTIONS
                         true
                     }
                     Key.ButtonR1 -> { activeSheet = BpSheet.TOOLS; true }
@@ -334,14 +335,19 @@ fun BigPictureScreen(navController: NavController) {
                 )
         )
 
-        // 2. Foreground.
-        Column(modifier = Modifier.fillMaxSize().padding(28.dp)) {
-            // Global rail (top-right).
+        // 2. Foreground. Height-aware so the hero cover always fits between the top rail and the
+        // bottom carousel (the old fixed 330dp cover overflowed on landscape phones and clipped the
+        // Play / Game-options buttons off-screen).
+        BoxWithConstraints(modifier = Modifier.fillMaxSize().padding(24.dp)) {
+            val railH = 52.dp
+            val carouselStripH = CARD_HEIGHT + 32.dp   // card + its vertical content padding + scale headroom
+            // Cover fills the band left between the rail and the carousel, clamped to a sane range.
+            val coverH = (maxHeight - railH - carouselStripH - 16.dp).coerceIn(150.dp, 300.dp)
+            val coverW = coverH * 2f / 3f               // 2:3 poster ratio
+
+            // Global rail (top-end).
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .focusRequester(railFocus)
-                    .focusable(),
+                modifier = Modifier.fillMaxWidth().align(Alignment.TopEnd),
                 horizontalArrangement = Arrangement.End,
             ) {
                 RailButton(
@@ -369,86 +375,72 @@ fun BigPictureScreen(navController: NavController) {
             if (shortcuts.isEmpty()) {
                 // Empty state.
                 Column(
-                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    modifier = Modifier.align(Alignment.Center),
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
                 ) {
-                    Text(
-                        text = "No games yet",
-                        color = Color.White,
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
+                    Text("No games yet", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(16.dp))
-                    Button(onClick = { navController.navigate(Screen.Games.route) }) {
-                        Text("Add games")
-                    }
+                    Button(onClick = { navController.navigate(Screen.Games.route) }) { Text("Add games") }
                 }
             } else {
-                // Hero (centre).
-                Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.CenterStart) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CoverCard(
-                            cover = heroCover,
-                            modifier = Modifier.width(220.dp).height(330.dp),
-                            selected = false,
+                // Hero — vertically centred in the band between the rail and the carousel.
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .padding(top = railH, bottom = carouselStripH),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CoverCard(cover = heroCover, modifier = Modifier.width(coverW).height(coverH), selected = false)
+                    Spacer(Modifier.width(24.dp))
+                    Column {
+                        Text(
+                            text = selected?.name ?: "",
+                            color = Color.White,
+                            fontSize = 30.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 2,
                         )
-                        Spacer(Modifier.width(28.dp))
-                        Column {
-                            Text(
-                                text = selected?.name ?: "",
-                                color = Color.White,
-                                fontSize = 34.sp,
-                                fontWeight = FontWeight.Bold,
-                            )
-                            Spacer(Modifier.height(6.dp))
-                            val stats = playtimeStats(context, selected?.name ?: "")
-                            Text("Times Played: ${stats.first}", color = Color.White.copy(alpha = 0.85f), fontSize = 15.sp)
-                            Text("Playtime: ${stats.second}", color = Color.White.copy(alpha = 0.85f), fontSize = 15.sp)
-                            Spacer(Modifier.height(14.dp))
-                            // Spec chips (shortcut extra wins over container, else "Not Set").
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                SpecChip("Graphics", resolveSpec(selected?.getExtra("graphicsDriver"), container?.graphicsDriver))
-                                SpecChip("DXWrapper", resolveSpec(selected?.getExtra("dxwrapper"), container?.getDXWrapper()))
-                                SpecChip("Audio", resolveSpec(selected?.getExtra("audioDriver"), container?.audioDriver))
-                                SpecChip("box64", resolveSpec(selected?.getExtra("box64Preset"), container?.box64Preset))
-                            }
-                            Spacer(Modifier.height(20.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Button(
-                                    onClick = { zone = BpZone.PLAY; onLaunch() },
-                                    modifier = Modifier
-                                        .height(56.dp)
-                                        .focusRequester(playFocus)
-                                        .focusable()
-                                        .then(
-                                            if (zone == BpZone.PLAY)
-                                                Modifier.border(
-                                                    3.dp,
-                                                    MaterialTheme.colorScheme.onPrimary,
-                                                    RoundedCornerShape(16.dp),
-                                                )
-                                            else Modifier
-                                        ),
-                                    shape = RoundedCornerShape(16.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.primary,
+                        Spacer(Modifier.height(6.dp))
+                        val stats = playtimeStats(context, selected?.name ?: "")
+                        Text("Times Played: ${stats.first}", color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp)
+                        Text("Playtime: ${stats.second}", color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp)
+                        Spacer(Modifier.height(12.dp))
+                        // Spec chips (shortcut extra wins over container, else "Not Set").
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            SpecChip("Graphics", resolveSpec(selected?.getExtra("graphicsDriver"), container?.graphicsDriver))
+                            SpecChip("DXWrapper", resolveSpec(selected?.getExtra("dxwrapper"), container?.getDXWrapper()))
+                            SpecChip("Audio", resolveSpec(selected?.getExtra("audioDriver"), container?.audioDriver))
+                            SpecChip("box64", resolveSpec(selected?.getExtra("box64Preset"), container?.box64Preset))
+                        }
+                        Spacer(Modifier.height(16.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            // Play — touch onClick launches; the PLAY zone highlight is our own border
+                            // (nothing here is focusable, so there is no phantom Compose focus ring).
+                            Button(
+                                onClick = { zone = BpZone.PLAY; onLaunch() },
+                                modifier = Modifier
+                                    .height(52.dp)
+                                    .then(
+                                        if (zone == BpZone.PLAY)
+                                            Modifier.border(3.dp, MaterialTheme.colorScheme.onPrimary, RoundedCornerShape(16.dp))
+                                        else Modifier
                                     ),
-                                ) {
-                                    Icon(Icons.Filled.PlayArrow, contentDescription = null)
-                                    Spacer(Modifier.width(8.dp))
-                                    Text("Play", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                                }
-                                Spacer(Modifier.width(14.dp))
-                                OutlinedButton(
-                                    onClick = { if (selected != null) activeSheet = BpSheet.GAME_OPTIONS },
-                                    modifier = Modifier.height(56.dp),
-                                    shape = RoundedCornerShape(16.dp),
-                                ) {
-                                    Icon(Icons.Filled.Tune, contentDescription = null, tint = Color.White)
-                                    Spacer(Modifier.width(8.dp))
-                                    Text("Game options", color = Color.White)
-                                }
+                                shape = RoundedCornerShape(16.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                            ) {
+                                Icon(Icons.Filled.PlayArrow, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Play", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(Modifier.width(14.dp))
+                            OutlinedButton(
+                                onClick = { if (selected != null) activeSheet = BpSheet.GAME_OPTIONS },
+                                modifier = Modifier.height(52.dp),
+                                shape = RoundedCornerShape(16.dp),
+                            ) {
+                                Icon(Icons.Filled.Tune, contentDescription = null, tint = Color.White)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Game options", color = Color.White)
                             }
                         }
                     }
@@ -457,12 +449,9 @@ fun BigPictureScreen(navController: NavController) {
                 // Carousel (bottom).
                 LazyRow(
                     state = listState,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .focusRequester(carouselFocus)
-                        .focusable(),
+                    modifier = Modifier.fillMaxWidth().align(Alignment.BottomStart),
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
-                    contentPadding = PaddingValues(vertical = 16.dp),
+                    contentPadding = PaddingValues(vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     itemsIndexed(shortcuts) { index, s ->
