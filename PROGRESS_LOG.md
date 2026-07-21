@@ -1,5 +1,19 @@
 # Star-Compose — Progress Log
 
+## 2026-07-21 — 📦 Banner File Manager **1.1.0** bundled (replaces 1.0.0) — merged to main `137cc75c`, vc47
+
+> **Merged `feat/bfm-1.1-bake` → main (`--no-ff`).** Only changed file is the asset; no code paths touched. Safety tag `bfm11-premerge-backup` = `1b8d3e41`. CI green 3 flavors (run `29822725563`). **vc STAYS 47 — this simply ships with the next stable.**
+>
+> **Where it lives:** the bundled `wfm.exe` is baked *inside* `app/src/main/assets/container_pattern_common.tzst` at `home/xuser/.wine/drive_c/windows/wfm.exe` — NOT a loose asset. That archive is the delivery path that persists: `applyGeneralPatches()` re-extracts it into the prefix on an **app or image version change**, which is why a binary staged into a container alone gets reverted to the bundled copy.
+>
+> **Was 1.0.0 (295936 B) → now 1.1.0 (299008 B).** Verified byte-identical to the `wfm.exe` published on the banner-file-manager **v1.1.0** release, and the binary self-reports `Version 1.1.0` (old one said 1.0.0) — confirmed via wide (UTF-16) strings, since it's a UNICODE build and plain `strings` finds nothing.
+> **`libcdio.dll` unchanged** between v1.0.0 and v1.1.0 (hash-compared) → deliberately left untouched.
+> **Repack preserved the archive layout exactly:** 102 entries, identical entry order, identical paths+modes (`rw-rw----`, root/root), and a full extracted `diff -rq` showed **only `wfm.exe` differs**. Tools: `tar --no-recursion --numeric-owner -T <original order>` piped to `zstd -19`.
+>
+> ⚠️ **Testing note:** the archive only re-extracts when the app/image version changes, so an EXISTING container may keep 1.0.0 until that trigger fires — a **freshly created container** is the clean check (or read the version in the File Manager's About).
+>
+> Also this session: the reported FPS drop turned out to be **a different emulator**, so that investigation is dropped (research stays in [[project_bannerlator_input_fps_drop]] if it ever resurfaces).
+
 ## 2026-07-21 — 🎉 GYROSCOPE FEATURE 100% COMPLETE — P4 Tilt-to-Aim merged, main `fd2652f0` (vc47)
 
 > **Merged `feat/gyro-tilt-to-aim` → main (`--no-ff`), 10 files, +577/-37.** Safety tag `gyro-p4-premerge-backup` = `c575091c`. Artifacts CI on main = run `29822130104`. **vc STAYS 47.**
