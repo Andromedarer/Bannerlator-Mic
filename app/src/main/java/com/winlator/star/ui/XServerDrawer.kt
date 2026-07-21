@@ -1588,7 +1588,7 @@ private data class ToggleChipItem(
 // row is where the vertical space comes back — a Switch row costs ~4x the height of a chip.
 // Disabled chips keep ToggleRow's alpha-0.4 grey-out and swallow taps.
 @Composable
-private fun ToggleChipGrid(items: List<ToggleChipItem>, perRow: Int = 2) {
+private fun ToggleChipGrid(items: List<ToggleChipItem>, perRow: Int = 3) {
     val accent = MaterialTheme.colorScheme.primary
     val accentDim = LocalAccentDim.current
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1598,6 +1598,11 @@ private fun ToggleChipGrid(items: List<ToggleChipItem>, perRow: Int = 2) {
                 modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
+                // Split the padding for a short final row across both sides so it sits CENTRED,
+                // and every chip in the grid keeps the identical width (no odd-sized leftovers).
+                val missing = perRow - row.size
+                val leading = missing / 2
+                repeat(leading) { Spacer(Modifier.weight(1f)) }
                 row.forEach { item ->
                     val isOn = item.checked && item.enabled
                     Box(
@@ -1628,8 +1633,7 @@ private fun ToggleChipGrid(items: List<ToggleChipItem>, perRow: Int = 2) {
                         )
                     }
                 }
-                // Pad short final rows so every chip keeps the same width (grid stays aligned).
-                repeat(perRow - row.size) { Spacer(Modifier.weight(1f)) }
+                repeat(missing - leading) { Spacer(Modifier.weight(1f)) }
             }
         }
     }
@@ -2093,20 +2097,20 @@ private fun ControlsContent(state: XServerDrawerState) {
     // packed 2-per-row as chips so the tab has room for the Gyro section below.
     ToggleChipGrid(
         listOf(
-            ToggleChipItem("Show Touchscreen Controls", showTouchscreen) {
+            ToggleChipItem("Touch Controls", showTouchscreen) {
                 showTouchscreen = it
                 XServerDialogState.onInputControlsConfirm?.invoke(selectedIdx, showTouchscreen, timeoutEnabled, hapticsEnabled)
             },
-            ToggleChipItem("Enable Timeout", timeoutEnabled) {
+            ToggleChipItem("Timeout", timeoutEnabled) {
                 timeoutEnabled = it
                 XServerDialogState.onInputControlsConfirm?.invoke(selectedIdx, showTouchscreen, timeoutEnabled, hapticsEnabled)
             },
-            ToggleChipItem("Enable Haptics", hapticsEnabled) {
+            ToggleChipItem("Haptics", hapticsEnabled) {
                 hapticsEnabled = it
                 XServerDialogState.onInputControlsConfirm?.invoke(selectedIdx, showTouchscreen, timeoutEnabled, hapticsEnabled)
             },
         ),
-        perRow = 2
+        perRow = 3
     )
 
     // On-screen controls opacity — live, applied to the visible overlay as you drag.
@@ -2128,12 +2132,12 @@ private fun ControlsContent(state: XServerDrawerState) {
     Spacer(Modifier.height(4.dp))
     ToggleChipGrid(
         listOf(
-            ToggleChipItem("Follow app theme", controlsFollowTheme) {
+            ToggleChipItem("App Theme", controlsFollowTheme) {
                 state.setControlsFollowTheme(it)
                 state.onControlsColorChange?.run()
             }
         ),
-        perRow = 2
+        perRow = 3
     )
     if (!controlsFollowTheme) {
         Spacer(Modifier.height(8.dp))
@@ -2177,17 +2181,17 @@ private fun ControlsContent(state: XServerDrawerState) {
     // pair of callbacks the switch row did.
     ToggleChipGrid(
         listOf(
-            ToggleChipItem("Move Cursor to Touchpoint", moveCursorToTouch) {
+            ToggleChipItem("Cursor to Touch", moveCursorToTouch) {
                 state.onMoveCursorToTouchpoint?.run(); state.onClose?.run()
             },
-            ToggleChipItem("Relative Mouse Movement", isRelativeMouse) {
+            ToggleChipItem("Relative Mouse", isRelativeMouse) {
                 state.onRelativeMouseMovement?.run(); state.onClose?.run()
             },
             ToggleChipItem("Disable Mouse", isMouseDisabled) {
                 state.onDisableMouse?.run(); state.onClose?.run()
             },
         ),
-        perRow = 2
+        perRow = 3
     )
 
     HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
@@ -2202,12 +2206,12 @@ private fun ControlsContent(state: XServerDrawerState) {
     val vibrationMasterOn by XServerDialogState.vibrationMasterEnabled.collectAsState()
     ToggleChipGrid(
         listOf(
-            ToggleChipItem("Controller vibration", vibrationMasterOn) {
+            ToggleChipItem("Enabled", vibrationMasterOn) {
                 XServerDialogState.setVibrationMasterEnabled(it)
                 XServerDialogState.onVibrationMasterChanged?.invoke(it)
             }
         ),
-        perRow = 2
+        perRow = 3
     )
     if (vibrationMasterOn) {
         // Per-container rumble target + intensity (PC-accurate dual-motor rumble). Keyed on the
@@ -2250,7 +2254,7 @@ private fun ControlsContent(state: XServerDrawerState) {
                     XServerDialogState.onVibrationSlotChanged?.invoke(index, it) // persist to WinHandler
                 }
             },
-            perRow = 2
+            perRow = 3
         )
     }
 
@@ -2276,12 +2280,12 @@ private fun GyroSection() {
     val gyroEnabled by XServerDialogState.gyroEnabled.collectAsState()
     ToggleChipGrid(
         listOf(
-            ToggleChipItem("Enable gyro", gyroEnabled) {
+            ToggleChipItem("Enabled", gyroEnabled) {
                 XServerDialogState.setGyroEnabled(it)
                 XServerDialogState.onGyroEnabledChanged?.invoke(it)
             }
         ),
-        perRow = 2
+        perRow = 3
     )
     if (!gyroEnabled) return
 
@@ -2384,7 +2388,7 @@ private fun GyroSection() {
                 XServerDialogState.onGyroInvertYChanged?.invoke(it)
             },
         ),
-        perRow = 2
+        perRow = 3
     )
 }
 
