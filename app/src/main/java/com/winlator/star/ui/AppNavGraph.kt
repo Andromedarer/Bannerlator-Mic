@@ -27,7 +27,6 @@ import com.winlator.star.ui.screens.WrapperManagerScreen
 @Composable
 fun AppNavGraph(
     navController: NavHostController,
-    selectedInputProfileId: Int,
     startRoute: String = Screen.Games.route,
     modifier: Modifier = Modifier,
 ) {
@@ -74,7 +73,7 @@ fun AppNavGraph(
         }
 
         composable(Screen.InputControls.route) {
-            InputControlsScreen(selectedProfileId = selectedInputProfileId)
+            InputControlsScreen()
         }
 
         composable(Screen.AdrenoTools.route) {

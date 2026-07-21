@@ -64,6 +64,9 @@ final class InGameControlsEditor {
         sidebar = root.findViewById(R.id.InGameSidebar);
         sidebarContent = root.findViewById(R.id.InGameSidebarContent);
         dialogHost = root.findViewById(R.id.InGameComposeDialogHost);
+        updateSidebarWidth(activity.getResources().getDisplayMetrics().widthPixels);
+        root.addOnLayoutChangeListener((view, left, top, right, bottom,
+                oldLeft, oldTop, oldRight, oldBottom) -> updateSidebarWidth(right - left));
 
         sidebarOverlay.setOnTouchListener((view, event) -> {
             if (event.getAction() != MotionEvent.ACTION_DOWN) return true;
@@ -94,6 +97,17 @@ final class InGameControlsEditor {
         renderDialogHost();
     }
 
+    private void updateSidebarWidth(int availableWidth) {
+        if (availableWidth <= 0) return;
+        FrameLayout.LayoutParams params = (FrameLayout.LayoutParams)sidebar.getLayoutParams();
+        int width = ControlsEditorActivity.calculateSidebarWidth(
+                availableWidth, activity.getResources().getDisplayMetrics().density);
+        if (params.width != width) {
+            params.width = width;
+            sidebar.setLayoutParams(params);
+        }
+    }
+
     private static Function0<Unit> action(Runnable runnable) {
         return () -> {
             runnable.run();
@@ -104,10 +118,14 @@ final class InGameControlsEditor {
     void dispose() {
         activeDialogMode = null;
         inputControlsView.setOnEditorElementSettingsRequested(null);
-        if (profile != null) profile.save();
+        save();
         if (root.getParent() instanceof FrameLayout) {
             ((FrameLayout)root.getParent()).removeView(root);
         }
+    }
+
+    void save() {
+        if (profile != null) profile.save();
     }
 
     boolean isOpen() {

@@ -183,7 +183,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private String hudRendererLabel = null;     // full "Vulkan | DXVK" label for classic FrameRating.setRenderer
     private String hudEngineShort = null;       // short API/dx name for PerfHudView.setEngineLabel
     private String hudGpuName = null;           // GPU model string from _MESA_DRV_GPU_NAME
-    private InGameControlsEditor inGameControlsEditor;
+    private volatile InGameControlsEditor inGameControlsEditor;
     private boolean inGameEditorPreviousShowTouchscreen;
     private boolean inGameEditorPreviousTimeoutEnabled;
     private ControlsProfile inGameEditorPreviousProfile;
@@ -1420,6 +1420,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     @Override
     public void onPause() {
+        if (inGameControlsEditor != null) inGameControlsEditor.save();
         super.onPause();
 
         if (inputControlsView != null) inputControlsView.releaseAllInputs();
@@ -3483,7 +3484,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private void closeInGameControlsEditor() {
         if (inGameControlsEditor == null) return;
         inGameControlsEditor.dispose();
-        inGameControlsEditor = null;
         inputControlsView.setEditorBackgroundVisible(true);
         inputControlsView.setEditMode(false);
         if (inGameEditorPreviousProfile != null) showInputControls(inGameEditorPreviousProfile);
@@ -3499,6 +3499,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             timeoutHandler.removeCallbacks(hideControlsRunnable);
             if (touchpadView != null) touchpadView.setOnTouchListener(null);
         }
+        inGameControlsEditor = null;
         if (isRelativeMouseMovement || cursorLock) {
             inputControlsView.postDelayed(() -> ensurePointerCapture("in-game-controls-editor-closed"), 250);
         }
@@ -4188,6 +4189,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     public InputControlsView getInputControlsView() {
         return inputControlsView;
+    }
+
+    protected boolean isInGameControlsEditorOpen() {
+        return inGameControlsEditor != null;
     }
 
     private static final String TAG = "DXWrapperExtraction";

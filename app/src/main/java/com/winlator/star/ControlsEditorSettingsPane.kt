@@ -10,6 +10,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,6 +26,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
@@ -1331,7 +1333,10 @@ private fun BindingSetupDialog(
         onDismissRequest = onDismiss,
         title = { Text(text = stringResource(R.string.binding_setup_title, title), color = EditorText) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(EditorSpacing)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(EditorSpacing),
+            ) {
                 // Category filter chips
                 val filterCategories = listOf("All", "Keyboard", "Mouse", "Gamepad")
                 val filterLabels = listOf(
@@ -1416,10 +1421,7 @@ private fun BindingSetupDialog(
                 if (combo.isEmpty()) {
                     Text(text = stringResource(R.string.none), color = EditorTextValue)
                 } else {
-                    Column(
-                        modifier = Modifier.heightIn(max = 180.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         combo.forEachIndexed { index, binding ->
                             Row(
                                 modifier = Modifier.fillMaxWidth(),

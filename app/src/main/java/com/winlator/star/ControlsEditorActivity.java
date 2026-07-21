@@ -9,6 +9,7 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.MotionEvent;
 import android.view.animation.DecelerateInterpolator;
 import android.widget.FrameLayout;
@@ -30,7 +31,6 @@ import com.winlator.star.inputcontrols.ControlsProfile;
 import com.winlator.star.inputcontrols.InputControlsManager;
 import com.winlator.star.inputcontrols.CustomIconManager;
 import com.winlator.star.core.AppUtils;
-import com.winlator.star.core.UnitUtils;
 import com.winlator.star.widget.InputControlsView;
 
 import java.io.IOException;
@@ -141,6 +141,9 @@ public class ControlsEditorActivity extends AppCompatActivity {
         sidebarOverlay = findViewById(R.id.VSidebarOverlay);
         sidebarScrollView = findViewById(R.id.SVSidebar);
         sidebarContent = findViewById(R.id.LLSidebarContent);
+        updateSidebarWidth(getResources().getDisplayMetrics().widthPixels);
+        container.addOnLayoutChangeListener((view, left, top, right, bottom,
+                oldLeft, oldTop, oldRight, oldBottom) -> updateSidebarWidth(right - left));
         if (sidebarOverlay != null) {
             sidebarOverlay.setClickable(false);
             sidebarOverlay.setOnTouchListener((v, event) -> {
@@ -178,6 +181,20 @@ public class ControlsEditorActivity extends AppCompatActivity {
                 if (path != null) setBackgroundImageFromUri(Uri.fromFile(new java.io.File(path)));
             }
         });
+    }
+
+    static int calculateSidebarWidth(int availableWidth, float density) {
+        return Math.min(Math.round(300 * density), Math.round(availableWidth * 0.85f));
+    }
+
+    private void updateSidebarWidth(int availableWidth) {
+        if (sidebarScrollView == null || availableWidth <= 0) return;
+        ViewGroup.LayoutParams params = sidebarScrollView.getLayoutParams();
+        int width = calculateSidebarWidth(availableWidth, getResources().getDisplayMetrics().density);
+        if (params.width != width) {
+            params.width = width;
+            sidebarScrollView.setLayoutParams(params);
+        }
     }
 
     private void setBackgroundImageFromUri(Uri uri) {
@@ -418,8 +435,10 @@ public class ControlsEditorActivity extends AppCompatActivity {
         sidebarComposeView = ensureSidebarComposeView();
         bindSidebarSettings(element);
 
-        final float sidebarWidthPx = UnitUtils.dpToPx(300);
-        final float screenWidth = getResources().getDisplayMetrics().widthPixels;
+        final float sidebarWidthPx = sidebarScrollView.getLayoutParams().width;
+        final float screenWidth = inputControlsView.getWidth() > 0
+                ? inputControlsView.getWidth()
+                : getResources().getDisplayMetrics().widthPixels;
         Rect elementBounds = element.getBoundingBox();
         final float centerX = elementBounds != null && !elementBounds.isEmpty() ? elementBounds.centerX() : element.getX();
         sidebarOnRight = centerX <= screenWidth / 2f;
@@ -552,7 +571,7 @@ public class ControlsEditorActivity extends AppCompatActivity {
         saveSidebarState();
         sidebarOpen = false;
 
-        final float sidebarWidthPx = UnitUtils.dpToPx(300);
+        final float sidebarWidthPx = sidebarScrollView.getLayoutParams().width;
         sidebarOverlay.animate().cancel();
         sidebarScrollView.animate().cancel();
 
@@ -590,6 +609,12 @@ public class ControlsEditorActivity extends AppCompatActivity {
         }
         super.onBackPressed();
         overridePendingTransition(R.anim.slide_in_down, R.anim.slide_out_up);
+    }
+
+    @Override
+    protected void onStop() {
+        if (profile != null) profile.save();
+        super.onStop();
     }
 
     @Override

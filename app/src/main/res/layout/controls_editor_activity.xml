@@ -23,12 +23,11 @@
 
     <ScrollView
         android:id="@+id/SVSidebar"
-        android:layout_width="300dp"
+        android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:layout_gravity="start|top"
         android:background="#FF1A1A2E"
         android:fillViewport="true"
-        android:translationX="-300dp"
         android:visibility="gone">
 
         <LinearLayout

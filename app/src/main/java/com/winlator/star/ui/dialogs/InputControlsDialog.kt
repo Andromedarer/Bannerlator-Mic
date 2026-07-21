@@ -97,8 +97,12 @@ fun InputControlsDialog(state: XServerDialogState) {
 
                 OutlinedButton(
                     onClick = {
+                        state.onInputControlsConfirm?.invoke(
+                            selectedIdx, showTouchscreen, timeoutEnabled, hapticsEnabled
+                        )
                         state.onInputControlsSettings?.invoke(selectedIdx)
                     },
+                    enabled = selectedIdx > 0,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("Profile Settings…")

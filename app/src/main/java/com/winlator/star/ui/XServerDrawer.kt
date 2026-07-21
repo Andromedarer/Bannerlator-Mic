@@ -2190,6 +2190,7 @@ private fun ControlsContent(state: XServerDrawerState) {
                     XServerDialogState.onInputControlsConfirm?.invoke(selectedIdx, showTouchscreen, timeoutEnabled, hapticsEnabled)
                     XServerDialogState.onInputControlsSettings?.invoke(selectedIdx)
                 },
+                enabled = selectedIdx > 0,
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(10.dp),
             ) { Text("Profile Settings\u2026") }

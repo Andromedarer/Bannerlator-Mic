@@ -328,4 +328,62 @@ class InputControlsFormatTest {
 
         assertEquals(0.8f, states[Binding.GAMEPAD_BUTTON_A])
     }
+
+    @Test
+    fun opposingMappedDirections_areCombinedByDestinationAxis() {
+        val inputs = linkedMapOf(
+            Binding.GAMEPAD_LEFT_THUMB_LEFT to 0f,
+            Binding.GAMEPAD_LEFT_THUMB_RIGHT to 0.8f,
+            Binding.GAMEPAD_LEFT_THUMB_UP to 0.6f,
+            Binding.GAMEPAD_LEFT_THUMB_DOWN to 0f,
+        )
+        val state = GamepadState()
+
+        InputControlsView.applyMappedGamepadState(state, inputs)
+
+        assertEquals(0.8f, state.thumbLX)
+        assertEquals(-0.6f, state.thumbLY)
+
+        val reversed = inputs.entries.reversed().associateTo(linkedMapOf()) { it.toPair() }
+        InputControlsView.applyMappedGamepadState(state, reversed)
+        assertEquals(0.8f, state.thumbLX)
+        assertEquals(-0.6f, state.thumbLY)
+    }
+
+    @Test
+    fun simultaneousOpposingMappedDirections_cancelOut() {
+        val state = GamepadState()
+        InputControlsView.applyMappedGamepadState(
+            state,
+            mapOf(
+                Binding.GAMEPAD_RIGHT_THUMB_LEFT to 0.75f,
+                Binding.GAMEPAD_RIGHT_THUMB_RIGHT to 0.75f,
+            ),
+        )
+
+        assertEquals(0f, state.thumbRX)
+    }
+
+    @Test
+    fun opposingMouseDirections_areCombinedIndependentlyOfMapOrder() {
+        val inputs = linkedMapOf(
+            Binding.MOUSE_MOVE_LEFT to 0f,
+            Binding.MOUSE_MOVE_RIGHT to 0.7f,
+        )
+
+        assertEquals(
+            0.7f,
+            InputControlsView.getMappedDirectionalAxis(
+                inputs, Binding.MOUSE_MOVE_LEFT, Binding.MOUSE_MOVE_RIGHT,
+            ),
+        )
+        assertEquals(
+            0.7f,
+            InputControlsView.getMappedDirectionalAxis(
+                inputs.entries.reversed().associateTo(linkedMapOf()) { it.toPair() },
+                Binding.MOUSE_MOVE_LEFT,
+                Binding.MOUSE_MOVE_RIGHT,
+            ),
+        )
+    }
 }

@@ -83,6 +83,7 @@ public class InputControlsView extends View {
     private final CustomIconManager customIconManager;
     private Timer mouseMoveTimer;
     private final PointF mouseMoveOffset = new PointF();
+    private final Map<ExternalController, PointF> controllerMouseMoveOffsets = new IdentityHashMap<>();
     private boolean showTouchscreenControls = true;
 
     // Background image for editor reference
@@ -476,6 +477,9 @@ public class InputControlsView extends View {
         expandedElement = null;
         swallowedExpandablePointers.clear();
         mouseMoveOffset.set(0, 0);
+        synchronized (controllerMouseMoveOffsets) {
+            controllerMouseMoveOffsets.clear();
+        }
     }
 
     public synchronized void releaseAllInputs() {
@@ -501,6 +505,8 @@ public class InputControlsView extends View {
     public void setShowTouchscreenControls(boolean showTouchscreenControls) {
         if (this.showTouchscreenControls && !showTouchscreenControls) releaseActiveControls();
         this.showTouchscreenControls = showTouchscreenControls;
+        WinHandler winHandler = xServer != null ? xServer.getWinHandler() : null;
+        if (winHandler != null) winHandler.sendGamepadState();
         invalidate();
     }
 
@@ -647,13 +653,23 @@ public class InputControlsView extends View {
             mouseMoveTimer.schedule(new TimerTask() {
                 @Override
                 public void run() {
-                    if (mouseMoveOffset.x != 0 || mouseMoveOffset.y != 0) {
+                    float controllerX = 0;
+                    float controllerY = 0;
+                    synchronized (controllerMouseMoveOffsets) {
+                        for (PointF offset : controllerMouseMoveOffsets.values()) {
+                            controllerX += offset.x;
+                            controllerY += offset.y;
+                        }
+                    }
+                    float moveX = Mathf.clamp(mouseMoveOffset.x + controllerX, -1, 1);
+                    float moveY = Mathf.clamp(mouseMoveOffset.y + controllerY, -1, 1);
+                    if (moveX != 0 || moveY != 0) {
                         if (xServer.isRelativeMouseMovement())
-                            winHandler.mouseEvent(MouseEventFlags.MOVE, (int) (mouseMoveOffset.x * cursorSpeed * 10), (int) (mouseMoveOffset.y * cursorSpeed * 10), 0);
+                            winHandler.mouseEvent(MouseEventFlags.MOVE, (int) (moveX * cursorSpeed * 10), (int) (moveY * cursorSpeed * 10), 0);
                         else
                             xServer.injectPointerMoveDelta(
-                                (int) (mouseMoveOffset.x * cursorSpeed * 10),
-                                (int) (mouseMoveOffset.y * cursorSpeed * 10)
+                                (int) (moveX * cursorSpeed * 10),
+                                (int) (moveY * cursorSpeed * 10)
                         );
                     }
                 }
@@ -701,9 +717,23 @@ public class InputControlsView extends View {
                     activeKeys != null && activeKeys.contains(keyCode), 1f);
         }
 
+        applyMappedGamepadState(controller.remappedState, mappedAxes);
+        float controllerMouseX = getMappedDirectionalAxis(
+                mappedAxes, Binding.MOUSE_MOVE_LEFT, Binding.MOUSE_MOVE_RIGHT);
+        float controllerMouseY = getMappedDirectionalAxis(
+                mappedAxes, Binding.MOUSE_MOVE_UP, Binding.MOUSE_MOVE_DOWN);
+        synchronized (controllerMouseMoveOffsets) {
+            if (controllerMouseX == 0 && controllerMouseY == 0)
+                controllerMouseMoveOffsets.remove(controller);
+            else
+                controllerMouseMoveOffsets.put(controller, new PointF(controllerMouseX, controllerMouseY));
+        }
+        if (controllerMouseX != 0 || controllerMouseY != 0) createMouseMoveTimer();
         for (Map.Entry<Binding, Float> output : mappedAxes.entrySet()) {
+            Binding binding = output.getKey();
+            if (binding.isGamepad() || binding.isMouseMove()) continue;
             float value = output.getValue();
-            handleInputEvent(controller, output.getKey(), Math.abs(value) > ControlElement.STICK_DEAD_ZONE, value, false);
+            handleInputEvent(controller, binding, Math.abs(value) > ControlElement.STICK_DEAD_ZONE, value, false);
         }
 
         WinHandler winHandler = xServer != null ? xServer.getWinHandler() : null;
@@ -1029,6 +1059,55 @@ public class InputControlsView extends View {
         }
     }
 
+    public static void applyMappedGamepadState(GamepadState state, Map<Binding, Float> mappedInputs) {
+        state.reset();
+        for (Map.Entry<Binding, Float> input : mappedInputs.entrySet()) {
+            Binding binding = input.getKey();
+            float value = input.getValue();
+            if (binding == null || !binding.isGamepad()
+                    || Math.abs(value) <= ControlElement.STICK_DEAD_ZONE) continue;
+
+            float magnitude = Math.min(1f, Math.abs(value));
+            int buttonIdx = binding.ordinal() - Binding.GAMEPAD_BUTTON_A.ordinal();
+            if (buttonIdx >= 0 && buttonIdx <= ExternalController.IDX_BUTTON_R2) {
+                if (buttonIdx == ExternalController.IDX_BUTTON_L2)
+                    state.triggerL = Math.max(state.triggerL, magnitude);
+                else if (buttonIdx == ExternalController.IDX_BUTTON_R2)
+                    state.triggerR = Math.max(state.triggerR, magnitude);
+                else
+                    state.setPressed(buttonIdx, true);
+            }
+            else if (binding == Binding.GAMEPAD_LEFT_THUMB_UP)
+                state.thumbLY = Mathf.clamp(state.thumbLY - magnitude, -1, 1);
+            else if (binding == Binding.GAMEPAD_LEFT_THUMB_DOWN)
+                state.thumbLY = Mathf.clamp(state.thumbLY + magnitude, -1, 1);
+            else if (binding == Binding.GAMEPAD_LEFT_THUMB_LEFT)
+                state.thumbLX = Mathf.clamp(state.thumbLX - magnitude, -1, 1);
+            else if (binding == Binding.GAMEPAD_LEFT_THUMB_RIGHT)
+                state.thumbLX = Mathf.clamp(state.thumbLX + magnitude, -1, 1);
+            else if (binding == Binding.GAMEPAD_RIGHT_THUMB_UP)
+                state.thumbRY = Mathf.clamp(state.thumbRY - magnitude, -1, 1);
+            else if (binding == Binding.GAMEPAD_RIGHT_THUMB_DOWN)
+                state.thumbRY = Mathf.clamp(state.thumbRY + magnitude, -1, 1);
+            else if (binding == Binding.GAMEPAD_RIGHT_THUMB_LEFT)
+                state.thumbRX = Mathf.clamp(state.thumbRX - magnitude, -1, 1);
+            else if (binding == Binding.GAMEPAD_RIGHT_THUMB_RIGHT)
+                state.thumbRX = Mathf.clamp(state.thumbRX + magnitude, -1, 1);
+            else if (binding == Binding.GAMEPAD_DPAD_UP || binding == Binding.GAMEPAD_DPAD_RIGHT
+                    || binding == Binding.GAMEPAD_DPAD_DOWN || binding == Binding.GAMEPAD_DPAD_LEFT)
+                state.dpad[binding.ordinal() - Binding.GAMEPAD_DPAD_UP.ordinal()] = true;
+        }
+    }
+
+    public static float getMappedDirectionalAxis(
+            Map<Binding, Float> mappedInputs, Binding negative, Binding positive) {
+        float negativeValue = Math.abs(mappedInputs.getOrDefault(negative, 0f));
+        float positiveValue = Math.abs(mappedInputs.getOrDefault(positive, 0f));
+        if (negativeValue <= ControlElement.STICK_DEAD_ZONE) negativeValue = 0;
+        if (positiveValue <= ControlElement.STICK_DEAD_ZONE) positiveValue = 0;
+        return Mathf.clamp(positiveValue - negativeValue, -1, 1);
+    }
+
     private static void applyThumbBinding(GamepadState state, Binding binding) {
         switch (binding) {
             case GAMEPAD_LEFT_THUMB_UP: state.thumbLY = Mathf.clamp(state.thumbLY - 1, -1, 1); break;
@@ -1083,7 +1162,13 @@ public class InputControlsView extends View {
         mouseMoveOffset.x = Mathf.clamp(x, -1, 1);
         mouseMoveOffset.y = Mathf.clamp(y, -1, 1);
         if (pressed) createMouseMoveTimer();
-        else if (activeVirtualMouseBindings.isEmpty()) stopMouseMoveTimer();
+        else if (activeVirtualMouseBindings.isEmpty() && !hasControllerMouseMovement()) stopMouseMoveTimer();
+    }
+
+    private boolean hasControllerMouseMovement() {
+        synchronized (controllerMouseMoveOffsets) {
+            return !controllerMouseMoveOffsets.isEmpty();
+        }
     }
 
     private void stopMouseMoveTimer() {

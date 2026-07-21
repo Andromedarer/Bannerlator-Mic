@@ -85,7 +85,7 @@ import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun InputControlsScreen(selectedProfileId: Int = 0) {
+fun InputControlsScreen() {
     val context = LocalContext.current
     val activity = context as? MainActivity
     val manager = remember { InputControlsManager(context) }
@@ -104,9 +104,6 @@ fun InputControlsScreen(selectedProfileId: Int = 0) {
 
     fun refreshProfiles() {
         profiles = manager.getProfiles()
-        if (currentProfile == null && selectedProfileId > 0) {
-            currentProfile = profiles.firstOrNull { it.id == selectedProfileId }
-        }
         val idx = if (currentProfile != null) {
             val i = profiles.indexOf(currentProfile)
             if (i >= 0) i + 1 else 0
