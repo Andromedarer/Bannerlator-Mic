@@ -20,6 +20,8 @@ import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.compose.runtime.Composer;
 import androidx.compose.ui.platform.ComposeView;
+import androidx.lifecycle.ViewModel;
+import androidx.lifecycle.ViewModelProvider;
 
 import com.winlator.star.R;
 import com.winlator.star.inputcontrols.Binding;
@@ -43,6 +45,7 @@ public class ControlsEditorActivity extends AppCompatActivity {
     private InputControlsView inputControlsView;
     private ControlsProfile profile;
     private CustomIconManager customIconManager;
+    private EditorReferenceState editorReferenceState;
     private ActivityResultLauncher<String> iconPickerLauncher;
     private ActivityResultLauncher<Intent> iconPickerInAppLauncher;
 
@@ -67,9 +70,13 @@ public class ControlsEditorActivity extends AppCompatActivity {
         setContentView(R.layout.controls_editor_activity);
 
         customIconManager = new CustomIconManager(this);
+        editorReferenceState = new ViewModelProvider(this).get(EditorReferenceState.class);
         inputControlsView = new InputControlsView(this);
         inputControlsView.setEditMode(true);
         inputControlsView.setOverlayOpacity(0.6f);
+        inputControlsView.setBackgroundOpacity(editorReferenceState.getOpacity());
+        Bitmap restoredBackground = editorReferenceState.createBitmapCopy();
+        if (restoredBackground != null) inputControlsView.setBackgroundImage(restoredBackground);
 
         profile = InputControlsManager.loadProfile(this, ControlsProfile.getProfileFile(this, getIntent().getIntExtra("profile_id", 0)));
         inputControlsView.setProfile(profile);
@@ -177,8 +184,13 @@ public class ControlsEditorActivity extends AppCompatActivity {
         try {
             Bitmap bitmap = decodeSampledBitmap(uri);
             if (bitmap != null) {
-                inputControlsView.setBackgroundImage(bitmap);
-                AppUtils.showToast(this, R.string.background_image_set);
+                if (editorReferenceState.replaceBitmapWithCopy(bitmap)) {
+                    inputControlsView.setBackgroundImage(bitmap);
+                    AppUtils.showToast(this, R.string.background_image_set);
+                } else {
+                    bitmap.recycle();
+                    AppUtils.showToast(this, R.string.unable_to_load_image);
+                }
             } else {
                 AppUtils.showToast(this, R.string.unable_to_load_image);
             }
@@ -324,6 +336,7 @@ public class ControlsEditorActivity extends AppCompatActivity {
                         }
                         @Override
                         public void onBackgroundOpacityChange(float opacity) {
+                            editorReferenceState.setOpacity(opacity);
                             if (inputControlsView != null) inputControlsView.setBackgroundOpacity(opacity);
                         }
                         @Override
@@ -362,6 +375,7 @@ public class ControlsEditorActivity extends AppCompatActivity {
 
     private void clearBackgroundImage() {
         closeComposeDialog();
+        editorReferenceState.clearBitmap();
         inputControlsView.setBackgroundImage(null);
         AppUtils.showToast(this, R.string.background_cleared);
     }
@@ -583,5 +597,51 @@ public class ControlsEditorActivity extends AppCompatActivity {
         activeDialogMode = null;
         if (inputControlsView != null) inputControlsView.setBackgroundImage(null);
         super.onDestroy();
+    }
+
+    public static final class EditorReferenceState extends ViewModel {
+        private Bitmap bitmap;
+        private float opacity = 0.65f;
+
+        public float getOpacity() {
+            return opacity;
+        }
+
+        public void setOpacity(float opacity) {
+            this.opacity = Math.max(0f, Math.min(1f, opacity));
+        }
+
+        public boolean replaceBitmapWithCopy(Bitmap source) {
+            Bitmap copy = copyBitmap(source);
+            if (copy == null) return false;
+            clearBitmap();
+            bitmap = copy;
+            return true;
+        }
+
+        public Bitmap createBitmapCopy() {
+            return copyBitmap(bitmap);
+        }
+
+        public void clearBitmap() {
+            if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
+            bitmap = null;
+        }
+
+        private static Bitmap copyBitmap(Bitmap source) {
+            if (source == null || source.isRecycled()) return null;
+            Bitmap.Config config = source.getConfig() != null ? source.getConfig() : Bitmap.Config.ARGB_8888;
+            try {
+                return source.copy(config, false);
+            }
+            catch (OutOfMemoryError e) {
+                return null;
+            }
+        }
+
+        @Override
+        protected void onCleared() {
+            clearBitmap();
+        }
     }
 }

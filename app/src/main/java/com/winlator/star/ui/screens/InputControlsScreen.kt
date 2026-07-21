@@ -40,12 +40,18 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -75,6 +81,7 @@ import com.winlator.star.util.InAppFilePicker
 import org.json.JSONObject
 import java.util.concurrent.atomic.AtomicInteger
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InputControlsScreen(selectedProfileId: Int = 0) {
     val context = LocalContext.current
@@ -418,6 +425,28 @@ fun InputControlsScreen(selectedProfileId: Int = 0) {
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest),
                 modifier = Modifier.weight(1f)
             ) { Text(stringResource(R.string.export_control_profile_icpx), color = MaterialTheme.colorScheme.onBackground, fontSize = 12.sp) }
+        }
+        TooltipBox(
+            positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+            tooltip = {
+                PlainTooltip {
+                    Text(stringResource(R.string.export_control_profile_icp_tooltip))
+                }
+            },
+            state = rememberTooltipState(),
+        ) {
+            OutlinedButton(
+                onClick = {
+                    if (currentProfile != null) {
+                        val exported = manager.exportLegacyProfile(currentProfile!!)
+                        if (exported != null) AppUtils.showToast(context,
+                            "${context.getString(R.string.profile_exported_to)} ${exported.path}")
+                    } else AppUtils.showToast(context, R.string.no_profile_selected)
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.export_control_profile_icp_legacy), fontSize = 12.sp)
+            }
         }
 
         // ── Controls Editor ─────────────────────────────────────────

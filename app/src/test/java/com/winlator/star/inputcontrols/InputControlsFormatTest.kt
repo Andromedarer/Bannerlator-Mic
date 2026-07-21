@@ -1,5 +1,6 @@
 package com.winlator.star.inputcontrols
 
+import com.winlator.star.widget.InputControlsView
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -147,5 +148,184 @@ class InputControlsFormatTest {
         assertEquals(4, ControlElement.calculateExpandableItemsPerLane(500f, 100f, 20f, 10))
         assertEquals(1, ControlElement.calculateExpandableItemsPerLane(50f, 100f, 20f, 10))
         assertEquals(3, ControlElement.calculateExpandableItemsPerLane(1000f, 100f, 20f, 3))
+    }
+
+    @Test
+    fun legacySignedIconIds_areNormalizedWithoutChangingValidIds() {
+        assertEquals(128, InputControlsManager.normalizeLegacyIconId(-128))
+        assertEquals(200, InputControlsManager.normalizeLegacyIconId(-56))
+        assertEquals(255, InputControlsManager.normalizeLegacyIconId(-1))
+        assertEquals(99, InputControlsManager.normalizeLegacyIconId(99))
+
+        val element = ControlElement(null)
+        element.setIconId(-56)
+        assertEquals(200, element.iconId.toInt())
+    }
+
+    @Test
+    fun nonFiniteElementValues_fallBackToSafeDefaults() {
+        val element = ControlElement(null)
+        element.scale = Float.NaN
+        element.mouseSensitivity = Float.POSITIVE_INFINITY
+        element.deadZone = Float.NEGATIVE_INFINITY
+        element.customAreaOpacity = Float.NaN
+
+        assertEquals(1f, element.scale)
+        assertEquals(1f, element.mouseSensitivity)
+        assertEquals(ControlElement.STICK_DEAD_ZONE, element.deadZone)
+        assertEquals(0.25f, element.customAreaOpacity)
+    }
+
+    @Test
+    fun importedProfileValidation_rejectsMalformedAndNonFiniteElements() {
+        val validElement = JSONObject()
+            .put("type", "BUTTON")
+            .put("shape", "CIRCLE")
+            .put("toggleSwitch", false)
+            .put("x", 0.5)
+            .put("y", 0.5)
+            .put("scale", 1.0)
+            .put("text", "A")
+            .put("iconId", 0)
+            .put("bindings", JSONArray().put("KEY_A"))
+        val profile = JSONObject().put("name", "Test").put("elements", JSONArray().put(validElement))
+
+        assertTrue(InputControlsManager.isValidImportedProfile(profile))
+        validElement.put("scale", "NaN")
+        assertFalse(InputControlsManager.isValidImportedProfile(profile))
+        assertFalse(InputControlsManager.isValidImportedProfile(
+            JSONObject().put("name", "Test").put("elements", "not-an-array")
+        ))
+    }
+
+    @Test
+    fun unknownBindingNames_surviveUntilTheSlotIsEdited() {
+        assertFalse(Binding.isKnownSerializedName("FORK_TURBO"))
+        assertTrue(Binding.isKnownSerializedName("KEY_A"))
+        assertEquals("FORK_TURBO", ControlElement.getSerializedBindingName(Binding.NONE, "FORK_TURBO"))
+        assertEquals("NONE", ControlElement.getSerializedBindingName(Binding.NONE, "NONE"))
+        assertEquals("KEY_B", ControlElement.getSerializedBindingName(Binding.KEY_B, "FORK_TURBO"))
+    }
+
+    @Test
+    fun unknownControllerBindingNames_surviveUntilEdited() {
+        val binding = ExternalControllerBinding()
+        binding.setKeyCode(42)
+        binding.setLoadedBinding(Binding.NONE, "FORK_TURBO")
+
+        assertEquals("FORK_TURBO", binding.toJSONObject().getString("binding"))
+        binding.setBinding(Binding.KEY_B)
+        assertEquals("KEY_B", binding.toJSONObject().getString("binding"))
+    }
+
+    @Test
+    fun legacyExport_removesTransportOnlyWithoutMutatingCommands() {
+        val data = JSONObject()
+            .put("format", InputControlsManager.ICPX_FORMAT)
+            .put("formatVersion", 1)
+            .put("minReaderVersion", 1)
+            .put("customIcons", JSONArray().put(JSONObject().put("id", 100)))
+            .put("elements", JSONArray().put(JSONObject().put("type", "BUTTON_GRID")))
+
+        InputControlsManager.prepareLegacyExport(data)
+
+        assertFalse(data.has("format"))
+        assertFalse(data.has("formatVersion"))
+        assertFalse(data.has("minReaderVersion"))
+        assertFalse(data.has("customIcons"))
+        assertEquals("BUTTON_GRID", data.getJSONArray("elements").getJSONObject(0).getString("type"))
+    }
+
+    @Test
+    fun importedProfileValidation_rejectsUnknownTypeAndShape() {
+        val element = JSONObject()
+            .put("type", "BUTON")
+            .put("shape", "CIRCLE")
+            .put("toggleSwitch", false)
+            .put("x", 0.5)
+            .put("y", 0.5)
+            .put("scale", 1.0)
+            .put("text", "A")
+            .put("iconId", 0)
+            .put("bindings", JSONArray().put("KEY_A"))
+        val profile = JSONObject().put("name", "Test").put("elements", JSONArray().put(element))
+
+        assertFalse(InputControlsManager.isValidImportedProfile(profile))
+        element.put("type", "BUTTON").put("shape", "SQUAREISH")
+        assertFalse(InputControlsManager.isValidImportedProfile(profile))
+    }
+
+    @Test
+    fun importedProfileValidation_rejectsMalformedControllersAndNonPositiveRatios() {
+        val malformedController = JSONObject()
+            .put("id", "pad")
+            .put("name", "Pad")
+            .put("controllerBindings", JSONArray().put(JSONObject()
+                .put("keyCode", 1.5)
+                .put("binding", "KEY_A")))
+        val profile = JSONObject()
+            .put("name", "Test")
+            .put("controllers", JSONArray().put(malformedController))
+
+        assertFalse(InputControlsManager.isValidImportedProfile(profile))
+
+        val element = JSONObject()
+            .put("type", "MOUSE_AREA")
+            .put("shape", "RECT")
+            .put("toggleSwitch", false)
+            .put("x", 0.5)
+            .put("y", 0.5)
+            .put("scale", 1.0)
+            .put("text", "")
+            .put("iconId", 0)
+            .put("bindings", JSONArray().put("NONE"))
+            .put("areaWidthRatio", 0)
+        profile.remove("controllers")
+        profile.put("elements", JSONArray().put(element))
+        assertFalse(InputControlsManager.isValidImportedProfile(profile))
+    }
+
+    @Test
+    fun customIconBounds_rejectInvalidOrOversizedImages() {
+        assertTrue(CustomIconManager.hasValidIconBounds(2048, 2048))
+        assertFalse(CustomIconManager.hasValidIconBounds(0, 128))
+        assertFalse(CustomIconManager.hasValidIconBounds(2049, 1))
+        assertFalse(CustomIconManager.hasValidIconBounds(2000, 2100))
+    }
+
+    @Test
+    fun comboExecution_includesMainBindingWithoutChangingStoredExtras() {
+        val element = ControlElement(null)
+        element.setBindingAt(0, Binding.KEY_C)
+        element.setCombo(0, arrayOf(Binding.KEY_CTRL_L))
+
+        assertEquals(listOf(Binding.KEY_CTRL_L), element.getCombo(0)!!.toList())
+        assertEquals(
+            listOf(Binding.KEY_C, Binding.KEY_CTRL_L),
+            element.getEffectiveBindingsForSlot(0).toList(),
+        )
+    }
+
+    @Test
+    fun gamepadUsage_reflectsBindingAndComboEdits() {
+        val element = ControlElement(null)
+        element.setBindingAt(0, Binding.KEY_C)
+        assertFalse(element.usesGamepadBinding())
+
+        element.setCombo(0, arrayOf(Binding.GAMEPAD_BUTTON_A))
+        assertTrue(element.usesGamepadBinding())
+
+        element.setCombo(0, null)
+        assertFalse(element.usesGamepadBinding())
+    }
+
+    @Test
+    fun duplicateAxisOutputs_stayActiveWhileAnyMappedAxisIsActive() {
+        val states = mutableMapOf<Binding, Float>()
+
+        InputControlsView.mergeAxisBindingState(states, Binding.GAMEPAD_BUTTON_A, true, 0.8f)
+        InputControlsView.mergeAxisBindingState(states, Binding.GAMEPAD_BUTTON_A, false, 0f)
+
+        assertEquals(0.8f, states[Binding.GAMEPAD_BUTTON_A])
     }
 }

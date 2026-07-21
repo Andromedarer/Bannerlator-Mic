@@ -12,6 +12,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -36,6 +37,7 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
     private final ArrayList<ExternalController> controllers = new ArrayList<>();
     private final Map<String, GroupInfo> groups = new LinkedHashMap<>();
     private final List<ControlElement> immutableElements = Collections.unmodifiableList(elements);
+    private final List<ExternalController> immutableControllers = Collections.unmodifiableList(controllers);
     private boolean elementsLoaded = false;
     private boolean controllersLoaded = false;
     private boolean groupsLoaded = false;
@@ -84,7 +86,7 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
     }
 
     public void setCursorSpeed(float cursorSpeed) {
-        this.cursorSpeed = cursorSpeed;
+        this.cursorSpeed = Float.isFinite(cursorSpeed) ? Math.max(0.1f, Math.min(5.0f, cursorSpeed)) : 1.0f;
     }
 
     public boolean isCustomAccentEnabled() {
@@ -105,6 +107,16 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
 
     public boolean isVirtualGamepad() {
         return virtualGamepad;
+    }
+
+    void updateVirtualGamepad() {
+        virtualGamepad = false;
+        for (ControlElement element : elements) {
+            if (element.usesGamepadBinding()) {
+                virtualGamepad = true;
+                return;
+            }
+        }
     }
 
     public GamepadState getGamepadState() {
@@ -194,10 +206,10 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
         }
 
         try {
-            JSONObject profileJSONObject = new JSONObject(FileUtils.readString(file));
+            JSONObject profileJSONObject = new JSONObject(InputControlsManager.readStringAtomically(file));
             loadGroupsFromJSONObject(profileJSONObject);
         }
-        catch (JSONException e) {
+        catch (JSONException | IOException e) {
             groups.clear();
             groupsLoaded = true;
         }
@@ -209,7 +221,11 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
             String legacyPixelKey,
             int referenceSize) throws JSONException {
         if (elementJSONObject.has(ratioKey)) {
-            return (int)Math.round(elementJSONObject.getDouble(ratioKey) * Math.max(1, referenceSize));
+            double ratio = elementJSONObject.getDouble(ratioKey);
+            if (!Double.isFinite(ratio) || ratio <= 0) throw new JSONException("Invalid " + ratioKey);
+            double scaled = ratio * Math.max(1, referenceSize);
+            if (scaled > Integer.MAX_VALUE) throw new JSONException("Out-of-range " + ratioKey);
+            return (int)Math.round(scaled);
         }
         if (elementJSONObject.has(legacyPixelKey)) return elementJSONObject.getInt(legacyPixelKey);
         return null;
@@ -271,7 +287,7 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
 
         try {
             JSONObject data = file.isFile()
-                    ? new JSONObject(FileUtils.readString(file))
+                    ? new JSONObject(InputControlsManager.readStringAtomically(file))
                     : new JSONObject();
             data.put("schemaVersion", SCHEMA_VERSION);
             data.put("minEditorVersion", MIN_EDITOR_VERSION);
@@ -285,7 +301,7 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
 
             JSONArray groupsJSONArray = new JSONArray();
             if (!groupsLoaded && file.isFile()) {
-                JSONObject profileJSONObject = new JSONObject(FileUtils.readString(file));
+                JSONObject profileJSONObject = new JSONObject(InputControlsManager.readStringAtomically(file));
                 JSONArray existingGroups = profileJSONObject.optJSONArray("groups");
                 if (existingGroups != null) groupsJSONArray = existingGroups;
             }
@@ -301,7 +317,7 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
 
             JSONArray elementsJSONArray = new JSONArray();
             if (!elementsLoaded && file.isFile()) {
-                JSONObject profileJSONObject = new JSONObject(FileUtils.readString(file));
+                JSONObject profileJSONObject = new JSONObject(InputControlsManager.readStringAtomically(file));
                 // Preserve the on-disk elements when they were never loaded into memory,
                 // but tolerate a profile that has no (or a malformed) elements array
                 // otherwise the whole save() throws and is silently swallowed below,
@@ -314,18 +330,26 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
                 for (Object entry : elementOrder) {
                     if (entry instanceof ControlElement) {
                         ControlElement element = (ControlElement)entry;
-                        if (remainingElements.remove(element)) elementsJSONArray.put(element.toJSONObject());
+                        if (remainingElements.remove(element)) {
+                            JSONObject serializedElement = element.toJSONObject();
+                            if (serializedElement == null) return false;
+                            elementsJSONArray.put(serializedElement);
+                        }
                     } else {
                         elementsJSONArray.put(entry);
                     }
                 }
-                for (ControlElement element : remainingElements) elementsJSONArray.put(element.toJSONObject());
+                for (ControlElement element : remainingElements) {
+                    JSONObject serializedElement = element.toJSONObject();
+                    if (serializedElement == null) return false;
+                    elementsJSONArray.put(serializedElement);
+                }
             }
             data.put("elements", elementsJSONArray);
 
             JSONArray controllersJSONArray = new JSONArray();
             if (!controllersLoaded && file.isFile()) {
-                JSONObject profileJSONObject = new JSONObject(FileUtils.readString(file));
+                JSONObject profileJSONObject = new JSONObject(InputControlsManager.readStringAtomically(file));
                 if (profileJSONObject.has("controllers")) controllersJSONArray = profileJSONObject.getJSONArray("controllers");
             }
             else {
@@ -337,9 +361,9 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
             if (controllersJSONArray.length() > 0) data.put("controllers", controllersJSONArray);
             else data.remove("controllers");
 
-            return FileUtils.writeString(file, data.toString());
+            return InputControlsManager.writeStringAtomically(file, data.toString());
         }
-        catch (JSONException e) {
+        catch (JSONException | IOException e) {
             return false;
         }
     }
@@ -351,11 +375,13 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
     public void addElement(ControlElement element) {
         elements.add(element);
         elementsLoaded = true;
+        updateVirtualGamepad();
     }
 
     public void removeElement(ControlElement element) {
         elements.remove(element);
         elementsLoaded = true;
+        updateVirtualGamepad();
     }
 
     public List<ControlElement> getElements() {
@@ -371,11 +397,17 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
         controllersLoaded = false;
 
         File file = getProfileFile(context, id);
-        if (!file.isFile()) return controllers;
+        if (!file.isFile()) {
+            controllersLoaded = true;
+            return controllers;
+        }
 
         try {
-            JSONObject profileJSONObject = new JSONObject(FileUtils.readString(file));
-            if (!profileJSONObject.has("controllers")) return controllers;
+            JSONObject profileJSONObject = new JSONObject(InputControlsManager.readStringAtomically(file));
+            if (!profileJSONObject.has("controllers")) {
+                controllersLoaded = true;
+                return controllers;
+            }
             JSONArray controllersJSONArray = profileJSONObject.getJSONArray("controllers");
             for (int i = 0; i < controllersJSONArray.length(); i++) {
                 // Skip a single malformed controller instead of aborting the whole load.
@@ -391,7 +423,9 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
                         JSONObject controllerBindingJSONObject = controllerBindingsJSONArray.getJSONObject(j);
                         ExternalControllerBinding controllerBinding = new ExternalControllerBinding();
                         controllerBinding.setKeyCode(controllerBindingJSONObject.getInt("keyCode"));
-                        controllerBinding.setBinding(Binding.fromString(controllerBindingJSONObject.getString("binding")));
+                        String serializedBindingName = controllerBindingJSONObject.getString("binding");
+                        controllerBinding.setLoadedBinding(
+                                Binding.fromString(serializedBindingName), serializedBindingName);
                         controller.addControllerBinding(controllerBinding);
                     }
                     controllers.add(controller);
@@ -400,12 +434,17 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
                     e.printStackTrace();
                 }
             }
-            controllersLoaded = true;
         }
-        catch (JSONException e) {
+        catch (JSONException | IOException e) {
             e.printStackTrace();
         }
+        controllersLoaded = true;
         return controllers;
+    }
+
+    public List<ExternalController> getControllers() {
+        if (!controllersLoaded) loadControllers();
+        return immutableControllers;
     }
 
     public void loadElements(InputControlsView inputControlsView) {
@@ -421,7 +460,7 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
         }
 
         try {
-            JSONObject profileJSONObject = new JSONObject(FileUtils.readString(file));
+            JSONObject profileJSONObject = new JSONObject(InputControlsManager.readStringAtomically(file));
             loadGroupsFromJSONObject(profileJSONObject);
             JSONArray elementsJSONArray = profileJSONObject.optJSONArray("elements");
             if (elementsJSONArray == null) {
@@ -532,12 +571,19 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
                                 if (keys == null || keys.length() == 0) continue;
 
                                 ArrayList<Binding> combo = new ArrayList<>();
+                                ArrayList<String> rawNames = new ArrayList<>();
                                 for (int k = 0; k < keys.length(); k++) {
-                                    Binding binding = Binding.fromString(keys.optString(k, null));
+                                    String rawName = keys.optString(k, null);
+                                    if (rawName == null) continue;
+                                    rawNames.add(rawName);
+                                    Binding binding = Binding.fromString(rawName);
                                     if (binding != Binding.NONE) combo.add(binding);
                                     if (binding.isGamepad()) elementUsesGamepad = true;
                                 }
-                                if (!combo.isEmpty()) element.setCombo(idx, combo.toArray(new Binding[0]));
+                                if (!rawNames.isEmpty()) element.setLoadedCombo(
+                                        idx,
+                                        combo.toArray(new Binding[0]),
+                                        rawNames.toArray(new String[0]));
                             }
                             catch (JSONException | IllegalArgumentException e) {
                                 e.printStackTrace();
@@ -568,7 +614,7 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
             }
             elementsLoaded = true;
         }
-        catch (JSONException e) {
+        catch (JSONException | IOException e) {
             e.printStackTrace();
         }
     }

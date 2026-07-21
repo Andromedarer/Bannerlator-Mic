@@ -149,6 +149,8 @@
     <string name="unable_to_import_profile">Unable to import profile</string>
     <string name="import_control_profile">Import ICP / ICpx</string>
     <string name="export_control_profile_icpx">Export ICpx</string>
+    <string name="export_control_profile_icp_legacy">Export legacy ICP</string>
+    <string name="export_control_profile_icp_tooltip">Legacy ICP is best effort. New commands, groups, combos, and custom icons may be ignored or lost in older apps.</string>
     <string name="select_control_profile">Select ICP or ICpx profile</string>
     <plurals name="profiles_not_imported">
         <item quantity="one">%1$d profile could not be imported</item>

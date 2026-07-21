@@ -282,6 +282,8 @@ private fun GroupVisibilityRow(
     visible: Boolean,
     onVisibilityChange: (Boolean) -> Unit,
 ) {
+    var currentVisibility by remember(name, visible) { mutableStateOf(visible) }
+
     Surface(
         color = DialogSurface,
         shape = DialogShape,
@@ -295,7 +297,7 @@ private fun GroupVisibilityRow(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Icon(
-                painter = painterResource(if (visible) R.drawable.icon_eye else R.drawable.icon_eye_off),
+                painter = painterResource(if (currentVisibility) R.drawable.icon_eye else R.drawable.icon_eye_off),
                 contentDescription = stringResource(R.string.group_visibility),
                 tint = DialogText,
                 modifier = Modifier.size(20.dp),
@@ -304,7 +306,13 @@ private fun GroupVisibilityRow(
                 Text(text = name, color = DialogText, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(text = stringResource(R.string.group_element_count, count), color = DialogSubText)
             }
-            Switch(checked = visible, onCheckedChange = onVisibilityChange)
+            Switch(
+                checked = currentVisibility,
+                onCheckedChange = {
+                    currentVisibility = it
+                    onVisibilityChange(it)
+                },
+            )
         }
     }
 }

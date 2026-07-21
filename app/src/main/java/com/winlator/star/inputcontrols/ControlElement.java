@@ -123,6 +123,7 @@ public class ControlElement {
     private Shape gridCellShape;      // shape for each grid cell (default ROUND_RECT)
     private PointF mouseAreaLastPos;  // last touch position in MOUSE_AREA
     private Binding[][] comboBindings; // multi-key combos per binding slot (null = single key)
+    private String[][] rawComboBindingNames;
     private long[] cellPressTimes;     // per-cell press timestamps for flash animation
     private Binding holdKey;           // key held while touch is active (TRACKPAD/MOUSE_AREA/STICK/DYNAMIC_STICK), default NONE
     private float deadZone = 0.15f;
@@ -131,6 +132,7 @@ public class ControlElement {
     private float customAreaOpacity = 0.25f;
     private String groupId = null;
     private JSONObject sourceJSONObject;
+    private boolean holdKeyEdited;
     private ExpandableLayout expandableLayout = ExpandableLayout.RADIAL;
     private ExpandableDirection expandableDirection = ExpandableDirection.UP;
     private boolean expanded;
@@ -146,6 +148,7 @@ public class ControlElement {
     }
 
     public void setSourceJSONObject(JSONObject sourceJSONObject) {
+        holdKeyEdited = false;
         if (sourceJSONObject == null) {
             this.sourceJSONObject = null;
             return;
@@ -248,6 +251,7 @@ public class ControlElement {
         this.type = type;
         sourceJSONObject = null;
         reset();
+        notifyBindingsChanged();
     }
 
     public int getBindingCount() {
@@ -256,6 +260,7 @@ public class ControlElement {
 
     public void setBindingCount(int bindingCount) {
         resizeBindingArrays(bindingCount, true);
+        notifyBindingsChanged();
     }
 
     public int getExpandableChildCount() {
@@ -265,6 +270,7 @@ public class ControlElement {
     public void setExpandableChildCount(int childCount) {
         if (type == Type.EXPANDABLE_BUTTON) {
             resizeBindingArrays(clampExpandableChildCount(childCount), true);
+            notifyBindingsChanged();
         }
     }
 
@@ -300,6 +306,7 @@ public class ControlElement {
             boolean[] oldStates = states;
             boolean[] oldActiveBindingSlots = activeBindingSlots;
             Binding[][] oldComboBindings = comboBindings;
+            String[][] oldRawComboBindingNames = rawComboBindingNames;
             long[] oldCellPressTimes = cellPressTimes;
 
             bindings = Arrays.copyOf(oldBindings, safeBindingCount);
@@ -311,6 +318,9 @@ public class ControlElement {
                     ? Arrays.copyOf(oldActiveBindingSlots, safeBindingCount)
                     : new boolean[safeBindingCount];
             comboBindings = oldComboBindings != null ? Arrays.copyOf(oldComboBindings, safeBindingCount) : null;
+            rawComboBindingNames = oldRawComboBindingNames != null
+                    ? Arrays.copyOf(oldRawComboBindingNames, safeBindingCount)
+                    : null;
             cellPressTimes = oldCellPressTimes != null ? Arrays.copyOf(oldCellPressTimes, safeBindingCount) : null;
         } else {
             bindings = new Binding[safeBindingCount];
@@ -318,6 +328,7 @@ public class ControlElement {
             states = new boolean[safeBindingCount];
             activeBindingSlots = new boolean[safeBindingCount];
             comboBindings = null;
+            rawComboBindingNames = null;
             cellPressTimes = null;
         }
         boundingBoxNeedsUpdate = true;
@@ -332,6 +343,7 @@ public class ControlElement {
         states = Arrays.copyOf(states, safeBindingCount);
         activeBindingSlots = Arrays.copyOf(activeBindingSlots, safeBindingCount);
         if (comboBindings != null) comboBindings = Arrays.copyOf(comboBindings, safeBindingCount);
+        if (rawComboBindingNames != null) rawComboBindingNames = Arrays.copyOf(rawComboBindingNames, safeBindingCount);
         if (cellPressTimes != null) cellPressTimes = Arrays.copyOf(cellPressTimes, safeBindingCount);
         boundingBoxNeedsUpdate = true;
     }
@@ -385,7 +397,7 @@ public class ControlElement {
     public int getStickRadius() { return stickRadius; }
     public void setStickRadius(int stickRadius) { this.stickRadius = clamp(stickRadius, MIN_STICK_RADIUS, MAX_STICK_RADIUS); }
     public float getMouseSensitivity() { return mouseSensitivity; }
-    public void setMouseSensitivity(float s) { this.mouseSensitivity = Math.max(0.1f, Math.min(5.0f, s)); }
+    public void setMouseSensitivity(float s) { this.mouseSensitivity = clampFinite(s, 0.1f, 5.0f, 1.0f); }
     public int getGridRows() { return gridRows; }
     public void setGridRows(int gridRows) { this.gridRows = clamp(gridRows, 1, MAX_GRID_ROWS); boundingBoxNeedsUpdate = true; }
     public int getGridCols() { return gridCols; }
@@ -395,13 +407,24 @@ public class ControlElement {
     public Binding[] getCombo(int index) { return (comboBindings != null && index >= 0 && index < comboBindings.length) ? comboBindings[index] : null; }
     public void setCombo(int index, Binding[] combo) {
         if (!isValidBindingIndex(index)) return;
+        if (rawComboBindingNames != null && index < rawComboBindingNames.length) rawComboBindingNames[index] = null;
         if (combo == null || combo.length == 0) {
             if (comboBindings != null && index < comboBindings.length) comboBindings[index] = null;
+            notifyBindingsChanged();
             return;
         }
         if (comboBindings == null) comboBindings = new Binding[bindings.length][];
         else if (comboBindings.length != bindings.length) comboBindings = Arrays.copyOf(comboBindings, bindings.length);
         comboBindings[index] = sanitizeCombo(combo);
+        notifyBindingsChanged();
+    }
+
+    void setLoadedCombo(int index, Binding[] combo, String[] rawNames) {
+        if (!isValidBindingIndex(index)) return;
+        if (comboBindings == null) comboBindings = new Binding[bindings.length][];
+        comboBindings[index] = sanitizeCombo(combo);
+        if (rawComboBindingNames == null) rawComboBindingNames = new String[bindings.length][];
+        rawComboBindingNames[index] = rawNames != null ? Arrays.copyOf(rawNames, rawNames.length) : null;
     }
     public boolean hasCombo(int index) { return getCombo(index) != null && getCombo(index).length > 0; }
     public void setCellPressTime(int index, long time) {
@@ -412,15 +435,18 @@ public class ControlElement {
     }
 
     public Binding getHoldKey() { return holdKey != null ? holdKey : Binding.NONE; }
-    public void setHoldKey(Binding key) { this.holdKey = key != null ? key : Binding.NONE; }
+    public void setHoldKey(Binding key) {
+        this.holdKey = key != null ? key : Binding.NONE;
+        if (sourceJSONObject != null) holdKeyEdited = true;
+    }
     public float getDeadZone() { return deadZone; }
-    public void setDeadZone(float dz) { this.deadZone = Math.max(0f, Math.min(0.5f, dz)); }
+    public void setDeadZone(float dz) { this.deadZone = clampFinite(dz, 0f, 0.5f, STICK_DEAD_ZONE); }
     public boolean isCustomAreaAppearanceEnabled() { return customAreaAppearanceEnabled; }
     public void setCustomAreaAppearanceEnabled(boolean enabled) { customAreaAppearanceEnabled = enabled; }
     public int getCustomAreaColor() { return customAreaColor; }
     public void setCustomAreaColor(int color) { customAreaColor = 0xFF000000 | (color & 0x00FFFFFF); }
     public float getCustomAreaOpacity() { return customAreaOpacity; }
-    public void setCustomAreaOpacity(float opacity) { customAreaOpacity = Math.max(0f, Math.min(1f, opacity)); }
+    public void setCustomAreaOpacity(float opacity) { customAreaOpacity = clampFinite(opacity, 0f, 1f, 0.25f); }
     public String getGroupId() { return groupId; }
     public void setGroupId(String id) {
         String trimmedId = id != null ? id.trim() : null;
@@ -435,6 +461,37 @@ public class ControlElement {
             if (binding != null && binding != Binding.NONE) sanitized[count++] = binding;
         }
         return count == combo.length ? sanitized : Arrays.copyOf(sanitized, count);
+    }
+
+    Binding[] getEffectiveBindingsForSlot(int index) {
+        if (!isValidBindingIndex(index)) return new Binding[0];
+        Binding mainBinding = getBindingAt(index);
+        Binding[] combo = getCombo(index);
+        if (combo == null || combo.length == 0) {
+            return mainBinding == Binding.NONE ? new Binding[0] : new Binding[]{mainBinding};
+        }
+        if (mainBinding == Binding.NONE) return combo;
+        for (Binding binding : combo) if (binding == mainBinding) return combo;
+        Binding[] effective = new Binding[combo.length + 1];
+        effective[0] = mainBinding;
+        System.arraycopy(combo, 0, effective, 1, combo.length);
+        return effective;
+    }
+
+    boolean usesGamepadBinding() {
+        for (Binding binding : bindings) if (binding.isGamepad()) return true;
+        if (comboBindings != null) {
+            for (Binding[] combo : comboBindings) {
+                if (combo == null) continue;
+                for (Binding binding : combo) if (binding.isGamepad()) return true;
+            }
+        }
+        return false;
+    }
+
+    private void notifyBindingsChanged() {
+        ControlsProfile profile = inputControlsView != null ? inputControlsView.getProfile() : null;
+        if (profile != null) profile.updateVirtualGamepad();
     }
 
     public boolean isToggleSwitch() {
@@ -453,10 +510,22 @@ public class ControlElement {
         if (index < 0 || index >= MAX_BINDING_COUNT) return;
         ensureBindingCapacity(index + 1);
         bindings[index] = binding != null ? binding : Binding.NONE;
+        if (sourceJSONObject != null) {
+            JSONArray sourceBindings = sourceJSONObject.optJSONArray("bindings");
+            if (sourceBindings != null) {
+                try {
+                    while (sourceBindings.length() <= index) sourceBindings.put(Binding.NONE.name());
+                    sourceBindings.put(index, bindings[index].name());
+                }
+                catch (JSONException ignored) {}
+            }
+        }
+        notifyBindingsChanged();
     }
 
     public void setBinding(Binding binding) {
         Arrays.fill(bindings, binding != null ? binding : Binding.NONE);
+        notifyBindingsChanged();
     }
 
     public float getScale() {
@@ -464,7 +533,7 @@ public class ControlElement {
     }
 
     public void setScale(float scale) {
-        this.scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale));
+        this.scale = clampFinite(scale, MIN_SCALE, MAX_SCALE, 1.0f);
         boundingBoxNeedsUpdate = true;
     }
 
@@ -512,7 +581,12 @@ public class ControlElement {
     }
 
     public void setIconId(int iconId) {
-        this.iconId = (short)Math.max(0, Math.min(255, iconId));
+        int normalizedId = iconId >= Byte.MIN_VALUE && iconId < 0 ? iconId & 0xFF : iconId;
+        this.iconId = (short)Math.max(0, Math.min(255, normalizedId));
+    }
+
+    private static float clampFinite(float value, float min, float max, float fallback) {
+        return Float.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
     }
 
     public Rect getBoundingBox() {
@@ -2003,7 +2077,11 @@ public class ControlElement {
             elementJSONObject.put("shape", shape.name());
 
             JSONArray bindingsJSONArray = new JSONArray();
-            for (Binding binding : bindings) bindingsJSONArray.put(binding.name());
+            JSONArray sourceBindings = sourceJSONObject != null ? sourceJSONObject.optJSONArray("bindings") : null;
+            for (int i = 0; i < bindings.length; i++) {
+                String sourceName = sourceBindings != null ? sourceBindings.optString(i, null) : null;
+                bindingsJSONArray.put(getSerializedBindingName(bindings[i], sourceName));
+            }
 
             elementJSONObject.put("bindings", bindingsJSONArray);
             elementJSONObject.put("scale", Float.valueOf(scale));
@@ -2050,17 +2128,25 @@ public class ControlElement {
                 elementJSONObject.put("expandableDirection", expandableDirection.name());
             }
             // Serialize combos if any
-            if (comboBindings != null) {
+            if (comboBindings != null || rawComboBindingNames != null) {
                 JSONArray combosArr = new JSONArray();
-                int comboCount = Math.min(bindings.length, comboBindings.length);
+                int comboCount = bindings.length;
                 for (int i = 0; i < comboCount; i++) {
-                    Binding[] combo = comboBindings[i];
-                    if (combo == null || combo.length == 0) continue;
+                    Binding[] combo = comboBindings != null && i < comboBindings.length ? comboBindings[i] : null;
+                    String[] rawNames = rawComboBindingNames != null && i < rawComboBindingNames.length
+                            ? rawComboBindingNames[i]
+                            : null;
+                    if ((combo == null || combo.length == 0) && (rawNames == null || rawNames.length == 0)) continue;
 
                     JSONArray entry = new JSONArray();
                     entry.put(i); // index
                     JSONArray keys = new JSONArray();
-                    for (Binding b : combo) if (b != null && b != Binding.NONE) keys.put(b.name());
+                    if (rawNames != null) {
+                        for (String rawName : rawNames) if (rawName != null) keys.put(rawName);
+                    }
+                    else {
+                        for (Binding b : combo) if (b != null && b != Binding.NONE) keys.put(b.name());
+                    }
                     if (keys.length() == 0) continue;
                     entry.put(keys);
                     combosArr.put(entry);
@@ -2068,7 +2154,11 @@ public class ControlElement {
                 if (combosArr.length() > 0) elementJSONObject.put("combos", combosArr);
             }
             // Serialize hold key if set
-            if (holdKey != null && holdKey != Binding.NONE) {
+            String sourceHoldKey = sourceJSONObject != null ? sourceJSONObject.optString("holdKey", null) : null;
+            if (!holdKeyEdited && sourceHoldKey != null && !Binding.isKnownSerializedName(sourceHoldKey)) {
+                elementJSONObject.put("holdKey", sourceHoldKey);
+            }
+            else if (holdKey != null && holdKey != Binding.NONE) {
                 elementJSONObject.put("holdKey", holdKey.name());
             }
             return elementJSONObject;
@@ -2091,6 +2181,12 @@ public class ControlElement {
         };
         for (String key : optionalKeys) elementJSONObject.remove(key);
         return elementJSONObject;
+    }
+
+    static String getSerializedBindingName(Binding binding, String sourceName) {
+        return binding == Binding.NONE && sourceName != null && !Binding.isKnownSerializedName(sourceName)
+                ? sourceName
+                : binding.name();
     }
 
     public boolean containsPoint(float x, float y) {
@@ -2242,7 +2338,7 @@ public class ControlElement {
         if (state == wasActive && !analogUpdate) return;
         if (!analogUpdate) activeBindingSlots[index] = state;
         if (hasCombo(index)) {
-            for (Binding b : getCombo(index)) {
+            for (Binding b : getEffectiveBindingsForSlot(index)) {
                 // Suppress per-binding gamepad state sends; batch them at the end
                 // so the game receives the full combo as one atomic update.
                 if (b.isMouseMove()) {

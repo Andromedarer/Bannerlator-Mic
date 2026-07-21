@@ -99,6 +99,18 @@ public enum Binding {
         }
     }
 
+    public static boolean isKnownSerializedName(String name) {
+        if (name == null) return false;
+        if (name.equals("KEY_CTRL") || name.equals("KEY_SHIFT") || name.equals("KEY_ALT")) return true;
+        try {
+            valueOf(name);
+            return true;
+        }
+        catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
     public Pointer.Button getPointerButton() {
         switch (this) {
             case MOUSE_LEFT_BUTTON:

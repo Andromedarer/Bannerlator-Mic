@@ -180,6 +180,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private String hudGpuName = null;           // GPU model string from _MESA_DRV_GPU_NAME
     private InGameControlsEditor inGameControlsEditor;
     private boolean inGameEditorPreviousShowTouchscreen;
+    private boolean inGameEditorPreviousTimeoutEnabled;
+    private ControlsProfile inGameEditorPreviousProfile;
     private Shortcut shortcut;
     private String graphicsDriver = Container.DEFAULT_GRAPHICS_DRIVER;
     private HashMap<String, String> graphicsDriverConfig;
@@ -1300,6 +1302,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
     @Override
     public void onPause() {
         super.onPause();
+
+        if (inputControlsView != null) inputControlsView.releaseAllInputs();
+        if (touchpadView != null) touchpadView.releaseAllInputs();
+        if (winHandler != null && inputControlsView != null) winHandler.releaseAllControllerInputs();
 
         // Check if we are entering Picture-in-Picture mode
         if (!isInPictureInPictureMode()) {
@@ -2869,8 +2875,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
             seedControlsColorState();
         };
 
-        ds.onInputControlsSettings = () -> {
-            openInGameControlsEditorFromDialog();
+        ds.onInputControlsSettings = profileIndex -> {
+            openInGameControlsEditorFromDialog(profileIndex);
         };
 
         // Vibration state
@@ -3083,15 +3089,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
             seedControlsColorState();
         };
 
-        ds.onInputControlsSettings = () -> {
-            openInGameControlsEditorFromDialog();
+        ds.onInputControlsSettings = profileIndex -> {
+            openInGameControlsEditorFromDialog(profileIndex);
         };
         ds.show(XServerDialogState.ActiveDialog.INPUT_CONTROLS);
     }
 
-    private void openInGameControlsEditorFromDialog() {
+    private void openInGameControlsEditorFromDialog(int selectedIndex) {
         if (inGameControlsEditor != null || inputControlsView == null) return;
-        int selectedIndex = XServerDialogState.INSTANCE.getSelectedProfileIdx().getValue();
         ArrayList<ControlsProfile> profiles = inputControlsManager.getProfiles(true);
         if (selectedIndex <= 0 || selectedIndex - 1 >= profiles.size()) {
             AppUtils.showToast(this, R.string.no_profile_selected);
@@ -3100,10 +3105,16 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         ControlsProfile profile = profiles.get(selectedIndex - 1);
         inGameEditorPreviousShowTouchscreen = inputControlsView.isShowTouchscreenControls();
+        inGameEditorPreviousTimeoutEnabled = preferences.getBoolean("touchscreen_timeout_enabled", false);
+        inGameEditorPreviousProfile = inputControlsView.getProfile();
         XServerDialogState.INSTANCE.dismiss();
         drawerLayout.closeDrawers();
         releasePointerCaptureIfNeeded("in-game-controls-editor");
+        inputControlsView.releaseAllInputs();
+        if (touchpadView != null) touchpadView.releaseAllInputs();
         if (winHandler != null) winHandler.releaseAllControllerInputs();
+        timeoutHandler.removeCallbacks(hideControlsRunnable);
+        if (touchpadView != null) touchpadView.setOnTouchListener(null);
 
         showInputControls(profile);
         inputControlsView.setShowTouchscreenControls(true);
@@ -3126,13 +3137,18 @@ public class XServerDisplayActivity extends AppCompatActivity {
         inGameControlsEditor = null;
         inputControlsView.setEditorBackgroundVisible(true);
         inputControlsView.setEditMode(false);
+        if (inGameEditorPreviousProfile != null) showInputControls(inGameEditorPreviousProfile);
+        else hideInputControls();
+        inGameEditorPreviousProfile = null;
         inputControlsView.setShowTouchscreenControls(inGameEditorPreviousShowTouchscreen);
         inputControlsView.requestFocus();
         inputControlsView.invalidate();
         seedControlsColorState();
-        if (inGameEditorPreviousShowTouchscreen
-                && preferences.getBoolean("touchscreen_timeout_enabled", false)) {
+        if (inGameEditorPreviousShowTouchscreen && inGameEditorPreviousTimeoutEnabled) {
             startTouchscreenTimeout();
+        } else {
+            timeoutHandler.removeCallbacks(hideControlsRunnable);
+            if (touchpadView != null) touchpadView.setOnTouchListener(null);
         }
         if (isRelativeMouseMovement || cursorLock) {
             inputControlsView.postDelayed(() -> ensurePointerCapture("in-game-controls-editor-closed"), 250);

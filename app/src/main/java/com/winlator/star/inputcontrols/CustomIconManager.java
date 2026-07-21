@@ -20,6 +20,8 @@ public class CustomIconManager {
     public static final short CUSTOM_ICON_ID_OFFSET = 100;
     public static final short MAX_CUSTOM_ICON_ID = 255;
     private static final Object ICON_STORAGE_LOCK = new Object();
+    private static final int MAX_ICON_DIMENSION = 2048;
+    private static final long MAX_ICON_PIXELS = 4_194_304L;
 
     public static class ImportedIcon {
         public final short id;
@@ -49,9 +51,20 @@ public class CustomIconManager {
         short nextId = getNextAvailableId();
         if (nextId < 0) return -1;
         File outputFile = new File(customIconsDir, nextId + ".png");
-        try (InputStream is = context.getContentResolver().openInputStream(uri)) {
-            if (is == null) return -1;
-            Bitmap bitmap = BitmapFactory.decodeStream(is);
+        try {
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            try (InputStream is = context.getContentResolver().openInputStream(uri)) {
+                if (is == null) return -1;
+                BitmapFactory.decodeStream(is, null, bounds);
+            }
+            if (!hasValidIconBounds(bounds.outWidth, bounds.outHeight)) return -1;
+
+            Bitmap bitmap;
+            try (InputStream is = context.getContentResolver().openInputStream(uri)) {
+                if (is == null) return -1;
+                bitmap = BitmapFactory.decodeStream(is);
+            }
             if (bitmap == null) return -1;
             try (FileOutputStream fos = new FileOutputStream(outputFile)) {
                 if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, fos)) {
@@ -63,7 +76,7 @@ public class CustomIconManager {
                 bitmap.recycle();
             }
             return nextId;
-        } catch (IOException e) {
+        } catch (IOException | OutOfMemoryError e) {
             outputFile.delete();
             e.printStackTrace();
         }
@@ -134,10 +147,14 @@ public class CustomIconManager {
         BitmapFactory.Options bounds = new BitmapFactory.Options();
         bounds.inJustDecodeBounds = true;
         BitmapFactory.decodeByteArray(data, 0, data.length, bounds);
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0
-                || bounds.outWidth > 2048 || bounds.outHeight > 2048
-                || (long)bounds.outWidth * bounds.outHeight > 4_194_304L) return null;
-        Bitmap bitmap = BitmapFactory.decodeByteArray(data, 0, data.length);
+        if (!hasValidIconBounds(bounds.outWidth, bounds.outHeight)) return null;
+        Bitmap bitmap;
+        try {
+            bitmap = BitmapFactory.decodeByteArray(data, 0, data.length);
+        }
+        catch (OutOfMemoryError e) {
+            return null;
+        }
         if (bitmap == null) return null;
         bitmap.recycle();
 
@@ -177,6 +194,12 @@ public class CustomIconManager {
         catch (IOException e) {
             return false;
         }
+    }
+
+    static boolean hasValidIconBounds(int width, int height) {
+        return width > 0 && height > 0
+                && width <= MAX_ICON_DIMENSION && height <= MAX_ICON_DIMENSION
+                && (long)width * height <= MAX_ICON_PIXELS;
     }
 
     public void deleteIcon(int id) {

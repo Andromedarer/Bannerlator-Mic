@@ -6,6 +6,7 @@ import android.content.res.AssetManager;
 import android.media.MediaScannerConnection;
 import android.net.Uri;
 import android.os.Environment;
+import android.util.AtomicFile;
 import android.util.JsonReader;
 
 import androidx.annotation.Nullable;
@@ -20,13 +21,16 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.File;
+import java.io.ByteArrayOutputStream;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -66,6 +70,7 @@ public class InputControlsManager {
 
     private void copyAssetProfilesIfNeeded() {
         File profilesDir = InputControlsManager.getProfilesDir(context);
+        recoverAtomicProfiles(profilesDir);
         if (FileUtils.isEmpty(profilesDir)) {
             FileUtils.copy(context, "inputcontrols/profiles", profilesDir);
             return;
@@ -78,7 +83,7 @@ public class InputControlsManager {
         if (oldVersion == newVersion) return;
         preferences.edit().putInt("inputcontrols_app_version", newVersion).apply();
 
-        File[] files = profilesDir.listFiles();
+        File[] files = profilesDir.listFiles((dir, name) -> name.startsWith("controls-") && name.endsWith(".icp"));
         if (files == null) return;
 
         try {
@@ -87,10 +92,12 @@ public class InputControlsManager {
             for (String assetFile : assetFiles) {
                 String assetPath = "inputcontrols/profiles/"+assetFile;
                 ControlsProfile originProfile = loadProfile(context, assetManager.open(assetPath));
+                if (originProfile == null) continue;
 
                 File targetFile = null;
                 for (File file : files) {
                     ControlsProfile targetProfile = loadProfile(context, file);
+                    if (targetProfile == null) continue;
                     if (originProfile.id == targetProfile.id && originProfile.getName().equals(targetProfile.getName())) {
                         targetFile = file;
                         break;
@@ -110,7 +117,7 @@ public class InputControlsManager {
         copyAssetProfilesIfNeeded();
 
         ArrayList<ControlsProfile> profiles = new ArrayList<>();
-        File[] files = profilesDir.listFiles();
+        File[] files = profilesDir.listFiles((dir, name) -> name.startsWith("controls-") && name.endsWith(".icp"));
         if (files != null) {
             for (File file : files) {
                 ControlsProfile profile = loadProfile(context, file);
@@ -151,7 +158,7 @@ public class InputControlsManager {
         File newFile = ControlsProfile.getProfileFile(context, newId);
 
         try {
-            JSONObject data = new JSONObject(FileUtils.readString(ControlsProfile.getProfileFile(context, source.id)));
+            JSONObject data = new JSONObject(readStringAtomically(ControlsProfile.getProfileFile(context, source.id)));
             data.put("schemaVersion", ControlsProfile.SCHEMA_VERSION);
             data.put("minEditorVersion", ControlsProfile.MIN_EDITOR_VERSION);
             data.put("id", newId);
@@ -159,7 +166,7 @@ public class InputControlsManager {
             if (data.has("template")) data.remove("template");
             FileUtils.writeString(newFile, data.toString());
         }
-        catch (JSONException e) {}
+        catch (JSONException | IOException e) {}
 
         ControlsProfile profile = loadProfile(context, newFile);
         profiles.add(profile);
@@ -178,18 +185,44 @@ public class InputControlsManager {
         }
     }
 
-    private ControlsProfile importProfileLocked(JSONObject data) {
+    private static void recoverAtomicProfiles(File profilesDir) {
+        File[] recoveryFiles = profilesDir.listFiles((dir, name) ->
+                name.startsWith("controls-") && (name.endsWith(".icp.bak") || name.endsWith(".icp.new")));
+        if (recoveryFiles == null) return;
+        for (File recoveryFile : recoveryFiles) {
+            String name = recoveryFile.getName();
+            File baseFile = new File(profilesDir, name.substring(0, name.length() - 4));
+            try (InputStream ignored = new AtomicFile(baseFile).openRead()) {}
+            catch (IOException ignored) {
+                if (name.endsWith(".new") && !baseFile.isFile()) recoveryFile.delete();
+            }
+        }
+    }
+
+    private ControlsProfile importProfileLocked(JSONObject sourceData) {
+        if (sourceData == null) return null;
+        if (!profilesLoaded) loadProfiles(false);
         CustomIconManager customIconManager = new CustomIconManager(context);
         ArrayList<Short> importedIconIds = new ArrayList<>();
         try {
+            JSONObject data = new JSONObject(sourceData.toString());
             if (!isSupportedTransportFormat(data)) return null;
             Object profileName = data.opt("name");
             if (!data.has("id") || !(profileName instanceof String)
                     || ((String)profileName).trim().isEmpty()) return null;
-            int schemaVersion = data.optInt("schemaVersion", 1);
-            int minEditorVersion = data.optInt("minEditorVersion", 1);
+            Integer schemaVersion = getIntegralVersion(data, "schemaVersion", 1);
+            Integer minEditorVersion = getIntegralVersion(data, "minEditorVersion", 1);
+            if (schemaVersion == null || minEditorVersion == null || !isValidImportedProfile(data)) return null;
             if (schemaVersion > ControlsProfile.SCHEMA_VERSION
                     || minEditorVersion > ControlsProfile.EDITOR_VERSION) return null;
+
+            int foundIndex = -1;
+            for (int i = 0; i < profiles.size(); i++) {
+                if (profiles.get(i).getName().equals(profileName)) {
+                    foundIndex = i;
+                    break;
+                }
+            }
 
             Map<Integer, Integer> iconIdMap = new HashMap<>();
             JSONArray embeddedIcons = data.optJSONArray("customIcons");
@@ -198,7 +231,7 @@ public class InputControlsManager {
                 if (elements != null) {
                     for (int i = 0; i < elements.length(); i++) {
                         JSONObject element = elements.optJSONObject(i);
-                        int iconId = element != null ? element.optInt("iconId", 0) : 0;
+                        int iconId = element != null ? normalizeLegacyIconId(element.optInt("iconId", 0)) : 0;
                         if (iconId >= CustomIconManager.CUSTOM_ICON_ID_OFFSET
                                 && iconId <= CustomIconManager.MAX_CUSTOM_ICON_ID) iconIdMap.put(iconId, 0);
                     }
@@ -206,7 +239,7 @@ public class InputControlsManager {
                 for (int i = 0; i < embeddedIcons.length(); i++) {
                     JSONObject embeddedIcon = embeddedIcons.optJSONObject(i);
                     if (embeddedIcon == null) continue;
-                    int sourceId = embeddedIcon.optInt("id", -1);
+                    int sourceId = normalizeLegacyIconId(embeddedIcon.optInt("id", -1));
                     if (!iconIdMap.containsKey(sourceId) || iconIdMap.get(sourceId) != 0) continue;
                     CustomIconManager.ImportedIcon importedIcon = customIconManager.importEncodedIcon(
                             embeddedIcon.optString("png", null));
@@ -225,44 +258,41 @@ public class InputControlsManager {
             }
             remapIconIds(data, iconIdMap);
 
-            int newId = ++maxProfileId;
+            int newId = foundIndex >= 0 ? profiles.get(foundIndex).id : maxProfileId + 1;
             File newFile = ControlsProfile.getProfileFile(context, newId);
+            String previousData = foundIndex >= 0 ? readStringAtomically(newFile) : null;
             data.put("schemaVersion", ControlsProfile.SCHEMA_VERSION);
             data.put("minEditorVersion", ControlsProfile.MIN_EDITOR_VERSION);
             data.remove("format");
             data.remove("formatVersion");
             data.remove("minReaderVersion");
             data.put("id", newId);
-            if (!FileUtils.writeString(newFile, data.toString())) {
+            if (!isValidImportedProfile(data)) {
+                rollbackImportedIcons(customIconManager, importedIconIds);
+                return null;
+            }
+            if (!writeStringAtomically(newFile, data.toString())) {
                 rollbackImportedIcons(customIconManager, importedIconIds);
                 return null;
             }
             ControlsProfile newProfile = loadProfile(context, newFile);
             if (newProfile == null) {
-                newFile.delete();
+                if (previousData != null) writeStringAtomically(newFile, previousData);
+                else new AtomicFile(newFile).delete();
                 rollbackImportedIcons(customIconManager, importedIconIds);
                 return null;
             }
 
-            int foundIndex = -1;
-            for (int i = 0; i < profiles.size(); i++) {
-                ControlsProfile profile = profiles.get(i);
-                if (profile.getName().equals(newProfile.getName())) {
-                    foundIndex = i;
-                    break;
-                }
-            }
-
             if (foundIndex != -1) {
-                ControlsProfile replacedProfile = profiles.get(foundIndex);
-                File replacedFile = ControlsProfile.getProfileFile(context, replacedProfile.id);
-                if (!replacedFile.equals(newFile)) replacedFile.delete();
                 profiles.set(foundIndex, newProfile);
             }
-            else profiles.add(newProfile);
+            else {
+                maxProfileId = newId;
+                profiles.add(newProfile);
+            }
             return newProfile;
         }
-        catch (JSONException | RuntimeException e) {
+        catch (JSONException | IOException | RuntimeException e) {
             rollbackImportedIcons(customIconManager, importedIconIds);
             return null;
         }
@@ -270,26 +300,18 @@ public class InputControlsManager {
 
     public File exportProfile(ControlsProfile profile) {
         if (!profile.save()) return null;
-        File destination;
-        SharedPreferences sp = PreferenceManager.getDefaultSharedPreferences(context);
-        String winlatorPath = sp.getString("winlator_path_uri", null);
-        if (winlatorPath != null) {
-            Uri winlatorUri = Uri.parse(winlatorPath);
-            destination = new File(FileUtils.getFilePathFromUri(context, winlatorUri), "profiles/" + getSafeProfileName(profile) + ".icpx");
-        }
-        else {
-            destination = new File(SettingsFragment.DEFAULT_WINLATOR_PATH, "profiles/" + getSafeProfileName(profile) + ".icpx");
-        }
+        File destination = getExportDestination(profile, ".icpx");
         File source = ControlsProfile.getProfileFile(context, profile.id);
         try {
-            JSONObject data = new JSONObject(FileUtils.readString(source));
+            JSONObject data = new JSONObject(readStringAtomically(source));
             JSONArray elements = data.optJSONArray("elements");
             Set<Integer> iconIds = new HashSet<>();
             if (elements != null) {
                 for (int i = 0; i < elements.length(); i++) {
                     JSONObject element = elements.optJSONObject(i);
                     if (element == null) continue;
-                    int iconId = element.optInt("iconId", 0);
+                    int iconId = normalizeLegacyIconId(element.optInt("iconId", 0));
+                    if (iconId != element.optInt("iconId", 0)) element.put("iconId", iconId);
                     if (iconId >= CustomIconManager.CUSTOM_ICON_ID_OFFSET) iconIds.add(iconId);
                 }
             }
@@ -307,17 +329,7 @@ public class InputControlsManager {
             if (embeddedIcons.length() > 0) data.put("customIcons", embeddedIcons);
             else data.remove("customIcons");
             addTransportHeader(data);
-            File parent = destination.getParentFile();
-            if (parent != null && !parent.exists() && !parent.mkdirs()) return null;
-            File temporaryFile = new File(parent, destination.getName() + ".tmp");
-            if (!FileUtils.writeString(temporaryFile, data.toString())) return null;
-            try {
-                Files.move(temporaryFile.toPath(), destination.toPath(),
-                        StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-            }
-            catch (IOException atomicMoveError) {
-                Files.move(temporaryFile.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING);
-            }
+            if (!writeExportFile(destination, data)) return null;
         }
         catch (JSONException | IOException e) {
             return null;
@@ -326,15 +338,68 @@ public class InputControlsManager {
         return destination.isFile() ? destination : null;
     }
 
+    public File exportLegacyProfile(ControlsProfile profile) {
+        if (!profile.save()) return null;
+        File destination = getExportDestination(profile, ".icp");
+        File source = ControlsProfile.getProfileFile(context, profile.id);
+        try {
+            JSONObject data = prepareLegacyExport(new JSONObject(readStringAtomically(source)));
+            if (!writeExportFile(destination, data)) return null;
+        }
+        catch (JSONException | IOException e) {
+            return null;
+        }
+        MediaScannerConnection.scanFile(context, new String[]{destination.getAbsolutePath()}, null, null);
+        return destination.isFile() ? destination : null;
+    }
+
+    static JSONObject prepareLegacyExport(JSONObject data) {
+        data.remove("format");
+        data.remove("formatVersion");
+        data.remove("minReaderVersion");
+        data.remove("customIcons");
+        return data;
+    }
+
+    private File getExportDestination(ControlsProfile profile, String extension) {
+        SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(context);
+        String winlatorPath = preferences.getString("winlator_path_uri", null);
+        File root = winlatorPath != null
+                ? new File(FileUtils.getFilePathFromUri(context, Uri.parse(winlatorPath)))
+                : new File(SettingsFragment.DEFAULT_WINLATOR_PATH);
+        return new File(root, "profiles/" + getSafeProfileName(profile) + extension);
+    }
+
+    private static boolean writeExportFile(File destination, JSONObject data) throws IOException {
+        File parent = destination.getParentFile();
+        if (parent != null && !parent.exists() && !parent.mkdirs()) return false;
+        File temporaryFile = FileUtils.createTempFile(parent, destination.getName());
+        try {
+            if (!FileUtils.writeString(temporaryFile, data.toString())) return false;
+            try {
+                Files.move(temporaryFile.toPath(), destination.toPath(),
+                        StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            }
+            catch (AtomicMoveNotSupportedException atomicMoveError) {
+                Files.move(temporaryFile.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            }
+            return true;
+        }
+        finally {
+            temporaryFile.delete();
+        }
+    }
+
     static void remapIconIds(JSONObject data, Map<Integer, Integer> iconIdMap) throws JSONException {
         JSONArray elements = data.optJSONArray("elements");
         if (elements == null || iconIdMap.isEmpty()) return;
         for (int i = 0; i < elements.length(); i++) {
             JSONObject element = elements.optJSONObject(i);
             if (element == null) continue;
-            int sourceIconId = element.optInt("iconId", 0);
+            int sourceIconId = normalizeLegacyIconId(element.optInt("iconId", 0));
             Integer targetIconId = iconIdMap.get(sourceIconId);
             if (targetIconId != null) element.put("iconId", targetIconId);
+            else if (sourceIconId != element.optInt("iconId", 0)) element.put("iconId", sourceIconId);
         }
     }
 
@@ -360,6 +425,125 @@ public class InputControlsManager {
         return (int)number;
     }
 
+    private static Integer getIntegralVersion(JSONObject data, String key, int defaultValue) {
+        return data.has(key) ? getIntegralVersion(data, key) : defaultValue;
+    }
+
+    static int normalizeLegacyIconId(int iconId) {
+        return iconId >= Byte.MIN_VALUE && iconId < 0 ? iconId & 0xFF : iconId;
+    }
+
+    static boolean isValidImportedProfile(JSONObject data) {
+        Object name = data.opt("name");
+        if (!(name instanceof String) || ((String)name).trim().isEmpty()) return false;
+        if (data.has("cursorSpeed") && !isFiniteNumber(data, "cursorSpeed")) return false;
+        if (data.has("customAccentEnabled") && !(data.opt("customAccentEnabled") instanceof Boolean)) return false;
+        if (data.has("customAccentColor") && !(data.opt("customAccentColor") instanceof Number)) return false;
+        JSONArray controllers = data.optJSONArray("controllers");
+        if (data.has("controllers") && controllers == null) return false;
+        if (controllers != null) {
+            for (int i = 0; i < controllers.length(); i++) {
+                JSONObject controller = controllers.optJSONObject(i);
+                if (controller == null || !isValidImportedController(controller)) return false;
+            }
+        }
+        JSONArray elements = data.optJSONArray("elements");
+        if (data.has("elements") && elements == null) return false;
+        if (elements == null) return true;
+        for (int i = 0; i < elements.length(); i++) {
+            JSONObject element = elements.optJSONObject(i);
+            if (element == null || !isValidImportedElement(element)) return false;
+        }
+        return true;
+    }
+
+    private static boolean isValidImportedElement(JSONObject element) {
+        Object typeValue = element.opt("type");
+        if (!(typeValue instanceof String)) return false;
+        try {
+            ControlElement.Type.valueOf((String)typeValue);
+        }
+        catch (IllegalArgumentException e) {
+            return false;
+        }
+
+        Object shapeValue = element.opt("shape");
+        if (!(shapeValue instanceof String)) return false;
+        try {
+            ControlElement.Shape.valueOf((String)shapeValue);
+        }
+        catch (IllegalArgumentException e) {
+            return false;
+        }
+        if (!(element.opt("toggleSwitch") instanceof Boolean)
+                || !(element.opt("text") instanceof String)
+                || !(element.opt("iconId") instanceof Number)
+                || !isFiniteNumber(element, "x")
+                || !isFiniteNumber(element, "y")
+                || !isFiniteNumber(element, "scale")) return false;
+        JSONArray bindings = element.optJSONArray("bindings");
+        if (bindings == null) return false;
+        for (int i = 0; i < bindings.length(); i++) {
+            if (!(bindings.opt(i) instanceof String)) return false;
+        }
+        String[] optionalNumbers = {"deadZone", "mouseSensitivity", "customAreaOpacity",
+                "areaWidthRatio", "areaHeightRatio", "stickRadiusRatio"};
+        for (String key : optionalNumbers) {
+            if (element.has(key) && !isFiniteNumber(element, key)) return false;
+        }
+        String[] positiveRatios = {"areaWidthRatio", "areaHeightRatio", "stickRadiusRatio"};
+        for (String key : positiveRatios) {
+            if (element.has(key) && ((Number)element.opt(key)).doubleValue() <= 0) return false;
+        }
+        return true;
+    }
+
+    private static boolean isValidImportedController(JSONObject controller) {
+        if (!(controller.opt("id") instanceof String)
+                || ((String)controller.opt("id")).trim().isEmpty()
+                || !(controller.opt("name") instanceof String)) return false;
+        JSONArray bindings = controller.optJSONArray("controllerBindings");
+        if (bindings == null) return false;
+        for (int i = 0; i < bindings.length(); i++) {
+            JSONObject binding = bindings.optJSONObject(i);
+            if (binding == null || !(binding.opt("keyCode") instanceof Number)
+                    || getIntegralVersion(binding, "keyCode") == null
+                    || !(binding.opt("binding") instanceof String)) return false;
+        }
+        return true;
+    }
+
+    private static boolean isFiniteNumber(JSONObject data, String key) {
+        Object value = data.opt(key);
+        return value instanceof Number && Double.isFinite(((Number)value).doubleValue());
+    }
+
+    static boolean writeStringAtomically(File file, String value) {
+        AtomicFile atomicFile = new AtomicFile(file);
+        FileOutputStream outputStream = null;
+        try {
+            outputStream = atomicFile.startWrite();
+            outputStream.write(value.getBytes(StandardCharsets.UTF_8));
+            atomicFile.finishWrite(outputStream);
+            return true;
+        }
+        catch (IOException e) {
+            if (outputStream != null) atomicFile.failWrite(outputStream);
+            return false;
+        }
+    }
+
+    static String readStringAtomically(File file) throws IOException {
+        AtomicFile atomicFile = new AtomicFile(file);
+        try (InputStream inputStream = atomicFile.openRead();
+             ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[8192];
+            int count;
+            while ((count = inputStream.read(buffer)) != -1) outputStream.write(buffer, 0, count);
+            return outputStream.toString(StandardCharsets.UTF_8.name());
+        }
+    }
+
     static void addTransportHeader(JSONObject data) throws JSONException {
         data.put("format", ICPX_FORMAT);
         data.put("formatVersion", ICPX_FORMAT_VERSION);
@@ -377,7 +561,7 @@ public class InputControlsManager {
 
     public static ControlsProfile loadProfile(Context context, File file) {
         try {
-            return loadProfile(context, new FileInputStream(file));
+            return loadProfile(context, new AtomicFile(file).openRead());
         }
         catch (FileNotFoundException e) {
             return null;
@@ -412,12 +596,7 @@ public class InputControlsManager {
                     customAccentColor = reader.nextInt();
                 }
                 else {
-                    // Stop as soon as the heavy arrays are reached — they're always written after the
-                    // lightweight header, so the header fields are guaranteed read by now. Robust to
-                    // the optional accent fields appearing in any order (old profiles without them
-                    // simply keep the defaults). Skip any other unknown header field.
-                    if (name.equals("elements") || name.equals("controllers")) break;
-                    else reader.skipValue();
+                    reader.skipValue();
                 }
             }
 

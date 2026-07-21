@@ -93,8 +93,7 @@ fun InputControlsDialog(state: XServerDialogState) {
 
                 OutlinedButton(
                     onClick = {
-                        state.setSelectedProfileIdx(selectedIdx)
-                        state.onInputControlsSettings?.run()
+                        state.onInputControlsSettings?.invoke(selectedIdx)
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) {

@@ -3,6 +3,7 @@ package com.winlator.star
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import java.io.File
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
@@ -58,6 +59,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.text.KeyboardOptions
@@ -88,6 +91,7 @@ private val SmallShape = RoundedCornerShape(10.dp)
 private data class PickerIcon(
     val id: Int,
     val bitmap: Bitmap?,
+    val isCustom: Boolean = false,
 )
 
 @Composable
@@ -148,7 +152,7 @@ fun ControlsEditorSettingsPane(
     }
 
     val builtInIcons = remember(context) { loadBuiltInIcons(context) }
-    val customIcons = remember(context, customIconReloadKey) { loadCustomIcons(customIconManager) }
+    val customIcons = remember(customIconManager, customIconReloadKey) { loadCustomIcons(customIconManager) }
 
     var typeIndex by remember { mutableStateOf(element.getType().ordinal) }
     var shapeIndex by remember { mutableStateOf(element.getShape().ordinal) }
@@ -857,6 +861,9 @@ fun ControlsEditorSettingsPane(
             val noneLabel = stringResource(R.string.none)
             val createLabel = stringResource(R.string.create_new_group)
             val assignedGroupId = groupId.trim()
+            var assignedGroupVisible by remember(assignedGroupId, customIconReloadKey) {
+                mutableStateOf(assignedGroupId.isEmpty() || profile.isGroupVisible(assignedGroupId))
+            }
             val groupOptions = buildList {
                 add(noneLabel)
                 addAll(groupNames)
@@ -898,7 +905,7 @@ fun ControlsEditorSettingsPane(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             painter = painterResource(
-                                if (profile.isGroupVisible(assignedGroupId)) R.drawable.icon_eye else R.drawable.icon_eye_off
+                                if (assignedGroupVisible) R.drawable.icon_eye else R.drawable.icon_eye_off
                             ),
                             contentDescription = stringResource(R.string.group_visibility),
                             tint = EditorTextValue,
@@ -909,8 +916,9 @@ fun ControlsEditorSettingsPane(
                     }
 
                     Switch(
-                        checked = profile.isGroupVisible(assignedGroupId),
+                        checked = assignedGroupVisible,
                         onCheckedChange = { checked ->
+                            assignedGroupVisible = checked
                             profile.setGroupVisible(assignedGroupId, checked)
                             profile.save()
                             onInvalidate()
@@ -1205,6 +1213,8 @@ private fun IconPicker(
     onSelected: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
+    val thumbnailSizePx = with(LocalDensity.current) { 32.dp.roundToPx() }
     LazyRow(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(EditorSpacing),
@@ -1212,7 +1222,16 @@ private fun IconPicker(
         items(icons, key = { it.id }) { icon ->
             val selected = icon.id == selectedId
             val border = if (selected) BorderStroke(2.dp, EditorAccent) else BorderStroke(1.dp, Color.White.copy(alpha = 0.12f))
-            val imageBitmap = remember(icon.bitmap) { icon.bitmap?.asImageBitmap() }
+            val customBitmap = remember(icon.id, icon.isCustom, thumbnailSizePx) {
+                if (icon.isCustom) loadCustomIconThumbnail(context, icon.id, thumbnailSizePx) else null
+            }
+            DisposableEffect(customBitmap) {
+                onDispose {
+                    customBitmap?.takeUnless(Bitmap::isRecycled)?.recycle()
+                }
+            }
+            val bitmap = icon.bitmap ?: customBitmap
+            val imageBitmap = remember(bitmap) { bitmap?.asImageBitmap() }
             Surface(
                 shape = EditorShape,
                 color = if (selected) EditorSurface else Color.Transparent,
@@ -1538,9 +1557,35 @@ private fun loadBuiltInIcons(context: Context): List<PickerIcon> {
 }
 
 private fun loadCustomIcons(customIconManager: CustomIconManager): List<PickerIcon> {
-    return customIconManager.getCustomIconIds().mapNotNull { id ->
-        val bitmap = customIconManager.loadIcon(id)
-        PickerIcon(id = id.toInt(), bitmap = bitmap)
+    return customIconManager.getCustomIconIds().map { id ->
+        PickerIcon(id = id.toInt(), bitmap = null, isCustom = true)
+    }
+}
+
+private fun loadCustomIconThumbnail(context: Context, id: Int, targetSize: Int): Bitmap? {
+    val file = File(File(context.filesDir, "custom_icons"), "$id.png")
+    if (!file.isFile) return null
+
+    return try {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+
+        var sampleSize = 1
+        while (bounds.outWidth / (sampleSize * 2) >= targetSize ||
+            bounds.outHeight / (sampleSize * 2) >= targetSize
+        ) {
+            sampleSize *= 2
+        }
+        BitmapFactory.decodeFile(
+            file.absolutePath,
+            BitmapFactory.Options().apply {
+                inSampleSize = sampleSize
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            },
+        )
+    } catch (_: OutOfMemoryError) {
+        null
     }
 }
 

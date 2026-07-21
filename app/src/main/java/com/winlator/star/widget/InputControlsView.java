@@ -47,8 +47,11 @@ import com.winlator.star.xserver.XServer;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.Timer;
 import java.util.TimerTask;
 
@@ -104,6 +107,7 @@ public class InputControlsView extends View {
     private final Map<VirtualMouseBindingKey, Float> activeVirtualMouseBindings = new HashMap<>();
     private ControlElement expandedElement;
     private final SparseBooleanArray swallowedExpandablePointers = new SparseBooleanArray();
+    private final Map<ExternalController, Set<Integer>> activeControllerKeys = new IdentityHashMap<>();
 
     private static class VirtualStickState {
         final Binding binding;
@@ -449,6 +453,7 @@ public class InputControlsView extends View {
 
     public synchronized void setProfile(ControlsProfile profile) {
         releaseActiveControls();
+        activeControllerKeys.clear();
         stopMouseMoveTimer();
         if (profile != null) {
             this.profile = profile;
@@ -471,6 +476,22 @@ public class InputControlsView extends View {
         expandedElement = null;
         swallowedExpandablePointers.clear();
         mouseMoveOffset.set(0, 0);
+    }
+
+    public synchronized void releaseAllInputs() {
+        releaseActiveControls();
+        activeControllerKeys.clear();
+        if (profile == null) return;
+        WinHandler winHandler = xServer != null ? xServer.getWinHandler() : null;
+        for (ExternalController controller : profile.getControllers()) {
+            for (int i = 0; i < controller.getControllerBindingCount(); i++) {
+                Binding binding = controller.getControllerBindingAt(i).getBinding();
+                handleInputEvent(controller, binding, false, 0, false);
+            }
+            controller.state.reset();
+            controller.remappedState.reset();
+            if (winHandler != null) winHandler.sendGamepadState(controller);
+        }
     }
 
     public boolean isShowTouchscreenControls() {
@@ -640,7 +661,7 @@ public class InputControlsView extends View {
         }
     }
 
-    private void processJoystickInput(ExternalController controller) {
+    private void processControllerMappings(ExternalController controller) {
         final int[] axes = {
                 MotionEvent.AXIS_X, MotionEvent.AXIS_Y,
                 MotionEvent.AXIS_Z, MotionEvent.AXIS_RZ,
@@ -652,6 +673,7 @@ public class InputControlsView extends View {
                 controller.state.getDPadX(), controller.state.getDPadY()
         };
 
+        Map<Binding, Float> mappedAxes = new HashMap<>();
         for (int i = 0; i < axes.length; i++) {
             float value = values[i];
             byte activeSign = Math.abs(value) > ControlElement.STICK_DEAD_ZONE ? Mathf.sign(value) : 0;
@@ -659,13 +681,30 @@ public class InputControlsView extends View {
                 int keyCode = ExternalControllerBinding.getKeyCodeForAxis(axes[i], sign);
                 ExternalControllerBinding controllerBinding = controller.getControllerBinding(keyCode);
                 if (controllerBinding != null) {
-                    handleInputEvent(controller, controllerBinding.getBinding(), sign == activeSign, value, false);
+                    mergeAxisBindingState(mappedAxes, controllerBinding.getBinding(), sign == activeSign, value);
                 }
             }
         }
 
-        processTriggerInput(controller, controller.state.triggerL, KeyEvent.KEYCODE_BUTTON_L2, false);
-        processTriggerInput(controller, controller.state.triggerR, KeyEvent.KEYCODE_BUTTON_R2, false);
+        ExternalControllerBinding triggerL = controller.getControllerBinding(KeyEvent.KEYCODE_BUTTON_L2);
+        if (triggerL != null) mergeAxisBindingState(
+                mappedAxes, triggerL.getBinding(), controller.state.triggerL > ControlElement.STICK_DEAD_ZONE, controller.state.triggerL);
+        ExternalControllerBinding triggerR = controller.getControllerBinding(KeyEvent.KEYCODE_BUTTON_R2);
+        if (triggerR != null) mergeAxisBindingState(
+                mappedAxes, triggerR.getBinding(), controller.state.triggerR > ControlElement.STICK_DEAD_ZONE, controller.state.triggerR);
+
+        Set<Integer> activeKeys = activeControllerKeys.get(controller);
+        for (int i = 0; i < controller.getControllerBindingCount(); i++) {
+            ExternalControllerBinding controllerBinding = controller.getControllerBindingAt(i);
+            int keyCode = controllerBinding.getKeyCode();
+            mergeAxisBindingState(mappedAxes, controllerBinding.getBinding(),
+                    activeKeys != null && activeKeys.contains(keyCode), 1f);
+        }
+
+        for (Map.Entry<Binding, Float> output : mappedAxes.entrySet()) {
+            float value = output.getValue();
+            handleInputEvent(controller, output.getKey(), Math.abs(value) > ControlElement.STICK_DEAD_ZONE, value, false);
+        }
 
         WinHandler winHandler = xServer != null ? xServer.getWinHandler() : null;
         if (winHandler != null) {
@@ -673,15 +712,12 @@ public class InputControlsView extends View {
         }
     }
 
-    private void processTriggerInput(ExternalController controller, float value, int keyCode, boolean sendUpdate) {
-        ExternalControllerBinding binding = controller.getControllerBinding(keyCode);
-        if (binding != null) {
-            boolean isPressed = value > ControlElement.STICK_DEAD_ZONE; 
-            if (isPressed) {
-                handleInputEvent(controller, binding.getBinding(), true, value, sendUpdate);
-            } else {
-                handleInputEvent(controller, binding.getBinding(), false, 0, sendUpdate);
-            }
+    public static void mergeAxisBindingState(
+            Map<Binding, Float> mappedAxes, Binding binding, boolean active, float value) {
+        if (binding == null || binding == Binding.NONE) return;
+        float current = mappedAxes.getOrDefault(binding, 0f);
+        if (!mappedAxes.containsKey(binding) || (active && Math.abs(value) > Math.abs(current))) {
+            mappedAxes.put(binding, active ? value : 0f);
         }
     }
 
@@ -690,16 +726,7 @@ public class InputControlsView extends View {
         if (!editMode && profile != null) {
             ExternalController controller = profile.getController(event.getDeviceId());
             if (controller != null && controller.updateStateFromMotionEvent(event)) {
-                ExternalControllerBinding controllerBinding;
-                controllerBinding = controller.getControllerBinding(KeyEvent.KEYCODE_BUTTON_L2);
-                if (controllerBinding != null) {
-                    handleInputEvent(controller, controllerBinding.getBinding(), controller.state.isPressed(ExternalController.IDX_BUTTON_L2));
-                }
-                controllerBinding = controller.getControllerBinding(KeyEvent.KEYCODE_BUTTON_R2);
-                if (controllerBinding != null) {
-                    handleInputEvent(controller, controllerBinding.getBinding(), controller.state.isPressed(ExternalController.IDX_BUTTON_R2));
-                }
-                processJoystickInput(controller);
+                processControllerMappings(controller);
                 return true;
             }
         }
@@ -948,11 +975,17 @@ public class InputControlsView extends View {
                 if (controllerBinding != null) {
                     int action = event.getAction();
                     if (action == KeyEvent.ACTION_DOWN) {
-                        handleInputEvent(controller, controllerBinding.getBinding(), true);
+                        activeControllerKeys.computeIfAbsent(controller, ignored -> new HashSet<>())
+                                .add(event.getKeyCode());
                     }
                     else if (action == KeyEvent.ACTION_UP) {
-                        handleInputEvent(controller, controllerBinding.getBinding(), false);
+                        Set<Integer> activeKeys = activeControllerKeys.get(controller);
+                        if (activeKeys != null) {
+                            activeKeys.remove(event.getKeyCode());
+                            if (activeKeys.isEmpty()) activeControllerKeys.remove(controller);
+                        }
                     }
+                    processControllerMappings(controller);
                     return true;
                 }
             }

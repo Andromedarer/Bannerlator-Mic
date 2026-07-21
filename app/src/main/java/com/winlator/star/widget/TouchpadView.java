@@ -57,6 +57,14 @@ public class TouchpadView extends View {
     private float resolutionScale;
     private static final int UPDATE_FORM_DELAYED_TIME = 50;
     private boolean mouseEnabled = true;
+    private final Runnable delayedTouchscreenPress = this::performDelayedTouchscreenPress;
+
+    private void performDelayedTouchscreenPress() {
+        if (continueClick) {
+            xServer.injectPointerMove(lastTouchedPosX, lastTouchedPosY);
+            xServer.injectPointerButtonPress(Pointer.Button.BUTTON_LEFT);
+        }
+    }
 
     private Handler timeoutHandler; // Reference to the activity's timeout handler
     private Runnable hideControlsRunnable; // Runnable to hide the controls
@@ -292,19 +300,13 @@ public class TouchpadView extends View {
             }
 
             if (simTouchScreen) {
-                final Runnable clickDelay = () -> {
-                    if (continueClick) {
-                        xServer.injectPointerMove(lastTouchedPosX, lastTouchedPosY);
-                        xServer.injectPointerButtonPress(Pointer.Button.BUTTON_LEFT);
-                    }
-                };
                 if (pointerId == 0) {
                     continueClick = true;
                     if (Math.hypot(fingers[0].x - lastTouchedPosX, fingers[0].y - lastTouchedPosY) * resolutionScale > EFFECTIVE_TOUCH_DISTANCE) {
                         lastTouchedPosX = fingers[0].x;
                         lastTouchedPosY = fingers[0].y;
                     }
-                    postDelayed(clickDelay, CLICK_DELAYED_TIME);
+                    postDelayed(delayedTouchscreenPress, CLICK_DELAYED_TIME);
                 } else if (pointerId == 1) {
                     // When put a finger on InputControl, such as a button.
                     // The pointerId that TouchPadView got won't increase from 1, so map 1 as 0 here.
@@ -314,7 +316,7 @@ public class TouchpadView extends View {
                             lastTouchedPosX = fingers[1].x;
                             lastTouchedPosY = fingers[1].y;
                         }
-                        postDelayed(clickDelay, CLICK_DELAYED_TIME);
+                        postDelayed(delayedTouchscreenPress, CLICK_DELAYED_TIME);
                     } else
                         continueClick = System.currentTimeMillis() - fingers[0].touchTime > CLICK_DELAYED_TIME;
                 }
@@ -575,6 +577,27 @@ public class TouchpadView extends View {
 
     public void setSensitivity(float sensitivity) {
         this.sensitivity = sensitivity;
+    }
+
+    public void releaseAllInputs() {
+        continueClick = false;
+        removeCallbacks(delayedTouchscreenPress);
+        for (byte i = 0; i < MAX_FINGERS; i++) fingers[i] = null;
+        numFingers = 0;
+        scrolling = false;
+        scrollAccumY = 0;
+        fingerPointerButtonLeft = null;
+        fingerPointerButtonRight = null;
+        if (xServer.isRelativeMouseMovement()) {
+            xServer.getWinHandler().mouseEvent(MouseEventFlags.LEFTUP, 0, 0, 0);
+            xServer.getWinHandler().mouseEvent(MouseEventFlags.RIGHTUP, 0, 0, 0);
+            xServer.getWinHandler().mouseEvent(MouseEventFlags.MIDDLEUP, 0, 0, 0);
+        }
+        else {
+            xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_LEFT);
+            xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_RIGHT);
+            xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_MIDDLE);
+        }
     }
 
     public boolean isPointerButtonLeftEnabled() {
