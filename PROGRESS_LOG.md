@@ -1,5 +1,22 @@
 # Star-Compose — Progress Log
 
+## 2026-07-21 — 🏁 **2.8 STABLE CUT — release build dispatched** (vc48, bump `c8de4b5d`, run `29833269026`)
+
+> **Version bump + README committed and pushed to main; `release.yml` dispatched for tag `2.8`** (`release_number=2.8`, `make_prerelease=false`). The halted 2.7.2 prep was **retargeted to 2.8** on user instruction ("you talked me into 2.8") — the two uncommitted working-tree edits were rewritten from 2.7.2/vc48 to **2.8/vc48** (versionCode was already 48, so no further tick) and committed as `c8de4b5d`.
+>
+> **46 commits since tag `2.7.1`.** Three headline features:
+> - **🎯 Gyroscope motion aim — feature complete (all 6 phases).** Right-stick or mouse output, Tilt-to-Aim orientation mode, Hold/Toggle activation, device-level calibration + live bias, per-container/per-game persistence. Credit: WinNative.
+> - **📺 Big Picture — full Compose rebuild.** Fluid couch launcher, D-pad fixes (phantom focus ring, clipped Play buttons, pinned hero buttons), real per-game spec chips, no music.
+> - **🎮 PC-accurate controller vibration.** Dual-motor, per-container mode + intensity, winebus never-expire duration patch across Proton 10/11 on arm64ec **and** x86-64 + structural fallback. Credit: TideGear (#91) / GameNative (#1214).
+>
+> Plus: Controls drawer split into **Touch / Mouse / Vibration / Gyro** sub-tabs + 3-across chip grid; **Banner File Manager 1.1.0** bundled.
+>
+> **README updated** — version row → 2.8/vc48, TOC anchor, What's New in 2.8 (2.7.1 demoted into `<details>Previously in 2.7.1</details>`, the old 2.7 block retired), new Full Features entries for gyro, PC-accurate vibration, Big Picture and the Controls sub-tabs. Gyro/vibration credit tables were already landed by `97bb1d61` / `09e9891f`.
+>
+> **Release body staged** in the 2.7.1 layout (logo → badges → title → tagline → bold summary → `<details>` full feature list → What's New → `<details>` Previously in 2.7.1 → Community → Downloads → Credits → Notes), to be applied via `gh release edit --notes-file` once CI publishes. Live community counts refreshed: **249 games / 291 configs**. WinNative + TideGear added as lead credits.
+>
+> ▶️ **PENDING:** CI green (3 flavors + `update.json` vc48) → `gh release edit --notes-file` → verify `Latest`/not-prerelease via API → checkpoint memory.
+
 ## 2026-07-21 — 🔴 VIBRATION NOT FELT — live diagnosis (UNRESOLVED, device reboot pending) + 2.7.2 release HALTED
 
 > **⏸️ 2.7.2 release halted mid-prep** on user request. **Nothing tagged, released or pushed — 2.7.1 is still Latest.** Two **uncommitted** edits remain in the working tree: `app/build.gradle` (vc 47→48, 2.7.1→2.7.2) and `README.md` (version row + contents link). Either finish the cut or `git checkout` those two files. (I recommended **2.8** — 45 commits, 3 headline features — user chose **2.7.2**; honour that.)
