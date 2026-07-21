@@ -1,5 +1,22 @@
 # Star-Compose — Progress Log
 
+## 2026-07-21 — 🎉 GYROSCOPE FEATURE 100% COMPLETE — P4 Tilt-to-Aim merged, main `fd2652f0` (vc47)
+
+> **Merged `feat/gyro-tilt-to-aim` → main (`--no-ff`), 10 files, +577/-37.** Safety tag `gyro-p4-premerge-backup` = `c575091c`. Artifacts CI on main = run `29822130104`. **vc STAYS 47.**
+>
+> **P4 = orientation sensing mode** — aim by absolute device tilt instead of rotation rate, so a held tilt sustains the stick deflection and returning to the captured centre recentres it. Per-game, **default Rate**.
+> - ⭐ **Rate mode is textually untouched.** Verified on main: the whole `WinHandler` diff vs `61bc20d3` has exactly **1** removed/modified line (the `applyGyroTuning` signature gaining a param) — everything else is insertion-only. The mode branches at **sensor-selection time only** and orientation samples arrive via a separate `updateGyroOrientation()`, so selecting Rate is a *provable* no-op.
+> - **`TYPE_GAME_ROTATION_VECTOR`** (no magnetometer) → `ROTATION_VECTOR` → unsupported (chip disabled with a reason; the resolver falls back to rate and does **not** rewrite the persisted setting).
+> - Pipeline on the angle offset from a captured zero: deadzone (a dead-cone here) → invert → sensitivity×gain 4.0 → low-pass → clamp. **Calibration bias deliberately NOT applied** (it's a rad/s rate offset vs an angle, and the zero-reference already cancels constants).
+> - **Display remap mandatory + dynamic** — cached `volatile int`, refreshed on config change **and** on display change (the latter catches a 90↔270 flip that never fires a config change). Preallocated `float[9]/[9]/[3]` + `float[4]` scratch for the **Samsung `values.length > 4`** crash; gimbal guard at `|pitch| > 1.3` rad.
+> - **Mouse blocked** in orientation mode in UI *and* via `sanitizeGyroMode()` at 3 call sites. **Recenter** auto on each activation edge + a drawer button that is the ONLY path under the `ALWAYS` activator (no edge exists there).
+> - **Sensor re-registration fix:** `registerGyroSensor()` compares the registered sensor *type*, so a mid-session mode switch re-registers instead of silently keeping the wrong sensor.
+> - ✅ **DEVICE-PROVEN incl. the 180° flip**, which exercises the second landscape remap case — that was the feature's single real technical risk (a wrong remap inverts axes in exactly one orientation) and it is now retired.
+>
+> **🎉 GYRO IS DONE: P1 ✅ P2 ✅ P3 ✅ P4 ✅ P5 ✅ P6 ✅.** Started the day as a vestigial `sensorManager` field with an empty init block; now: rate + orientation sensing, right/left stick + mouse targets, Hold/Toggle activation, device-level calibration, per-container/per-game persistence with three config surfaces (in-game drawer, container editor, shortcut dialog), and localized strings. WinNative credited in the README.
+>
+> ⚠️ **Still unverified on hardware:** the Hold/Toggle **un-latch fix** (latch on → tilt to full deflection → tap off → the stick must recentre immediately). ▶️ **Next up: the input-driven FPS-drop fix** → [[project_bannerlator_input_fps_drop]] — root-caused, plan ready, **Phase-0 measurement probe (0.5h) first**; the win is a ~15-line dirty-check, and notably nobody upstream has fixed this.
+
 ## 2026-07-21 (morning) — 🔨 CHECKPOINT: gyro P4 Tilt-to-Aim IN FLIGHT, user offline (driving to work)
 
 > **Written mid-implementation, before the user went offline.** Main is `61bc20d3` (gyro feature complete except P4, vc47). **P4 is being implemented on branch `feat/gyro-tilt-to-aim` (off `61bc20d3`) — files were still being written when this was committed, so it is NOT reviewed, NOT built, NOT staged.** Only this file was staged in this commit; the P4 source changes are deliberately left uncommitted.
