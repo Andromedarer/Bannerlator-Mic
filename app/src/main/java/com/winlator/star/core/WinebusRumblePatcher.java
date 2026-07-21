@@ -33,7 +33,7 @@ import java.io.RandomAccessFile;
  * untouched). We rewrite {@code mov w3,w20} to {@code mov w3,#-1} (movn w3,#0 = 0x12800003)
  * while leaving {@code blr x8} intact.
  */
-final class WinebusRumblePatcher {
+public final class WinebusRumblePatcher {
     private static final String TAG = "Evshim";
 
     /** One duration-load rewrite window plus how many are expected across the file. */
@@ -82,7 +82,7 @@ final class WinebusRumblePatcher {
      *   <li>any other count (unknown build / ambiguous) -> log and SKIP, never partial.</li>
      * </ul>
      */
-    static void patchDuration(File winebus, String archDir) {
+    public static void patchDuration(File winebus, String archDir) {
         Sig sig = signatureFor(archDir);
         if (sig == null) {
             Log.i(TAG, "rumble: no verified duration pattern for " + archDir + ", skipping");
