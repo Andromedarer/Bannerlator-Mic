@@ -1,5 +1,22 @@
 # Star-Compose — Progress Log
 
+## 2026-07-21 — 🏁 SESSION CHECKPOINT — gyro MERGED to main; P3 / P5 / FPS-fix scoped and parked for tomorrow
+
+> **main = `058eda91`, vc STAYS 47, artifacts CI green all 3 flavors (run `29798211980`), staged `/sdcard/Download/bannerlator-main-058eda9-standard.apk` (sha `c31f9423…`).** Everything from this session is on main: **Big Picture** (full Compose rebuild), **PC-accurate controller vibration** (both merges), **gyro P1+P2** (incl. mouse mode), the **drawer chip restyle**, and credits for **TideGear / GameNative / WinNative**.
+>
+> ⚠️ The two GYRO entries below say "NOT merged" — that is now **STALE**. Both were merged via `feat/gyro-controls` → main at `058eda91` (`--no-ff`), after adding the **WinNative credit** (`97bb1d61`) — WinNative is GPL-3.0, same as us, so the port is licence-compatible. Merge verified non-destructive: all vibration files unchanged, zero rumble lines removed from `WinHandler.java`, Big Picture intact. Safety tags kept: `gyro-premerge-backup` = `97bb1d61`, `bp-premerge-backup` = `3d99fbf`. Branches `feat/gyro-controls` + `feat/bigpicture-compose-rebuild` NOT deleted.
+>
+> **Device-confirmed by user this session:** rumble works; gyro direction correct (no sign flip needed); gyro mouse mode works. So the axis mapping and `GYRO_MOUSE_SCALE = 12.0f` are both validated as shipped.
+>
+> **▶️ PARKED FOR TOMORROW — three implementation-ready plans, all in memory, no code written:**
+> - **FPS drop on mouse/touch** → [[project_bannerlator_input_fps_drop]]. ⚠️ **Earlier research was materially WRONG and is now corrected**: `GLSurfaceView.requestRender()` ALREADY coalesces, so it's the GL thread free-running (~3× host composite), not 100s of frames — **a fixed 120Hz cap is near-worthless on this 144Hz panel; the big win is an exact DIRTY-CHECK at `star/renderer/GLRenderer.java:371` (~15 lines, zero staleness risk by construction)**. Also: GL direct-scanout is hard-disabled on main (`XServerDisplayActivity.java:2461`) so the native-mode skip is dead code, and captured/relative mouse doesn't trigger the bug at all (absolute paths only). **Phase 0 measurement probe (0.5h) is mandatory first.** Do NOT port WinNative #538.
+> - **Gyro P3** (Hold/Toggle + bias calibration) → [[project_bannerlator_gyro_p3_plan]]. **WinNative has NO bias calibration to port** (their "Calibrate Gyroscope" is just a Subcard title) — part (a) is ours to design, gated on a step-0 measurement since `TYPE_GYROSCOPE` is usually platform-calibrated. **Do Hold/Toggle first (~4.5h).**
+> - **Gyro P5** (per-container/per-game persistence) → [[project_bannerlator_gyro_p5_persistence_plan]], ~9-10h. NOT all 8 settings per-game; calibration bias must stay global. Must follow the **FPS-limiter** write-back rule, not vibration's container-only one.
+>
+> **Suggested order tomorrow:** FPS Phase 0 probe → FPS Step 1 dirty-check → gyro Hold/Toggle.
+>
+> 🔎 **Debug lesson worth keeping:** a "nothing happens" gyro report cost a cycle and was NOT a code bug — the staged APK had never been installed. **Always verify the installed APK's sha256 (`bridge 'pm path <pkg>'` → `sha256sum`) against the staged build before debugging any device symptom.** Several Bannerlator APKs now sit in /sdcard/Download.
+
 ## 2026-07-21 — ✅ GYRO P2 DEVICE-PROVEN + drawer chip restyle (branch `feat/gyro-controls`, NOT merged, vc47)
 
 > **User-confirmed on device: gyro DIRECTION is correct (no sign flip needed) and MOUSE MODE works.** Both flagged unknowns retired. Commit `9caa95e1`, CI-green 3 flavors (run `29797680278`), staged `bannerlator-gyro-p2b-9caa95e-standard.apk`.
