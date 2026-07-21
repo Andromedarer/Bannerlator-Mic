@@ -292,6 +292,65 @@ object XServerDialogState {
     @JvmField var onVibrationIntensityChanged: VibrationIntensityCallback? = null
 
     // -------------------------------------------------------------------------
+    // Gyro (motion aim) — Controls tab. WinHandler owns the values and persists them to
+    // SharedPreferences, same round-trip as the vibration master switch: the activity seeds these
+    // flows in setupUI and each drawer change fires the matching callback straight back into
+    // WinHandler (live, no restart). Per-container/per-game persistence is a later phase.
+    // -------------------------------------------------------------------------
+    // False on devices with no gyroscope — hides the whole section rather than offering dead controls.
+    private val _gyroSupported = MutableStateFlow(false)
+    val gyroSupported: StateFlow<Boolean> = _gyroSupported
+    fun setGyroSupported(v: Boolean) { _gyroSupported.value = v }
+
+    private val _gyroEnabled = MutableStateFlow(true)
+    val gyroEnabled: StateFlow<Boolean> = _gyroEnabled
+    fun setGyroEnabled(v: Boolean) { _gyroEnabled.value = v }
+
+    // 0=Right stick 1=Left stick 2=Mouse (WinHandler.GYRO_TARGET_*).
+    private val _gyroTarget = MutableStateFlow(0)
+    val gyroTarget: StateFlow<Int> = _gyroTarget
+    fun setGyroTarget(v: Int) { _gyroTarget.value = v }
+
+    private val _gyroSensitivity = MutableStateFlow(2.0f)
+    val gyroSensitivity: StateFlow<Float> = _gyroSensitivity
+    fun setGyroSensitivity(v: Float) { _gyroSensitivity.value = v }
+
+    private val _gyroDeadzone = MutableStateFlow(0.05f)
+    val gyroDeadzone: StateFlow<Float> = _gyroDeadzone
+    fun setGyroDeadzone(v: Float) { _gyroDeadzone.value = v }
+
+    private val _gyroSmoothing = MutableStateFlow(0.5f)
+    val gyroSmoothing: StateFlow<Float> = _gyroSmoothing
+    fun setGyroSmoothing(v: Float) { _gyroSmoothing.value = v }
+
+    private val _gyroInvertX = MutableStateFlow(false)
+    val gyroInvertX: StateFlow<Boolean> = _gyroInvertX
+    fun setGyroInvertX(v: Boolean) { _gyroInvertX.value = v }
+
+    private val _gyroInvertY = MutableStateFlow(false)
+    val gyroInvertY: StateFlow<Boolean> = _gyroInvertY
+    fun setGyroInvertY(v: Boolean) { _gyroInvertY.value = v }
+
+    // 0=L1 1=L2 2=R1 3=R3 4=Always on (WinHandler.GYRO_ACTIVATOR_*). Hold-to-activate throughout;
+    // a hold-vs-toggle mode is a later phase.
+    private val _gyroActivator = MutableStateFlow(0)
+    val gyroActivator: StateFlow<Int> = _gyroActivator
+    fun setGyroActivator(v: Int) { _gyroActivator.value = v }
+
+    fun interface GyroBoolCallback { fun invoke(value: Boolean) }
+    fun interface GyroIntCallback { fun invoke(value: Int) }
+    fun interface GyroFloatCallback { fun invoke(value: Float) }
+
+    @JvmField var onGyroEnabledChanged: GyroBoolCallback? = null
+    @JvmField var onGyroTargetChanged: GyroIntCallback? = null
+    @JvmField var onGyroSensitivityChanged: GyroFloatCallback? = null
+    @JvmField var onGyroDeadzoneChanged: GyroFloatCallback? = null
+    @JvmField var onGyroSmoothingChanged: GyroFloatCallback? = null
+    @JvmField var onGyroInvertXChanged: GyroBoolCallback? = null
+    @JvmField var onGyroInvertYChanged: GyroBoolCallback? = null
+    @JvmField var onGyroActivatorChanged: GyroIntCallback? = null
+
+    // -------------------------------------------------------------------------
     // Debug / Logs dialog
     // -------------------------------------------------------------------------
     private val _logLines  = MutableStateFlow<List<String>>(emptyList())
@@ -515,6 +574,15 @@ object XServerDialogState {
         _vibrationSlots.value  = emptyList()
         _vibrationMode.value   = 1
         _vibrationIntensity.value = 100
+        _gyroSupported.value   = false
+        _gyroEnabled.value     = true
+        _gyroTarget.value      = 0
+        _gyroSensitivity.value = 2.0f
+        _gyroDeadzone.value    = 0.05f
+        _gyroSmoothing.value   = 0.5f
+        _gyroInvertX.value     = false
+        _gyroInvertY.value     = false
+        _gyroActivator.value   = 0
         _logLines.value        = emptyList()
         _logPaused.value       = false
         _inputProfiles.value   = emptyList()
@@ -549,6 +617,9 @@ object XServerDialogState {
         onRequestResume = null
         onVibrationSlotChanged = null
         onVibrationModeChanged = null; onVibrationIntensityChanged = null
+        onGyroEnabledChanged = null; onGyroTargetChanged = null
+        onGyroSensitivityChanged = null; onGyroDeadzoneChanged = null; onGyroSmoothingChanged = null
+        onGyroInvertXChanged = null; onGyroInvertYChanged = null; onGyroActivatorChanged = null
         onInputControlsConfirm = null; onInputControlsSettings = null
         onScreenEffectsApply = null; onSeAddProfile = null; onSeRemoveProfile = null
         onWindowClick = null

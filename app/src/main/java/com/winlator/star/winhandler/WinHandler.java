@@ -89,6 +89,84 @@ public class WinHandler {
     private volatile int vibrationMode = VIBRATION_MODE_CONTROLLER;
     private volatile int vibrationIntensity = 100;
 
+    // Gyro (motion aim) — "hold the activator + tilt the device" -> right stick / left stick / mouse.
+    // Rate-mode math (deadzone -> invert -> sensitivity -> low-pass -> clamp) follows the reference
+    // gyro implementation in the WinNative tree (WinHandler.updateGyroData / getOutputGamepadState).
+    // Sensitivity/deadzone/smoothing/invert/activator are live user settings (in-game drawer, Controls
+    // tab); the defaults below reproduce the original hardcoded P1 behaviour exactly.
+    public static final int GYRO_TARGET_RIGHT_STICK = 0;
+    public static final int GYRO_TARGET_LEFT_STICK = 1;
+    public static final int GYRO_TARGET_MOUSE = 2;
+    // Activator = the button that gates the gyro while held. ALWAYS = no gate (no hold needed).
+    public static final int GYRO_ACTIVATOR_L1 = 0;
+    public static final int GYRO_ACTIVATOR_L2 = 1;
+    public static final int GYRO_ACTIVATOR_R1 = 2;
+    public static final int GYRO_ACTIVATOR_R3 = 3;
+    public static final int GYRO_ACTIVATOR_ALWAYS = 4;
+
+    public static final boolean GYRO_ENABLED_DEFAULT = true;
+    public static final int GYRO_TARGET_DEFAULT = GYRO_TARGET_RIGHT_STICK;
+    public static final float GYRO_DEADZONE_DEFAULT = 0.05f;    // rad/s; below this is hand tremor
+    public static final float GYRO_SENSITIVITY_DEFAULT = 2.0f;  // rad/s -> stick deflection gain
+    public static final float GYRO_SMOOTHING_DEFAULT = 0.5f;    // 0 = raw, ->1 = heavier low-pass
+    public static final int GYRO_ACTIVATOR_DEFAULT = GYRO_ACTIVATOR_L1;
+
+    private static final float GYRO_AXIS_EPSILON = 0.001f; // don't re-inject for sub-noise changes
+    // rad/s * sensitivity -> pixels per sensor sample in mouse mode. Picked so sensitivity 2.0 gives
+    // roughly the same "feel" as the right-stick path at the SENSOR_DELAY_GAME (~50 Hz) sample rate.
+    private static final float GYRO_MOUSE_SCALE = 12.0f;
+
+    private volatile boolean gyroEnabled = GYRO_ENABLED_DEFAULT;
+    private volatile int gyroTarget = GYRO_TARGET_DEFAULT;
+    private volatile float gyroDeadzone = GYRO_DEADZONE_DEFAULT;
+    private volatile float gyroSensitivity = GYRO_SENSITIVITY_DEFAULT;
+    private volatile float gyroSmoothing = GYRO_SMOOTHING_DEFAULT;
+    private volatile boolean gyroInvertX = false;
+    private volatile boolean gyroInvertY = false;
+    private volatile int gyroActivator = GYRO_ACTIVATOR_DEFAULT;
+
+    private float smoothedGyroX = 0.0f;
+    private float smoothedGyroY = 0.0f;
+    private float currentGyroStickX = 0.0f;
+    private float currentGyroStickY = 0.0f;
+    // Sub-pixel carry for mouse mode, so slow tilts still move the pointer instead of rounding to 0.
+    private float accumulatedGyroMouseX = 0.0f;
+    private float accumulatedGyroMouseY = 0.0f;
+    // Last controller that pushed state; the gyro re-injects through it so a held tilt keeps panning.
+    private ExternalController gyroTargetController;
+    private boolean gyroApplyLogged = false;
+    // Scratch state for the gyro overlay — never handed out, so no per-event allocation.
+    private final GamepadState outputGamepadState = new GamepadState();
+
+    // Mouse-mode injection scratch. The pending delta is accumulated under this lock and drained by a
+    // SINGLE pre-allocated Runnable, so a sustained tilt never allocates per sample (this path runs
+    // while the game renders) and bursts coalesce into one packet instead of flooding the send queue.
+    private final Object gyroMouseLock = new Object();
+    private int pendingGyroMouseDx = 0;
+    private int pendingGyroMouseDy = 0;
+    private boolean gyroMouseActionQueued = false;
+    private final Runnable gyroMouseAction = () -> {
+        final int dx, dy;
+        synchronized (gyroMouseLock) {
+            dx = pendingGyroMouseDx;
+            dy = pendingGyroMouseDy;
+            pendingGyroMouseDx = 0;
+            pendingGyroMouseDy = 0;
+            gyroMouseActionQueued = false;
+        }
+        if (dx == 0 && dy == 0)
+            return;
+        sendData.rewind();
+        sendData.put(RequestCodes.MOUSE_EVENT);
+        sendData.putInt(10);
+        sendData.putInt(MouseEventFlags.MOVE);
+        sendData.putShort((short) dx);
+        sendData.putShort((short) dy);
+        sendData.putShort((short) 0);
+        sendData.put((byte) 1); // cursor pos feedback (MOVE)
+        sendPacket(CLIENT_PORT);
+    };
+
     private boolean xinputDisabled;
     private boolean xinputDisabledInitialized = false;
 
@@ -124,6 +202,18 @@ public class WinHandler {
         }
         // Master switch (default: enabled) — a single kill-switch for ALL controller vibration.
         vibrationMasterEnabled = preferences.getBoolean("vibration_master_enabled", true);
+
+        // Gyro settings — global prefs (same pref-backed lifecycle as the vibration master switch).
+        // The defaults reproduce the original hardcoded behaviour, so an untouched install behaves
+        // exactly as before: enabled, right stick, sens 2.0 / deadzone 0.05 / smoothing 0.5, hold L1.
+        gyroEnabled = preferences.getBoolean("gyro_enabled", GYRO_ENABLED_DEFAULT);
+        gyroTarget = preferences.getInt("gyro_target", GYRO_TARGET_DEFAULT);
+        gyroDeadzone = preferences.getFloat("gyro_deadzone", GYRO_DEADZONE_DEFAULT);
+        gyroSensitivity = preferences.getFloat("gyro_sensitivity", GYRO_SENSITIVITY_DEFAULT);
+        gyroSmoothing = preferences.getFloat("gyro_smoothing", GYRO_SMOOTHING_DEFAULT);
+        gyroInvertX = preferences.getBoolean("gyro_invert_x", false);
+        gyroInvertY = preferences.getBoolean("gyro_invert_y", false);
+        gyroActivator = preferences.getInt("gyro_activator", GYRO_ACTIVATOR_DEFAULT);
     }
 
     private boolean sendPacket(int port) {
@@ -731,7 +821,7 @@ public class WinHandler {
         if (useVirtualGamepad) {
             int slot = assignSlot(OSC_DEVICE_ID);
             if (slot >= 0 && writers[slot] != null) {
-                writers[slot].writeGamepadState(gamepadState);
+                writers[slot].writeGamepadState(getOutputGamepadState(gamepadState));
             }
         } else {
             releaseSlot(OSC_DEVICE_ID);
@@ -742,6 +832,9 @@ public class WinHandler {
     public void sendGamepadState(ExternalController controller) {
         if (controller == null)
             return;
+
+        // Remember the live controller so the gyro can re-push through it between input events.
+        gyroTargetController = controller;
 
         // Check if this controller has bindings in the current profile
         // If it does, we should NOT send the raw state here, because InputControlsView
@@ -756,7 +849,7 @@ public class WinHandler {
                 // was solely responsible for sending remapped states.
                 int slot = assignSlot(controller.getDeviceId());
                 if (slot >= 0 && writers[slot] != null) {
-                    writers[slot].writeGamepadState(controller.remappedState);
+                    writers[slot].writeGamepadState(getOutputGamepadState(controller.remappedState));
                 }
                 return; // Suppress raw state sending if remapped state was sent
             }
@@ -764,8 +857,279 @@ public class WinHandler {
 
         int slot = assignSlot(controller.getDeviceId());
         if (slot >= 0 && writers[slot] != null) {
-            writers[slot].writeGamepadState(controller.state);
+            writers[slot].writeGamepadState(getOutputGamepadState(controller.state));
         }
+    }
+
+    /**
+     * Feeds one gyroscope sample (rad/s about the device X and Y axes) into the configured target
+     * (right stick, left stick or the mouse pointer). Called on the main thread from the activity's
+     * SensorEventListener, so it shares a thread with the controller/OSC input path and needs no
+     * extra synchronization.
+     */
+    public void updateGyroData(float rawGyroX, float rawGyroY) {
+        if (!gyroEnabled) {
+            resetGyroRuntimeState();
+            return;
+        }
+
+        if (Math.abs(rawGyroX) < gyroDeadzone)
+            rawGyroX = 0.0f;
+        if (Math.abs(rawGyroY) < gyroDeadzone)
+            rawGyroY = 0.0f;
+
+        if (gyroInvertX)
+            rawGyroX = -rawGyroX;
+        if (gyroInvertY)
+            rawGyroY = -rawGyroY;
+
+        if (gyroTarget == GYRO_TARGET_MOUSE) {
+            updateGyroMouse(rawGyroX, rawGyroY);
+            return;
+        }
+
+        rawGyroX *= gyroSensitivity;
+        rawGyroY *= gyroSensitivity;
+
+        final float smoothing = gyroSmoothing;
+        smoothedGyroX = (smoothedGyroX * smoothing) + (rawGyroX * (1.0f - smoothing));
+        smoothedGyroY = (smoothedGyroY * smoothing) + (rawGyroY * (1.0f - smoothing));
+
+        float nextGyroStickX = clamp(smoothedGyroX, -1.0f, 1.0f);
+        float nextGyroStickY = clamp(smoothedGyroY, -1.0f, 1.0f);
+        // Snap the low-pass tail to exact zero so the stick fully recenters once motion stops.
+        if (Math.abs(nextGyroStickX) < GYRO_AXIS_EPSILON) nextGyroStickX = 0.0f;
+        if (Math.abs(nextGyroStickY) < GYRO_AXIS_EPSILON) nextGyroStickY = 0.0f;
+        if (Math.abs(nextGyroStickX - currentGyroStickX) <= GYRO_AXIS_EPSILON
+                && Math.abs(nextGyroStickY - currentGyroStickY) <= GYRO_AXIS_EPSILON) {
+            return;
+        }
+        currentGyroStickX = nextGyroStickX;
+        currentGyroStickY = nextGyroStickY;
+
+        pushGyroToActiveTarget();
+    }
+
+    /**
+     * Re-injects the current gamepad state for whichever target holds the activator, so a sustained
+     * tilt keeps panning even while no controller/touch event is arriving. A no-op when the
+     * activator isn't held, and FakeInputWriter still diffs the axes, so an unchanged state writes
+     * nothing.
+     */
+    private void pushGyroToActiveTarget() {
+        ExternalController controller = gyroTargetController;
+        if (controller != null && (isGyroActivatorPressed(controller.state)
+                || isGyroActivatorPressed(controller.remappedState))) {
+            sendGamepadState(controller);
+            return;
+        }
+        if (activity.getInputControlsView() == null)
+            return;
+        ControlsProfile profile = activity.getInputControlsView().getProfile();
+        if (profile != null && isGyroActivatorPressed(profile.getGamepadState())) {
+            sendGamepadState();
+        }
+    }
+
+    /**
+     * Rate-mode mouse path: the tilt drives the POINTER instead of a stick, which is the only gyro
+     * target that does anything on a Wine desktop or in a mouse-look game. Deltas stay proportional
+     * to the tilt rate (no fixed-speed drift) and the sub-pixel remainder is carried between samples
+     * so a slow tilt still moves. Allocation-free — see gyroMouseAction.
+     */
+    private void updateGyroMouse(float rawGyroX, float rawGyroY) {
+        // Mouse mode never touches the sticks; drop any overlay a previous stick session left behind.
+        clearGyroStickOverlay();
+
+        if (!isGyroActivatorHeld()) {
+            smoothedGyroX = 0.0f;
+            smoothedGyroY = 0.0f;
+            accumulatedGyroMouseX = 0.0f;
+            accumulatedGyroMouseY = 0.0f;
+            return;
+        }
+
+        final float smoothing = gyroSmoothing;
+        smoothedGyroX = (smoothedGyroX * smoothing) + (rawGyroX * (1.0f - smoothing));
+        smoothedGyroY = (smoothedGyroY * smoothing) + (rawGyroY * (1.0f - smoothing));
+
+        accumulatedGyroMouseX += smoothedGyroX * gyroSensitivity * GYRO_MOUSE_SCALE;
+        accumulatedGyroMouseY += smoothedGyroY * gyroSensitivity * GYRO_MOUSE_SCALE;
+
+        int dx = (int) accumulatedGyroMouseX;
+        int dy = (int) accumulatedGyroMouseY;
+        if (dx == 0 && dy == 0)
+            return;
+        accumulatedGyroMouseX -= dx;
+        accumulatedGyroMouseY -= dy;
+
+        // Same seam the on-screen-controls mouse timer uses: relative mode goes to winhandler.exe as
+        // real relative motion (mouse-look games), otherwise we move the X pointer (desktop/windowed).
+        XServer xServer = activity != null ? activity.getXServer() : null;
+        if (xServer != null && !xServer.isRelativeMouseMovement()) {
+            xServer.injectPointerMoveDelta(dx, dy);
+            return;
+        }
+        queueGyroMouseEvent(dx, dy);
+    }
+
+    /** Coalescing, allocation-free enqueue of a relative mouse move onto the existing send thread. */
+    private void queueGyroMouseEvent(int dx, int dy) {
+        if (!initReceived)
+            return;
+        synchronized (gyroMouseLock) {
+            pendingGyroMouseDx += dx;
+            pendingGyroMouseDy += dy;
+            if (gyroMouseActionQueued)
+                return;
+            gyroMouseActionQueued = true;
+        }
+        addAction(gyroMouseAction);
+    }
+
+    /** Zeroes the stick overlay and re-pushes once, so the stick can't stay stuck deflected. */
+    private void clearGyroStickOverlay() {
+        if (currentGyroStickX == 0.0f && currentGyroStickY == 0.0f)
+            return;
+        currentGyroStickX = 0.0f;
+        currentGyroStickY = 0.0f;
+        pushGyroToActiveTarget();
+    }
+
+    /** Full runtime reset — used when the gyro is switched off or re-pointed at another target. */
+    private void resetGyroRuntimeState() {
+        smoothedGyroX = 0.0f;
+        smoothedGyroY = 0.0f;
+        accumulatedGyroMouseX = 0.0f;
+        accumulatedGyroMouseY = 0.0f;
+        clearGyroStickOverlay();
+    }
+
+    /** True when the activator is held on any live target (or the user chose "Always on"). */
+    private boolean isGyroActivatorHeld() {
+        if (gyroActivator == GYRO_ACTIVATOR_ALWAYS)
+            return true;
+        ExternalController controller = gyroTargetController;
+        if (controller != null && (isGyroActivatorPressed(controller.state)
+                || isGyroActivatorPressed(controller.remappedState)))
+            return true;
+        if (activity.getInputControlsView() == null)
+            return false;
+        ControlsProfile profile = activity.getInputControlsView().getProfile();
+        return profile != null && isGyroActivatorPressed(profile.getGamepadState());
+    }
+
+    // Activation gate: gyro only contributes while the chosen button is held on the state we're about
+    // to inject. "Always on" needs no button at all, so it short-circuits before the state lookup.
+    private boolean isGyroActivatorPressed(GamepadState state) {
+        if (gyroActivator == GYRO_ACTIVATOR_ALWAYS)
+            return true;
+        if (state == null)
+            return false;
+        return state.isPressed(gyroActivatorButtonIndex());
+    }
+
+    private byte gyroActivatorButtonIndex() {
+        switch (gyroActivator) {
+            case GYRO_ACTIVATOR_L2: return ExternalController.IDX_BUTTON_L2;
+            case GYRO_ACTIVATOR_R1: return ExternalController.IDX_BUTTON_R1;
+            case GYRO_ACTIVATOR_R3: return ExternalController.IDX_BUTTON_R3;
+            default:                return ExternalController.IDX_BUTTON_L1;
+        }
+    }
+
+    /**
+     * Overlays the gyro deflection on the configured stick. Returns baseState untouched whenever the
+     * gyro isn't contributing, so the normal controller path stays byte-identical; when it is, the
+     * deltas are added to (never replace) the physical stick and clamped back into range.
+     */
+    private GamepadState getOutputGamepadState(GamepadState baseState) {
+        if (baseState == null)
+            return baseState;
+        if (currentGyroStickX == 0.0f && currentGyroStickY == 0.0f)
+            return baseState;
+        if (gyroTarget == GYRO_TARGET_MOUSE)
+            return baseState;
+        if (!isGyroActivatorPressed(baseState))
+            return baseState;
+
+        outputGamepadState.copy(baseState);
+        if (gyroTarget == GYRO_TARGET_LEFT_STICK) {
+            outputGamepadState.thumbLX = clamp(baseState.thumbLX + currentGyroStickX, -1.0f, 1.0f);
+            outputGamepadState.thumbLY = clamp(baseState.thumbLY + currentGyroStickY, -1.0f, 1.0f);
+        } else {
+            outputGamepadState.thumbRX = clamp(baseState.thumbRX + currentGyroStickX, -1.0f, 1.0f);
+            outputGamepadState.thumbRY = clamp(baseState.thumbRY + currentGyroStickY, -1.0f, 1.0f);
+        }
+
+        if (!gyroApplyLogged) {
+            gyroApplyLogged = true;
+            Log.i("WinHandlerGyro", "Gyro applied to stick (first sample): target=" + gyroTarget
+                    + " x=" + currentGyroStickX + " y=" + currentGyroStickY);
+        }
+        return outputGamepadState;
+    }
+
+    // ---- Gyro settings (global prefs; per-container persistence is a later phase) ----
+
+    public boolean isGyroEnabled()      { return gyroEnabled; }
+    public int getGyroTarget()          { return gyroTarget; }
+    public float getGyroSensitivity()   { return gyroSensitivity; }
+    public float getGyroDeadzone()      { return gyroDeadzone; }
+    public float getGyroSmoothing()     { return gyroSmoothing; }
+    public boolean isGyroInvertX()      { return gyroInvertX; }
+    public boolean isGyroInvertY()      { return gyroInvertY; }
+    public int getGyroActivator()       { return gyroActivator; }
+
+    public void setGyroEnabled(boolean enabled) {
+        gyroEnabled = enabled;
+        if (!enabled)
+            resetGyroRuntimeState();
+        preferences.edit().putBoolean("gyro_enabled", enabled).apply();
+    }
+
+    /** Switching target must drop the old overlay, or the previous stick stays deflected forever. */
+    public void setGyroTarget(int target) {
+        gyroTarget = (target < GYRO_TARGET_RIGHT_STICK || target > GYRO_TARGET_MOUSE)
+                ? GYRO_TARGET_DEFAULT : target;
+        resetGyroRuntimeState();
+        preferences.edit().putInt("gyro_target", gyroTarget).apply();
+    }
+
+    public void setGyroSensitivity(float sensitivity) {
+        gyroSensitivity = clamp(sensitivity, 0.1f, 10.0f);
+        preferences.edit().putFloat("gyro_sensitivity", gyroSensitivity).apply();
+    }
+
+    public void setGyroDeadzone(float deadzone) {
+        gyroDeadzone = clamp(deadzone, 0.0f, 0.5f);
+        preferences.edit().putFloat("gyro_deadzone", gyroDeadzone).apply();
+    }
+
+    public void setGyroSmoothing(float smoothing) {
+        gyroSmoothing = clamp(smoothing, 0.0f, 0.95f);
+        preferences.edit().putFloat("gyro_smoothing", gyroSmoothing).apply();
+    }
+
+    public void setGyroInvertX(boolean invert) {
+        gyroInvertX = invert;
+        preferences.edit().putBoolean("gyro_invert_x", invert).apply();
+    }
+
+    public void setGyroInvertY(boolean invert) {
+        gyroInvertY = invert;
+        preferences.edit().putBoolean("gyro_invert_y", invert).apply();
+    }
+
+    public void setGyroActivator(int activator) {
+        gyroActivator = (activator < GYRO_ACTIVATOR_L1 || activator > GYRO_ACTIVATOR_ALWAYS)
+                ? GYRO_ACTIVATOR_DEFAULT : activator;
+        resetGyroRuntimeState();
+        preferences.edit().putInt("gyro_activator", gyroActivator).apply();
+    }
+
+    private static float clamp(float value, float min, float max) {
+        return Math.max(min, Math.min(max, value));
     }
 
     /**
@@ -801,6 +1165,9 @@ public class WinHandler {
                 writers[slot].softRelease();
             }
             usedSlots.remove(slot);
+            if (gyroTargetController != null && gyroTargetController.getDeviceId() == deviceId) {
+                gyroTargetController = null;
+            }
             controllers.remove(deviceId);
             Log.d("WinHandler", "Device " + deviceId + " disconnected (or OSC disabled). Slot released: " + slot);
         }

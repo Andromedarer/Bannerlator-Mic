@@ -1,5 +1,29 @@
 # Star-Compose — Progress Log
 
+## 2026-07-21 — ✅ GYRO P2 DEVICE-PROVEN + drawer chip restyle (branch `feat/gyro-controls`, NOT merged, vc47)
+
+> **User-confirmed on device: gyro DIRECTION is correct (no sign flip needed) and MOUSE MODE works.** Both flagged unknowns retired. Commit `9caa95e1`, CI-green 3 flavors (run `29797680278`), staged `bannerlator-gyro-p2b-9caa95e-standard.apk`.
+>
+> **Gyro section** in the in-game drawer Controls tab, below Vibration, with progressive disclosure (dependent controls only compose when enabled; whole section hidden on devices with no gyroscope): Enabled → Apply gyro to (Right stick / Left stick / **Mouse**) → Sensitivity → Activation (L1/L2/R1/R3/**Always**) → Deadzone / Smoothing / Invert X/Y. Pref-backed (`gyro_*`), wired through `XServerDialogState` mirroring the vibration master switch. Defaults reproduce P1 exactly so it can't regress.
+>
+> **Mouse mode is real injection and beats the reference:** absolute X pointer via `XServer.injectPointerMoveDelta` when the mouse isn't captured (works on the Wine DESKTOP — WinNative's gyro-mouse always uses the relative packet, so theirs does nothing there), relative motion via the winhandler packet when captured (mouse-look games). Proportional deltas with a carried fractional remainder; allocation-free coalescing via one preallocated Runnable (deliberate — input-path cost is implicated in the separate FPS-drop bug).
+>
+> **Chip restyle** — new `ToggleChipGrid` modelled on the existing `ModeChipGrid` (the scale/effect button look), to free vertical space in the Controls tab for gyro. Converted the plain on/off toggles (Controls, Mouse & Cursor, Vibration master + per-slot rows, Vulkan screen effects); toggles that gate a dependent slider/pane stay `ToggleRow` on purpose (13 callers remain). **Layout rule that worked: `perRow = 3`, every chip an identical 1/3 width, short final rows CENTRED (padding spacers split across both sides, not trailing-only), and labels shortened so none wrap to two lines** — the 2-line wraps were what made rows uneven. Presentation only, no behaviour or pref-key changes.
+>
+> **Vibration untouched throughout** (re-verified: no rumble lines changed in `WinHandler.java`). ▶️ REMAINING before merge: **WinNative attribution in the README Credits table** (the code is derived from their gyro implementation — same courtesy we just did for TideGear). Optional later phases: P3 calibration, P4 Tilt-to-Aim (`TYPE_ROTATION_VECTOR`), P5 per-container/per-game persistence, P6 localization.
+
+## 2026-07-21 — 🎯 GYRO P1 DEVICE-PROVEN (branch `feat/gyro-controls`, NOT merged, vc47)
+
+> **Motion-aim MVP works on device (Pocket FIT, GTA IV).** Hold **L1** + tilt → camera pans. Commit `7cf04b57`, CI-green 3 flavors (run `29795316889`), staged `bannerlator-gyro-p1-7cf04b5-standard.apk` (sha `3cc09922…`).
+>
+> **Architecture confirmed by recon + proven in practice: gyro is PURELY HOST-SIDE.** No guest `winhandler.exe` change, no wire-protocol change — the live gamepad path is evdev injection (`FakeInputWriter.java:232-295`); `GamepadState.writeTo` is dead code. Gyro is overlaid on the gamepad state at the three `writeGamepadState` call sites in `WinHandler.java` via `getOutputGamepadState()`, which returns the base state **by reference, unmodified**, unless gyro≠0 AND L1 held → normal controller path stays bit-identical, and a physical right stick is **added to, never clobbered**.
+>
+> **`XServerDisplayActivity`:** completed the long-vestigial `sensorManager` field — `TYPE_GYROSCOPE`, allocation-free listener at `SENSOR_DELAY_GAME`, register/unregister across onCreate/onResume/onPause/onDestroy, strict no-op without a gyro. **`WinHandler`:** `updateGyroData()` = deadzone → sensitivity → exponential low-pass → clamp (ported from WinNative rate-mode); sustained tilt re-pushes through the last active controller so panning continues between input events. Constants hardcoded this phase (become settings in P2). Zero per-event allocation (deliberate — input-path cost is implicated in the separate FPS-drop bug).
+>
+> ⚠️ **DEBUG GOTCHA (cost a test cycle):** "nothing happens" was NOT a code bug — the staged APK had never been installed; the running app hashed to the *previous* main build. **Always verify the installed APK's sha256 (`pm path` → `sha256sum`) against the staged build before debugging a device symptom.** Several Bannerlator APKs now sit in /sdcard/Download and it's easy to tap the wrong one.
+>
+> **Vibration untouched** (verified: zero vibration/rumble lines changed in `WinHandler.java`; `GuestProgramLauncherComponent` + `FakeInputWriter` not modified). ▶️ NEXT: tune axis sign/sensitivity from device feel, then P2 settings UI, P3 calibration + activation button, P4 Tilt-to-Aim, P5 per-game persistence. **Gyro→MOUSE mode is a separate target** (WinNative `mouse_gyro_enabled`) — needed for cursor control on a container desktop; right-stick mode does nothing there.
+
 ## 2026-07-20 (later) — 🎮 BIG PICTURE MODE — full Compose rebuild (branch `feat/bigpicture-compose-rebuild`, NO vc bump)
 
 > **User ask: "totally revamp/rebuild Big Picture to be fluid and easy — no background music, easy access to app settings, features and games."** Design locked with the user: full Compose rebuild · clean **blurred-hero** background (no music, no WebView, no parallax bitmap loop) · nav rails for App Settings + Game features + Tools + Power/Exit.
