@@ -14,6 +14,8 @@ import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.net.Uri;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.os.Build;
@@ -253,6 +255,21 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     // Inside the XServerDisplayActivity class
     private SensorManager sensorManager;
+    // Gyro (motion aim) — rate samples go straight to WinHandler, which gates them on the
+    // activator button and overlays them on the right stick. Inert when the device has no gyroscope.
+    private Sensor gyroSensor;
+    private boolean gyroListenerRegistered = false;
+    private final SensorEventListener gyroListener = new SensorEventListener() {
+        @Override
+        public void onSensorChanged(SensorEvent event) {
+            if (winHandler == null || event.sensor.getType() != Sensor.TYPE_GYROSCOPE) return;
+            winHandler.updateGyroData(event.values[0], event.values[1]);
+        }
+
+        @Override
+        public void onAccuracyChanged(Sensor sensor, int accuracy) {
+        }
+    };
 
     // Playtime stats tracking
     private long startTime;
@@ -485,8 +502,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
 
         // Initialize SensorManager
-
-
+        sensorManager = (SensorManager) getSystemService(SENSOR_SERVICE);
+        if (sensorManager != null) gyroSensor = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
+        Log.i("XServerGyro", "Gyroscope sensor " + (gyroSensor != null ? "found: " + gyroSensor.getName() : "not available"));
+        registerGyroSensor();
 
         // Record the start time
         startTime = System.currentTimeMillis();
@@ -1301,6 +1320,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (isPaused) setPausedState(false);
         // Re-assert the VRR vote — onStop() released it when backgrounded.
         reapplyVrr();
+        // onPause() dropped the gyro listener so it can't drain the battery in the background.
+        registerGyroSensor();
         // Track the live panel rate again (the readout shows it while Auto is on).
         registerVrrDisplayListener();
         updateCurrentRefreshRate();
@@ -1322,6 +1343,20 @@ public class XServerDisplayActivity extends AppCompatActivity {
         savePlaytimeData();
         handler.removeCallbacks(savePlaytimeRunnable);
         ProcessHelper.pauseAllWineProcesses();
+        unregisterGyroSensor();
+    }
+
+    // Gyro listener register/unregister — both are idempotent and a no-op without a gyroscope.
+    private void registerGyroSensor() {
+        if (sensorManager == null || gyroSensor == null || gyroListenerRegistered) return;
+        sensorManager.registerListener(gyroListener, gyroSensor, SensorManager.SENSOR_DELAY_GAME);
+        gyroListenerRegistered = true;
+    }
+
+    private void unregisterGyroSensor() {
+        if (sensorManager == null || !gyroListenerRegistered) return;
+        sensorManager.unregisterListener(gyroListener);
+        gyroListenerRegistered = false;
     }
 
 
@@ -1835,6 +1870,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        unregisterGyroSensor();
         stopDxApiDetection();
         cancelLaunchTimers();
         // Drop the failure-card callbacks so this activity isn't retained via the static holder.

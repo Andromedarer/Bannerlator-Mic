@@ -89,6 +89,24 @@ public class WinHandler {
     private volatile int vibrationMode = VIBRATION_MODE_CONTROLLER;
     private volatile int vibrationIntensity = 100;
 
+    // Gyro (motion aim) — P1: hardcoded "hold L1 + tilt the device" -> right stick. The constants
+    // below are the ones that become user settings in a later phase (sensitivity/deadzone/smoothing).
+    // Rate-mode math (deadzone -> sensitivity -> low-pass -> clamp) follows the reference gyro
+    // implementation in the WinNative tree (WinHandler.updateGyroData / getOutputGamepadState).
+    private static final float GYRO_DEADZONE = 0.05f;      // rad/s; below this is hand tremor
+    private static final float GYRO_SENSITIVITY = 2.0f;    // rad/s -> stick deflection gain
+    private static final float GYRO_SMOOTHING = 0.5f;      // 0 = raw, ->1 = heavier low-pass
+    private static final float GYRO_AXIS_EPSILON = 0.001f; // don't re-inject for sub-noise changes
+    private float smoothedGyroX = 0.0f;
+    private float smoothedGyroY = 0.0f;
+    private float currentGyroStickX = 0.0f;
+    private float currentGyroStickY = 0.0f;
+    // Last controller that pushed state; the gyro re-injects through it so a held tilt keeps panning.
+    private ExternalController gyroTargetController;
+    private boolean gyroApplyLogged = false;
+    // Scratch state for the gyro overlay — never handed out, so no per-event allocation.
+    private final GamepadState outputGamepadState = new GamepadState();
+
     private boolean xinputDisabled;
     private boolean xinputDisabledInitialized = false;
 
@@ -731,7 +749,7 @@ public class WinHandler {
         if (useVirtualGamepad) {
             int slot = assignSlot(OSC_DEVICE_ID);
             if (slot >= 0 && writers[slot] != null) {
-                writers[slot].writeGamepadState(gamepadState);
+                writers[slot].writeGamepadState(getOutputGamepadState(gamepadState));
             }
         } else {
             releaseSlot(OSC_DEVICE_ID);
@@ -742,6 +760,9 @@ public class WinHandler {
     public void sendGamepadState(ExternalController controller) {
         if (controller == null)
             return;
+
+        // Remember the live controller so the gyro can re-push through it between input events.
+        gyroTargetController = controller;
 
         // Check if this controller has bindings in the current profile
         // If it does, we should NOT send the raw state here, because InputControlsView
@@ -756,7 +777,7 @@ public class WinHandler {
                 // was solely responsible for sending remapped states.
                 int slot = assignSlot(controller.getDeviceId());
                 if (slot >= 0 && writers[slot] != null) {
-                    writers[slot].writeGamepadState(controller.remappedState);
+                    writers[slot].writeGamepadState(getOutputGamepadState(controller.remappedState));
                 }
                 return; // Suppress raw state sending if remapped state was sent
             }
@@ -764,8 +785,95 @@ public class WinHandler {
 
         int slot = assignSlot(controller.getDeviceId());
         if (slot >= 0 && writers[slot] != null) {
-            writers[slot].writeGamepadState(controller.state);
+            writers[slot].writeGamepadState(getOutputGamepadState(controller.state));
         }
+    }
+
+    /**
+     * Feeds one gyroscope sample (rad/s about the device X and Y axes) into the right stick.
+     * Called on the main thread from the activity's SensorEventListener, so it shares a thread
+     * with the controller/OSC input path and needs no extra synchronization.
+     */
+    public void updateGyroData(float rawGyroX, float rawGyroY) {
+        if (Math.abs(rawGyroX) < GYRO_DEADZONE)
+            rawGyroX = 0.0f;
+        if (Math.abs(rawGyroY) < GYRO_DEADZONE)
+            rawGyroY = 0.0f;
+
+        rawGyroX *= GYRO_SENSITIVITY;
+        rawGyroY *= GYRO_SENSITIVITY;
+
+        smoothedGyroX = (smoothedGyroX * GYRO_SMOOTHING) + (rawGyroX * (1.0f - GYRO_SMOOTHING));
+        smoothedGyroY = (smoothedGyroY * GYRO_SMOOTHING) + (rawGyroY * (1.0f - GYRO_SMOOTHING));
+
+        float nextGyroStickX = clamp(smoothedGyroX, -1.0f, 1.0f);
+        float nextGyroStickY = clamp(smoothedGyroY, -1.0f, 1.0f);
+        // Snap the low-pass tail to exact zero so the stick fully recenters once motion stops.
+        if (Math.abs(nextGyroStickX) < GYRO_AXIS_EPSILON) nextGyroStickX = 0.0f;
+        if (Math.abs(nextGyroStickY) < GYRO_AXIS_EPSILON) nextGyroStickY = 0.0f;
+        if (Math.abs(nextGyroStickX - currentGyroStickX) <= GYRO_AXIS_EPSILON
+                && Math.abs(nextGyroStickY - currentGyroStickY) <= GYRO_AXIS_EPSILON) {
+            return;
+        }
+        currentGyroStickX = nextGyroStickX;
+        currentGyroStickY = nextGyroStickY;
+
+        pushGyroToActiveTarget();
+    }
+
+    /**
+     * Re-injects the current gamepad state for whichever target holds the activator, so a sustained
+     * tilt keeps panning even while no controller/touch event is arriving. A no-op when the
+     * activator isn't held, and FakeInputWriter still diffs the axes, so an unchanged state writes
+     * nothing.
+     */
+    private void pushGyroToActiveTarget() {
+        ExternalController controller = gyroTargetController;
+        if (controller != null && (isGyroActivatorPressed(controller.state)
+                || isGyroActivatorPressed(controller.remappedState))) {
+            sendGamepadState(controller);
+            return;
+        }
+        if (activity.getInputControlsView() == null)
+            return;
+        ControlsProfile profile = activity.getInputControlsView().getProfile();
+        if (profile != null && isGyroActivatorPressed(profile.getGamepadState())) {
+            sendGamepadState();
+        }
+    }
+
+    // P1 activation gate: gyro only contributes while L1 is held on the state we're about to inject.
+    private boolean isGyroActivatorPressed(GamepadState state) {
+        return state != null && state.isPressed(ExternalController.IDX_BUTTON_L1);
+    }
+
+    /**
+     * Overlays the gyro deflection on the right stick. Returns baseState untouched whenever the gyro
+     * isn't contributing, so the normal controller path stays byte-identical; when it is, the deltas
+     * are added to (never replace) the physical stick and clamped back into range.
+     */
+    private GamepadState getOutputGamepadState(GamepadState baseState) {
+        if (baseState == null)
+            return baseState;
+        if (currentGyroStickX == 0.0f && currentGyroStickY == 0.0f)
+            return baseState;
+        if (!isGyroActivatorPressed(baseState))
+            return baseState;
+
+        outputGamepadState.copy(baseState);
+        outputGamepadState.thumbRX = clamp(baseState.thumbRX + currentGyroStickX, -1.0f, 1.0f);
+        outputGamepadState.thumbRY = clamp(baseState.thumbRY + currentGyroStickY, -1.0f, 1.0f);
+
+        if (!gyroApplyLogged) {
+            gyroApplyLogged = true;
+            Log.i("WinHandlerGyro", "Gyro applied to right stick (first sample): rx="
+                    + outputGamepadState.thumbRX + " ry=" + outputGamepadState.thumbRY);
+        }
+        return outputGamepadState;
+    }
+
+    private static float clamp(float value, float min, float max) {
+        return Math.max(min, Math.min(max, value));
     }
 
     /**
@@ -801,6 +909,9 @@ public class WinHandler {
                 writers[slot].softRelease();
             }
             usedSlots.remove(slot);
+            if (gyroTargetController != null && gyroTargetController.getDeviceId() == deviceId) {
+                gyroTargetController = null;
+            }
             controllers.remove(deviceId);
             Log.d("WinHandler", "Device " + deviceId + " disconnected (or OSC disabled). Slot released: " + slot);
         }
