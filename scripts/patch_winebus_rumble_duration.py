@@ -44,25 +44,30 @@ yields exactly 2 sites on P9/P10/P11. Residual risk (accepted): a build with two
 unrelated `mov w3,w<reg>; blr x8` would be mis-patched; exact patterns are tried
 first and the ==2 guard is the mitigation.
 
-x86_64-unix  (NOT VERIFIED for this repo)
------------------------------------------
-No x86_64-unix winebus.so ships in Bannerlator's assets (arm64ec only), so the
-x86_64 window below could NOT be re-derived against our build. It is carried
-over UNVERIFIED from BannerHub #91's GameHub x64 build and is provided only so
-this script still works if pointed at a future Box64 winebus.so -- verify the
-disassembly before trusting it. The masked 11-byte window is:
+x86_64-unix  (VERIFIED against Wine 10.0 x86_64 winebus.so, 78504 bytes,
+             content pack Wine/10.0-X86_64-1)
+------------------------------------------------------------------------
+System V ABI -> 4th int arg = ECX (duration_ms). At BOTH rumble sites inside
+sdl_device_haptics_start (this build is -O0):
 
-    8B 4D <disp8>     mov   ecx, [rbp+disp8]   ; duration_ms (4th arg)
+    8B 4D E4          mov   ecx, [rbp-0x1c]   ; duration_ms (4th arg)   <-- target
     0F B7 F6          movzwl %si, %esi
     0F B7 D2          movzwl %dx, %edx
-    FF D0             call  *%rax
+    FF D0             call  *%rax             ; indirect SDL_JoystickRumble[Triggers]
 
-10 of 11 bytes fixed (disp8 floats); the movzwl pair discriminates from the
-haptics-stop site. Replaced with `or ecx, -1` (83 C9 FF), rest preserved.
+The exact 11-byte window matches EXACTLY the 2 rumble sites; the distinctive
+suffix `movzwl si; movzwl dx; call *rax` (0F B7 F6 0F B7 D2 FF D0) occurs only
+there. We replace `mov ecx,[rbp-0x1c]` (8B 4D E4) with `or ecx,-1` (83 C9 FF)
+so ECX becomes 0xffffffff; suffix/call preserved. The zero-duration
+sdl_device_haptics_stop materializes ecx with `xor ecx,ecx` (31 C9), so it is
+NOT matched and stays untouched. A masked structural fallback (disp8 floats:
+8B 4D ?? + the exact suffix) covers a stack-slot shift in another build and
+still matches exactly 2 here.
 
-Guard on both arches: exactly 2 original sites -> patch; 0 original + 2 patched
--> already done; anything else -> ambiguous, SKIP (never partial/destructive).
-Zero-duration stop paths are separate call sites and stay untouched.
+Guard on both arches: an exact pattern matching exactly 2 sites -> patch; else
+a structural fallback if it yields exactly 2; else ambiguous -> SKIP. Already
+patched (2 patched windows) -> no-op. Never partial/destructive. Zero-duration
+stop paths are separate call sites and stay untouched.
 """
 import argparse
 import shutil
@@ -103,16 +108,18 @@ def _aarch64_structural_sites(blob: bytes) -> list:
 
 
 # ---------------------------------------------------------------------------
-# x86_64 (UNVERIFIED for this repo; inherited from BannerHub #91).
-# Wildcards: mask 0xff means "must match", 0x00 means "wildcard".
+# x86_64 (VERIFIED against Wine 10.0 x86_64 winebus.so).
 # ---------------------------------------------------------------------------
 
-X86_64_PATTERN = (
-    bytes.fromhex("8b 4d 00  0f b7 f6  0f b7 d2  ff d0"),
-    bytes.fromhex("ff ff 00  ff ff ff  ff ff ff  ff ff"),
-)
-X86_64_PATCHED_PATTERN = bytes.fromhex("83 c9 ff  0f b7 f6  0f b7 d2  ff d0")
-X86_64_PATCHED_LOAD    = bytes.fromhex("83 c9 ff")  # or ecx, -1
+# movzwl si,esi ; movzwl dx,edx ; call *rax  -- the distinctive rumble-arg suffix.
+X86_64_SUFFIX          = bytes.fromhex("0f b7 f6  0f b7 d2  ff d0")
+# Exact per-build window: mov ecx,[rbp-0x1c] ; <suffix>  ->  or ecx,-1 ; <suffix>
+X86_64_ORIGINAL_SITE   = bytes.fromhex("8b 4d e4") + X86_64_SUFFIX
+X86_64_PATCHED_SITE    = bytes.fromhex("83 c9 ff") + X86_64_SUFFIX  # or ecx,-1 ; <suffix>
+X86_64_PATCHED_LOAD    = bytes.fromhex("83 c9 ff")                  # or ecx, -1
+# Structural fallback (disp8 floats): 8B 4D ?? + suffix.
+X86_64_STRUCT_PATTERN  = (bytes.fromhex("8b 4d 00") + X86_64_SUFFIX,
+                          bytes.fromhex("ff ff 00") + b"\xff" * len(X86_64_SUFFIX))
 
 
 ELF_MACHINE_AARCH64 = 0xb7
@@ -197,44 +204,43 @@ def patch_aarch64(path: Path, blob: bytes, *, dry_run: bool) -> bool:
     )
 
 
-def patch_x86_64(path: Path, blob: bytes, *, dry_run: bool) -> bool:
-    print(f"WARNING: x86_64 pattern is UNVERIFIED for this repo (no x86_64-unix "
-          f"winebus.so ships in Bannerlator); disassemble {path} before trusting.",
-          file=sys.stderr)
-    hits = find_all_masked(blob, *X86_64_PATTERN)
-    patched_hits = find_all(blob, X86_64_PATCHED_PATTERN)
-
-    if not hits:
-        if len(patched_hits) == 2:
-            print(f"OK: {path} already patched (x86_64) at "
-                  f"{', '.join(hex(x) for x in patched_hits)}")
-            return False
-        raise ValueError(
-            f"{path}: expected 2 original x86_64 rumble call sites, "
-            f"found 0 original and {len(patched_hits)} patched (ambiguous, skipped)"
-        )
-    if len(hits) != 2:
-        raise ValueError(
-            f"{path}: expected exactly 2 original x86_64 rumble call sites, "
-            f"found {len(hits)} at {', '.join(hex(x) for x in hits)}"
-        )
-
-    print(f"PATCH (x86_64): {path}")
-    for off in hits:
-        print(f"  file+{off:#x}: mov ecx, [rbp+disp8] -> or ecx, -1")
-
+def _x86_64_apply(path: Path, blob: bytes, sites: list, how: str, *, dry_run: bool) -> bool:
+    print(f"PATCH (x86_64, {how}): {path}")
+    for off in sites:
+        print(f"  file+{off:#x}: mov ecx,[rbp+disp8] -> or ecx,-1")
     if dry_run:
         return True
-
     mutable = bytearray(blob)
-    for off in hits:
+    for off in sites:
         mutable[off:off + len(X86_64_PATCHED_LOAD)] = X86_64_PATCHED_LOAD
     path.write_bytes(mutable)
-
     verify = path.read_bytes()
-    if find_all_masked(verify, *X86_64_PATTERN) or len(find_all(verify, X86_64_PATCHED_PATTERN)) != 2:
+    if len(find_all(verify, X86_64_PATCHED_SITE)) != 2:
         raise RuntimeError(f"{path}: x86_64 verification failed after write")
     return True
+
+
+def patch_x86_64(path: Path, blob: bytes, *, dry_run: bool) -> bool:
+    patched_hits = find_all(blob, X86_64_PATCHED_SITE)
+    if len(patched_hits) == 2:
+        print(f"OK: {path} already patched (x86_64) at "
+              f"{', '.join(hex(x) for x in patched_hits)}")
+        return False
+
+    # 1) Exact per-build window.
+    hits = find_all(blob, X86_64_ORIGINAL_SITE)
+    if len(hits) == 2:
+        return _x86_64_apply(path, blob, hits, "Wine 10.0 (mov ecx,[rbp-0x1c])", dry_run=dry_run)
+
+    # 2) Structural fallback: mov ecx,[rbp+disp8] + distinctive suffix (disp8 wildcarded).
+    sites = find_all_masked(blob, *X86_64_STRUCT_PATTERN)
+    if len(sites) == 2:
+        return _x86_64_apply(path, blob, sites, "structural fallback", dry_run=dry_run)
+
+    raise ValueError(
+        f"{path}: no exact x86_64 pattern matched 2 sites and structural fallback found "
+        f"{len(sites)} (patched={len(patched_hits)}) - ambiguous/unknown, skipped"
+    )
 
 
 def patch_one(path: Path, *, backup: bool, dry_run: bool) -> bool:
