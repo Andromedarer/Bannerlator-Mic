@@ -1535,41 +1535,46 @@ private fun VibrationModeButtons(selected: Int, enabled: Boolean = true, onSelec
 // gating never leaves holes or misaligns the grid.
 // enabled=false greys the WHOLE grid and swallows taps, the same way VibrationModeButtons does it —
 // for rows that stay on screen because they still explain something, but can't be acted on yet.
+// disabledIndices greys INDIVIDUAL chips (indices into the flat items list) for the case where one
+// option is unreachable in the current configuration but the rest of the row is still live — greyed
+// rather than dropped, so the row doesn't reflow and the option is visibly still a thing that exists.
 @Composable
 private fun ModeChipGrid(items: List<Triple<String, Boolean, () -> Unit>>, perRow: Int,
-                         enabled: Boolean = true) {
+                         enabled: Boolean = true, disabledIndices: Set<Int> = emptySet()) {
     val accent = MaterialTheme.colorScheme.primary
     val accentDim = LocalAccentDim.current
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        items.chunked(perRow).forEach { row ->
+        items.withIndex().chunked(perRow).forEach { row ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                row.forEach { (label, isOn, onTap) ->
+                row.forEach { (index, item) ->
+                    val (label, isOn, onTap) = item
+                    val chipEnabled = enabled && index !in disabledIndices
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(if (isOn && enabled) accent else Color.Black)
+                            .background(if (isOn && chipEnabled) accent else Color.Black)
                             .border(
                                 width = 1.dp,
-                                color = if (isOn && enabled) accent else accentDim,
+                                color = if (isOn && chipEnabled) accent else accentDim,
                                 shape = RoundedCornerShape(8.dp)
                             )
-                            .clickable(enabled = enabled) { onTap() }
+                            .clickable(enabled = chipEnabled) { onTap() }
                             .padding(vertical = 9.dp)
                     ) {
                         Text(
                             label,
                             color = when {
-                                !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
-                                isOn     -> Color.Black
-                                else     -> accent
+                                !chipEnabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                                isOn         -> Color.Black
+                                else         -> accent
                             },
                             fontSize = 12.sp,
-                            fontWeight = if (isOn && enabled) FontWeight.Bold else FontWeight.Medium
+                            fontWeight = if (isOn && chipEnabled) FontWeight.Bold else FontWeight.Medium
                         )
                     }
                 }
@@ -2300,6 +2305,45 @@ private fun GyroSection() {
     // which is the only target that does anything on a Wine desktop or in a mouse-look game.
     val initGyroTarget by XServerDialogState.gyroTarget.collectAsState()
     var gyroTarget by remember(initGyroTarget) { mutableIntStateOf(initGyroTarget) }
+
+    // How the tilt is READ. Rate = the tilt speed drives the stick and it recentres when you stop;
+    // Tilt to aim = the stick follows the angle you hold, so a held tilt keeps aiming. The two are
+    // mutually exclusive with the Mouse target (a held tilt would be a constant pointer delta and the
+    // pointer would run to a screen edge), so each greys the other's chip out with a reason.
+    val orientationSupported by XServerDialogState.gyroOrientationSupported.collectAsState()
+    val initGyroMode by XServerDialogState.gyroMode.collectAsState()
+    var gyroMode by remember(initGyroMode) { mutableIntStateOf(initGyroMode) }
+    val orientationBlockedByMouse = gyroTarget == 2
+    val orientationSelectable = orientationSupported && !orientationBlockedByMouse
+    Spacer(Modifier.height(6.dp))
+    Text(stringResource(R.string.gyro_drawer_mode), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Spacer(Modifier.height(4.dp))
+    ModeChipGrid(
+        listOf(
+            Triple(stringResource(R.string.gyro_drawer_mode_rate), gyroMode == 0) { setGyroModeLive(0) { gyroMode = it } },
+            Triple(stringResource(R.string.gyro_drawer_mode_orientation), gyroMode == 1) { setGyroModeLive(1) { gyroMode = it } },
+        ),
+        perRow = 2,
+        disabledIndices = if (orientationSelectable) emptySet() else setOf(1)
+    )
+    if (!orientationSupported) {
+        GyroHint(stringResource(R.string.gyro_drawer_orientation_unsupported))
+    }
+    else if (orientationBlockedByMouse) {
+        GyroHint(stringResource(R.string.gyro_drawer_orientation_mouse_hint))
+    }
+    else if (gyroMode == 1) {
+        GyroHint(stringResource(R.string.gyro_drawer_orientation_hint))
+        // Mandatory, not polish: with the "Always" activator there is never a rising edge, so this is
+        // the only way to fix a centre that has drifted. Deliberately not bound to a gamepad button —
+        // the activator already costs one.
+        Spacer(Modifier.height(6.dp))
+        AccentButton(stringResource(R.string.gyro_drawer_recenter)) {
+            XServerDialogState.onGyroRecenterRequested?.invoke()
+        }
+        GyroHint(stringResource(R.string.gyro_drawer_recenter_hint))
+    }
+
     Spacer(Modifier.height(6.dp))
     Text(stringResource(R.string.gyro_drawer_apply_to), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     Spacer(Modifier.height(4.dp))
@@ -2309,15 +2353,14 @@ private fun GyroSection() {
             Triple(stringResource(R.string.gyro_drawer_target_left_stick), gyroTarget == 1) { setGyroTargetLive(1) { gyroTarget = it } },
             Triple(stringResource(R.string.gyro_drawer_target_mouse), gyroTarget == 2) { setGyroTargetLive(2) { gyroTarget = it } },
         ),
-        perRow = 3
+        perRow = 3,
+        disabledIndices = if (gyroMode == 1) setOf(2) else emptySet()
     )
-    if (gyroTarget == 2) {
-        Text(
-            stringResource(R.string.gyro_drawer_mouse_hint),
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-            fontSize = 11.sp,
-            modifier = Modifier.padding(start = 4.dp, top = 2.dp)
-        )
+    if (gyroMode == 1) {
+        GyroHint(stringResource(R.string.gyro_drawer_mouse_unavailable_hint))
+    }
+    else if (gyroTarget == 2) {
+        GyroHint(stringResource(R.string.gyro_drawer_mouse_hint))
     }
 
     // Sensitivity is the one knob people reach for constantly, so it sits right under the target.
@@ -2372,12 +2415,7 @@ private fun GyroSection() {
         enabled = activationModeEnabled
     )
     if (activationModeEnabled && gyroActivationMode == 1) {
-        Text(
-            stringResource(R.string.gyro_drawer_toggle_hint),
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-            fontSize = 11.sp,
-            modifier = Modifier.padding(start = 4.dp, top = 2.dp)
-        )
+        GyroHint(stringResource(R.string.gyro_drawer_toggle_hint))
     }
 
     // ---- Fine tuning: set once, then forgotten. Kept last so it never crowds the controls above. ----
@@ -2426,6 +2464,18 @@ private fun GyroSection() {
     )
 }
 
+// The one hint-text treatment used throughout the gyro section: dimmed, small, tucked under the row
+// it explains. Also how a disabled chip states its reason, so "greyed out" is never unexplained.
+@Composable
+private fun GyroHint(text: String) {
+    Text(
+        text,
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+        fontSize = 11.sp,
+        modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+    )
+}
+
 // Target/activator changes have to hit the local picker state AND WinHandler (which resets the
 // overlay so the old stick can't stay deflected) — kept out of the composable so the chip lambdas
 // stay one-liners.
@@ -2439,6 +2489,15 @@ private fun setGyroActivatorLive(activator: Int, reflect: (Int) -> Unit) {
     reflect(activator)
     XServerDialogState.setGyroActivator(activator)
     XServerDialogState.onGyroActivatorChanged?.invoke(activator)
+}
+
+// Read-mode switch. The activity re-registers the sensor on the way through (rate and orientation
+// read DIFFERENT sensors), so this is the one gyro setting whose callback has a side effect beyond
+// WinHandler's own fields.
+private fun setGyroModeLive(mode: Int, reflect: (Int) -> Unit) {
+    reflect(mode)
+    XServerDialogState.setGyroMode(mode)
+    XServerDialogState.onGyroModeChanged?.invoke(mode)
 }
 
 // Same deal for the activation mode: WinHandler drops the toggle latch on the way through, so

@@ -304,6 +304,9 @@
 
     <string name="gyro">Gyro (Motion Aim)</string>
     <string name="gyro_enabled">Enable Motion Aim</string>
+    <string name="gyro_mode_label">Motion Mode</string>
+    <string name="gyro_mode_rate">Rate</string>
+    <string name="gyro_mode_orientation">Tilt to Aim</string>
     <string name="gyro_target_label">Motion Target</string>
     <string name="gyro_target_right_stick">Right Stick</string>
     <string name="gyro_target_left_stick">Left Stick</string>
@@ -329,6 +332,15 @@
          the drawer is a cramped overlay: short chip-sized labels, no "Enable Motion Aim" sentences. -->
     <string name="gyro_drawer_title">Gyro</string>
     <string name="gyro_drawer_enabled">Enabled</string>
+    <string name="gyro_drawer_mode">Motion mode</string>
+    <string name="gyro_drawer_mode_rate">Rate</string>
+    <string name="gyro_drawer_mode_orientation">Tilt to aim</string>
+    <string name="gyro_drawer_orientation_hint">The stick follows the angle you hold the device at, so a held tilt keeps aiming.</string>
+    <string name="gyro_drawer_orientation_unsupported">Not available — this device has no rotation-vector sensor.</string>
+    <string name="gyro_drawer_orientation_mouse_hint">Not available with the Mouse target — pick a stick first.</string>
+    <string name="gyro_drawer_recenter">Recenter</string>
+    <string name="gyro_drawer_recenter_hint">Makes the pose you are holding now the centre.</string>
+    <string name="gyro_drawer_mouse_unavailable_hint">Mouse is not available in Tilt to aim — a held tilt would run the pointer off screen.</string>
     <string name="gyro_drawer_apply_to">Apply gyro to</string>
     <string name="gyro_drawer_target_right_stick">Right stick</string>
     <string name="gyro_drawer_target_left_stick">Left stick</string>

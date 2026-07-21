@@ -20,6 +20,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.hardware.input.InputManager;
 import android.os.Handler;
+import android.os.SystemClock;
 import android.net.LocalServerSocket;
 import android.net.LocalSocket;
 import android.os.VibrationEffect;
@@ -109,6 +110,14 @@ public class WinHandler {
     // no button to latch, so the gate below ignores the mode in that case.
     public static final int GYRO_ACTIVATION_HOLD = 0;
     public static final int GYRO_ACTIVATION_TOGGLE = 1;
+    // How the tilt is read. RATE = the original path (angular velocity -> deflection; the stick
+    // recentres as soon as you stop moving). ORIENTATION = "tilt to aim": the stick follows the ANGLE
+    // the device is held at relative to a captured zero, so a held tilt keeps the stick deflected.
+    // The two modes never share a sample: the activity picks ONE sensor from this value and rate
+    // samples land in updateGyroData while orientation samples land in updateGyroOrientation. Nothing
+    // in updateGyroData branches on the mode, so rate mode is byte-identical to before this existed.
+    public static final int GYRO_MODE_RATE = 0;
+    public static final int GYRO_MODE_ORIENTATION = 1;
 
     public static final boolean GYRO_ENABLED_DEFAULT = true;
     public static final int GYRO_TARGET_DEFAULT = GYRO_TARGET_RIGHT_STICK;
@@ -117,11 +126,23 @@ public class WinHandler {
     public static final float GYRO_SMOOTHING_DEFAULT = 0.5f;    // 0 = raw, ->1 = heavier low-pass
     public static final int GYRO_ACTIVATOR_DEFAULT = GYRO_ACTIVATOR_L1;
     public static final int GYRO_ACTIVATION_MODE_DEFAULT = GYRO_ACTIVATION_HOLD;
+    public static final int GYRO_MODE_DEFAULT = GYRO_MODE_RATE;
 
     private static final float GYRO_AXIS_EPSILON = 0.001f; // don't re-inject for sub-noise changes
     // rad/s * sensitivity -> pixels per sensor sample in mouse mode. Picked so sensitivity 2.0 gives
     // roughly the same "feel" as the right-stick path at the SENSOR_DELAY_GAME (~50 Hz) sample rate.
     private static final float GYRO_MOUSE_SCALE = 12.0f;
+    // rad of tilt * sensitivity -> stick deflection in orientation mode. At sensitivity 1.0 that's
+    // full deflection at ~14 deg off centre, so the stock 2.0 lands at ~7 deg — a wrist's worth.
+    private static final float GYRO_ORIENTATION_STICK_GAIN = 4.0f;
+    // getOrientation()'s yaw is undefined as the remapped pitch approaches +/-90 deg (gimbal lock):
+    // the azimuth flips wildly for a motionless device. Past this we hold the last deflection rather
+    // than emit garbage. 1.3 rad ~= 74.5 deg, comfortably outside any normal hand-held pose.
+    private static final float GYRO_ORIENTATION_GIMBAL_LIMIT = 1.3f;
+    // Axis/handedness verification aid — off unless `setprop log.tag.BLGyroOrient DEBUG` is set, and
+    // rate-limited so even then it can't flood a 200 Hz path. Ship-safe, so it never needs removing.
+    private static final String GYRO_ORIENT_LOG_TAG = "BLGyroOrient";
+    private static final long GYRO_ORIENT_LOG_INTERVAL_MS = 200; // ~5 Hz
 
     private volatile boolean gyroEnabled = GYRO_ENABLED_DEFAULT;
     private volatile int gyroTarget = GYRO_TARGET_DEFAULT;
@@ -132,6 +153,7 @@ public class WinHandler {
     private volatile boolean gyroInvertY = false;
     private volatile int gyroActivator = GYRO_ACTIVATOR_DEFAULT;
     private volatile int gyroActivationMode = GYRO_ACTIVATION_MODE_DEFAULT;
+    private volatile int gyroMode = GYRO_MODE_DEFAULT;
     // False until the launch-time container/shortcut resolution lands (applyGyroTuning). The sample
     // path is a strict no-op while it's false, so the gyro never runs on values the user didn't pick.
     private volatile boolean gyroConfigApplied = false;
@@ -152,6 +174,13 @@ public class WinHandler {
     // Sub-pixel carry for mouse mode, so slow tilts still move the pointer instead of rounding to 0.
     private float accumulatedGyroMouseX = 0.0f;
     private float accumulatedGyroMouseY = 0.0f;
+    // Orientation-mode zero reference: the pose captured the moment the gyro became active, which the
+    // offsets below are measured against. Touched only from the sensor path and the reset/config
+    // helpers (main thread), same as the toggle latch above.
+    private boolean gyroOrientationCalibrated = false;
+    private float orientationYawZero = 0.0f;
+    private float orientationPitchZero = 0.0f;
+    private long lastGyroOrientLogMs = 0;
     // Last controller that pushed state; the gyro re-injects through it so a held tilt keeps panning.
     private ExternalController gyroTargetController;
     private boolean gyroApplyLogged = false;
@@ -951,6 +980,134 @@ public class WinHandler {
     }
 
     /**
+     * Feeds one ORIENTATION sample (yaw and pitch in radians, already remapped for the display
+     * rotation by the activity) into the configured stick. Deliberately a separate entry point rather
+     * than a branch inside updateGyroData: rate mode is the shipped, device-proven path and stays
+     * textually untouched, so selecting rate mode is a provable no-op. The activity registers exactly
+     * one sensor for the selected mode, so only one of the two methods is ever called in a session.
+     *
+     * The pipeline mirrors rate mode — deadzone, invert, sensitivity, low-pass, clamp — but on the
+     * ANGLE OFFSET from a captured zero instead of an angular rate, so a held tilt sustains the
+     * deflection. Same thread and the same allocation-free rules as updateGyroData.
+     */
+    public void updateGyroOrientation(float yaw, float pitch) {
+        if (!gyroConfigApplied || !gyroEnabled) {
+            resetGyroRuntimeState();
+            return;
+        }
+
+        // NOT subtracted here, on purpose: the calibration bias is a zero-RATE offset in rad/s and the
+        // input on this path is an angle, so the subtraction would be dimensionally meaningless. The
+        // zero-reference capture below already cancels any constant offset, which is what the bias
+        // does for rate mode. The bias stays live for rate mode and its UI stays visible in both.
+
+        // Same single call site as rate mode — this is the only per-sample hook in orientation mode,
+        // so the toggle latch would never see an edge without it.
+        updateGyroActivation();
+
+        if (!isGyroActivatorHeld()) {
+            // Inactive: drop the zero reference so the NEXT activation recaptures centre (this is the
+            // auto-recenter for Hold and Toggle alike — Hold never reaches updateGyroActivation), then
+            // clear the filter and the overlay so the stick doesn't stay deflected.
+            gyroOrientationCalibrated = false;
+            smoothedGyroX = 0.0f;
+            smoothedGyroY = 0.0f;
+            clearGyroStickOverlay();
+            return;
+        }
+
+        // Gimbal guard: hold the previous deflection instead of emitting a garbage yaw. Placed before
+        // the capture too, so a zero reference can't be taken from a pose where yaw is undefined.
+        if (Math.abs(pitch) > GYRO_ORIENTATION_GIMBAL_LIMIT)
+            return;
+
+        if (!gyroOrientationCalibrated) {
+            orientationYawZero = yaw;
+            orientationPitchZero = pitch;
+            gyroOrientationCalibrated = true;
+        }
+
+        float deltaX = wrapAngle(yaw - orientationYawZero);
+        float deltaY = wrapAngle(pitch - orientationPitchZero);
+
+        // Same setting as rate mode, reinterpreted: here it's a dead CONE around the captured centre
+        // rather than a minimum rate, so the stock 0.05 reads as ~2.9 degrees of slop. One setting on
+        // purpose — a second "orientation deadzone" would be one more knob describing the same hand.
+        if (Math.abs(deltaX) < gyroDeadzone)
+            deltaX = 0.0f;
+        if (Math.abs(deltaY) < gyroDeadzone)
+            deltaY = 0.0f;
+
+        if (gyroInvertX)
+            deltaX = -deltaX;
+        if (gyroInvertY)
+            deltaY = -deltaY;
+
+        deltaX *= gyroSensitivity * GYRO_ORIENTATION_STICK_GAIN;
+        deltaY *= gyroSensitivity * GYRO_ORIENTATION_STICK_GAIN;
+
+        final float smoothing = gyroSmoothing;
+        smoothedGyroX = (smoothedGyroX * smoothing) + (deltaX * (1.0f - smoothing));
+        smoothedGyroY = (smoothedGyroY * smoothing) + (deltaY * (1.0f - smoothing));
+
+        // The clamp is load-bearing here in a way it isn't in rate mode: tilt far enough and the raw
+        // gain runs well past 1.0, and the stick has to saturate rather than wrap or overshoot.
+        float nextGyroStickX = clamp(smoothedGyroX, -1.0f, 1.0f);
+        float nextGyroStickY = clamp(smoothedGyroY, -1.0f, 1.0f);
+        if (Math.abs(nextGyroStickX) < GYRO_AXIS_EPSILON) nextGyroStickX = 0.0f;
+        if (Math.abs(nextGyroStickY) < GYRO_AXIS_EPSILON) nextGyroStickY = 0.0f;
+        // Keep this early-out: a held tilt is near-constant, so without it every single sample would
+        // re-push an identical gamepad state for as long as the user holds the device still.
+        if (Math.abs(nextGyroStickX - currentGyroStickX) <= GYRO_AXIS_EPSILON
+                && Math.abs(nextGyroStickY - currentGyroStickY) <= GYRO_AXIS_EPSILON) {
+            return;
+        }
+        currentGyroStickX = nextGyroStickX;
+        currentGyroStickY = nextGyroStickY;
+
+        logGyroOrientation(nextGyroStickX, nextGyroStickY);
+        pushGyroToActiveTarget();
+    }
+
+    /**
+     * Wraps a radian difference back into [-PI, PI] so crossing the yaw discontinuity doesn't throw
+     * the stick to the opposite extreme. Two branches rather than Math.IEEEremainder: the inputs are
+     * two angles already in [-PI, PI], so the difference is in [-2PI, 2PI] and one correction is
+     * always enough — and this costs a compare instead of a libm call on the sensor path.
+     */
+    private static float wrapAngle(float radians) {
+        if (radians > (float) Math.PI) radians -= (float) (2.0 * Math.PI);
+        else if (radians < -(float) Math.PI) radians += (float) (2.0 * Math.PI);
+        return radians;
+    }
+
+    /**
+     * Rate-limited debug of the computed deflection, used to verify the axis mapping and the invert
+     * handedness on real hardware (`adb shell setprop log.tag.BLGyroOrient DEBUG`). isLoggable is a
+     * cached property read, so with the tag off this is a compare and a return.
+     */
+    private void logGyroOrientation(float stickX, float stickY) {
+        if (!Log.isLoggable(GYRO_ORIENT_LOG_TAG, Log.DEBUG))
+            return;
+        long now = SystemClock.uptimeMillis();
+        if (now - lastGyroOrientLogMs < GYRO_ORIENT_LOG_INTERVAL_MS)
+            return;
+        lastGyroOrientLogMs = now;
+        Log.d(GYRO_ORIENT_LOG_TAG, "deltaX=" + stickX + " deltaY=" + stickY + " target=" + gyroTarget);
+    }
+
+    /**
+     * Manual recenter: the next orientation sample recaptures the current pose as centre. The drawer's
+     * Recenter row is the only caller and it is NOT optional — with the "Always" activator there is no
+     * rising edge for the whole session, so this is the only way to fix a drifted centre.
+     */
+    public void recenterGyroOrientation() {
+        gyroOrientationCalibrated = false;
+        smoothedGyroX = 0.0f;
+        smoothedGyroY = 0.0f;
+    }
+
+    /**
      * Re-injects the current gamepad state for whichever target holds the activator, so a sustained
      * tilt keeps panning even while no controller/touch event is arriving. A no-op when the
      * activator isn't held, and FakeInputWriter still diffs the axes, so an unchanged state writes
@@ -1025,6 +1182,9 @@ public class WinHandler {
                 smoothedGyroY = 0.0f;
                 accumulatedGyroMouseX = 0.0f;
                 accumulatedGyroMouseY = 0.0f;
+                // Orientation mode: drop the zero reference too, so the next tap-on recaptures centre
+                // from wherever the device is being held rather than resuming an hours-old pose.
+                gyroOrientationCalibrated = false;
                 pushGyroClearToLastTarget();
             }
         }
@@ -1114,6 +1274,7 @@ public class WinHandler {
         clearGyroStickOverlay();
         gyroToggleLatched = false;
         gyroActivatorWasPressed = false;
+        gyroOrientationCalibrated = false;
     }
 
     /**
@@ -1210,6 +1371,7 @@ public class WinHandler {
     public boolean isGyroInvertY()      { return gyroInvertY; }
     public int getGyroActivator()       { return gyroActivator; }
     public int getGyroActivationMode()  { return gyroActivationMode; }
+    public int getGyroMode()            { return gyroMode; }
 
     /**
      * Applies the whole resolved gyro configuration in one shot (launch time, from
@@ -1217,11 +1379,12 @@ public class WinHandler {
      * Same clamps as the individual setters below, so a hand-edited container JSON can't get through.
      */
     public void applyGyroTuning(boolean enabled, int target, int activator, int activationMode,
-                                float sensitivity, float deadzone, float smoothing,
+                                int mode, float sensitivity, float deadzone, float smoothing,
                                 boolean invertX, boolean invertY) {
         gyroEnabled = enabled;
         gyroTarget = (target < GYRO_TARGET_RIGHT_STICK || target > GYRO_TARGET_MOUSE)
                 ? GYRO_TARGET_DEFAULT : target;
+        gyroMode = sanitizeGyroMode(mode);
         gyroActivator = (activator < GYRO_ACTIVATOR_L1 || activator > GYRO_ACTIVATOR_ALWAYS)
                 ? GYRO_ACTIVATOR_DEFAULT : activator;
         gyroActivationMode = (activationMode < GYRO_ACTIVATION_HOLD || activationMode > GYRO_ACTIVATION_TOGGLE)
@@ -1246,7 +1409,29 @@ public class WinHandler {
     public void setGyroTarget(int target) {
         gyroTarget = (target < GYRO_TARGET_RIGHT_STICK || target > GYRO_TARGET_MOUSE)
                 ? GYRO_TARGET_DEFAULT : target;
+        // Re-run the mouse rule: picking the mouse target has to knock orientation mode back to rate.
+        gyroMode = sanitizeGyroMode(gyroMode);
         resetGyroRuntimeState();
+    }
+
+    /** Switching read mode drops the zero reference and the overlay via the shared reset. */
+    public void setGyroMode(int mode) {
+        gyroMode = sanitizeGyroMode(mode);
+        resetGyroRuntimeState();
+    }
+
+    /**
+     * Range check plus the one rule the two settings share: orientation mode can NOT drive the mouse.
+     * That path integrates into a sub-pixel accumulator and emits relative deltas, so a held tilt is a
+     * constant delta and the pointer accelerates into a screen edge and pegs there. The UI disables
+     * the combination, and this makes a hand-edited container JSON unable to reach it either.
+     */
+    private int sanitizeGyroMode(int mode) {
+        if (mode < GYRO_MODE_RATE || mode > GYRO_MODE_ORIENTATION)
+            return GYRO_MODE_DEFAULT;
+        if (mode == GYRO_MODE_ORIENTATION && gyroTarget == GYRO_TARGET_MOUSE)
+            return GYRO_MODE_RATE;
+        return mode;
     }
 
     public void setGyroSensitivity(float sensitivity) {

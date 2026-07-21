@@ -3807,6 +3807,10 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
         mutableStateOf(shortcut.getExtra("gyroActivationMode",
             shortcut.container.gyroActivationMode.toString()).toIntOrNull() ?: Container.GYRO_ACTIVATION_MODE_DEFAULT)
     }
+    var gyroMode by remember {
+        mutableStateOf(shortcut.getExtra("gyroMode",
+            shortcut.container.gyroMode.toString()).toIntOrNull() ?: Container.GYRO_MODE_DEFAULT)
+    }
     var gyroSensitivity by remember {
         mutableStateOf(shortcut.getExtra("gyroSensitivity",
             shortcut.container.gyroSensitivity.toString()).toFloatOrNull() ?: Container.GYRO_SENSITIVITY_DEFAULT)
@@ -4131,6 +4135,7 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
             putExtra("gyroTarget", gyroTarget.toString())
             putExtra("gyroActivator", gyroActivator.toString())
             putExtra("gyroActivationMode", gyroActivationMode.toString())
+            putExtra("gyroMode", gyroMode.toString())
             putExtra("gyroSensitivity", gyroSensitivity.toString())
             putExtra("gyroInvertX", if (gyroInvertX) "1" else "0")
             putExtra("gyroInvertY", if (gyroInvertY) "1" else "0")
@@ -4545,6 +4550,26 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                             Text(stringResource(R.string.gyro_enabled), modifier = Modifier.weight(1f))
                         }
                         if (gyroEnabled) {
+                            // Same pairing rule as the container editor: Tilt to Aim and the Mouse
+                            // target can't coexist (a held tilt is a constant pointer delta), so each
+                            // selection knocks the other back to a working value.
+                            val gyroModeLabels = listOf(
+                                stringResource(R.string.gyro_mode_rate),
+                                stringResource(R.string.gyro_mode_orientation),
+                            )
+                            LabeledDropdown(
+                                label = stringResource(R.string.gyro_mode_label),
+                                options = gyroModeLabels,
+                                selectedOption = gyroModeLabels.getOrElse(gyroMode) {
+                                    gyroModeLabels[Container.GYRO_MODE_DEFAULT]
+                                },
+                                onSelect = { opt ->
+                                    gyroMode = gyroModeLabels.indexOf(opt).coerceAtLeast(0)
+                                    if (gyroMode == Container.GYRO_MODE_ORIENTATION && gyroTarget == Container.GYRO_TARGET_MOUSE)
+                                        gyroTarget = Container.GYRO_TARGET_DEFAULT
+                                }
+                            )
+                            Spacer(Modifier.height(8.dp))
                             val gyroTargetLabels = listOf(
                                 stringResource(R.string.gyro_target_right_stick),
                                 stringResource(R.string.gyro_target_left_stick),
@@ -4556,7 +4581,11 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                                 selectedOption = gyroTargetLabels.getOrElse(gyroTarget) {
                                     gyroTargetLabels[Container.GYRO_TARGET_DEFAULT]
                                 },
-                                onSelect = { opt -> gyroTarget = gyroTargetLabels.indexOf(opt).coerceAtLeast(0) }
+                                onSelect = { opt ->
+                                    gyroTarget = gyroTargetLabels.indexOf(opt).coerceAtLeast(0)
+                                    if (gyroTarget == Container.GYRO_TARGET_MOUSE)
+                                        gyroMode = Container.GYRO_MODE_RATE
+                                }
                             )
                             val gyroActivatorLabels = listOf(
                                 stringResource(R.string.gyro_activator_l1),

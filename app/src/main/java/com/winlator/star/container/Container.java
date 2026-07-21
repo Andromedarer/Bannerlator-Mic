@@ -507,6 +507,11 @@ public class Container {
     public static final int GYRO_ACTIVATOR_ALWAYS = 4;
     public static final int GYRO_ACTIVATION_HOLD = 0;
     public static final int GYRO_ACTIVATION_TOGGLE = 1;
+    // How the tilt is read. RATE = the shipped behaviour (angular velocity -> stick deflection, the
+    // stick recentres the moment you stop moving). ORIENTATION = "tilt to aim": the stick follows the
+    // ANGLE you're holding the device at, so a held tilt keeps the stick deflected.
+    public static final int GYRO_MODE_RATE = 0;
+    public static final int GYRO_MODE_ORIENTATION = 1;
 
     public static final boolean GYRO_ENABLED_DEFAULT = true;
     public static final int GYRO_TARGET_DEFAULT = GYRO_TARGET_RIGHT_STICK;
@@ -517,6 +522,9 @@ public class Container {
     // HOLD is the default on purpose: it's what the gyro has always done, so an existing container
     // that has never seen this key behaves exactly as before.
     public static final int GYRO_ACTIVATION_MODE_DEFAULT = GYRO_ACTIVATION_HOLD;
+    // RATE for the same reason HOLD is the activation default: it's what the gyro has always done, so
+    // a container that has never seen this key behaves exactly as it did before tilt-to-aim existed.
+    public static final int GYRO_MODE_DEFAULT = GYRO_MODE_RATE;
     public static final boolean GYRO_INVERT_X_DEFAULT = false;
     public static final boolean GYRO_INVERT_Y_DEFAULT = false;
 
@@ -526,6 +534,20 @@ public class Container {
 
     public void setGyroEnabled(boolean enabled) {
         putExtra("gyroEnabled", enabled ? "1" : "0");
+    }
+
+    public int getGyroMode() {
+        try {
+            int m = Integer.parseInt(getExtra("gyroMode", String.valueOf(GYRO_MODE_DEFAULT)));
+            return (m < GYRO_MODE_RATE || m > GYRO_MODE_ORIENTATION) ? GYRO_MODE_DEFAULT : m;
+        }
+        catch (NumberFormatException e) {
+            return GYRO_MODE_DEFAULT;
+        }
+    }
+
+    public void setGyroMode(int mode) {
+        putExtra("gyroMode", String.valueOf(mode));
     }
 
     public int getGyroTarget() {
