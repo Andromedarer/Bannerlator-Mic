@@ -37,11 +37,6 @@ public abstract class ImageFsInstaller {
         }
     }
 
-    // Stages the bundled bionic-fg Vulkan layer (.so + implicit-layer manifest) into imagefs so
-    // frame generation / the FPS limiter work without manually copying the .so after every
-    // (re)install. Idempotent: skips the .so copy when it is already present with the same size.
-    // The manifest's library_path is ../../../lib/libbionic_fg.so, so it must sit in
-    // usr/share/vulkan/implicit_layer.d/ with the .so in usr/lib/.
     // Identity of a bundled asset as staged on disk: the app build it came from plus the asset's
     // size. Comparing SIZE ALONE (the old check) silently skips an update whenever a new build of
     // an asset happens to land on the same byte count; folding in versionCode means any release
@@ -59,13 +54,21 @@ public abstract class ImageFsInstaller {
         }
     }
 
+    // Stages the bundled bionic-fg Vulkan layer (.so + implicit-layer manifest) into imagefs so
+    // frame generation / the FPS limiter work without manually copying the .so after every
+    // (re)install. Idempotent via the version stamp above. The manifest's library_path is
+    // ../../../lib/libbionic_fg.so, so it must sit in usr/share/vulkan/implicit_layer.d/ with the
+    // .so in usr/lib/.
     public static void installBionicFgLayer(Context context, ImageFs imageFs) {
         try {
             File soDst = new File(imageFs.getLibDir(), "libbionic_fg.so");
             long assetSize = FileUtils.getSize(context, "bionic-fg/libbionic_fg.so");
             File stamp = new File(imageFs.getLibDir(), ".bionic-fg-stamp");
             String want = assetStamp(context, "bionic-fg/libbionic_fg.so");
-            if (stampMatches(stamp, want) && soDst.isFile()) return;
+            // Both checks, because they catch different failures: the stamp catches a new build
+            // that happens to be the same size as the installed one, the size catches the staged
+            // file drifting on disk (replaced, truncated) while the stamp still reads current.
+            if (stampMatches(stamp, want) && soDst.isFile() && soDst.length() == assetSize) return;
             if (!soDst.isFile() || soDst.length() != assetSize) {
                 // Copy via a temp file and rename into place: staging runs off the main thread,
                 // so a game launched during it would otherwise be able to dlopen a half-written
@@ -116,7 +119,7 @@ public abstract class ImageFsInstaller {
             long assetSize = FileUtils.getSize(context, "lsfg-vk/liblsfg-vk.so");
             File stamp = new File(imageFs.getLibDir(), ".lsfg-vk-stamp");
             String want = assetStamp(context, "lsfg-vk/liblsfg-vk.so");
-            if (stampMatches(stamp, want) && soDst.isFile()) return;
+            if (stampMatches(stamp, want) && soDst.isFile() && soDst.length() == assetSize) return;
             if (!soDst.isFile() || soDst.length() != assetSize) {
                 File soTmp = new File(soDst.getParentFile(), "liblsfg-vk.so.staging");
                 FileUtils.copy(context, "lsfg-vk/liblsfg-vk.so", soTmp);
