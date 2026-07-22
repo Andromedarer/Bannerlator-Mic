@@ -4551,3 +4551,25 @@ Select via `conf.toml` or `BIONIC_FG_MODEL`. Bundling (rather than hand-injectin
 **⚠️ NEAR-MISS worth remembering:** scripted (python) edits silently converted two CRLF files to LF — `XServerDisplayActivity.java` and `ImageFsInstaller.java` — turning both into whole-file rewrites (583 changed lines for 64 real ones) and destroying blame. Caught by checking the diffstat before pushing; fixed in `91111fcc`. **Check `--stat` (and `-w`) before merging scripted edits.**
 
 **▶️ NEXT (tomorrow):** port clintOnSky's PR #96 present-path fix into the fork as real source (NOT the retired patch file) — `waitLastDispatch()` on the dispatch's own fence + bounded timeout, replacing the per-frame `vkQueueWaitIdle(device_.computeQueue())` still at `layer.cpp:1471`. Confirmed ABSENT from tonight's build, so every number above was measured with that stall in place. Prediction: all four models rise; if FSR3 rises least, part of its lead was just spending less time in the shared stall. Then the m3 lateral-motion quality test.
+
+---
+
+## 2026-07-22 — File manager: SD card always listed (branch `fix/sd-always-listed`, CI green, awaiting device test)
+
+**Bug (long-standing, 4 prior fixes all failed):** the SD card drops out of the in-app Compose file manager's drive list after exiting a container. Earlier attempts (ON_RESUME re-enumerate, re-enum on dropdown-open, settling retries + MEDIA_MOUNTED receiver, `storageTick` lifecycle keying) all failed on device because they re-ran the *same* enumeration — `File("/storage").listFiles()` — which is a filesystem read, and the volume is genuinely absent from the restarted process's stale storage sandbox.
+
+**Fix = change the source, not the timing.** New `core/StorageRoots.kt`, modelled on WinNative's `shared/android/StoragePathUtils.kt`, rewritten to our style. Merges four independent sources into one deduplicated, insertion-ordered volume set:
+1. `StorageManager.getStorageVolumes()` — authoritative, read over Binder, gated on `MEDIA_MOUNTED`. **Not affected by this process's mount view.**
+2. `Context.getExternalFilesDirs(null)` — per-app dirs on each volume, granted separately from shared storage; walked up past `Android/` to recover the volume root.
+3. `/storage` listing — what we used to do exclusively, now just a backstop.
+4. `/mnt/media_rw` listing.
+
+A volume reported by *any* source is **always** emitted. When its root is unreadable, `deepestReadable()` walks up from the app-specific dir and returns the highest listable directory instead — so the entry degrades to a partial view rather than vanishing. Unreadable entries still render (SD icon for removable) and toast on tap instead of silently doing nothing.
+
+`FileManagerScreen.kt`: `drives` was a **keyless `remember {}`** (frozen for the screen's lifetime) → now `remember(storageTick)` with an ON_RESUME `LifecycleEventObserver`, matching the Containers/Shortcuts/Saves screens. Drive menu switched from `Pair<String,File>` to `StorageRoot`.
+
+**CI GREEN run `29905312058`** (3 flavors, headSha `420c9033` verified). Staged `/sdcard/Download/Bannerlator-sd-always-standard.apk`, sha256 `9029cef4b7c62f30…` verified host↔device. vc stays 48 per the release-versioning rule.
+
+**⬜ DEVICE TEST:** launch a container → exit → open File Manager → drive chip → SD card must still be listed *and* openable. Also check it survives a second cycle, and that Internal/Drive C:/Drive Z: are unregressed.
+
+**Honest caveat:** sources (1) and (2) will always *report* the volume, so the entry can no longer disappear. Whether `/storage/<uuid>` is still *readable* in the stale-sandbox state is the open question — if not, the fallback should land us in the SD's `Android/data/<pkg>/files` subtree, which is a reduced but non-empty view. If the device test shows the entry present but empty, the remaining gap is the mount-namespace layer (options A–D in the memory file), not enumeration.
