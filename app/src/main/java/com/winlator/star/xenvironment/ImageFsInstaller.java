@@ -101,9 +101,47 @@ public abstract class ImageFsInstaller {
     // device on a full imagefs re-extract. Each call is individually idempotent (size check or
     // version stamp), so the steady-state cost is a few stats. Call off the main thread.
     public static void stageBundledComponents(Context context, ImageFs imageFs) {
+        disableLibjpegShadowOnXiaomi(imageFs);
         installBionicFgLayer(context, imageFs);
         installLsfgVkLayer(context, imageFs);
         installFFmpeg8(context, imageFs);
+    }
+
+    // XIAOMI/HYPEROS ONLY. Our imagefs ships a build-time libjpeg.so -> libjpeg.so.8 symlink.
+    // Nothing resolves the bare "libjpeg.so" soname at runtime — every consumer in the imagefs
+    // (libgstopengl, libgdk_pixbuf, libtiff) links against libjpeg.so.8 — but on Xiaomi the
+    // symlink is actively harmful: their patched libhwui.so drags /system_ext/lib64/libjpeg-hyper.so
+    // into any dlopen closure that touches libandroid.so, which BOTH frame-gen layers do for
+    // AHardwareBuffer. libjpeg-hyper's own "libjpeg.so" dependency then resolves via
+    // LD_LIBRARY_PATH to our symlinked copy, which does not export the jsimd_* SIMD symbols it
+    // needs; the failed relocation aborts the whole dlopen, so bionic-fg AND lsfg-vk silently
+    // never load ("Requested layer ... failed to load"). Moving the symlink aside lets the linker
+    // fall through to Xiaomi's own /system/lib64/libjpeg.so, which does export them.
+    //
+    // Diagnosis and fix by @clintOnSky (PR #96). Renamed rather than deleted so the change is
+    // reversible and so a support report can be answered by looking for the parked file.
+    // Gated on libjpeg-hyper being present, so every non-Xiaomi device is left untouched.
+    public static void disableLibjpegShadowOnXiaomi(ImageFs imageFs) {
+        try {
+            if (!new File("/system_ext/lib64/libjpeg-hyper.so").isFile()) return;
+            File libDir = imageFs.getLibDir();
+            File shadow = new File(libDir, "libjpeg.so");
+            if (!shadow.exists()) return;   // already parked, or this imagefs never shipped it
+            File parked = new File(libDir, "libjpeg.so.disabled");
+            // An imagefs re-extract recreates the symlink, so clear any stale parked copy first
+            // rather than leaving the rename to fail.
+            if (parked.exists() && !parked.delete()) {
+                Log.e("ImageFsInstaller", "Could not clear stale libjpeg.so.disabled");
+                return;
+            }
+            if (shadow.renameTo(parked)) {
+                Log.i("ImageFsInstaller", "Parked usr/lib/libjpeg.so as .disabled (Xiaomi libjpeg-hyper workaround)");
+            } else {
+                Log.e("ImageFsInstaller", "Failed to park usr/lib/libjpeg.so; frame-gen layers may not load on this device");
+            }
+        } catch (Exception e) {
+            Log.e("ImageFsInstaller", "Failed to apply the Xiaomi libjpeg workaround", e);
+        }
     }
 
     // Stages the bundled lsfg-vk Vulkan layer (.so + implicit-layer manifest) into imagefs so the
