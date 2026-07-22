@@ -1,5 +1,20 @@
 # Star-Compose — Progress Log
 
+## 2026-07-22 — ⏱️ Frame-gen **present-path stall removed** — wait on the dispatch's own fence, not the whole queue (branch `feat/model3.1-layer`, vc stays 48)
+
+> **The layer called `vkQueueWaitIdle(computeQueue())` once per presented frame.** In single-device mode that queue is also the *application's* render queue on any GPU exposing a single universal queue family — the normal mobile/Adreno layout — so every present was draining the game's own in-flight work, not just the interpolation dispatch. **This is the last piece of clintOnSky's PR #96 still wanted;** its Xiaomi/HyperOS half already landed separately as `24d64ea0`, and its flow-preset chips were declined in favour of the continuous slider.
+>
+> **The fix:** track the fence of the most recent `present()` submission (`lastSubmitFence_`, aliasing one of the two `frames_[]` fences, nulled in `destroy()`) and wait on that alone, bounded by the existing `syncFenceTimeoutNs`. Timeouts get their own consecutive counter, `dispatchFenceTimeouts`, feeding the existing `noteFenceTimeout` / `kMaxFenceTimeouts` sticky-disable path alongside the copy and generated-frame counters.
+>
+> **Two deliberate deviations from PR #96 — each of them a bug in a naive port:**
+> - **No early `return` on timeout.** Returning straight to `queuePresent` from inside the framegen block skips `std::swap(st.prevAhb, st.currAhb)` and `st.frameCount++` at the end of the function, wedging the prev/curr rotation. The injection loop is gated instead (`for (int k = 0; dispatchReady && k < N; ++k)`) and control falls through to the normal real-frame present. The copy-fence path *may* early-return because framegen hasn't run yet at that point.
+> - **Output image layout/ownership bookkeeping is updated unconditionally,** before the wait rather than inside the success branch. The dispatch has already been *submitted*, so its transitions land whether or not the wait succeeds; leaving the tracker behind would barrier from a stale `oldLayout` on the following present.
+>
+> **⚠️ Every frame-gen number recorded so far was measured with this stall in place** — the whole parked 4-model sweep (Default 92.7 / Traced 97.5 / V2 96.5 / FSR3 134.7 fps). All four models are expected to move. **If FSR3 rises the least, part of its +45% lead was simply spending less time in the shared stall.** ⚠️ Precision caveat: the old wait drained `computeQueue()`, and whether that *is* the game's queue depends on the single-universal-queue-family assumption — normal on Adreno, still unconfirmed on this device.
+>
+> **Built:** fork `The412Banner/bionic-fg` `35e39f3` on `feat/model3.1-block-flow`, layer CI `29950660966` green, `.so` md5 `2aae71fe` / 6,573,808 B (was `238d2f45` / 6,572,168). App `d6838323`, CI `29950801448` green ×3 flavours; the size change moves the `versionCode:size` staging stamp, so the layer re-stages on device. Bundled layer **verified md5 `2aae71fe` inside the staged APK**, closing the "bundled layer never reached the device" failure mode. ⚠️ **NOT yet device-verified.** Next: re-run the parked sweep against the with-stall table, then the lateral-motion quality test neither model 3 nor model 4 has had.
+
+
 ## 2026-07-22 — 🎞️ bionic-fg **model 4 "FSR3+"** — block-grid optical flow, sub-pixel, true bidirectional (branch `feat/model3.1-layer`, vc stays 48)
 
 > **Model 3's FSR3 optical flow reworked, added as a SEPARATE 5th model rather than replacing it.** Model 3 stays bit-identical so the two can be A/B'd live in the same scene — its own quality was only ever measured on a *parked* Dirt 3 scene (zero motion = a cost measurement, a worthless quality one), so replacing it in place would have destroyed the baseline before it was ever validated.
