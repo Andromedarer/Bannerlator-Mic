@@ -96,6 +96,7 @@ public class ControlElement {
     private final Rect boundingBox = new Rect();
     private boolean[] states = new boolean[4];
     private boolean[] activeBindingSlots = new boolean[4];
+    private boolean[] blockTouchscreenMouseButtons = {true, true, true, true};
     private boolean holdKeyActive;
     private final Path path = new Path();
     private boolean boundingBoxNeedsUpdate = true;
@@ -121,6 +122,7 @@ public class ControlElement {
     private int gridRows;             // rows in button grid (for BUTTON_GRID)
     private int gridCols;             // columns in button grid (for BUTTON_GRID)
     private Shape gridCellShape;      // shape for each grid cell (default ROUND_RECT)
+    private float gridSpacing;        // spacing between grid cells in snapping-size units
     private PointF mouseAreaLastPos;  // last touch position in MOUSE_AREA
     private Binding[][] comboBindings; // multi-key combos per binding slot (null = single key)
     private String[][] rawComboBindingNames;
@@ -177,6 +179,7 @@ public class ControlElement {
         gridRows = 0;
         gridCols = 0;
         gridCellShape = Shape.ROUND_RECT;
+        gridSpacing = 0;
         mouseAreaLastPos = null;
         holdKey = Binding.NONE;
         holdKeyActive = false;
@@ -305,6 +308,7 @@ public class ControlElement {
             Binding[] oldBindings = bindings;
             boolean[] oldStates = states;
             boolean[] oldActiveBindingSlots = activeBindingSlots;
+            boolean[] oldBlockTouchscreenMouseButtons = blockTouchscreenMouseButtons;
             Binding[][] oldComboBindings = comboBindings;
             String[][] oldRawComboBindingNames = rawComboBindingNames;
             long[] oldCellPressTimes = cellPressTimes;
@@ -317,6 +321,16 @@ public class ControlElement {
             activeBindingSlots = oldActiveBindingSlots != null
                     ? Arrays.copyOf(oldActiveBindingSlots, safeBindingCount)
                     : new boolean[safeBindingCount];
+            blockTouchscreenMouseButtons = oldBlockTouchscreenMouseButtons != null
+                    ? Arrays.copyOf(oldBlockTouchscreenMouseButtons, safeBindingCount)
+                    : new boolean[safeBindingCount];
+            if (oldBlockTouchscreenMouseButtons == null) {
+                Arrays.fill(blockTouchscreenMouseButtons, true);
+            }
+            else if (oldBlockTouchscreenMouseButtons.length < safeBindingCount) {
+                Arrays.fill(blockTouchscreenMouseButtons, oldBlockTouchscreenMouseButtons.length,
+                        safeBindingCount, true);
+            }
             comboBindings = oldComboBindings != null ? Arrays.copyOf(oldComboBindings, safeBindingCount) : null;
             rawComboBindingNames = oldRawComboBindingNames != null
                     ? Arrays.copyOf(oldRawComboBindingNames, safeBindingCount)
@@ -327,6 +341,8 @@ public class ControlElement {
             Arrays.fill(bindings, Binding.NONE);
             states = new boolean[safeBindingCount];
             activeBindingSlots = new boolean[safeBindingCount];
+            blockTouchscreenMouseButtons = new boolean[safeBindingCount];
+            Arrays.fill(blockTouchscreenMouseButtons, true);
             comboBindings = null;
             rawComboBindingNames = null;
             cellPressTimes = null;
@@ -342,6 +358,9 @@ public class ControlElement {
         Arrays.fill(bindings, oldLength, bindings.length, Binding.NONE);
         states = Arrays.copyOf(states, safeBindingCount);
         activeBindingSlots = Arrays.copyOf(activeBindingSlots, safeBindingCount);
+        int oldPriorityLength = blockTouchscreenMouseButtons.length;
+        blockTouchscreenMouseButtons = Arrays.copyOf(blockTouchscreenMouseButtons, safeBindingCount);
+        Arrays.fill(blockTouchscreenMouseButtons, oldPriorityLength, safeBindingCount, true);
         if (comboBindings != null) comboBindings = Arrays.copyOf(comboBindings, safeBindingCount);
         if (rawComboBindingNames != null) rawComboBindingNames = Arrays.copyOf(rawComboBindingNames, safeBindingCount);
         if (cellPressTimes != null) cellPressTimes = Arrays.copyOf(cellPressTimes, safeBindingCount);
@@ -403,8 +422,16 @@ public class ControlElement {
     public int getGridCols() { return gridCols; }
     public void setGridCols(int gridCols) { this.gridCols = clamp(gridCols, 1, MAX_GRID_COLS); boundingBoxNeedsUpdate = true; }
     public Shape getGridCellShape() { return gridCellShape != null ? gridCellShape : Shape.ROUND_RECT; }
-    public void setGridCellShape(Shape s) { this.gridCellShape = s != null ? s : Shape.ROUND_RECT; }
+    public void setGridCellShape(Shape s) { this.gridCellShape = s != null ? s : Shape.ROUND_RECT; boundingBoxNeedsUpdate = true; }
+    public float getGridSpacing() { return gridSpacing; }
+    public void setGridSpacing(float spacing) { gridSpacing = clampFinite(spacing, 0f, 1f, 0f); }
     public Binding[] getCombo(int index) { return (comboBindings != null && index >= 0 && index < comboBindings.length) ? comboBindings[index] : null; }
+    public boolean blocksTouchscreenMouseButtonsAt(int index) {
+        return !isValidBindingIndex(index) || blockTouchscreenMouseButtons[index];
+    }
+    public void setBlocksTouchscreenMouseButtonsAt(int index, boolean blocked) {
+        if (isValidBindingIndex(index)) blockTouchscreenMouseButtons[index] = blocked;
+    }
     public void setCombo(int index, Binding[] combo) {
         if (!isValidBindingIndex(index)) return;
         if (rawComboBindingNames != null && index < rawComboBindingNames.length) rawComboBindingNames[index] = null;
@@ -647,7 +674,7 @@ public class ControlElement {
             case BUTTON_GRID: {
                 int cols = getEffectiveGridCols();
                 int rows = getEffectiveGridRows();
-                halfWidth = snappingSize * 3 * cols;
+                halfWidth = snappingSize * (getGridCellShape() == Shape.SQUARE ? 2 : 3) * cols;
                 halfHeight = snappingSize * 2 * rows;
                 break;
             }
@@ -1165,7 +1192,7 @@ public class ControlElement {
                         float right = left + cellW;
                         float bottom = top + cellH;
                         // Build cell rect for shape drawing
-                        Rect cellRect = new Rect((int)(left + 2), (int)(top + 2), (int)(right - 2), (int)(bottom - 2));
+                        Rect cellRect = getGridCellRect(left, top, right, bottom);
                         boolean pressed = cellIdx < states.length && states[cellIdx];
 
                         // --- Press flash animation ---
@@ -1591,7 +1618,7 @@ public class ControlElement {
                         float bottom = top + cellH;
                         boolean pressed = cellIdx < states.length && states[cellIdx];
 
-                        Rect cellRect = new Rect((int)left + 2, (int)top + 2, (int)right - 2, (int)bottom - 2);
+                        Rect cellRect = getGridCellRect(left, top, right, bottom);
                         int cellFillColor = applyGridPressFlash(cellIdx, pressed ? pressedFillColor : fillColor, pressed, now);
                         drawGameHubShape(canvas, paint, cellRect, cellFillColor, true, cellShape);
                         paint.setStyle(Paint.Style.STROKE);
@@ -1679,6 +1706,12 @@ public class ControlElement {
                 break;
             }
         }
+    }
+
+    private Rect getGridCellRect(float left, float top, float right, float bottom) {
+        int inset = Math.round(inputControlsView.getSnappingSize() * gridSpacing * scale * 0.5f);
+        return new Rect(Math.round(left) + inset, Math.round(top) + inset,
+                Math.round(right) - inset, Math.round(bottom) - inset);
     }
 
     private int applyGridPressFlash(int cellIndex, int fillColor, boolean pressed, long now) {
@@ -2085,6 +2118,11 @@ public class ControlElement {
             }
 
             elementJSONObject.put("bindings", bindingsJSONArray);
+            JSONArray blockTouchscreenMouseButtonsJSONArray = new JSONArray();
+            for (boolean blocked : blockTouchscreenMouseButtons) {
+                blockTouchscreenMouseButtonsJSONArray.put(blocked);
+            }
+            elementJSONObject.put("blockTouchscreenMouseButtons", blockTouchscreenMouseButtonsJSONArray);
             elementJSONObject.put("scale", Float.valueOf(scale));
             elementJSONObject.put("x", (float)x / inputControlsView.getMaxWidth());
             elementJSONObject.put("y", (float)y / inputControlsView.getMaxHeight());
@@ -2122,6 +2160,7 @@ public class ControlElement {
                 if (gridCellShape != null && gridCellShape != Shape.ROUND_RECT) {
                     elementJSONObject.put("gridCellShape", gridCellShape.name());
                 }
+                if (gridSpacing > 0) elementJSONObject.put("gridSpacing", Float.valueOf(gridSpacing));
             }
             if (type == Type.EXPANDABLE_BUTTON) {
                 elementJSONObject.put("expandableChildCount", bindings.length);
@@ -2176,7 +2215,8 @@ public class ControlElement {
         String[] optionalKeys = {
                 "range", "orientation", "groupId", "areaWidthRatio", "areaHeightRatio",
                 "stickRadiusRatio", "areaWidth", "areaHeight", "stickRadius",
-                "mouseSensitivity", "gridRows", "gridCols", "gridCellShape", "combos", "holdKey",
+                "mouseSensitivity", "gridRows", "gridCols", "gridCellShape", "gridSpacing", "combos", "holdKey",
+                "blockTouchscreenMouseButtons",
                 "expandableChildCount", "expandableLayout", "expandableDirection",
                 "customAreaAppearanceEnabled", "customAreaColor", "customAreaOpacity"
         };

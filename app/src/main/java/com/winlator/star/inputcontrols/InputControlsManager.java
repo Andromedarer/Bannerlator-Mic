@@ -486,7 +486,14 @@ public class InputControlsManager {
         for (int i = 0; i < bindings.length(); i++) {
             if (!(bindings.opt(i) instanceof String)) return false;
         }
-        String[] optionalNumbers = {"deadZone", "mouseSensitivity", "customAreaOpacity",
+        JSONArray blockTouchscreenMouseButtons = element.optJSONArray("blockTouchscreenMouseButtons");
+        if (element.has("blockTouchscreenMouseButtons") && blockTouchscreenMouseButtons == null) return false;
+        if (blockTouchscreenMouseButtons != null) {
+            for (int i = 0; i < blockTouchscreenMouseButtons.length(); i++) {
+                if (!(blockTouchscreenMouseButtons.opt(i) instanceof Boolean)) return false;
+            }
+        }
+        String[] optionalNumbers = {"deadZone", "mouseSensitivity", "customAreaOpacity", "gridSpacing",
                 "areaWidthRatio", "areaHeightRatio", "stickRadiusRatio"};
         for (String key : optionalNumbers) {
             if (element.has(key) && !isFiniteNumber(element, key)) return false;

@@ -462,6 +462,7 @@ public class InputControlsView extends View {
             deselectAllElements();
         }
         else this.profile = null;
+        updateTouchscreenMouseButtons();
         createMouseMoveTimer();
     }
 
@@ -505,6 +506,7 @@ public class InputControlsView extends View {
     public void setShowTouchscreenControls(boolean showTouchscreenControls) {
         if (this.showTouchscreenControls && !showTouchscreenControls) releaseActiveControls();
         this.showTouchscreenControls = showTouchscreenControls;
+        updateTouchscreenMouseButtons();
         WinHandler winHandler = xServer != null ? xServer.getWinHandler() : null;
         if (winHandler != null) winHandler.sendGamepadState();
         invalidate();
@@ -615,6 +617,7 @@ public class InputControlsView extends View {
 
     public void setTouchpadView(TouchpadView touchpadView) {
         this.touchpadView = touchpadView;
+        updateTouchscreenMouseButtons();
     }
 
     public XServer getXServer() {
@@ -767,6 +770,10 @@ public class InputControlsView extends View {
     public boolean onTouchEvent(MotionEvent event) {
         boolean hapticsEnabled = preferences.getBoolean("touchscreen_haptics_enabled", true);
         if (!editMode) resetTouchscreenTimeout();
+        int actionMasked = event.getActionMasked();
+        if (actionMasked == MotionEvent.ACTION_DOWN || actionMasked == MotionEvent.ACTION_POINTER_DOWN) {
+            updateTouchscreenMouseButtons();
+        }
         if (!editMode && !showTouchscreenControls) {
             if (touchpadView != null) touchpadView.onTouchEvent(event);
             return true;
@@ -854,7 +861,6 @@ public class InputControlsView extends View {
         if (!editMode && profile != null && showTouchscreenControls) {
             int actionIndex = event.getActionIndex();
             int pointerId = event.getPointerId(actionIndex);
-            int actionMasked = event.getActionMasked();
             boolean handled = false;
 
             switch (actionMasked) {
@@ -969,6 +975,35 @@ public class InputControlsView extends View {
             }
         }
         return true;
+    }
+
+    private void updateTouchscreenMouseButtons() {
+        if (touchpadView == null) return;
+        boolean blockLeft = false;
+        boolean blockRight = false;
+        if (profile != null && showTouchscreenControls) {
+            for (ControlElement element : profile.getElements()) {
+                if (isElementHiddenByGroup(element)) continue;
+                if (element.getType() == ControlElement.Type.EXPANDABLE_BUTTON && !element.isExpanded()) continue;
+                for (int index = 0; index < element.getBindingCount(); index++) {
+                    if (!element.blocksTouchscreenMouseButtonsAt(index)) continue;
+                    Binding binding = element.getBindingAt(index);
+                    if (binding == Binding.MOUSE_LEFT_BUTTON) blockLeft = true;
+                    else if (binding == Binding.MOUSE_RIGHT_BUTTON) blockRight = true;
+                    Binding[] combo = element.getCombo(index);
+                    if (combo != null) {
+                        for (Binding comboBinding : combo) {
+                            if (comboBinding == Binding.MOUSE_LEFT_BUTTON) blockLeft = true;
+                            else if (comboBinding == Binding.MOUSE_RIGHT_BUTTON) blockRight = true;
+                        }
+                    }
+                    if (blockLeft && blockRight) break;
+                }
+                if (blockLeft && blockRight) break;
+            }
+        }
+        touchpadView.setPointerButtonLeftEnabled(!blockLeft);
+        touchpadView.setPointerButtonRightEnabled(!blockRight);
     }
 
     private void swallowActiveExpandablePointer() {

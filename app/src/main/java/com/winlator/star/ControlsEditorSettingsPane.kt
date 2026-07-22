@@ -174,6 +174,7 @@ fun ControlsEditorSettingsPane(
     var gridRows by remember { mutableStateOf(element.getGridRows().coerceAtLeast(1)) }
     var gridCols by remember { mutableStateOf(element.getGridCols().coerceAtLeast(1)) }
     var gridCellShapeIndex by remember { mutableStateOf(element.getGridCellShape().ordinal) }
+    var gridSpacingPct by remember { mutableStateOf((element.getGridSpacing() * 100f).roundToInt()) }
     var holdKeyIndex by remember { mutableStateOf(holdKeyOptions.indexOf(element.getHoldKey().toString()).coerceAtLeast(0)) }
     var toggleSwitch by remember { mutableStateOf(element.isToggleSwitch()) }
     var customText by remember { mutableStateOf(element.getText()) }
@@ -248,11 +249,12 @@ fun ControlsEditorSettingsPane(
         bindingDialogTitle = title
     }
 
-    fun saveBindingSlot(index: Int, binding: Binding, combo: List<Binding>) {
+    fun saveBindingSlot(index: Int, binding: Binding, combo: List<Binding>, blockTouchscreenMouseButtons: Boolean) {
         val cleanCombo = combo.filter { it != Binding.NONE }.distinct()
         val mainBinding = if (binding != Binding.NONE) binding else cleanCombo.lastOrNull() ?: Binding.NONE
         element.setBindingAt(index, mainBinding)
         element.setCombo(index, if (cleanCombo.isEmpty()) null else cleanCombo.toTypedArray())
+        element.setBlocksTouchscreenMouseButtonsAt(index, blockTouchscreenMouseButtons)
         if (mainBinding == Binding.SHOW_ANDROID_KEYBOARD || cleanCombo.contains(Binding.SHOW_ANDROID_KEYBOARD)) {
             element.setToggleSwitch(false)
             toggleSwitch = false
@@ -276,6 +278,7 @@ fun ControlsEditorSettingsPane(
         gridRows = element.getGridRows().coerceAtLeast(1)
         gridCols = element.getGridCols().coerceAtLeast(1)
         gridCellShapeIndex = element.getGridCellShape().ordinal
+        gridSpacingPct = (element.getGridSpacing() * 100f).roundToInt()
         holdKeyIndex = holdKeyOptions.indexOf(element.getHoldKey().toString()).coerceAtLeast(0)
         toggleSwitch = element.isToggleSwitch()
         customText = element.getText()
@@ -657,6 +660,19 @@ fun ControlsEditorSettingsPane(
                     saveAndInvalidate()
                 },
             )
+            LabeledSlider(
+                label = stringResource(R.string.grid_spacing),
+                value = gridSpacingPct,
+                rangeStart = 0,
+                rangeEnd = 100,
+                suffix = "%",
+                onValueChange = { value ->
+                    gridSpacingPct = value
+                    element.setGridSpacing(value / 100f)
+                    onInvalidate()
+                },
+                onValueChangeFinished = { profile.save() },
+            )
             QuickFillBar(
                 onQwerty = { fillGrid(qwertyKeys) },
                 onFunctionKeys = { fillGrid(functionKeys) },
@@ -780,10 +796,11 @@ fun ControlsEditorSettingsPane(
                 title = bindingDialogTitle,
                 initialBinding = element.getBindingAt(index),
                 initialCombo = element.getCombo(index)?.toList().orEmpty(),
+                initialBlockTouchscreenMouseButtons = element.blocksTouchscreenMouseButtonsAt(index),
                 options = bindingOptions,
                 onDismiss = { bindingDialogIndex = -1 },
-                onSave = { binding, combo ->
-                    saveBindingSlot(index, binding, combo)
+                onSave = { binding, combo, blockTouchscreenMouseButtons ->
+                    saveBindingSlot(index, binding, combo, blockTouchscreenMouseButtons)
                     bindingDialogIndex = -1
                 },
             )
@@ -1301,9 +1318,10 @@ private fun BindingSetupDialog(
     title: String,
     initialBinding: Binding,
     initialCombo: List<Binding>,
+    initialBlockTouchscreenMouseButtons: Boolean,
     options: List<Binding>,
     onDismiss: () -> Unit,
-    onSave: (Binding, List<Binding>) -> Unit,
+    onSave: (Binding, List<Binding>, Boolean) -> Unit,
 ) {
     val cleanInitialCombo = remember(initialCombo) {
         initialCombo.filter { it != Binding.NONE }.distinct()
@@ -1314,6 +1332,9 @@ private fun BindingSetupDialog(
     var selectedBinding by remember(title, initialSelection) { mutableStateOf(initialSelection) }
     var typedValue by remember(title, initialSelection) { mutableStateOf("") }
     var combo by remember(title, cleanInitialCombo) { mutableStateOf(cleanInitialCombo) }
+    var blockTouchscreenMouseButtons by remember(title, initialBlockTouchscreenMouseButtons) {
+        mutableStateOf(initialBlockTouchscreenMouseButtons)
+    }
     var filterCategory by remember(title) { mutableStateOf("All") }
 
     fun optionsForCategory(category: String): List<Binding> {
@@ -1333,6 +1354,9 @@ private fun BindingSetupDialog(
     val typedBinding = bindingFromTypedValue(typedValue)
     val addCandidate = typedBinding ?: selectedBinding
     val canAddCandidate = addCandidate != Binding.NONE && !combo.contains(addCandidate)
+    val hasTouchscreenMouseButton = (combo + selectedBinding).any {
+        it == Binding.MOUSE_LEFT_BUTTON || it == Binding.MOUSE_RIGHT_BUTTON
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1449,18 +1473,41 @@ private fun BindingSetupDialog(
                         }
                     }
                 }
+                if (hasTouchscreenMouseButton) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(R.string.mouse_binding_priority),
+                                color = EditorTextValue,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                text = stringResource(R.string.mouse_binding_priority_description),
+                                color = EditorSubText,
+                            )
+                        }
+                        Switch(
+                            checked = blockTouchscreenMouseButtons,
+                            onCheckedChange = { blockTouchscreenMouseButtons = it },
+                        )
+                    }
+                }
             }
         },
         confirmButton = {
             TextButton(onClick = {
-                onSave(typedBinding ?: selectedBinding, combo)
+                onSave(typedBinding ?: selectedBinding, combo, blockTouchscreenMouseButtons)
             }) {
                 Text(text = stringResource(R.string.save), color = EditorAccent)
             }
         },
         dismissButton = {
             Row {
-                TextButton(onClick = { onSave(Binding.NONE, emptyList()) }) {
+                TextButton(onClick = { onSave(Binding.NONE, emptyList(), true) }) {
                     Text(text = stringResource(R.string.clear), color = EditorAccent)
                 }
                 TextButton(onClick = onDismiss) {

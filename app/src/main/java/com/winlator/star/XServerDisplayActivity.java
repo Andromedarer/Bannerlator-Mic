@@ -3629,7 +3629,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
         inputControlsView.setProfile(profile);
 
         touchpadView.setSensitivity(profile.getCursorSpeed() * globalCursorSpeed);
-        touchpadView.setPointerButtonRightEnabled(false);
 
         inputControlsView.invalidate();
         winHandler.sendGamepadState();

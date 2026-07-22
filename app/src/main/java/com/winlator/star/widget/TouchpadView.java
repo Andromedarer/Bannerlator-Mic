@@ -96,7 +96,7 @@ public class TouchpadView extends View {
     private final Runnable delayedTouchscreenPress = this::performDelayedTouchscreenPress;
 
     private void performDelayedTouchscreenPress() {
-        if (continueClick) {
+        if (continueClick && pointerButtonLeftEnabled) {
             xServer.injectPointerMove(lastTouchedPosX, lastTouchedPosY);
             xServer.injectPointerButtonPress(Pointer.Button.BUTTON_LEFT);
         }
@@ -463,7 +463,7 @@ public class TouchpadView extends View {
             xServer.injectPointerMove((int) transformedPoint[0], (int) transformedPoint[1]);
 
         // Handle long press for right click (or use a dedicated method to detect long press)
-        if (event.getPointerCount() == 1) {
+        if (event.getPointerCount() == 1 && pointerButtonLeftEnabled) {
             if (xServer.isRelativeMouseMovement())
                 xServer.getWinHandler().mouseEvent(MouseEventFlags.LEFTDOWN, 0, 0, 0);
             else
@@ -500,7 +500,7 @@ public class TouchpadView extends View {
     }
 
     private void handleTwoFingerTap(MotionEvent event) {
-        if (event.getPointerCount() == 2) {
+        if (event.getPointerCount() == 2 && pointerButtonRightEnabled) {
             if (xServer.isRelativeMouseMovement()) {
                 xServer.getWinHandler().mouseEvent(MouseEventFlags.RIGHTDOWN, 0, 0, 0);
                 xServer.getWinHandler().mouseEvent(MouseEventFlags.RIGHTUP, 0, 0, 0);
@@ -665,7 +665,7 @@ public class TouchpadView extends View {
     }
 
     private void releasePointerButtonLeft(final Finger finger) {
-        if (pointerButtonLeftEnabled && finger == fingerPointerButtonLeft && xServer.pointer.isButtonPressed(Pointer.Button.BUTTON_LEFT)) {
+        if (finger == fingerPointerButtonLeft && xServer.pointer.isButtonPressed(Pointer.Button.BUTTON_LEFT)) {
             postDelayed(() -> {
                 xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_LEFT);
                 fingerPointerButtonLeft = null;
@@ -674,7 +674,7 @@ public class TouchpadView extends View {
     }
 
     private void releasePointerButtonRight(final Finger finger) {
-        if (pointerButtonRightEnabled && finger == fingerPointerButtonRight && xServer.pointer.isButtonPressed(Pointer.Button.BUTTON_RIGHT)) {
+        if (finger == fingerPointerButtonRight && xServer.pointer.isButtonPressed(Pointer.Button.BUTTON_RIGHT)) {
             postDelayed(() -> {
                 xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_RIGHT);
                 fingerPointerButtonRight = null;

@@ -46,6 +46,8 @@ class InputControlsFormatTest {
             .put("customAreaAppearanceEnabled", true)
             .put("customAreaColor", 0xFF112233.toInt())
             .put("customAreaOpacity", 0.5)
+            .put("gridSpacing", 0.5)
+            .put("blockTouchscreenMouseButtons", JSONArray().put(false))
             .put("forkField", "keep")
 
         val copy = ControlElement.copyForSerialization(source)
@@ -60,6 +62,8 @@ class InputControlsFormatTest {
         assertFalse(copy.has("customAreaAppearanceEnabled"))
         assertFalse(copy.has("customAreaColor"))
         assertFalse(copy.has("customAreaOpacity"))
+        assertFalse(copy.has("gridSpacing"))
+        assertFalse(copy.has("blockTouchscreenMouseButtons"))
         assertEquals("keep", copy.getString("forkField"))
     }
 
@@ -191,6 +195,16 @@ class InputControlsFormatTest {
         val profile = JSONObject().put("name", "Test").put("elements", JSONArray().put(validElement))
 
         assertTrue(InputControlsManager.isValidImportedProfile(profile))
+        validElement.put("blockTouchscreenMouseButtons", JSONArray().put(true))
+        assertTrue(InputControlsManager.isValidImportedProfile(profile))
+        validElement.put("blockTouchscreenMouseButtons", JSONArray().put("true"))
+        assertFalse(InputControlsManager.isValidImportedProfile(profile))
+        validElement.remove("blockTouchscreenMouseButtons")
+        validElement.put("gridSpacing", 0.5)
+        assertTrue(InputControlsManager.isValidImportedProfile(profile))
+        validElement.put("gridSpacing", "0.5")
+        assertFalse(InputControlsManager.isValidImportedProfile(profile))
+        validElement.remove("gridSpacing")
         validElement.put("scale", "NaN")
         assertFalse(InputControlsManager.isValidImportedProfile(profile))
         assertFalse(InputControlsManager.isValidImportedProfile(
@@ -311,6 +325,29 @@ class InputControlsFormatTest {
             listOf(Binding.KEY_C, Binding.KEY_CTRL_L),
             element.getEffectiveBindingsForSlot(0).toList(),
         )
+    }
+
+    @Test
+    fun touchscreenMousePriority_defaultsOnAndSurvivesBindingArrayResize() {
+        val element = ControlElement(null)
+        assertTrue(element.blocksTouchscreenMouseButtonsAt(0))
+
+        element.setBlocksTouchscreenMouseButtonsAt(0, false)
+        element.setBindingCount(6)
+
+        assertFalse(element.blocksTouchscreenMouseButtonsAt(0))
+        assertTrue(element.blocksTouchscreenMouseButtonsAt(5))
+    }
+
+    @Test
+    fun gridSpacing_isClampedToSupportedRange() {
+        val element = ControlElement(null)
+        assertEquals(0f, element.gridSpacing)
+
+        element.gridSpacing = 2f
+        assertEquals(1f, element.gridSpacing)
+        element.gridSpacing = Float.NaN
+        assertEquals(0f, element.gridSpacing)
     }
 
     @Test
