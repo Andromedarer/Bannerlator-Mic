@@ -181,6 +181,7 @@ import com.winlator.star.core.FileUtils
 import com.winlator.star.core.KeyValueSet
 import com.winlator.star.core.StringUtils
 import com.winlator.star.core.WineInfo
+import com.winlator.star.core.WinePath
 import com.winlator.star.util.InAppFilePicker
 import com.winlator.star.fexcore.FEXCorePreset
 import com.winlator.star.fexcore.FEXCorePresetManager
@@ -195,7 +196,7 @@ import com.winlator.star.ui.theme.OnSurfaceVariant
 import com.winlator.star.ui.theme.Surface as SurfaceColor
 import com.winlator.star.ui.theme.SurfaceVariant as SurfaceVariantColor
 import com.winlator.star.widget.CPUListView
-import com.winlator.star.widget.EnvVarsView
+import com.winlator.star.ui.components.EnvVarsEditor
 import com.winlator.star.winhandler.WinHandler
 import android.net.Uri
 import android.os.Build
@@ -3987,8 +3988,17 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
         }
     }
 
+    // Env vars live in dialog-level state (not in the tab) so switching tabs can't drop
+    // in-progress edits; written back to the shortcut's extras in save() below.
+    var envVarsStr by remember { mutableStateOf(shortcut.getExtra("envVars")) }
+    // The game's folder on the Android side, derived from the shortcut's Exec= path, so the
+    // editor can look for DLLs the game ships. Null when the drive letter isn't mapped.
+    val gameDir = remember(shortcut) {
+        runCatching { WinePath.resolveAndroidPath(shortcut.container, shortcut.path)?.parentFile }
+            .getOrNull()
+    }
+
     // AndroidView refs
-    val envVarsViewRef = remember { mutableStateOf<EnvVarsView?>(null) }
     val cpuListViewRef = remember { mutableStateOf<CPUListView?>(null) }
 
     // Icon
@@ -4111,7 +4121,7 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
         if (enableDInput) finalInputType = finalInputType or WinHandler.FLAG_INPUT_TYPE_DINPUT.toInt()
 
         val wincomps = winComponents.joinToString(",") { "${it.key}=${it.selectedIndex}" }
-        val envVars = envVarsViewRef.value?.getEnvVars() ?: shortcut.getExtra("envVars")
+        val envVars = envVarsStr
         val cpuList = cpuListViewRef.value?.getCheckedCPUListAsString() ?: shortcut.getExtra("cpuList", shortcut.container.getCPUList(true))
 
         val b64PresetId = box64Presets.getOrElse(selectedBox64PresetIndex) { null }?.id ?: Box64Preset.COMPATIBILITY
@@ -4655,7 +4665,7 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                     // Tab content
                     when (selectedTab) {
                         0 -> ScWinComponentsTab(winComponents)
-                        1 -> ScEnvVarsTab(shortcut, envVarsViewRef)
+                        1 -> ScEnvVarsTab(envVarsStr, { envVarsStr = it }, gameDir)
          2 -> ScAdvancedTab(
             isArm64EC = isArm64EC,
             box64Versions = box64Versions,
@@ -4826,51 +4836,21 @@ private fun ScWinComponentsTab(components: androidx.compose.runtime.snapshots.Sn
     }
 }
 
+// A shortcut stores only the variables explicitly set on it; the container's own values are
+// merged underneath at launch (XServerDisplayActivity), so an empty editor here still inherits
+// everything from the container. Nothing is seeded from the container into the shortcut.
 @Composable
-private fun ScEnvVarsTab(shortcut: Shortcut, envVarsViewRef: MutableState<EnvVarsView?>) {
-    var showAddEnvVar by remember { mutableStateOf(false) }
-    // Flush the legacy EnvVarsView's contents back into the Shortcut's in-memory
-    // extras before the tab leaves composition, so a tab switch doesn't drop
-    // in-progress edits. shortcut.putExtra mutates only the in-memory JSONObject;
-    // disk persistence still happens later in save() -> saveData().
-    DisposableEffect(Unit) {
-        onDispose {
-            envVarsViewRef.value?.let { shortcut.putExtra("envVars", it.envVars.ifEmpty { null }) }
-            envVarsViewRef.value = null
-        }
-    }
-    Column {
-        AndroidView(
-            factory = { ctx ->
-                EnvVarsView(ctx).also { ev ->
-                    ev.setDarkMode(true)
-                    ev.setEnvVars(com.winlator.star.core.EnvVars(shortcut.getExtra("envVars")))
-                    envVarsViewRef.value = ev
-                }
-            },
-            modifier = Modifier.fillMaxWidth().heightIn(min = 150.dp)
-        )
-        Spacer(Modifier.height(8.dp))
-        Button(
-            onClick = { showAddEnvVar = true },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Icon(Icons.Default.Add, contentDescription = null)
-            Spacer(Modifier.width(4.dp))
-            Text("Add Environment Variable")
-        }
-    }
-    if (showAddEnvVar) {
-        AddEnvVarComposable(
-            onConfirm = { name, value ->
-                envVarsViewRef.value?.let { ev ->
-                    if (name.isNotEmpty() && !ev.containsName(name)) ev.add(name, value)
-                }
-                showAddEnvVar = false
-            },
-            onDismiss = { showAddEnvVar = false }
-        )
-    }
+private fun ScEnvVarsTab(
+    envVars: String,
+    onEnvVarsChange: (String) -> Unit,
+    gameDir: File?,
+) {
+    EnvVarsEditor(
+        value = envVars,
+        onValueChange = onEnvVarsChange,
+        modifier = Modifier.fillMaxWidth(),
+        gameDir = gameDir
+    )
 }
 
 @Composable

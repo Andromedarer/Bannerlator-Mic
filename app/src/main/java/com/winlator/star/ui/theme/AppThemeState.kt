@@ -102,7 +102,7 @@ object AppThemeState {
     }
 
     /** Java-friendly entry point: returns the current accent (primary) color as an
-     *  ARGB int. Used by legacy AndroidView widgets (CPUListView, EnvVarsView) so
+     *  ARGB int. Used by the remaining legacy AndroidView widgets (CPUListView) so
      *  they can tint their CheckBox/ToggleButton drawables to match the Compose
      *  accent picker. */
     @JvmStatic

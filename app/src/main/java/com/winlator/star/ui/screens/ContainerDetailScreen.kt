@@ -75,7 +75,7 @@ import com.winlator.star.container.Container
 import com.winlator.star.widget.perfhud.parseHudOutline
 import com.winlator.star.widget.ColorPickerView
 import com.winlator.star.widget.CPUListView
-import com.winlator.star.widget.EnvVarsView
+import com.winlator.star.ui.components.EnvVarsEditor
 
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
@@ -103,7 +103,6 @@ fun ContainerDetailScreen(
     var dxvkRefreshKey           by remember { mutableStateOf(0) }
 
     // AndroidView references for custom views
-    val envVarsViewRef      = remember { mutableStateOf<EnvVarsView?>(null)      }
     val cpuListViewRef      = remember { mutableStateOf<CPUListView?>(null)      }
     val cpuListWoW64Ref     = remember { mutableStateOf<CPUListView?>(null)      }
     val colorPickerViewRef  = remember { mutableStateOf<ColorPickerView?>(null)  }
@@ -134,7 +133,7 @@ fun ContainerDetailScreen(
                         resolvedGraphicsDriverConfig = viewModel.graphicsDriverConfig,
                         resolvedDXWrapperConfig      = viewModel.dxWrapperConfig,
                         resolvedFPSCounterConfig     = viewModel.fpsCounterConfig,
-                        resolvedEnvVars      = envVarsViewRef.value?.envVars ?: viewModel.envVarsStr,
+                        resolvedEnvVars      = viewModel.envVarsStr,
                         resolvedCPUList      = cpuListViewRef.value?.checkedCPUListAsString ?: viewModel.cpuList,
                         resolvedCPUListWoW64 = cpuListWoW64Ref.value?.checkedCPUListAsString ?: viewModel.cpuListWoW64,
                         resolvedColorAsString = colorPickerViewRef.value?.colorAsString ?: "#0277bd",
@@ -187,7 +186,7 @@ fun ContainerDetailScreen(
                         )
                         WineConfigTab(viewModel, colorPickerViewRef)
                     }
-                    1 -> EnvVarsTab(viewModel, envVarsViewRef)
+                    1 -> EnvVarsTab(viewModel)
                     2 -> DrivesTab(viewModel)
                     3 -> WinComponentsTab(viewModel)
                     4 -> Column {
@@ -1126,51 +1125,15 @@ private fun WinComponentRow(comp: WinComponentEntry, onSelect: (Int) -> Unit) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
-private fun EnvVarsTab(
-    viewModel: ContainerDetailViewModel,
-    envVarsViewRef: MutableState<EnvVarsView?>
-) {
-    var showAddEnvVar by remember { mutableStateOf(false) }
-    // Flush the legacy EnvVarsView's contents back to the ViewModel before the
-    // tab leaves composition, so a tab switch doesn't drop in-progress edits.
-    DisposableEffect(Unit) {
-        onDispose {
-            envVarsViewRef.value?.let { viewModel.envVarsStr = it.envVars }
-            envVarsViewRef.value = null
-        }
-    }
-    Column {
-        AndroidView(
-            factory = { ctx ->
-                EnvVarsView(ctx).also { ev ->
-                    ev.setDarkMode(true)
-                    ev.setEnvVars(com.winlator.star.core.EnvVars(viewModel.envVarsStr))
-                    envVarsViewRef.value = ev
-                }
-            },
-            modifier = Modifier.fillMaxWidth().heightIn(min = 200.dp)
-        )
-        Spacer(Modifier.height(8.dp))
-        Button(
-            onClick = { showAddEnvVar = true },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Icon(Icons.Default.Add, contentDescription = null)
-            Spacer(Modifier.width(4.dp))
-            Text(stringResource(R.string.add) + " " + stringResource(R.string.environment_variables))
-        }
-    }
-    if (showAddEnvVar) {
-        AddEnvVarComposable(
-            onConfirm = { name, value ->
-                envVarsViewRef.value?.let { ev ->
-                    if (name.isNotEmpty() && !ev.containsName(name)) ev.add(name, value)
-                }
-                showAddEnvVar = false
-            },
-            onDismiss = { showAddEnvVar = false }
-        )
-    }
+private fun EnvVarsTab(viewModel: ContainerDetailViewModel) {
+    // The editor writes straight through to the ViewModel on every edit, so a tab switch
+    // can't drop in-progress edits and nothing has to be flushed back on dispose.
+    // gameDir is null here: a container has no single game folder to scan.
+    EnvVarsEditor(
+        value = viewModel.envVarsStr,
+        onValueChange = { viewModel.envVarsStr = it },
+        modifier = Modifier.fillMaxWidth()
+    )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1640,63 +1603,6 @@ private fun XRTab(viewModel: ContainerDetailViewModel) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared composables
-// ─────────────────────────────────────────────────────────────────────────────
-@Composable
-internal fun AddEnvVarComposable(
-    onConfirm: (name: String, value: String) -> Unit,
-    onDismiss: () -> Unit
-) {
-    var name by remember { mutableStateOf("") }
-    var value by remember { mutableStateOf("") }
-    var showPresets by remember { mutableStateOf(false) }
-
-    val knownNames = remember { EnvVarsView.knownEnvVars.map { it[0] } }
-
-    OutlinedAlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.new_environment_variable)) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Name") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
-                OutlinedTextField(
-                    value = value,
-                    onValueChange = { value = it },
-                    label = { Text("Value") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
-                Box {
-                    OutlinedButton(onClick = { showPresets = true }, modifier = Modifier.fillMaxWidth()) {
-                        Text("Presets")
-                    }
-                    DropdownMenu(expanded = showPresets, onDismissRequest = { showPresets = false }) {
-                        knownNames.forEach { preset ->
-                            DropdownMenuItem(
-                                text = { Text(preset) },
-                                onClick = { name = preset; showPresets = false }
-                            )
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                val n = name.trim().replace(" ", "")
-                val v = value.trim().replace(" ", "")
-                onConfirm(n, v)
-            }) { Text(stringResource(android.R.string.ok)) }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(android.R.string.cancel)) } }
-    )
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
