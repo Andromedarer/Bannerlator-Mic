@@ -119,6 +119,7 @@ import com.winlator.star.core.CPUStatus;
 import com.winlator.star.xserver.XLock;
 import com.winlator.star.xconnector.UnixSocketConfig;
 import com.winlator.star.xenvironment.ImageFs;
+import com.winlator.star.xenvironment.ImageFsInstaller;
 import com.winlator.star.xenvironment.XEnvironment;
 import com.winlator.star.xenvironment.components.ALSAServerComponent;
 import com.winlator.star.xenvironment.components.GuestProgramLauncherComponent;
@@ -856,6 +857,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
         XServerDialogHostKt.setupDialogHost(dialogHostView);
 
         imageFs = ImageFs.find(this);
+
+        // Stage the bundled components before the guest starts. MainActivity already does this on
+        // app start, but this Activity is exported and home-screen game shortcuts launch it
+        // directly — so a user who updates and then launches straight into a game would otherwise
+        // run the previous frame-gen layer until they next opened the app. Synchronous on purpose:
+        // once the stamps match this is a couple of stats, and when they don't the copy has to
+        // happen before the guest dlopens the layer anyway.
+        ImageFsInstaller.stageBundledComponents(this, imageFs);
 
         // Prepare dev/input directory - actual event files created after shortcut is loaded
         File devInputDir = new File(imageFs.getRootDir(), "dev/input");

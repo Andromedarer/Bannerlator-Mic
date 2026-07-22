@@ -42,10 +42,30 @@ public abstract class ImageFsInstaller {
     // (re)install. Idempotent: skips the .so copy when it is already present with the same size.
     // The manifest's library_path is ../../../lib/libbionic_fg.so, so it must sit in
     // usr/share/vulkan/implicit_layer.d/ with the .so in usr/lib/.
+    // Identity of a bundled asset as staged on disk: the app build it came from plus the asset's
+    // size. Comparing SIZE ALONE (the old check) silently skips an update whenever a new build of
+    // an asset happens to land on the same byte count; folding in versionCode means any release
+    // restages regardless. Kept cheap on purpose — this runs on every launch, including the
+    // game-launch path, so it must stay a couple of stats rather than a hash of several MB.
+    private static String assetStamp(Context context, String assetPath) {
+        return com.winlator.star.BuildConfig.VERSION_CODE + ":" + FileUtils.getSize(context, assetPath);
+    }
+
+    private static boolean stampMatches(File stampFile, String want) {
+        try {
+            return stampFile.isFile() && want.equals(FileUtils.readString(stampFile).trim());
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     public static void installBionicFgLayer(Context context, ImageFs imageFs) {
         try {
             File soDst = new File(imageFs.getLibDir(), "libbionic_fg.so");
             long assetSize = FileUtils.getSize(context, "bionic-fg/libbionic_fg.so");
+            File stamp = new File(imageFs.getLibDir(), ".bionic-fg-stamp");
+            String want = assetStamp(context, "bionic-fg/libbionic_fg.so");
+            if (stampMatches(stamp, want) && soDst.isFile()) return;
             if (!soDst.isFile() || soDst.length() != assetSize) {
                 // Copy via a temp file and rename into place: staging runs off the main thread,
                 // so a game launched during it would otherwise be able to dlopen a half-written
@@ -66,6 +86,7 @@ public abstract class ImageFsInstaller {
             // only when absent, so any change to it (layer name, api version, env gating) could
             // never reach a device that already had the old copy.
             FileUtils.copy(context, "bionic-fg/VkLayer_BIONIC_framegen.json", manifestDst);
+            FileUtils.writeString(stamp, want);
         } catch (Exception e) {
             Log.e("ImageFsInstaller", "Failed to stage bionic-fg layer", e);
         }
@@ -93,14 +114,25 @@ public abstract class ImageFsInstaller {
         try {
             File soDst = new File(imageFs.getLibDir(), "liblsfg-vk.so");
             long assetSize = FileUtils.getSize(context, "lsfg-vk/liblsfg-vk.so");
+            File stamp = new File(imageFs.getLibDir(), ".lsfg-vk-stamp");
+            String want = assetStamp(context, "lsfg-vk/liblsfg-vk.so");
+            if (stampMatches(stamp, want) && soDst.isFile()) return;
             if (!soDst.isFile() || soDst.length() != assetSize) {
-                FileUtils.copy(context, "lsfg-vk/liblsfg-vk.so", soDst);
+                File soTmp = new File(soDst.getParentFile(), "liblsfg-vk.so.staging");
+                FileUtils.copy(context, "lsfg-vk/liblsfg-vk.so", soTmp);
+                if (!soTmp.renameTo(soDst)) {
+                    soTmp.delete();
+                    Log.e("ImageFsInstaller", "Failed to swap in the staged lsfg-vk layer");
+                    return;
+                }
+                Log.i("ImageFsInstaller", "Staged bundled lsfg-vk layer (" + assetSize + " bytes)");
             }
             File manifestDir = new File(imageFs.getRootDir(), "usr/share/vulkan/implicit_layer.d");
             manifestDir.mkdirs();
             File manifestDst = new File(manifestDir, "VkLayer_LS_frame_generation.json");
             // Always refresh the manifest (it gained enable_environment in newer builds).
             FileUtils.copy(context, "lsfg-vk/VkLayer_LS_frame_generation.json", manifestDst);
+            FileUtils.writeString(stamp, want);
         } catch (Exception e) {
             Log.e("ImageFsInstaller", "Failed to stage lsfg-vk layer", e);
         }
