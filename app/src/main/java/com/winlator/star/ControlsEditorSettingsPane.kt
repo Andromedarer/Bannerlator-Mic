@@ -59,6 +59,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
@@ -74,6 +76,7 @@ import com.winlator.star.inputcontrols.ControlElement
 import com.winlator.star.inputcontrols.ControlsProfile
 import com.winlator.star.inputcontrols.CustomIconManager
 import com.winlator.star.ui.components.ColorPicker
+import com.winlator.star.ui.theme.AppThemeState
 import kotlinx.coroutines.delay
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -1217,6 +1220,7 @@ private fun IconPicker(
 ) {
     val context = LocalContext.current
     val thumbnailSizePx = with(LocalDensity.current) { 32.dp.roundToPx() }
+    val glyphTint = Color(AppThemeState.getCurrentAccentArgb())
     LazyRow(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(EditorSpacing),
@@ -1248,6 +1252,7 @@ private fun IconPicker(
                             bitmap = imageBitmap,
                             contentDescription = stringResource(R.string.icon_content_description, icon.id),
                             modifier = Modifier.size(32.dp),
+                            colorFilter = ColorFilter.tint(glyphTint, BlendMode.SrcIn),
                         )
                     }
                 }
@@ -1345,11 +1350,11 @@ private fun BindingSetupDialog(
                     stringResource(R.string.binding_filter_mouse),
                     stringResource(R.string.binding_filter_gamepad),
                 )
-                Row(
+                LazyRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    filterCategories.forEachIndexed { index, category ->
+                    items(filterCategories.zip(filterLabels), key = { it.first }) { (category, label) ->
                         val isSelected = category == filterCategory
                         TextButton(
                             onClick = {
@@ -1364,12 +1369,12 @@ private fun BindingSetupDialog(
                             colors = ButtonDefaults.textButtonColors(
                                 contentColor = if (isSelected) EditorAccent else EditorSubText,
                             ),
-                            modifier = Modifier.weight(1f),
                         ) {
                             Text(
-                                text = filterLabels[index],
+                                text = label,
                                 color = if (isSelected) EditorAccent else EditorSubText,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                maxLines = 1,
                             )
                         }
                     }

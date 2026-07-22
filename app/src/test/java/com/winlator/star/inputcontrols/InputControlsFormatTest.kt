@@ -294,6 +294,13 @@ class InputControlsFormatTest {
     }
 
     @Test
+    fun compactBindingLabels_keepUsefulGamepadAndNumpadText() {
+        assertEquals("A", ControlElement.getCompactBindingLabel(Binding.GAMEPAD_BUTTON_A))
+        assertEquals("L1", ControlElement.getCompactBindingLabel(Binding.GAMEPAD_BUTTON_L1))
+        assertEquals("NP1", ControlElement.getCompactBindingLabel(Binding.KEY_KP_1))
+    }
+
+    @Test
     fun comboExecution_includesMainBindingWithoutChangingStoredExtras() {
         val element = ControlElement(null)
         element.setBindingAt(0, Binding.KEY_C)

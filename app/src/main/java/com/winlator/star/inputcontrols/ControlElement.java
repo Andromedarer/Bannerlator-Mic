@@ -680,7 +680,7 @@ public class ControlElement {
         else if (type == Type.EXPANDABLE_BUTTON) return expanded ? "X" : "+";
         else {
             Binding binding = getBindingAt(0);
-            String text = binding.toString().replace("NUMPAD ", "NP").replace("BUTTON ", "");
+            String text = getCompactBindingLabel(binding);
             if (text.length() > 7) {
                 String[] parts = text.split(" ");
                 StringBuilder sb = new StringBuilder();
@@ -1714,7 +1714,7 @@ public class ControlElement {
             label = sb.toString();
         }
         else {
-            label = bindings[cellIndex].toString().replace("NUMPAD ", "NP");
+            label = getCompactBindingLabel(bindings[cellIndex]);
         }
 
         if (maxLength > 0 && label.length() > maxLength) return label.substring(0, maxLength);
@@ -1727,8 +1727,12 @@ public class ControlElement {
         if (binding == Binding.KEY_SHIFT_L || binding == Binding.KEY_SHIFT_R) return "S";
         if (binding == Binding.KEY_ALT_L || binding == Binding.KEY_ALT_R) return "A";
 
-        String label = binding.toString().replace("NUMPAD ", "NP").replace(" ", "");
+        String label = getCompactBindingLabel(binding).replace(" ", "");
         return label.length() > 3 ? label.substring(0, 3) : label;
+    }
+
+    static String getCompactBindingLabel(Binding binding) {
+        return binding.toString().replace("NUMPAD ", "NP").replace("BUTTON ", "");
     }
 
     /** Blend two ARGB colors with 50% mix (used for press flash) */
@@ -1803,12 +1807,9 @@ public class ControlElement {
         if (icon == null) return;
 
         Paint paint = inputControlsView.getPaint();
-        if (iconId < CustomIconManager.CUSTOM_ICON_ID_OFFSET) {
-            boolean pressed = type == Type.BUTTON && states[0];
-            // Icon tint follows the theme accent (bright variant when pressed), for both
-            // the default and GAMEHUB visual styles.
-            paint.setColorFilter(new PorterDuffColorFilter(pressed ? inputControlsView.getAccentBrightColor() : inputControlsView.getAccentColor(), PorterDuff.Mode.SRC_IN));
-        }
+        boolean pressed = type == Type.BUTTON && states[0];
+        // Imported images are control glyphs too, so use their alpha as the accent mask.
+        paint.setColorFilter(new PorterDuffColorFilter(pressed ? inputControlsView.getAccentBrightColor() : inputControlsView.getAccentColor(), PorterDuff.Mode.SRC_IN));
         int margin = (int)(inputControlsView.getSnappingSize() * (shape == Shape.CIRCLE || shape == Shape.SQUARE ? 2.0f : 1.0f) * scale);
         int halfSize = (int)((Math.min(width, height) - margin) * 0.5f);
 
@@ -2657,6 +2658,7 @@ public class ControlElement {
                     handleBindingSlot(i, state, value);
                     this.states[i] = state;
                 }
+                inputControlsView.invalidate();
             }
 
             return true;
@@ -2705,7 +2707,7 @@ public class ControlElement {
                 if (type == Type.RANGE_BUTTON) {
                     scroller.handleTouchUp();
                 }
-                else if (type == Type.STICK || type == Type.DYNAMIC_STICK) {
+                else if (type == Type.D_PAD || type == Type.STICK || type == Type.DYNAMIC_STICK) {
                     if (type == Type.DYNAMIC_STICK) {
                         stickVisible = false;
                         visualStickX = 0;

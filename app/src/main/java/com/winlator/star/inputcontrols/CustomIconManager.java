@@ -3,9 +3,15 @@ package com.winlator.star.inputcontrols;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.RectF;
 import android.net.Uri;
 import android.util.Base64;
 import com.winlator.star.core.FileUtils;
+import com.caverock.androidsvg.SVG;
+import com.caverock.androidsvg.SVGParseException;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -22,6 +28,7 @@ public class CustomIconManager {
     private static final Object ICON_STORAGE_LOCK = new Object();
     private static final int MAX_ICON_DIMENSION = 2048;
     private static final long MAX_ICON_PIXELS = 4_194_304L;
+    private static final int MAX_ICON_FILE_BYTES = 4 * 1024 * 1024;
 
     public static class ImportedIcon {
         public final short id;
@@ -52,19 +59,9 @@ public class CustomIconManager {
         if (nextId < 0) return -1;
         File outputFile = new File(customIconsDir, nextId + ".png");
         try {
-            BitmapFactory.Options bounds = new BitmapFactory.Options();
-            bounds.inJustDecodeBounds = true;
-            try (InputStream is = context.getContentResolver().openInputStream(uri)) {
-                if (is == null) return -1;
-                BitmapFactory.decodeStream(is, null, bounds);
-            }
-            if (!hasValidIconBounds(bounds.outWidth, bounds.outHeight)) return -1;
-
-            Bitmap bitmap;
-            try (InputStream is = context.getContentResolver().openInputStream(uri)) {
-                if (is == null) return -1;
-                bitmap = BitmapFactory.decodeStream(is);
-            }
+            byte[] data = readIconData(uri);
+            if (data == null) return -1;
+            Bitmap bitmap = decodeIcon(data);
             if (bitmap == null) return -1;
             try (FileOutputStream fos = new FileOutputStream(outputFile)) {
                 if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, fos)) {
@@ -76,11 +73,66 @@ public class CustomIconManager {
                 bitmap.recycle();
             }
             return nextId;
-        } catch (IOException | OutOfMemoryError e) {
+        } catch (IOException | SVGParseException | OutOfMemoryError e) {
             outputFile.delete();
-            e.printStackTrace();
         }
         return -1;
+    }
+
+    private byte[] readIconData(Uri uri) throws IOException {
+        try (InputStream inputStream = context.getContentResolver().openInputStream(uri)) {
+            if (inputStream == null) return null;
+            ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+            byte[] buffer = new byte[8192];
+            int count;
+            while ((count = inputStream.read(buffer)) != -1) {
+                if (outputStream.size() + count > MAX_ICON_FILE_BYTES) return null;
+                outputStream.write(buffer, 0, count);
+            }
+            return outputStream.size() > 0 ? outputStream.toByteArray() : null;
+        }
+    }
+
+    // Normalize every accepted source to PNG so runtime loading and IPCX stay format-independent.
+    private static Bitmap decodeIcon(byte[] data) throws SVGParseException {
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeByteArray(data, 0, data.length, bounds);
+        if (hasValidIconBounds(bounds.outWidth, bounds.outHeight)) {
+            return BitmapFactory.decodeByteArray(data, 0, data.length);
+        }
+
+        // SVGZ is unnecessary for icons and could expand far beyond the input-size limit.
+        if (data.length >= 2 && (data[0] & 0xff) == 0x1f && (data[1] & 0xff) == 0x8b) return null;
+        SVG.setInternalEntitiesEnabled(false);
+        SVG svg = SVG.getFromInputStream(new ByteArrayInputStream(data));
+        RectF viewBox = svg.getDocumentViewBox();
+        float width = svg.getDocumentWidth();
+        float height = svg.getDocumentHeight();
+        boolean validViewBox = viewBox != null && viewBox.width() > 0 && viewBox.height() > 0;
+        boolean validWidth = isPositiveFinite(width);
+        boolean validHeight = isPositiveFinite(height);
+        if (!validWidth && validViewBox) {
+            width = validHeight ? height * viewBox.width() / viewBox.height() : viewBox.width();
+        }
+        if (!validHeight && validViewBox) {
+            height = validWidth ? width * viewBox.height() / viewBox.width() : viewBox.height();
+        }
+        if (!isPositiveFinite(width) || !isPositiveFinite(height)) return null;
+
+        int bitmapWidth = (int)Math.ceil(width);
+        int bitmapHeight = (int)Math.ceil(height);
+        if (!hasValidIconBounds(bitmapWidth, bitmapHeight)) return null;
+
+        Bitmap bitmap = Bitmap.createBitmap(bitmapWidth, bitmapHeight, Bitmap.Config.ARGB_8888);
+        svg.setDocumentWidth(bitmapWidth);
+        svg.setDocumentHeight(bitmapHeight);
+        svg.renderToCanvas(new Canvas(bitmap));
+        return bitmap;
+    }
+
+    private static boolean isPositiveFinite(float value) {
+        return value > 0 && !Float.isInfinite(value) && !Float.isNaN(value);
     }
 
     private short getNextAvailableId() {

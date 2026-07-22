@@ -400,7 +400,7 @@ public class ControlsEditorActivity extends AppCompatActivity {
     private void pickCustomIconFromFiles() {
         closeComposeDialog();
         Intent intent = new Intent(this, FilePickerActivity.class);
-        intent.putExtra(FilePickerActivity.EXTRA_EXTENSIONS, new String[]{"png", "jpg", "jpeg", "webp", "bmp", "gif"});
+        intent.putExtra(FilePickerActivity.EXTRA_EXTENSIONS, new String[]{"png", "jpg", "jpeg", "webp", "bmp", "gif", "svg"});
         intent.putExtra(FilePickerActivity.EXTRA_PICKER_TITLE, getString(R.string.select_icon_image));
         iconPickerInAppLauncher.launch(intent);
     }
