@@ -1569,7 +1569,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     // Writes the bionic-fg layer config (TOML) into the guest HOME so it is present before the
     // first swapchain present. The layer hot-reloads this file, so it doubles as the live-control
-    // path (see in-game drawer). Keys: multiplier (2-4), flow_scale (0.2-1.0), model (0/1).
+    // path (see in-game drawer). Keys: multiplier (2-4), flow_scale (0.2-1.0), model (0-3).
     // multiplier: 0 = frame gen off (Off in the menu), else 2-4. fpsLimit: 0 = no cap, else 10-200.
     private void writeBionicFgConfig(int multiplier, float flowScale, boolean fpsLimiterEnabled, int fpsLimitValue) {
         try {
@@ -1582,7 +1582,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             String toml = "# Written by Bannerlator (per-container frame generation)\n"
                     + "multiplier = " + multiplier + "\n"
                     + "flow_scale = " + String.format(java.util.Locale.US, "%.2f", flowScale) + "\n"
-                    + "model = 0\n"
+                    + "model = " + resolvedFrameGenModel() + "\n"
                     + "fps_limit_enabled = " + (fpsLimiterEnabled ? "true" : "false") + "\n"
                     + "fps_limit = " + fpsLimitValue + "\n";
             FileUtils.writeString(confFile, toml);
@@ -4508,6 +4508,20 @@ return true;
 
     private String resolvedFrameGenEngine() {
         return shortcut != null ? shortcut.getExtra("frameGenEngine", container.getFrameGenEngine()) : container.getFrameGenEngine();
+    }
+
+    // bionic-fg interpolation model for this launch: per-game override else the container value.
+    // Same read-only resolver discipline as resolvedFrameGenEngine — never writes back.
+    private int resolvedFrameGenModel() {
+        int fallback = container.getFrameGenModel();
+        if (shortcut == null) return fallback;
+        try {
+            int m = Integer.parseInt(shortcut.getExtra("frameGenModel", String.valueOf(fallback)));
+            return (m < 0 || m > 3) ? fallback : m;
+        }
+        catch (NumberFormatException e) {
+            return fallback;
+        }
     }
 
     // Resolved ReShade config for this launch: the loadout (ordered effects + per-effect enabled),

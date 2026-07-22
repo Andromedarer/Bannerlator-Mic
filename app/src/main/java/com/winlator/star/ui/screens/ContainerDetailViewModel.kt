@@ -108,6 +108,9 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     // Frame-gen engine (per-container): "off" | "bionic" | "lsfg" (mutually exclusive).
     // multiplier & flow scale are tuned live from the in-game side menu (bionic-fg).
     var frameGenEngine by mutableStateOf("off")
+    // bionic-fg interpolation model (per-container, 0-3). 0 = the long-standing default chain;
+    // 1-3 are newer engines that are not device-proven yet. Only meaningful when engine=="bionic".
+    var frameGenModel by mutableStateOf(0)
     // lsfg-vk performance_mode (per-container): lower interpolation quality for higher FPS. Also
     // live-toggleable from the in-game FG menu. Only meaningful when frameGenEngine == "lsfg".
     var lsfgPerformanceMode by mutableStateOf(false)
@@ -382,6 +385,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         fullscreenMode      = c?.getFullscreenMode() ?: Container.FULLSCREEN_OFF
 
         frameGenEngine     = c?.frameGenEngine ?: "off"
+        frameGenModel      = c?.frameGenModel ?: 0
         lsfgPerformanceMode = c?.isLsfgPerformanceMode == true
         fpsLimiterEnabled  = c?.isFpsLimiterEnabled == true
         matchRefreshRate   = c?.isMatchRefreshRate != false   // default ON for new/unset containers
@@ -685,6 +689,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             c.setFPSCounterConfig(fpsConfig)
             c.setFullscreenMode(fullscreenMode)
             c.setFrameGenEngine(frameGenEngine)
+            c.setFrameGenModel(frameGenModel)
             c.setLsfgPerformanceMode(lsfgPerformanceMode)
             c.setFpsLimiterEnabled(fpsLimiterEnabled)
             c.setMatchRefreshRate(matchRefreshRate)
@@ -776,6 +781,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
                 container = created
                 if (created != null) {
                     created.setFrameGenEngine(frameGenEngine)
+                    created.setFrameGenModel(frameGenModel)
                     created.setLsfgPerformanceMode(lsfgPerformanceMode)
                     created.setVibrationMode(vibrationMode)
                     created.setVibrationIntensity(vibrationIntensity)

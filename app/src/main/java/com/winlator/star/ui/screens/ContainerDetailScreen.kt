@@ -715,6 +715,28 @@ private fun TopLevelFields(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 52.dp, top = 2.dp, bottom = 4.dp)
             )
+            // Interpolation model. Default (0) is the long-standing chain; 1-3 are newer engines
+            // that are not yet device-proven, hence the explicit "experimental" labelling.
+            val fgModelLabels = listOf(
+                stringResource(R.string.frame_generation_model_default),
+                stringResource(R.string.frame_generation_model_traced),
+                stringResource(R.string.frame_generation_model_v2),
+                stringResource(R.string.frame_generation_model_fsr3)
+            )
+            LabeledDropdown(
+                label = stringResource(R.string.frame_generation_model),
+                options = fgModelLabels,
+                selectedOption = fgModelLabels[viewModel.frameGenModel.coerceIn(0, 3)],
+                onSelect = { viewModel.frameGenModel = fgModelLabels.indexOf(it) }
+            )
+            if (viewModel.frameGenModel != 0) {
+                Text(
+                    text = stringResource(R.string.frame_generation_model_experimental_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 52.dp, top = 2.dp, bottom = 4.dp)
+                )
+            }
         }
         if (viewModel.frameGenEngine == "lsfg") {
             Text(

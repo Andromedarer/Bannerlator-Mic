@@ -47,17 +47,39 @@ public abstract class ImageFsInstaller {
             File soDst = new File(imageFs.getLibDir(), "libbionic_fg.so");
             long assetSize = FileUtils.getSize(context, "bionic-fg/libbionic_fg.so");
             if (!soDst.isFile() || soDst.length() != assetSize) {
-                FileUtils.copy(context, "bionic-fg/libbionic_fg.so", soDst);
+                // Copy via a temp file and rename into place: staging runs off the main thread,
+                // so a game launched during it would otherwise be able to dlopen a half-written
+                // layer. rename() within the same directory is atomic.
+                File soTmp = new File(soDst.getParentFile(), "libbionic_fg.so.staging");
+                FileUtils.copy(context, "bionic-fg/libbionic_fg.so", soTmp);
+                if (!soTmp.renameTo(soDst)) {
+                    soTmp.delete();
+                    Log.e("ImageFsInstaller", "Failed to swap in the staged bionic-fg layer");
+                    return;
+                }
+                Log.i("ImageFsInstaller", "Staged bundled bionic-fg layer (" + assetSize + " bytes)");
             }
             File manifestDir = new File(imageFs.getRootDir(), "usr/share/vulkan/implicit_layer.d");
             manifestDir.mkdirs();
             File manifestDst = new File(manifestDir, "VkLayer_BIONIC_framegen.json");
-            if (!manifestDst.isFile()) {
-                FileUtils.copy(context, "bionic-fg/VkLayer_BIONIC_framegen.json", manifestDst);
-            }
+            // Always refresh the manifest, like the lsfg-vk one below. It was previously written
+            // only when absent, so any change to it (layer name, api version, env gating) could
+            // never reach a device that already had the old copy.
+            FileUtils.copy(context, "bionic-fg/VkLayer_BIONIC_framegen.json", manifestDst);
         } catch (Exception e) {
             Log.e("ImageFsInstaller", "Failed to stage bionic-fg layer", e);
         }
+    }
+
+    // Stages the components that ride ALONGSIDE the imagefs tarball rather than inside it: both
+    // frame-generation layers and the ffmpeg-8 libs. These ship as APK assets, so an app update
+    // can carry a newer build of any of them — and without this they would only ever reach a
+    // device on a full imagefs re-extract. Each call is individually idempotent (size check or
+    // version stamp), so the steady-state cost is a few stats. Call off the main thread.
+    public static void stageBundledComponents(Context context, ImageFs imageFs) {
+        installBionicFgLayer(context, imageFs);
+        installLsfgVkLayer(context, imageFs);
+        installFFmpeg8(context, imageFs);
     }
 
     // Stages the bundled lsfg-vk Vulkan layer (.so + implicit-layer manifest) into imagefs so the
