@@ -4495,3 +4495,25 @@ Resume recipe: launch GL container xuser-3 -> AIO DX11 cube -> enable perf HUD -
 **Branch note:** cut off `origin/main` @ `8521a4b2`, NOT off `feat/displayx-renderer` (which was checked out at the time and is unrelated). versionCode stays vc48/"2.8".
 
 **Status:** code complete, inspection-only — pushing to CI now. **NEXT (device-test once green):** verify the chip lights up, then drag-select in an RTS, long-press RMB, pinch-zoom. Highest-risk untested area = drag-select vs the InputControls overlay pointer-id case.
+
+
+## 🎞️ BIONIC-FG SHADER POOL + MODELS 2/3 BUNDLED (2026-07-22) — built off latest main, NOT device-tested
+**Why:** the frame-gen layer we ship has been `9136405c` (2026-06-21) — pre-dating every model built since. Models 1, 2 and 3 have never been in a shipped `.so`; the pooled GameScopeVK/V2 shaders have never reached a device.
+
+**Source rebased onto current upstream.** The Track-3 work sat on the *pre-squash* compat commits, so it read as diverged from `main` (`68497bf` = our own merged PR #6, squashed on merge). Replaying it hit conflicts on every compat commit — the same content arriving twice. Instead the exact 12-file delta was applied on top of `origin/main` as `feat/fsr3-on-main` (`2eb68ef`). Verified before committing: no file exists only in `main` (nothing lost), and the resulting tree is byte-identical to `603d26e`. **The rebuilt `.so` came out byte-identical too — md5 `971e6aaa` from both branches — which independently proves the rebase changed nothing functional.**
+
+**What the layer now contains** (`2eb68ef`, built by run `29886009167`):
+- shaders_embedded regenerated from current `libGameScopeVK.so`; the malformed `shader_02` replaced by the clean 50412-byte module. **Note: `shader_02` is one of the three BCN texture-decode utilities and is dispatched by NO model (model 0 uses 3-30, model 1 uses 3,4,30-53), and `IsValidSpirv` only checks the 4-byte magic — so this was never a live defect, only hygiene.**
+- 12 distinct `libGameScopeV2.so` modules pooled at idx 54-65, wired as **model 2** via `kV2ShaderMap` (13 swaps; base 14 and 20 share V2 module 60).
+- **model 3** = FidelityFX Optical Flow, 4 compute shaders at idx 66-69, MIT, attributed.
+- `IsValidSpirv` restored — the pool regen at `48a6b52` dropped the definition while `session.cpp:20` and `framegen_context.cpp:24` still called it, so `feat/shader-pool-gamescope-v2` (`b0c2e5c`) does not compile at all. Only the Track-3 line builds.
+
+**App side (this branch, off main `5e284f4a`, versionCode stays 48):** submodule repointed `xXJSONDeruloXx` → `The412Banner/bionic-fg` @ `2eb68ef`; bundled asset replaced (`9136405c` → `971e6aaa`, 6,557,856 B); `patches/bionic-fg-bannerlator-fixes.patch` **deleted** and its apply-step removed from `build-bionic-fg.yml` — those three fixes are upstream in `68497bf` now and the patch would fail against the current tree.
+
+**⚠️ NOT VERIFIED ON DEVICE. Test order (each step has a control):**
+1. **model 0** — regression baseline, must behave as the shipped layer does today. If it doesn't, the pool regen broke something.
+2. **model 1** — first time the traced graph ships at all.
+3. **model 2** — the real gamble: V2's shaders run through **model 1's** dispatch graph, which was traced from `libGameScopeVK`'s native dispatch. A 13-module delta suggests V2 changed something; if pass order/bindings moved, expect garbage or a crash.
+4. **model 3** — known deviations (subgroup-free GLSL, 3×3/±3 search, no sub-pixel): perf is the risk, not correctness.
+
+Select via `conf.toml` or `BIONIC_FG_MODEL`. Bundling (rather than hand-injecting) sidesteps the `ImageFsInstaller.installBionicFgLayer` clobber, which re-copies the bundled asset over any manual drop whenever sizes differ.

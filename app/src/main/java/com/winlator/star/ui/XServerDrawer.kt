@@ -779,6 +779,7 @@ private fun FrameGenSection(state: XServerDrawerState) {
     val frameGenEnabled by state.frameGenEnabled.collectAsState()
     val initFgMult by state.frameGenMultiplier.collectAsState()
     val initFgFlow by state.frameGenFlowScale.collectAsState()
+    val initFgModel by state.frameGenModel.collectAsState()
     val engine by state.frameGenEngine.collectAsState()
     val layerActive by state.bionicFgActive.collectAsState()
     val initLsfgPerf by state.lsfgPerformanceMode.collectAsState()
@@ -828,13 +829,35 @@ private fun FrameGenSection(state: XServerDrawerState) {
     if (frameGenEnabled) {
         var fgMult by remember(initFgMult) { mutableIntStateOf(initFgMult) }
         var fgFlow by remember(initFgFlow) { mutableFloatStateOf(initFgFlow) }
+        var fgModel by remember(initFgModel) { mutableIntStateOf(initFgModel) }
         fun applyFg() {
             state.setFrameGenMultiplier(fgMult)
             state.setFrameGenFlowScale(fgFlow)
+            state.setFrameGenModel(fgModel)
             state.onBionicFgConfigChange?.run()
         }
 
         FgMultiplierButtons(fgMult) { fgMult = it; applyFg() }
+
+        // Interpolation model, bionic-fg only. The layer rebuilds its framegen context when the
+        // model changes (same path as a multiplier change), so this switches live. Hidden while
+        // frame gen is Off, where it would have nothing to act on.
+        AnimatedVisibility(
+            visible = engine == "bionic" && fgMult > 0,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut()
+        ) {
+            Column {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "Model",
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(start = 4.dp, bottom = 6.dp)
+                )
+                FgModelButtons(fgModel) { fgModel = it; applyFg() }
+            }
+        }
 
         // Flow Scale only matters with frame gen actually on -> collapse it while Off.
         AnimatedVisibility(
@@ -887,6 +910,43 @@ private fun FrameGenSection(state: XServerDrawerState) {
 }
 
 // Off / 2× / 3× / 4× segmented button row. mult values 0/2/3/4; selected = filled accent.
+@Composable
+private fun FgModelButtons(selected: Int, onSelect: (Int) -> Unit) {
+    val accent = MaterialTheme.colorScheme.primary
+    val accentDim = LocalAccentDim.current
+    // 0 is the long-standing default chain; 1-3 are newer engines, not yet device-proven.
+    val options = listOf(0 to "Default", 1 to "Traced", 2 to "V2", 3 to "FSR3")
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        options.forEach { (model, label) ->
+            val isSel = selected == model
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (isSel) accent else Color.Black)
+                    .border(
+                        width = 1.dp,
+                        color = if (isSel) accent else accentDim,
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                    .clickable { onSelect(model) }
+                    .padding(vertical = 9.dp)
+            ) {
+                Text(
+                    label,
+                    color = if (isSel) Color.Black else accent,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun FgMultiplierButtons(selected: Int, onSelect: (Int) -> Unit) {
     val accent = MaterialTheme.colorScheme.primary

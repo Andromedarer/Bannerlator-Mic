@@ -82,6 +82,11 @@ object XServerDrawerState {
     private val _frameGenFlowScale = MutableStateFlow(0.6f)
     val frameGenFlowScale: StateFlow<Float> = _frameGenFlowScale
 
+    // bionic-fg interpolation model (0-3). Switchable live: the layer rebuilds its framegen
+    // context on a model change (layer.cpp needsContextRebuild), same as a multiplier change.
+    private val _frameGenModel = MutableStateFlow(0)
+    val frameGenModel: StateFlow<Int> = _frameGenModel
+
     // Which FG engine the container runs: "off" / "bionic" / "lsfg". Shown as a label above the
     // in-game multiplier/flow controls so the user knows which engine they're tuning.
     private val _frameGenEngine = MutableStateFlow("off")
@@ -242,6 +247,7 @@ object XServerDrawerState {
     fun setFrameGenEnabled(v: Boolean)     { _frameGenEnabled.value = v }
     fun setFrameGenMultiplier(v: Int)      { _frameGenMultiplier.value = v }
     fun setFrameGenFlowScale(v: Float)     { _frameGenFlowScale.value = v }
+    fun setFrameGenModel(v: Int)           { _frameGenModel.value = v.coerceIn(0, 3) }
     fun setFrameGenEngine(v: String)       { _frameGenEngine.value = v }
     fun setLsfgPerformanceMode(v: Boolean) { _lsfgPerformanceMode.value = v }
     fun setFpsLimiterEnabled(v: Boolean)   { _fpsLimiterEnabled.value = v }
@@ -281,6 +287,7 @@ object XServerDrawerState {
         _frameGenEnabled.value = false
         _frameGenMultiplier.value = 2
         _frameGenFlowScale.value = 0.6f
+        _frameGenModel.value = 0
         _frameGenEngine.value = "off"
         _lsfgPerformanceMode.value = false
         _fpsLimiterEnabled.value = false

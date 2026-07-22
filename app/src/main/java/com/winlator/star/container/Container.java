@@ -377,6 +377,7 @@ public class Container {
     // are tuned live from the in-game side menu (both hot-reload via conf.toml).
     public static final int FRAMEGEN_DEFAULT_MULTIPLIER = 2;
     public static final float FRAMEGEN_DEFAULT_FLOW_SCALE = 0.6f;
+    public static final int FRAMEGEN_DEFAULT_MODEL = 0;
 
     public boolean isFrameGenEnabled() {
         return getExtra("frameGenEnabled", "0").equals("1");
@@ -435,6 +436,27 @@ public class Container {
 
     public void setFrameGenFlowScale(float flowScale) {
         putExtra("frameGenFlowScale", String.valueOf(flowScale));
+    }
+
+    // bionic-fg interpolation model (conf.toml `model`, layer clamp 0-3):
+    //   0 = hand-written optical-flow chain (the long-standing default)
+    //   1 = GameScopeVK's traced dispatch graph
+    //   2 = same graph fed libGameScopeV2's shader variants
+    //   3 = FidelityFX Optical Flow
+    // 1-3 are unproven on device; 0 stays the default so behaviour is unchanged unless chosen.
+    // BIONIC_FG_MODEL in the container/shortcut env vars still overrides this at the layer.
+    public int getFrameGenModel() {
+        try {
+            int m = Integer.parseInt(getExtra("frameGenModel", String.valueOf(FRAMEGEN_DEFAULT_MODEL)));
+            return (m < 0 || m > 3) ? FRAMEGEN_DEFAULT_MODEL : m;
+        }
+        catch (NumberFormatException e) {
+            return FRAMEGEN_DEFAULT_MODEL;
+        }
+    }
+
+    public void setFrameGenModel(int model) {
+        putExtra("frameGenModel", String.valueOf(model));
     }
 
     // lsfg-vk "performance mode" (conf.toml performance_mode): trades interpolation quality for FPS,
