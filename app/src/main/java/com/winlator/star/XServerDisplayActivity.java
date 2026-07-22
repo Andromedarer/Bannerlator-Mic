@@ -708,9 +708,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
             // FPS limiter is no longer part of frame gen — it's a standalone host pacer
             // (onFpsLimitChange). bionic-fg conf carries frame gen only; pass the limiter off.
-            writeBionicFgConfig(mult, flow, false, 0);
+            int fgModel = s.getFrameGenModel().getValue();
+            writeBionicFgConfig(mult, flow, false, 0, fgModel);
             if (fgOn) container.setFrameGenMultiplier(mult);
             container.setFrameGenFlowScale(flow);
+            container.setFrameGenModel(fgModel);
             container.saveData();
         };
         // Standalone FPS limiter: paces the X11 Present extension (delays IdleNotify) so the GAME
@@ -947,6 +949,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // FG drawer (live hot-reload). The persisted container multiplier is left untouched.
         XServerDrawerState.INSTANCE.setFrameGenMultiplier(0);
         XServerDrawerState.INSTANCE.setFrameGenFlowScale(container.getFrameGenFlowScale());
+        XServerDrawerState.INSTANCE.setFrameGenModel(resolvedFrameGenModel());
         XServerDrawerState.INSTANCE.setFrameGenEngine(fgEngine);
         XServerDrawerState.INSTANCE.setLsfgPerformanceMode(container.isLsfgPerformanceMode());
         XServerDrawerState.INSTANCE.setFpsLimiterEnabled(fpsLimOn);
@@ -1571,7 +1574,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // first swapchain present. The layer hot-reloads this file, so it doubles as the live-control
     // path (see in-game drawer). Keys: multiplier (2-4), flow_scale (0.2-1.0), model (0-3).
     // multiplier: 0 = frame gen off (Off in the menu), else 2-4. fpsLimit: 0 = no cap, else 10-200.
-    private void writeBionicFgConfig(int multiplier, float flowScale, boolean fpsLimiterEnabled, int fpsLimitValue) {
+    private void writeBionicFgConfig(int multiplier, float flowScale, boolean fpsLimiterEnabled, int fpsLimitValue, int model) {
         try {
             File configDir = new File(imageFs.home_path, ".config/bionic-fg");
             configDir.mkdirs();
@@ -1582,7 +1585,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             String toml = "# Written by Bannerlator (per-container frame generation)\n"
                     + "multiplier = " + multiplier + "\n"
                     + "flow_scale = " + String.format(java.util.Locale.US, "%.2f", flowScale) + "\n"
-                    + "model = " + resolvedFrameGenModel() + "\n"
+                    + "model = " + Math.max(0, Math.min(3, model)) + "\n"
                     + "fps_limit_enabled = " + (fpsLimiterEnabled ? "true" : "false") + "\n"
                     + "fps_limit = " + fpsLimitValue + "\n";
             FileUtils.writeString(confFile, toml);
@@ -2410,7 +2413,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
                             0,
                             container.getFrameGenFlowScale(),
                             false,
-                            0);
+                            0,
+                            resolvedFrameGenModel());
                 }
             }
 
