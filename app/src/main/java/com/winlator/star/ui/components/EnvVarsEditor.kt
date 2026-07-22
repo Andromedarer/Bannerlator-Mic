@@ -1,5 +1,7 @@
 package com.winlator.star.ui.components
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,14 +16,20 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -41,13 +49,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import com.winlator.star.ui.screens.LabeledDropdown
 import com.winlator.star.ui.screens.MenuItemDivider
 import com.winlator.star.ui.screens.OutlinedAlertDialog
 import com.winlator.star.ui.screens.SectionBox
+import com.winlator.star.ui.screens.outlinedMenuCard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -493,7 +502,6 @@ private fun defaultValueFor(name: String): String {
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun EnvVarRow(
     row: EnvRow,
@@ -521,55 +529,218 @@ private fun EnvVarRow(
                     }
                 }
                 EnvVarType.SELECT -> {
-                    val options = known?.options.orEmpty()
-                    LabeledDropdown(
-                        label = row.name,
-                        options = options,
-                        selectedOption = row.value.ifEmpty { options.firstOrNull() ?: "" },
-                        onSelect = onValueChange
+                    // Editable combobox, not a plain dropdown: the presets are a shortcut, not
+                    // the whole vocabulary. WINEDEBUG in particular is routinely set to something
+                    // like "+loaddll,+seh,+module" that no preset list can cover, so a typed value
+                    // outside the list is kept verbatim and never coerced back onto a preset.
+                    EnvValueField(
+                        name = row.name,
+                        value = row.value,
+                        onValueChange = onValueChange,
+                        presets = known?.options.orEmpty()
                     )
                 }
                 EnvVarType.SELECT_MULTIPLE -> {
-                    val selected = row.value.split(",").filter { it.isNotBlank() }
-                    Column {
-                        Text(
-                            row.name,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        FlowRow(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            known?.options.orEmpty().forEach { option ->
-                                val isOn = option in selected
-                                FilterChip(
-                                    selected = isOn,
-                                    onClick = {
-                                        val next = if (isOn) selected - option else selected + option
-                                        onValueChange(next.joinToString(","))
-                                    },
-                                    label = { Text(option, style = MaterialTheme.typography.labelSmall) }
-                                )
-                            }
-                        }
-                    }
+                    MultiSelectGroup(
+                        name = row.name,
+                        options = known?.options.orEmpty(),
+                        value = row.value,
+                        onValueChange = onValueChange
+                    )
                 }
                 EnvVarType.NUMBER, EnvVarType.TEXT -> {
-                    OutlinedTextField(
+                    EnvValueField(
+                        name = row.name,
                         value = row.value,
                         onValueChange = onValueChange,
-                        label = { Text(row.name) },
-                        singleLine = true,
-                        keyboardOptions = if (type == EnvVarType.NUMBER)
-                            KeyboardOptions(keyboardType = KeyboardType.Number) else KeyboardOptions.Default,
-                        modifier = Modifier.fillMaxWidth()
+                        numeric = type == EnvVarType.NUMBER
                     )
                 }
             }
         }
         IconButton(onClick = onRemove) {
             Icon(Icons.Default.Delete, contentDescription = "Remove ${row.name}")
+        }
+    }
+}
+
+/**
+ * The typed value field shared by SELECT, TEXT and NUMBER rows.
+ *
+ * When [presets] is non-empty the field is an editable combobox: the text area takes focus and
+ * the keyboard on tap, and the trailing arrow opens the preset list — picking one replaces the
+ * text. Anything typed that isn't a preset is stored as-is.
+ *
+ * Values can't contain a space, because core/EnvVars splits the stored string on spaces before
+ * splitting on the first '='. Rather than corrupt such a value on save, spaces are dropped as
+ * they're typed and the field says so — the constraint is surfaced instead of applied silently.
+ */
+@Composable
+private fun EnvValueField(
+    name: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    presets: List<String> = emptyList(),
+    numeric: Boolean = false,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    var spaceDropped by remember { mutableStateOf(false) }
+
+    val supporting: (@Composable () -> Unit)? = if (!spaceDropped) null else {
+        @Composable {
+            Text(
+                "Spaces aren't allowed here — variables are separated by spaces.",
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+    }
+    val arrow: (@Composable () -> Unit)? = if (presets.isEmpty()) null else {
+        @Composable {
+            IconButton(onClick = { expanded = true }) {
+                Icon(Icons.Default.ArrowDropDown, contentDescription = "Presets for $name")
+            }
+        }
+    }
+
+    Box {
+        OutlinedTextField(
+            value = value,
+            onValueChange = { typed ->
+                spaceDropped = typed.contains(' ')
+                onValueChange(typed)
+            },
+            label = { Text(name) },
+            singleLine = true,
+            keyboardOptions = if (numeric) KeyboardOptions(keyboardType = KeyboardType.Number)
+                              else KeyboardOptions.Default,
+            supportingText = supporting,
+            trailingIcon = arrow,
+            modifier = Modifier.fillMaxWidth()
+        )
+        if (presets.isNotEmpty()) {
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+                modifier = Modifier.outlinedMenuCard()
+            ) {
+                presets.forEachIndexed { index, preset ->
+                    if (index > 0) MenuItemDivider()
+                    DropdownMenuItem(
+                        text = { Text(preset) },
+                        onClick = {
+                            spaceDropped = false
+                            onValueChange(preset)
+                            expanded = false
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Above this many options a SELECT_MULTIPLE group starts collapsed behind a disclosure. */
+private const val MULTI_SELECT_COLLAPSE_ABOVE = 6
+
+/**
+ * A SELECT_MULTIPLE chip group. Small groups render as a plain grid, exactly as before.
+ * Big ones (TU_DEBUG is ~30 options, DXVK_HUD ~20) would otherwise fill the screen with a wall
+ * of chips, so they start collapsed showing only the chips that are actually enabled.
+ *
+ * Collapsed chips are drawn as static labels, not FilterChips: a tap on a collapsed chip that
+ * silently deselected it would be a destructive action hidden behind a summary view. Only the
+ * disclosure control reacts, and expanding restores the normal selectable grid.
+ *
+ * Expansion is remembered per row, so toggling a chip doesn't fold the group back up. It lives
+ * in the row's own composition slot (rows are keyed by a stable id), which means it survives
+ * recomposition but deliberately resets to collapsed each time the tab is opened.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun MultiSelectGroup(
+    name: String,
+    options: List<String>,
+    value: String,
+    onValueChange: (String) -> Unit,
+) {
+    val selected = value.split(",").filter { it.isNotBlank() }
+    val collapsible = options.size > MULTI_SELECT_COLLAPSE_ABOVE
+    var expanded by remember { mutableStateOf(false) }
+    val showGrid = expanded || !collapsible
+
+    Column {
+        if (collapsible) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    name,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f)
+                )
+                Icon(
+                    if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                    contentDescription = if (expanded) "Collapse $name" else "Expand $name",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+        } else {
+            Text(
+                name,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+
+        if (showGrid) {
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                options.forEach { option ->
+                    val isOn = option in selected
+                    FilterChip(
+                        selected = isOn,
+                        onClick = {
+                            val next = if (isOn) selected - option else selected + option
+                            onValueChange(next.joinToString(","))
+                        },
+                        label = { Text(option, style = MaterialTheme.typography.labelSmall) }
+                    )
+                }
+            }
+        } else if (selected.isEmpty()) {
+            Text(
+                "None selected",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(vertical = 4.dp)
+            )
+        } else {
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                selected.forEach { option ->
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.secondaryContainer)
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            option,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
+                }
+            }
         }
     }
 }
