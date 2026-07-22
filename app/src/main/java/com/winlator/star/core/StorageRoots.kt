@@ -10,15 +10,15 @@ import java.io.File
 /**
  * A storage volume offered in the file manager's drive menu.
  *
- * [dir] is the deepest path we can actually read on that volume, which is not always the volume
- * root: when shared-storage access is unavailable the app-specific directory is still reachable,
- * and browsing that beats hiding the card entirely.
+ * [dir] is the best path we found for the volume: its root when that is listable, otherwise the
+ * deepest directory we can actually read on the way down to the app-specific directory. A volume
+ * always gets exactly one entry, even if several paths lead to it.
  */
 data class StorageRoot(
     val label: String,
     val dir: File,
     val removable: Boolean,
-    /** False when nothing on the volume could be listed; the entry is still shown. */
+    /** False when no path on the volume could be listed; the entry is still shown. */
     val readable: Boolean,
 )
 
@@ -28,96 +28,118 @@ data class StorageRoot(
  * Listing `/storage` is not enough on its own: a volume can be absent from this process's mount
  * view (notably after a container exits and the app process is restarted onto a stale storage
  * sandbox) even though it is mounted and healthy. The framework knows about it regardless, so the
- * volume set is built from several independent sources and merged:
+ * volume set is built from several independent sources:
  *
  *  1. [StorageManager.getStorageVolumes] — the authoritative list, read over Binder.
  *  2. [Context.getExternalFilesDirs] — per-app directories, granted separately from shared storage.
  *  3. `/storage` and `/mnt/media_rw` directory listings — the filesystem view, as a backstop.
  *
- * A volume reported by any source is always emitted, so the SD card cannot silently disappear.
+ * Those sources overlap heavily: one SD card is reachable as `/storage/<uuid>`, as
+ * `/mnt/media_rw/<uuid>`, and via its app-specific directory, and typically only some of them are
+ * readable. So paths are grouped by the *volume* they belong to rather than by path, and each
+ * volume contributes a single entry pointing at the best path available for it.
  */
 object StorageRoots {
 
+    private const val EMULATED_PREFIX = "/storage/emulated"
     private const val INTERNAL_PATH = "/storage/emulated/0"
 
-    fun list(context: Context): List<StorageRoot> {
-        val roots = LinkedHashMap<String, StorageRoot>()
+    /** Identifies the physical volume a path belongs to; paths sharing a key are the same card. */
+    private const val PRIMARY_KEY = "primary"
 
-        fun put(root: StorageRoot) {
-            val key = canonicalPath(root.dir)
-            // First writer wins, except that a readable path always beats an unreadable one.
-            val existing = roots[key]
-            if (existing == null || (!existing.readable && root.readable)) roots[key] = root
+    private class Volume(val key: String) {
+        var label: String? = null
+        var removable: Boolean = key != PRIMARY_KEY
+        /** Candidate directories, best-guess first. */
+        val candidates = LinkedHashSet<File>()
+        /** App-specific directories, used to find a readable path inside an unreadable root. */
+        val seeds = LinkedHashSet<File>()
+    }
+
+    fun list(context: Context): List<StorageRoot> {
+        val volumes = LinkedHashMap<String, Volume>()
+
+        fun volumeOf(key: String) = volumes.getOrPut(key) { Volume(key) }
+
+        // Internal storage is never removable and never absent; seed it first so it heads the menu.
+        volumeOf(PRIMARY_KEY).apply {
+            label = "Internal"
+            removable = false
+            candidates += File(INTERNAL_PATH)
         }
 
         val appDirs = appSpecificDirs(context)
         val storageManager = context.getSystemService(StorageManager::class.java)
 
-        // Internal storage is never removable and never absent; seed it first so it heads the menu.
-        val internal = File(INTERNAL_PATH)
-        put(StorageRoot("Internal", internal, removable = false, readable = canBrowse(internal)))
-
-        // 1 + 2 — framework-reported volumes, resolved to the best path we can browse.
+        // 1 + 2 — framework-reported volumes. Authoritative, and unaffected by our mount view.
         storageManager?.storageVolumes.orEmpty()
             .filter { isMounted(it.state) }
             .forEach { volume ->
-                val seeds = appDirs.filter { belongsTo(storageManager!!, it, volume) }
-                val dir = resolveVolumeDir(volume, seeds)
-                put(
-                    StorageRoot(
-                        label = labelFor(context, volume),
-                        dir = dir,
-                        removable = volume.isRemovable,
-                        readable = canBrowse(dir),
-                    )
-                )
+                val uuid = volume.uuid?.takeIf { it.isNotBlank() }
+                val entry = volumeOf(if (volume.isPrimary) PRIMARY_KEY else uuid ?: return@forEach)
+                entry.removable = !volume.isPrimary && volume.isRemovable
+                if (entry.label == null) entry.label = labelFor(context, volume, uuid)
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    volume.directory?.let { entry.candidates += it }
+                }
+                if (uuid != null) {
+                    entry.candidates += File("/storage/$uuid")
+                    // Last resort only: the raw mount is normally unreadable to an app, so it must
+                    // never outrank /storage/<uuid> and must never become an entry of its own.
+                    entry.candidates += File("/mnt/media_rw/$uuid")
+                }
+                appDirs.filter { belongsTo(storageManager!!, it, volume) }.forEach { entry.seeds += it }
             }
 
-        // 3 — filesystem backstop, for anything the framework did not report.
-        listOf(File("/storage"), File("/mnt/media_rw")).forEach { parent ->
-            parent.listFiles().orEmpty().forEach { child ->
-                if (!child.isDirectory) return@forEach
-                if (child.name == "self" || child.name == "emulated") return@forEach
-                put(StorageRoot(child.name, child, removable = true, readable = canBrowse(child)))
-            }
+        // 3 — filesystem backstop, for any volume the framework did not report.
+        File("/storage").listFiles().orEmpty().forEach { child ->
+            if (!child.isDirectory || child.name == "self" || child.name == "emulated") return@forEach
+            volumeOf(child.name).candidates += child
+        }
+        File("/mnt/media_rw").listFiles().orEmpty().forEach { child ->
+            if (child.isDirectory) volumeOf(child.name).candidates += child
         }
 
-        // Any app-specific directory whose volume none of the above surfaced.
+        // App-specific directories, which stay reachable when shared storage is not.
         appDirs.forEach { dir ->
             val root = volumeRootOf(dir) ?: return@forEach
-            val best = if (canBrowse(root)) root else deepestReadable(root, dir) ?: return@forEach
-            put(StorageRoot(root.name, best, removable = true, readable = canBrowse(best)))
+            val entry = volumeOf(if (isEmulated(root)) PRIMARY_KEY else root.name)
+            entry.candidates += root
+            entry.seeds += dir
         }
 
-        // Internal first, then removable volumes, then anything else — stable within each group.
-        return roots.values.sortedBy { if (canonicalPath(it.dir) == canonicalPath(internal)) 0 else 1 }
+        val roots = volumes.values.map { it.toRoot() }
+        val internal = roots.filter { !it.removable }
+        val removable = roots.filter { it.removable }.sortedBy { it.label }
+        return disambiguate(internal + removable)
     }
 
-    /**
-     * Picks the path to browse for [volume]: its root if we can read it, otherwise the deepest
-     * readable directory on the way down to one of the app-specific [seeds].
-     */
-    private fun resolveVolumeDir(volume: StorageVolume, seeds: List<File>): File {
-        val candidates = buildList {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) volume.directory?.let(::add)
-            volume.uuid?.takeIf { it.isNotBlank() }?.let { uuid ->
-                add(File("/storage/$uuid"))
-                add(File("/mnt/media_rw/$uuid"))
-            }
-            seeds.mapNotNull(::volumeRootOf).forEach(::add)
-            if (volume.isPrimary) add(File(INTERNAL_PATH))
+    private fun Volume.toRoot(): StorageRoot {
+        // Prefer a path we can actually list; a readable child beats an unreadable root.
+        val dir = candidates.firstOrNull(::canBrowse)
+            ?: candidates.firstNotNullOfOrNull { root -> seeds.firstNotNullOfOrNull { deepestReadable(root, it) } }
+            ?: seeds.firstOrNull(::canBrowse)
+            // Report the volume anyway; an entry that lists empty beats one that silently vanished.
+            ?: candidates.firstOrNull()
+            ?: File("/storage/$key")
+
+        return StorageRoot(
+            label = label ?: defaultLabel(),
+            dir = dir,
+            removable = removable,
+            readable = canBrowse(dir),
+        )
+    }
+
+    private fun Volume.defaultLabel(): String = if (removable) "SD card" else key
+
+    /** Appends the volume id to any label used by more than one volume, so entries stay tellable apart. */
+    private fun disambiguate(roots: List<StorageRoot>): List<StorageRoot> {
+        val counts = roots.groupingBy { it.label }.eachCount()
+        return roots.map { root ->
+            if (counts.getValue(root.label) == 1) root else root.copy(label = "${root.label} (${root.dir.name})")
         }
-
-        candidates.firstOrNull(::canBrowse)?.let { return it }
-
-        // Nothing at the root is readable — fall back into the volume via an app-specific dir.
-        candidates.forEach { root ->
-            seeds.forEach { seed -> deepestReadable(root, seed)?.let { return it } }
-        }
-        seeds.firstOrNull(::canBrowse)?.let { return it }
-
-        // Report the volume anyway; an entry that lists empty is better than one that vanished.
-        return candidates.firstOrNull() ?: File("/storage/${volume.uuid.orEmpty()}")
     }
 
     /** Walks up from [seed] towards [root] and returns the highest directory we can list. */
@@ -155,12 +177,21 @@ object StorageRoots {
         }
     }
 
-    private fun labelFor(context: Context, volume: StorageVolume): String = when {
-        volume.isPrimary -> "Internal"
-        else -> volume.getDescription(context)?.takeIf { it.isNotBlank() }
-            ?: volume.uuid?.takeIf { it.isNotBlank() }
-            ?: "SD card"
+    /**
+     * Names a volume the way the rest of the file manager does. The framework description is only
+     * used when it says something more useful than "SD card" — on some devices it is a bare disk
+     * name like "android", which tells the user nothing about which card they are looking at.
+     */
+    private fun labelFor(context: Context, volume: StorageVolume, uuid: String?): String {
+        if (volume.isPrimary) return "Internal"
+        if (volume.isRemovable) return "SD card"
+        val description = volume.getDescription(context)?.trim()
+        return description?.takeIf { it.isNotBlank() && !it.equals("android", ignoreCase = true) }
+            ?: uuid
+            ?: "Storage"
     }
+
+    private fun isEmulated(dir: File): Boolean = dir.absolutePath.startsWith(EMULATED_PREFIX)
 
     private fun isMounted(state: String?): Boolean =
         state == Environment.MEDIA_MOUNTED || state == Environment.MEDIA_MOUNTED_READ_ONLY
