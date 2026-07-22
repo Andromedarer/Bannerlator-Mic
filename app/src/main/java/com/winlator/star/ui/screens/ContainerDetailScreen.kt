@@ -3,16 +3,14 @@ package com.winlator.star.ui.screens
 
 import android.app.Activity
 import android.content.Context
-import android.content.Intent
 import android.net.Uri
 import android.view.ContextThemeWrapper
-import android.os.Environment
-import android.provider.DocumentsContract
 import android.view.View
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -61,6 +59,7 @@ import com.winlator.star.core.FileUtils
 import com.winlator.star.core.GPUInformation
 import com.winlator.star.core.ImageUtils
 import com.winlator.star.util.InAppFilePicker
+import java.io.File
 import com.winlator.star.core.StringUtils
 import com.winlator.star.core.WineThemeManager
 import android.graphics.Bitmap
@@ -121,7 +120,17 @@ fun ContainerDetailScreen(
         floatingActionButton = {
             FloatingActionButton(
                 onClick = {
-                    if (!viewModel.isSaving) viewModel.confirm(
+                    val duplicates = viewModel.duplicateDriveLetters
+                    if (duplicates.isNotEmpty()) {
+                        // Saving would write two drives onto one letter; send the user to the tab.
+                        viewModel.selectedTab = tabTitles.indexOf("DRIVES")
+                        Toast.makeText(
+                            context,
+                            "Two drives share " + duplicates.sorted().joinToString(", ") { "$it:" } +
+                                " — give each drive its own letter",
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    } else if (!viewModel.isSaving) viewModel.confirm(
                         resolvedGraphicsDriverConfig = viewModel.graphicsDriverConfig,
                         resolvedDXWrapperConfig      = viewModel.dxWrapperConfig,
                         resolvedFPSCounterConfig     = viewModel.fpsCounterConfig,
@@ -1170,17 +1179,16 @@ private fun DrivesTab(viewModel: ContainerDetailViewModel) {
     val context = LocalContext.current
     var pendingDriveUid by remember { mutableStateOf<Long?>(null) }
 
+    // Uses the built-in picker rather than SAF: it returns a real absolute path, so a folder on the
+    // SD card yields /storage/<uuid>/... The SAF mapping produced /mnt/media_rw/<uuid>/..., the raw
+    // vold mount, which neither the app nor the container can read.
     val dirPickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == android.app.Activity.RESULT_OK) {
-            val uri = result.data?.data
-            if (uri != null && pendingDriveUid != null) {
-                val path = FileUtils.getFilePathFromUri(context, uri)
-                if (path != null) {
-                    viewModel.updateDrivePath(pendingDriveUid!!, path)
-                }
-            }
+            val path = InAppFilePicker.pickedPath(result.data)
+            val uid = pendingDriveUid
+            if (path != null && uid != null) viewModel.updateDrivePath(uid, path)
         }
         pendingDriveUid = null
     }
@@ -1193,21 +1201,34 @@ private fun DrivesTab(viewModel: ContainerDetailViewModel) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+        val duplicateLetters = viewModel.duplicateDriveLetters
         viewModel.drives.forEach { drive ->
             DriveRow(
                 drive = drive,
                 letterOptions = viewModel.driveLetterOptions,
+                isDuplicate = drive.letter in duplicateLetters,
                 onLetterChange = { viewModel.updateDriveLetter(drive.uid, it) },
                 onPathChange   = { viewModel.updateDrivePath(drive.uid, it)   },
                 onBrowse = {
                     pendingDriveUid = drive.uid
-                    val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
-                        putExtra(DocumentsContract.EXTRA_INITIAL_URI,
-                            Uri.fromFile(Environment.getExternalStorageDirectory()))
-                    }
-                    dirPickerLauncher.launch(intent)
+                    dirPickerLauncher.launch(
+                        InAppFilePicker.buildDirIntent(
+                            context,
+                            title = "Select folder for drive ${drive.letter}:",
+                            initialDir = drive.path.takeIf { it.isNotBlank() && File(it).isDirectory },
+                        )
+                    )
                 },
                 onRemove = { viewModel.removeDrive(drive.uid) }
+            )
+        }
+        if (duplicateLetters.isNotEmpty()) {
+            Text(
+                "Each drive needs its own letter. Duplicated: " +
+                    duplicateLetters.sorted().joinToString(", ") { "$it:" },
+                color = MaterialTheme.colorScheme.error,
+                fontSize = 12.sp,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
             )
         }
         Button(
@@ -1226,6 +1247,7 @@ private fun DrivesTab(viewModel: ContainerDetailViewModel) {
 private fun DriveRow(
     drive: DriveEntry,
     letterOptions: List<String>,
+    isDuplicate: Boolean,
     onLetterChange: (String) -> Unit,
     onPathChange: (String) -> Unit,
     onBrowse: () -> Unit,
@@ -1236,7 +1258,14 @@ private fun DriveRow(
             options = letterOptions,
             selectedOption = "${drive.letter}:",
             onSelect = { onLetterChange(it.trimEnd(':')) },
-            modifier = Modifier.width(64.dp)
+            modifier = Modifier
+                .width(64.dp)
+                .then(
+                    if (isDuplicate) Modifier.border(
+                        BorderStroke(1.dp, MaterialTheme.colorScheme.error),
+                        RoundedCornerShape(4.dp),
+                    ) else Modifier
+                )
         )
         OutlinedTextField(
             value = drive.path,

@@ -897,9 +897,22 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         } catch (_: Exception) {}
     }
 
+    /**
+     * Drive letters assigned to more than one drive. Two drives sharing a letter collide in the
+     * container, so the editor flags them and saving is blocked until they are resolved.
+     */
+    val duplicateDriveLetters: Set<String>
+        get() = drives.groupingBy { it.letter }.eachCount().filterValues { it > 1 }.keys
+
     fun addDrive() {
         if (drives.size >= Container.MAX_DRIVE_LETTERS) return
-        val letter = driveLetterOptions.getOrElse(drives.size) { "D:" }.first().toString()
+        // Take the first UNUSED letter. Indexing by drives.size hands out a letter that an existing
+        // drive already holds whenever the assigned letters are not the first N in order.
+        val used = drives.mapTo(HashSet()) { it.letter }
+        val letter = driveLetterOptions
+            .map { it.trimEnd(':') }
+            .firstOrNull { it !in used }
+            ?: return
         drives.add(DriveEntry(letter = letter, path = ""))
     }
 
