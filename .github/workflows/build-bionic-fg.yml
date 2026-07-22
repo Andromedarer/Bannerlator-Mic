@@ -34,20 +34,12 @@ jobs:
           yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --install "ndk;26.1.10909125" "cmake;3.22.1"
           echo "ANDROID_NDK_HOME=$SDK_ROOT/ndk/26.1.10909125" >> $GITHUB_ENV
 
-      - name: Apply Bannerlator fixes to bionic-fg
-        run: |
-          # Keeps the submodule pinned to its upstream commit while building our
-          # fixes. This patch is the exact change we propose upstream as a PR
-          # (xXJSONDeruloXx/bionic-fg). It covers:
-          #   1. manifest: add spec-required `disable_environment` (else the
-          #      glibc Vulkan loader skips the implicit layer at parse time);
-          #   2. present path: bound the cross-context fence waits (UINT64_MAX ->
-          #      250ms) so a wrapper-ICD semaphore mismatch degrades to a real
-          #      present + disables framegen instead of hanging (ANR/SIGQUIT);
-          #   3. drop two instance exts wrongly listed as device exts.
-          # All verified on-device 2026-06-19; see BIONIC_FG_INTEGRATION_REPORT.md §2.
-          git -C app/src/main/cpp/bionic-fg apply --verbose \
-            "${GITHUB_WORKSPACE}/patches/bionic-fg-bannerlator-fixes.patch"
+      # No patch step: the Bannerlator fixes that used to be applied here
+      # (manifest disable_environment, bounded cross-context fence waits,
+      # instance-vs-device extension split) were merged upstream as
+      # xXJSONDeruloXx/bionic-fg#6 and are now in the submodule source itself.
+      # patches/bionic-fg-bannerlator-fixes.patch is retired; re-adding it here
+      # would fail to apply against the current tree.
 
       - name: Configure (arm64-v8a, android-26)
         run: |
