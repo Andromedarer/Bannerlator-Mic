@@ -14,6 +14,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -1313,6 +1315,7 @@ private fun BindingValueRow(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun BindingSetupDialog(
     title: String,
@@ -1366,7 +1369,6 @@ private fun BindingSetupDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(EditorSpacing),
             ) {
-                // Category filter chips
                 val filterCategories = listOf("All", "Keyboard", "Mouse", "Gamepad")
                 val filterLabels = listOf(
                     stringResource(R.string.binding_filter_all),
@@ -1374,11 +1376,12 @@ private fun BindingSetupDialog(
                     stringResource(R.string.binding_filter_mouse),
                     stringResource(R.string.binding_filter_gamepad),
                 )
-                LazyRow(
+                FlowRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    items(filterCategories.zip(filterLabels), key = { it.first }) { (category, label) ->
+                    filterCategories.zip(filterLabels).forEach { (category, label) ->
                         val isSelected = category == filterCategory
                         TextButton(
                             onClick = {
