@@ -674,7 +674,9 @@ public class ControlElement {
             case BUTTON_GRID: {
                 int cols = getEffectiveGridCols();
                 int rows = getEffectiveGridRows();
-                float cellWidth = snappingSize * (getGridCellShape() == Shape.SQUARE ? 4f : 6f);
+                Shape cellShape = getGridCellShape();
+                float cellWidth = snappingSize
+                        * (cellShape == Shape.SQUARE || cellShape == Shape.CIRCLE ? 4f : 6f);
                 float cellHeight = snappingSize * 4f;
                 float gap = snappingSize * gridSpacing;
                 halfWidth = Math.round((cellWidth * cols + gap * (cols - 1)) * 0.5f);
@@ -1692,7 +1694,7 @@ public class ControlElement {
         Shape renderShape = cellShape != null ? cellShape : Shape.ROUND_RECT;
         switch (renderShape) {
             case CIRCLE:
-                canvas.drawCircle(bb.centerX(), bb.centerY(), Math.min(bb.width(), bb.height()) * 0.45f, paint);
+                canvas.drawCircle(bb.centerX(), bb.centerY(), Math.min(bb.width(), bb.height()) * 0.5f, paint);
                 break;
             case RECT:
                 canvas.drawRect(bb, paint);
