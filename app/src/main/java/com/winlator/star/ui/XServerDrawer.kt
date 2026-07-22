@@ -779,6 +779,7 @@ private fun FrameGenSection(state: XServerDrawerState) {
     val frameGenEnabled by state.frameGenEnabled.collectAsState()
     val initFgMult by state.frameGenMultiplier.collectAsState()
     val initFgFlow by state.frameGenFlowScale.collectAsState()
+    val initFgModel by state.frameGenModel.collectAsState()
     val engine by state.frameGenEngine.collectAsState()
     val layerActive by state.bionicFgActive.collectAsState()
     val initLsfgPerf by state.lsfgPerformanceMode.collectAsState()
@@ -828,13 +829,35 @@ private fun FrameGenSection(state: XServerDrawerState) {
     if (frameGenEnabled) {
         var fgMult by remember(initFgMult) { mutableIntStateOf(initFgMult) }
         var fgFlow by remember(initFgFlow) { mutableFloatStateOf(initFgFlow) }
+        var fgModel by remember(initFgModel) { mutableIntStateOf(initFgModel) }
         fun applyFg() {
             state.setFrameGenMultiplier(fgMult)
             state.setFrameGenFlowScale(fgFlow)
+            state.setFrameGenModel(fgModel)
             state.onBionicFgConfigChange?.run()
         }
 
         FgMultiplierButtons(fgMult) { fgMult = it; applyFg() }
+
+        // Interpolation model, bionic-fg only. The layer rebuilds its framegen context when the
+        // model changes (same path as a multiplier change), so this switches live. Hidden while
+        // frame gen is Off, where it would have nothing to act on.
+        AnimatedVisibility(
+            visible = engine == "bionic" && fgMult > 0,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut()
+        ) {
+            Column {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "Model",
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(start = 4.dp, bottom = 6.dp)
+                )
+                FgModelButtons(fgModel) { fgModel = it; applyFg() }
+            }
+        }
 
         // Flow Scale only matters with frame gen actually on -> collapse it while Off.
         AnimatedVisibility(
@@ -887,6 +910,43 @@ private fun FrameGenSection(state: XServerDrawerState) {
 }
 
 // Off / 2× / 3× / 4× segmented button row. mult values 0/2/3/4; selected = filled accent.
+@Composable
+private fun FgModelButtons(selected: Int, onSelect: (Int) -> Unit) {
+    val accent = MaterialTheme.colorScheme.primary
+    val accentDim = LocalAccentDim.current
+    // 0 is the long-standing default chain; 1-3 are newer engines, not yet device-proven.
+    val options = listOf(0 to "Default", 1 to "Traced", 2 to "V2", 3 to "FSR3")
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        options.forEach { (model, label) ->
+            val isSel = selected == model
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (isSel) accent else Color.Black)
+                    .border(
+                        width = 1.dp,
+                        color = if (isSel) accent else accentDim,
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                    .clickable { onSelect(model) }
+                    .padding(vertical = 9.dp)
+            ) {
+                Text(
+                    label,
+                    color = if (isSel) Color.Black else accent,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun FgMultiplierButtons(selected: Int, onSelect: (Int) -> Unit) {
     val accent = MaterialTheme.colorScheme.primary
@@ -1906,6 +1966,15 @@ private fun HudContent(state: XServerDrawerState) {
     var showClock by remember(cfg) { mutableStateOf(b("showClock", "showClock", "0")) }
     var showCpuGraph by remember(cfg) { mutableStateOf(b("showCPUGraph", "showCPUGraph", "0")) }
     var showGpuGraph by remember(cfg) { mutableStateOf(b("showGPUGraph", "showGPUGraph", "0")) }
+    // Temperature display: unit, plus danger bands as a single 3-way (Off / Auto / Manual) rather
+    // than two toggles — "banding on but auto off" and "banding off but auto on" aren't distinct
+    // states worth exposing. Auto reads the device's own thermal trip points.
+    var tempUnitF by remember(cfg) { mutableStateOf(cfg.getOrDefault("tempUnit", "c").equals("f", true)) }
+    var tempBands by remember(cfg) { mutableStateOf(cfg.getOrDefault("tempBands", "1") != "0") }
+    var tempAuto by remember(cfg) { mutableStateOf(cfg.getOrDefault("tempAuto", "1") != "0") }
+    var tempRedCpu by remember(cfg) { mutableFloatStateOf(cfg.getOrDefault("tempRedCpu", "90").toFloatOrNull() ?: 90f) }
+    var tempRedGpu by remember(cfg) { mutableFloatStateOf(cfg.getOrDefault("tempRedGpu", "90").toFloatOrNull() ?: 90f) }
+    var tempRedBat by remember(cfg) { mutableFloatStateOf(cfg.getOrDefault("tempRedBat", "48").toFloatOrNull() ?: 48f) }
 
     var scaleValue by remember(cfg) { mutableFloatStateOf(cfg.getOrDefault("hudScale", Container.DEFAULT_HUD_SCALE.toString()).toFloatOrNull() ?: Container.DEFAULT_HUD_SCALE.toFloat()) }
     var opacityValue by remember(cfg) { mutableFloatStateOf(cfg.getOrDefault("hudOpacity", "80").toFloatOrNull() ?: 80f) }
@@ -1944,6 +2013,12 @@ private fun HudContent(state: XServerDrawerState) {
         "showClock=${i(showClock)}",
         "showCPUGraph=${i(showCpuGraph)}",
         "showGPUGraph=${i(showGpuGraph)}",
+        "tempUnit=${if (tempUnitF) "f" else "c"}",
+        "tempBands=${i(tempBands)}",
+        "tempAuto=${i(tempAuto)}",
+        "tempRedCpu=${tempRedCpu.toInt()}",
+        "tempRedGpu=${tempRedGpu.toInt()}",
+        "tempRedBat=${tempRedBat.toInt()}",
         "hudSkin=$skin",
         "hudColor=$color",
         "hudOutline=${outlineValue.toInt()}",
@@ -2002,6 +2077,37 @@ private fun HudContent(state: XServerDrawerState) {
         if (gameHub) add(Triple("Dual battery", dualBattery) { dualBattery = !dualBattery; apply() })
     }
     ModeChipGrid(metricChips, perRow = 3)
+
+    // ── Temperature display ── only worth showing when a temperature is actually on screen.
+    if (showTemp || (gameNative && (showGpuTemp || showBattery))) {
+        HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
+        HudChipRow("Temp unit", listOf("°C", "°F"), if (tempUnitF) 1 else 0) {
+            tempUnitF = it == 1; apply()
+        }
+        val bandMode = if (!tempBands) 0 else if (tempAuto) 1 else 2
+        HudChipRow("Danger colors", listOf("Off", "Auto", "Manual"), bandMode) {
+            tempBands = it != 0
+            tempAuto = it != 2
+            apply()
+        }
+        Text(
+            when (bandMode) {
+                0 -> "Temperatures use their normal color."
+                1 -> "Thresholds read from your device's own thermal trip points, falling back to safe defaults."
+                else -> "Set the red point per sensor; amber sits just below it."
+            },
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), fontSize = 11.sp,
+            modifier = Modifier.padding(start = 4.dp, top = 2.dp, bottom = 4.dp)
+        )
+        if (bandMode == 2) {
+            // Only the red point is exposed; amber is derived. Nobody knows their preferred amber
+            // in the abstract, and three sliders beat six. Values are always °C.
+            LabeledSlider("CPU red at", tempRedCpu, 50f..110f, { tempRedCpu = it }, { apply() }, format = { "${it.toInt()}°C" })
+            if (gameNative && showGpuTemp)
+                LabeledSlider("GPU red at", tempRedGpu, 50f..110f, { tempRedGpu = it }, { apply() }, format = { "${it.toInt()}°C" })
+            LabeledSlider("Battery red at", tempRedBat, 35f..60f, { tempRedBat = it }, { apply() }, format = { "${it.toInt()}°C" })
+        }
+    }
 
     if (gameHub) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
@@ -2209,22 +2315,27 @@ private fun ControlsContent(state: XServerDrawerState) {
             Text("Mouse & Cursor", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
             Spacer(Modifier.height(4.dp))
 
-            // Each of these flips its flag host-side and closes the drawer — the chip fires exactly the same
-            // pair of callbacks the switch row did.
+            // Each of these flips its flag host-side and stays open — like the fullscreen selector, the
+            // drawer keeps rendering so the chip's new on/off state is visible where you tapped it.
             ToggleChipGrid(
                 listOf(
                     ToggleChipItem("Cursor to Touch", moveCursorToTouch) {
-                        state.onMoveCursorToTouchpoint?.run(); state.onClose?.run()
+                        state.onMoveCursorToTouchpoint?.run()
                     },
                     ToggleChipItem("Relative Mouse", isRelativeMouse) {
-                        state.onRelativeMouseMovement?.run(); state.onClose?.run()
+                        state.onRelativeMouseMovement?.run()
                     },
                     ToggleChipItem("Disable Mouse", isMouseDisabled) {
-                        state.onDisableMouse?.run(); state.onClose?.run()
+                        state.onDisableMouse?.run()
                     },
                 ),
                 perRow = 3
             )
+
+            // Tied directly to the toggle: the gestures only exist in absolute-cursor mode, so the
+            // pane appears as part of switching Cursor to Touch on and leaves with it. No cog — one
+            // less tap, and turning the mode on now shows you exactly what you turned on.
+            if (moveCursorToTouch) TouchGestureSettings(state)
         }
 
         // ── Vibration ──
@@ -2294,6 +2405,54 @@ private fun ControlsContent(state: XServerDrawerState) {
         // ── Gyro ── its own branch, deliberately OUTSIDE the vibration block above: the gyro section
         // is unrelated to rumble and must render whether or not vibration is switched on.
         3 -> GyroSection()
+    }
+}
+
+// ───── Touch gesture settings — Controls > Mouse, shown while Cursor to Touch is on ─────
+// These gestures only exist in absolute-cursor mode, so the pane lives and dies with that toggle
+// rather than behind its own control. Each gesture is independently switchable because the right set
+// is per-game: an RTS wants both, a mouse-look shooter wants neither stealing its drags. Changes
+// apply to the live touchpad immediately and persist, so a game can be tuned without relaunching.
+// There is no pinch-to-zoom — two-finger pan already emits the same wheel events.
+@Composable
+private fun TouchGestureSettings(state: XServerDrawerState) {
+    val accent = MaterialTheme.colorScheme.primary
+    val dragSelect by state.gestureDragSelect.collectAsState()
+    val longPress by state.gestureLongPressRightClick.collectAsState()
+
+    Spacer(Modifier.height(10.dp))
+    Text("Touch Gestures", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+    Spacer(Modifier.height(2.dp))
+    Text(
+        "Drag to box-select, hold for right click. Two-finger drag scrolls the wheel.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    Spacer(Modifier.height(6.dp))
+
+    ToggleChipGrid(
+        listOf(
+            ToggleChipItem("Box Select", dragSelect) {
+                state.setGestureDragSelect(it); state.onGestureConfigChange?.run()
+            },
+            ToggleChipItem("Hold = Right", longPress) {
+                state.setGestureLongPressRightClick(it); state.onGestureConfigChange?.run()
+            },
+        ),
+        perRow = 2
+    )
+
+    // The slider only exists while its gesture does — a hold delay with holds switched off is the
+    // kind of dead control the sub-tab split was meant to get rid of.
+    if (longPress) {
+        val initHoldMs by state.gestureLongPressMs.collectAsState()
+        var holdMs by remember(initHoldMs) { mutableIntStateOf(initHoldMs) }
+        IntSlider("Hold Delay", holdMs, 150..800,
+            onValueChange = { holdMs = it },
+            onValueChangeFinished = {
+                state.setGestureLongPressMs(holdMs); state.onGestureConfigChange?.run()
+            }
+        )
     }
 }
 

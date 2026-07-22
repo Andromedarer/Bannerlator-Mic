@@ -626,6 +626,12 @@
     <string name="frame_generation_multiplier">Multiplier</string>
     <string name="frame_generation_lsfg_needs_dll">lsfg-vk is unavailable — import a Lossless.dll at the bottom of Settings to enable it.</string>
     <string name="frame_generation_ingame_hint">Tune the multiplier &amp; flow scale live from the in-game side menu.</string>
+    <string name="frame_generation_model">Interpolation model</string>
+    <string name="frame_generation_model_default">Default</string>
+    <string name="frame_generation_model_traced">Traced graph (experimental)</string>
+    <string name="frame_generation_model_v2">V2 engine (experimental)</string>
+    <string name="frame_generation_model_fsr3">FidelityFX optical flow (experimental)</string>
+    <string name="frame_generation_model_experimental_hint">Experimental model — may render incorrectly or cost more performance than it gains. Switch back to Default if a game misbehaves.</string>
     <string name="frame_generation_lsfg_hint">Uses your imported Lossless.dll (set it at the bottom of Settings). Tune the multiplier &amp; flow scale live from the in-game side menu.</string>
     <string name="fg_performance_mode">Performance mode</string>
     <string name="fg_performance_mode_hint">Lower quality for higher FPS — helps on low-end devices. Also toggleable live from the in-game side menu.</string>

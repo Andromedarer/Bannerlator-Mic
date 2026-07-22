@@ -35,6 +35,18 @@ object XServerDrawerState {
     private val _moveCursorToTouchpoint  = MutableStateFlow(false)
     val moveCursorToTouchpoint: StateFlow<Boolean> = _moveCursorToTouchpoint
 
+    // Per-gesture config, shown in the Controls > Mouse pane whenever Cursor to Touch is on. Each
+    // gesture is independently switchable because which of them is welcome is per-game: an RTS wants
+    // both, a mouse-look shooter wants neither. Seeded from prefs and pushed to TouchpadView live.
+    private val _gestureDragSelect = MutableStateFlow(true)
+    val gestureDragSelect: StateFlow<Boolean> = _gestureDragSelect
+
+    private val _gestureLongPressRightClick = MutableStateFlow(true)
+    val gestureLongPressRightClick: StateFlow<Boolean> = _gestureLongPressRightClick
+
+    private val _gestureLongPressMs = MutableStateFlow(300)
+    val gestureLongPressMs: StateFlow<Int> = _gestureLongPressMs
+
     private val _showLogs                = MutableStateFlow(false)
     val showLogs: StateFlow<Boolean>     = _showLogs
 
@@ -69,6 +81,11 @@ object XServerDrawerState {
 
     private val _frameGenFlowScale = MutableStateFlow(0.6f)
     val frameGenFlowScale: StateFlow<Float> = _frameGenFlowScale
+
+    // bionic-fg interpolation model (0-3). Switchable live: the layer rebuilds its framegen
+    // context on a model change (layer.cpp needsContextRebuild), same as a multiplier change.
+    private val _frameGenModel = MutableStateFlow(0)
+    val frameGenModel: StateFlow<Int> = _frameGenModel
 
     // Which FG engine the container runs: "off" / "bionic" / "lsfg". Shown as a label above the
     // in-game multiplier/flow controls so the user knows which engine they're tuning.
@@ -157,6 +174,9 @@ object XServerDrawerState {
     @JvmField var onLogs:                   Runnable? = null
     @JvmField var onExit:                   Runnable? = null
     @JvmField var onMoveCursorToTouchpoint: Runnable? = null
+    // Fired when any gesture chip/slider under the Cursor to Touch cog changes; the activity reads
+    // the flows above, persists them, and pushes the set to the live TouchpadView.
+    @JvmField var onGestureConfigChange:    Runnable? = null
     @JvmField var onRelativeMouseMovement:  Runnable? = null
     @JvmField var onDisableMouse:           Runnable? = null
     @JvmField var onNativeRenderingToggle: Runnable? = null
@@ -200,6 +220,12 @@ object XServerDrawerState {
     fun setIsRelativeMouseMovement(v: Boolean) { _isRelativeMouseMovement.value = v }
     fun setIsMouseDisabled(v: Boolean)         { _isMouseDisabled.value = v }
     fun setMoveCursorToTouchpoint(v: Boolean)  { _moveCursorToTouchpoint.value = v }
+    fun setGestureDragSelect(v: Boolean)          { _gestureDragSelect.value = v }
+    fun setGestureLongPressRightClick(v: Boolean) { _gestureLongPressRightClick.value = v }
+    fun setGestureLongPressMs(v: Int)             { _gestureLongPressMs.value = v }
+    fun getGestureDragSelectValue(): Boolean          = _gestureDragSelect.value
+    fun getGestureLongPressRightClickValue(): Boolean = _gestureLongPressRightClick.value
+    fun getGestureLongPressMsValue(): Int             = _gestureLongPressMs.value
     fun setShowLogs(v: Boolean)                { _showLogs.value = v }
     fun setShowMagnifier(v: Boolean)           { _showMagnifier.value = v }
     fun setCursorExpanded(v: Boolean)          { _cursorExpanded.value = v }
@@ -221,6 +247,7 @@ object XServerDrawerState {
     fun setFrameGenEnabled(v: Boolean)     { _frameGenEnabled.value = v }
     fun setFrameGenMultiplier(v: Int)      { _frameGenMultiplier.value = v }
     fun setFrameGenFlowScale(v: Float)     { _frameGenFlowScale.value = v }
+    fun setFrameGenModel(v: Int)           { _frameGenModel.value = v.coerceIn(0, 3) }
     fun setFrameGenEngine(v: String)       { _frameGenEngine.value = v }
     fun setLsfgPerformanceMode(v: Boolean) { _lsfgPerformanceMode.value = v }
     fun setFpsLimiterEnabled(v: Boolean)   { _fpsLimiterEnabled.value = v }
@@ -248,6 +275,9 @@ object XServerDrawerState {
         _isRelativeMouseMovement.value = false
         _isMouseDisabled.value = false
         _moveCursorToTouchpoint.value = false
+        _gestureDragSelect.value = true
+        _gestureLongPressRightClick.value = true
+        _gestureLongPressMs.value = 300
         _showLogs.value = false
         _showMagnifier.value = true
         _nativeRenderingEnabled.value = false
@@ -257,6 +287,7 @@ object XServerDrawerState {
         _frameGenEnabled.value = false
         _frameGenMultiplier.value = 2
         _frameGenFlowScale.value = 0.6f
+        _frameGenModel.value = 0
         _frameGenEngine.value = "off"
         _lsfgPerformanceMode.value = false
         _fpsLimiterEnabled.value = false
@@ -276,7 +307,7 @@ object XServerDrawerState {
         onScreenEffects = null; onGraphicEngine = null; onVibration = null
         onToggleFullscreen = null; onSetFullscreenMode = null; onPauseResume = null; onPipMode = null
         onActiveWindows = null; onTaskManager = null; onMagnifier = null
-        onLogs = null; onExit = null; onMoveCursorToTouchpoint = null
+        onLogs = null; onExit = null; onMoveCursorToTouchpoint = null; onGestureConfigChange = null
         onRelativeMouseMovement = null; onDisableMouse = null
         onNativeRenderingToggle = null; onFpsConfigApply = null
         onBionicFgConfigChange = null; onFpsLimitChange = null

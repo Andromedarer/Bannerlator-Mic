@@ -118,6 +118,7 @@ import com.winlator.star.core.CPUStatus;
 import com.winlator.star.xserver.XLock;
 import com.winlator.star.xconnector.UnixSocketConfig;
 import com.winlator.star.xenvironment.ImageFs;
+import com.winlator.star.xenvironment.ImageFsInstaller;
 import com.winlator.star.xenvironment.XEnvironment;
 import com.winlator.star.xenvironment.components.ALSAServerComponent;
 import com.winlator.star.xenvironment.components.GuestProgramLauncherComponent;
@@ -716,9 +717,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
             // FPS limiter is no longer part of frame gen — it's a standalone host pacer
             // (onFpsLimitChange). bionic-fg conf carries frame gen only; pass the limiter off.
-            writeBionicFgConfig(mult, flow, false, 0);
+            int fgModel = s.getFrameGenModel().getValue();
+            writeBionicFgConfig(mult, flow, false, 0, fgModel);
             if (fgOn) container.setFrameGenMultiplier(mult);
             container.setFrameGenFlowScale(flow);
+            container.setFrameGenModel(fgModel);
             container.saveData();
         };
         // Standalone FPS limiter: paces the X11 Present extension (delays IdleNotify) so the GAME
@@ -779,7 +782,17 @@ public class XServerDisplayActivity extends AppCompatActivity {
         state.onMagnifier              = () -> showMagnifierOverlay();
         state.onLogs                   = () -> XServerDialogState.INSTANCE.show(XServerDialogState.ActiveDialog.DEBUG);
         state.onExit                   = () -> exit();
+        // Seed the drawer chip from the persisted preference so it reflects reality on open
+        // (state.reset() above zeroes it, so this has to come after).
+        state.setMoveCursorToTouchpoint(preferences.getBoolean("move_cursor_to_touchpoint", false));
         state.onMoveCursorToTouchpoint = () -> MoveCursorToTouchpoint();
+        // Per-gesture config shown under the Cursor to Touch toggle. Seed from prefs; the push to the
+        // touchpad happens in setupUI, which is where that view is actually built.
+        state.setGestureDragSelect(preferences.getBoolean("gesture_drag_select", true));
+        state.setGestureLongPressRightClick(preferences.getBoolean("gesture_long_press_rmb", true));
+        state.setGestureLongPressMs(preferences.getInt("gesture_long_press_ms",
+            TouchpadView.DEFAULT_LONG_PRESS_MILLISECONDS));
+        state.onGestureConfigChange = this::applyGestureConfig;
         state.onRelativeMouseMovement  = () -> {
             isRelativeMouseMovement = !isRelativeMouseMovement;
             state.setIsRelativeMouseMovement(isRelativeMouseMovement);
@@ -852,6 +865,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
         XServerDialogHostKt.setupDialogHost(dialogHostView);
 
         imageFs = ImageFs.find(this);
+
+        // Stage the bundled components before the guest starts. MainActivity already does this on
+        // app start, but this Activity is exported and home-screen game shortcuts launch it
+        // directly — so a user who updates and then launches straight into a game would otherwise
+        // run the previous frame-gen layer until they next opened the app. Synchronous on purpose:
+        // once the stamps match this is a couple of stats, and when they don't the copy has to
+        // happen before the guest dlopens the layer anyway.
+        ImageFsInstaller.stageBundledComponents(this, imageFs);
 
         // Prepare dev/input directory - actual event files created after shortcut is loaded
         File devInputDir = new File(imageFs.getRootDir(), "dev/input");
@@ -945,6 +966,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // FG drawer (live hot-reload). The persisted container multiplier is left untouched.
         XServerDrawerState.INSTANCE.setFrameGenMultiplier(0);
         XServerDrawerState.INSTANCE.setFrameGenFlowScale(container.getFrameGenFlowScale());
+        XServerDrawerState.INSTANCE.setFrameGenModel(resolvedFrameGenModel());
         XServerDrawerState.INSTANCE.setFrameGenEngine(fgEngine);
         XServerDrawerState.INSTANCE.setLsfgPerformanceMode(container.isLsfgPerformanceMode());
         XServerDrawerState.INSTANCE.setFpsLimiterEnabled(fpsLimOn);
@@ -1563,9 +1585,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     // Writes the bionic-fg layer config (TOML) into the guest HOME so it is present before the
     // first swapchain present. The layer hot-reloads this file, so it doubles as the live-control
-    // path (see in-game drawer). Keys: multiplier (2-4), flow_scale (0.2-1.0), model (0/1).
+    // path (see in-game drawer). Keys: multiplier (2-4), flow_scale (0.2-1.0), model (0-3).
     // multiplier: 0 = frame gen off (Off in the menu), else 2-4. fpsLimit: 0 = no cap, else 10-200.
-    private void writeBionicFgConfig(int multiplier, float flowScale, boolean fpsLimiterEnabled, int fpsLimitValue) {
+    private void writeBionicFgConfig(int multiplier, float flowScale, boolean fpsLimiterEnabled, int fpsLimitValue, int model) {
         try {
             File configDir = new File(imageFs.home_path, ".config/bionic-fg");
             configDir.mkdirs();
@@ -1576,7 +1598,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             String toml = "# Written by Bannerlator (per-container frame generation)\n"
                     + "multiplier = " + multiplier + "\n"
                     + "flow_scale = " + String.format(java.util.Locale.US, "%.2f", flowScale) + "\n"
-                    + "model = 0\n"
+                    + "model = " + Math.max(0, Math.min(3, model)) + "\n"
                     + "fps_limit_enabled = " + (fpsLimiterEnabled ? "true" : "false") + "\n"
                     + "fps_limit = " + fpsLimitValue + "\n";
             FileUtils.writeString(confFile, toml);
@@ -2415,7 +2437,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
                             0,
                             container.getFrameGenFlowScale(),
                             false,
-                            0);
+                            0,
+                            resolvedFrameGenModel());
                 }
             }
 
@@ -2719,6 +2742,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
         touchpadView.setFourFingersTapCallback(() -> {
             if (!drawerLayout.isDrawerOpen(GravityCompat.START)) drawerLayout.openDrawer(GravityCompat.START);
         });
+        // The preference persists across launches but was never restored onto the view, so
+        // Cursor to Touch silently reverted to off every session until it was toggled again.
+        touchpadView.setMoveCursorToTouchpoint(preferences.getBoolean("move_cursor_to_touchpoint", false));
+        applyGestureConfig(); // wiring ran before this view existed; push the seeded set now
         rootView.addView(touchpadView);
 
         inputControlsView = new InputControlsView(this, timeoutHandler, hideControlsRunnable);
@@ -4554,6 +4581,20 @@ return true;
         return shortcut != null ? shortcut.getExtra("frameGenEngine", container.getFrameGenEngine()) : container.getFrameGenEngine();
     }
 
+    // bionic-fg interpolation model for this launch: per-game override else the container value.
+    // Same read-only resolver discipline as resolvedFrameGenEngine — never writes back.
+    private int resolvedFrameGenModel() {
+        int fallback = container.getFrameGenModel();
+        if (shortcut == null) return fallback;
+        try {
+            int m = Integer.parseInt(shortcut.getExtra("frameGenModel", String.valueOf(fallback)));
+            return (m < 0 || m > 3) ? fallback : m;
+        }
+        catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
     // Resolved ReShade config for this launch: the loadout (ordered effects + per-effect enabled),
     // the solo/stack mode, and the raw per-effect params JSON (nested, or migrated flat legacy).
     private static class ResolvedReshade {
@@ -5126,7 +5167,28 @@ return true;
         if (touchpadView != null) {
             touchpadView.setMoveCursorToTouchpoint(newValue);
         }
+
+        // Push back into the drawer so the chip renders its on/off state (matches the
+        // Relative Mouse / Disable Mouse toggles in setupUI).
+        XServerDrawerState.INSTANCE.setMoveCursorToTouchpoint(newValue);
     } // Closes MoveCursorToTouchpoint
+
+    /** Persist the drawer's gesture settings and apply them to the live touchpad. */
+    private void applyGestureConfig() {
+        XServerDrawerState state = XServerDrawerState.INSTANCE;
+        boolean dragSelect = state.getGestureDragSelectValue();
+        boolean longPress = state.getGestureLongPressRightClickValue();
+        int longPressMs = state.getGestureLongPressMsValue();
+
+        preferences.edit()
+            .putBoolean("gesture_drag_select", dragSelect)
+            .putBoolean("gesture_long_press_rmb", longPress)
+            .putInt("gesture_long_press_ms", longPressMs)
+            .apply();
+
+        if (touchpadView != null)
+            touchpadView.setGestureConfig(dragSelect, longPress, longPressMs);
+    }
 
     private void showActiveWindowsDialog() {
         ArrayList<com.winlator.star.xserver.Window> activeWindows = new ArrayList<>();

@@ -1,5 +1,27 @@
 # Star-Compose — Progress Log
 
+## 2026-07-21 — 📖 Graphics wrapper & driver selection guide `docs/graphics-wrappers-guide.md` (`41d5c706`)
+
+> **No user-facing wrapper doc existed** (only the internal `WRAPPER_MANAGER_PLAN.md`). Written from live sources: the **live catalog** `raw.githubusercontent.com/The412Banner/winlator-contents/main/wrappers.json` (**18 entries**, per the sync-repo rule — not a local clone), `bundled_wrappers.json`, `WrapperCatalog.kt`, `XServerDisplayActivity` driver-extraction + env gating, and `GPUInformation.isCompatLayerSupportedGpu`.
+>
+> Covers: what a wrapper is (DX→DXVK→wrapper→GPU chain, and that it's NOT the renderer) · **pick-by-GPU table** · all built-in drivers (Wrapper / Turnip / +bcn_layer / -gamenative / +compat+bcn / VirGL) · all 18 catalog entries grouped by upstream with author + GitHub links · **the BCn-layer slot is a layer, not an ICD** · import/update/delete · troubleshooting · credits.
+>
+> **Hardware gating documented exactly as coded:** Qualcomm `0x5143` → BCn emulation forced OFF (native BC; the pre-2.6.1 always-on bug is explained); bcn_layer activates on any non-Qualcomm; **compat_layer DX12 gated on the Valhall model allowlist** — G57/G68/G77/G78/G310/G610/G615/G710/G715/G720/G925 + Immortalis-G715/G720/G925, Bifrost/Midgard deliberately excluded.
+>
+> ⭐ **Most useful section — "Many of these are literally the same file":** the catalog's own descriptions record byte-identity across projects. Documented the 4 identical groups (default = WinlatorMali Wrapper = Ludashi Steven; original = WMali v2 = WinNative Wrapper; legacy = Pipetto Bionic; BL GameNative = WMali GameNative) and the ones that genuinely differ (3 distinct leegao builds, WinNative's GameNative, upstream GameNative 20260719, leegao BCn vs Fcharan fork) — so users stop A/B-testing identical bytes.
+>
+> **Linked from README twice:** a callout under "🎨 Graphics & translation layers" and on the Wrapper Version Manager Full-Features bullet. ⚠️ Fcharan / WinMali-Dev has **no recorded upstream URL** — credited by name only, deliberately not fabricated.
+
+## 2026-07-21 — 📖 Gyro guide `docs/gyro-controls-guide.md` + linked from README and the 2.8 release (`fe20174f`)
+
+> **312-line plain-English guide written from the CODE, not the changelog** — `GyroCalibrator.kt`, `WinHandler.updateGyroData` / `updateGyroOrientation` / `updateGyroMouse`, `Container.java` GYRO_* defaults, `InputControlsScreen.kt`, and the `gyro_*` strings.
+>
+> Covers: requirements (gyro + rotation-vector for Tilt to Aim) · the 4 setting locations · **Rate vs Tilt to Aim** (what each is for, why Rate is the default) · **3 targets — right / left stick / mouse** · activator (L1/L2/R1/R3/Always) + **Hold vs Toggle** · Sensitivity / Deadzone / Smoothing / Invert with a tuning order and defaults (2.0 / 0.05 / 0.5) · **calibration** (why bias is subtracted before the deadzone; per-device stamping; refuses to store while moving) · **Recenter** · the two intentionally-blocked combos (Mouse + Tilt to Aim; no rotation-vector) · troubleshooting · pipeline order · WinNative credit.
+>
+> **⚠️ Two release-note inaccuracies found and FIXED while writing it:** the notes said gyro drives "the right stick or the mouse" — **`GYRO_TARGET_LEFT_STICK` also exists and is exposed** (`gyro_target_left_stick`); and the two motion modes weren't explained at all. Both corrected in the live 2.8 body.
+>
+> **Linked from 3 places:** README What's New (callout under the gyro paragraph), README Full Features gyro bullet (also rewritten to list all 3 targets + both modes + activator choices), and the **2.8 release body** gyro section (absolute URL, verified 200 + present in the live body).
+
 ## 2026-07-21 — 🏁 **2.8 STABLE RELEASED = LATEST** (vc48, tag `2.8` @ `5f63103b`, run `29833848658`) (vc48, bump `c8de4b5d`, run `29833269026`)
 
 > **Version bump + README committed and pushed to main; `release.yml` dispatched for tag `2.8`** (`release_number=2.8`, `make_prerelease=false`). The halted 2.7.2 prep was **retargeted to 2.8** on user instruction ("you talked me into 2.8") — the two uncommitted working-tree edits were rewritten from 2.7.2/vc48 to **2.8/vc48** (versionCode was already 48, so no further tick) and committed as `c8de4b5d`.
@@ -4454,3 +4476,78 @@ Resume recipe: launch GL container xuser-3 -> AIO DX11 cube -> enable perf HUD -
 5. **Keep-alive ping + connect watchdog** — cheap, prevents idle CM drops (GameNative pingInterval 15s :3456 + post-connect BAD-CM watchdog :3563). We're TCP-only so add the watchdog; investigate a TCP heartbeat.
 
 **Guardrails:** Do 1+2 first (biggest ROI). Do NOT start editing until today's `c72d943` (CI run `28685150972`) is DEVICE-CONFIRMED on HL2 — don't stack unproven changes. One item per commit, device-verify each. Branch `feat/steam-goldberg-patcher`. Also-deferred #5 = wire the dead `updateNotification` (cosmetic).
+
+
+## 👆 CURSOR-TO-TOUCH FIX + RTS TOUCH GESTURES (2026-07-21) — branch `feat/touch-gestures`
+**Reported:** device screenshot — enabling "Cursor to Touch" (Controls > Mouse) never lights the chip.
+
+**Root cause:** `XServerDrawerState.setMoveCursorToTouchpoint()` had ZERO callers. `XServerDisplayActivity.MoveCursorToTouchpoint()` flipped the `move_cursor_to_touchpoint` pref + pushed to `TouchpadView`, but never wrote back to the StateFlow the drawer collects — so the chip was pinned false forever. The feature itself worked all along; purely a UI desync. Sibling toggles (Relative Mouse / Disable Mouse) DO call their `state.setX()`, which is why only this one looked dead.
+
+**Fixed:** push-back after the touchpad update + seed from `preferences` at wiring time (must come after `state.reset()` at :604). **Audited every other drawer toggle for the same failure mode — all clean** (Native Rendering is the best-behaved; Touch/Vibration/Gyro all seed from XServerDialogState + write their setter inline). Also dropped `state.onClose?.run()` from all 3 Controls>Mouse chips so the drawer stays open and the flip is visible.
+
+**Feature (same cut):** RTS-style gestures folded INTO the Cursor to Touch toggle (user's explicit choice over a separate/per-gesture chip), gated on `gesturesEnabled()` = `moveCursorToTouchpoint && !simTouchScreen`. Inspired by `Producdevity/gamehub-lite#73` — **nothing was code-portable** (that PR is ~40 smali patches against a decompiled closed-source APK); behaviour spec + thresholds only.
+- **Drag → box select**: past `MAX_TAP_TRAVEL_DISTANCE`, warp back to the start point, hold LMB, track ABSOLUTELY (relative deltas run through sensitivity+acceleration and would drift the selection corner off the fingertip).
+- **Long-press 300ms → RMB**: cancelled by 2nd finger / travel / finger-up. Tracks `gestureFinger`, NOT `fingers[0]` — first pointer id can be 1 when a finger rests on an InputControls overlay.
+- **Pinch → wheel**: spread-delta vs pan-delta per frame, larger wins; emits every whole `PINCH_WHEEL_STEP` (40). Spread = zoom in = SCROLL_UP. Legacy two-fingers-wide-apart LMB drag suppressed when gestures are on.
+- Stranded-button cleanup in 3 places: ACTION_CANCEL, live toggle-off mid-drag, and the finger-up short-circuit (stops a finished drag stacking a spurious tap-click).
+- **NOT done on purpose:** double-tap→double-click (free — identical warp coord means two taps already coalesce guest-side) and the configurable gesture-mapping dialog (~4000 of that PR's lines).
+
+**Branch note:** cut off `origin/main` @ `8521a4b2`, NOT off `feat/displayx-renderer` (which was checked out at the time and is unrelated). versionCode stays vc48/"2.8".
+
+**Status:** code complete, inspection-only — pushing to CI now. **NEXT (device-test once green):** verify the chip lights up, then drag-select in an RTS, long-press RMB, pinch-zoom. Highest-risk untested area = drag-select vs the InputControls overlay pointer-id case.
+
+
+## 🎞️ BIONIC-FG SHADER POOL + MODELS 2/3 BUNDLED (2026-07-22) — built off latest main, NOT device-tested
+**Why:** the frame-gen layer we ship has been `9136405c` (2026-06-21) — pre-dating every model built since. Models 1, 2 and 3 have never been in a shipped `.so`; the pooled GameScopeVK/V2 shaders have never reached a device.
+
+**Source rebased onto current upstream.** The Track-3 work sat on the *pre-squash* compat commits, so it read as diverged from `main` (`68497bf` = our own merged PR #6, squashed on merge). Replaying it hit conflicts on every compat commit — the same content arriving twice. Instead the exact 12-file delta was applied on top of `origin/main` as `feat/fsr3-on-main` (`2eb68ef`). Verified before committing: no file exists only in `main` (nothing lost), and the resulting tree is byte-identical to `603d26e`. **The rebuilt `.so` came out byte-identical too — md5 `971e6aaa` from both branches — which independently proves the rebase changed nothing functional.**
+
+**What the layer now contains** (`2eb68ef`, built by run `29886009167`):
+- shaders_embedded regenerated from current `libGameScopeVK.so`; the malformed `shader_02` replaced by the clean 50412-byte module. **Note: `shader_02` is one of the three BCN texture-decode utilities and is dispatched by NO model (model 0 uses 3-30, model 1 uses 3,4,30-53), and `IsValidSpirv` only checks the 4-byte magic — so this was never a live defect, only hygiene.**
+- 12 distinct `libGameScopeV2.so` modules pooled at idx 54-65, wired as **model 2** via `kV2ShaderMap` (13 swaps; base 14 and 20 share V2 module 60).
+- **model 3** = FidelityFX Optical Flow, 4 compute shaders at idx 66-69, MIT, attributed.
+- `IsValidSpirv` restored — the pool regen at `48a6b52` dropped the definition while `session.cpp:20` and `framegen_context.cpp:24` still called it, so `feat/shader-pool-gamescope-v2` (`b0c2e5c`) does not compile at all. Only the Track-3 line builds.
+
+**App side (this branch, off main `5e284f4a`, versionCode stays 48):** submodule repointed `xXJSONDeruloXx` → `The412Banner/bionic-fg` @ `2eb68ef`; bundled asset replaced (`9136405c` → `971e6aaa`, 6,557,856 B); `patches/bionic-fg-bannerlator-fixes.patch` **deleted** and its apply-step removed from `build-bionic-fg.yml` — those three fixes are upstream in `68497bf` now and the patch would fail against the current tree.
+
+**⚠️ NOT VERIFIED ON DEVICE. Test order (each step has a control):**
+1. **model 0** — regression baseline, must behave as the shipped layer does today. If it doesn't, the pool regen broke something.
+2. **model 1** — first time the traced graph ships at all.
+3. **model 2** — the real gamble: V2's shaders run through **model 1's** dispatch graph, which was traced from `libGameScopeVK`'s native dispatch. A 13-module delta suggests V2 changed something; if pass order/bindings moved, expect garbage or a crash.
+4. **model 3** — known deviations (subgroup-free GLSL, 3×3/±3 search, no sub-pixel): perf is the risk, not correctness.
+
+Select via `conf.toml` or `BIONIC_FG_MODEL`. Bundling (rather than hand-injecting) sidesteps the `ImageFsInstaller.installBionicFgLayer` clobber, which re-copies the bundled asset over any manual drop whenever sizes differ.
+
+
+## 🎞️ BIONIC-FG SHADER POOL + 4 MODELS — ✅ MERGED TO MAIN `763f46ed` (2026-07-22), DEVICE-PROVEN
+**versionCode STAYS 48.** Default behaviour unchanged (model 0). Branch `feat/bionic-fg-pool-on-main` merged --no-ff; final CI `29889458926` green on all 3 flavours.
+
+**Why this existed:** the shipped frame-gen layer had been `9136405c` (2026-06-21) the whole time — predating every model built since. Models 1/2/3 and the pooled shaders had never been in ANY release.
+
+**Layer now bundled = `971e6aaa`, 6,557,856 B**, built from fork `The412Banner/bionic-fg` @ `2eb68ef` (branch `feat/fsr3-on-main`), which replays the Track-3 work on top of current upstream `68497bf`. ⚠️ Do NOT `git rebase` the old branches to do this — they sit on the PRE-SQUASH compat commits so every one conflicts against main's squashed copy. Correct method = apply the 12-file delta onto main (verified `git diff --diff-filter=D origin/main 603d26e` is EMPTY first, i.e. nothing exists only in main). **The rebuilt .so came out byte-identical to the pre-rebase build — same md5 from two independent branches — proving the rebase is functionally inert.**
+
+**✅ ALL FOUR MODELS DEVICE-PROVEN** (Dirt 3, Adreno 750/Turnip, arm64ec+FEXCore+unixlib, 2× / flow 1.00). Clean `FramegenContext rebuilt` each way, zero `config rebuild failed`, zero errors. Live switching works end-to-end: chip → conf.toml → layer mtime watch → context rebuild.
+
+**📊 CONTROLLED SWEEP** (parked 000 MPH, identical scene `2:56.683`, all 4 within 31 s):
+| Model | FPS | GPU | CPU | PWR | CPU°C/GPU°C |
+|---|---|---|---|---|---|
+| 0 Default | 92.7 | 88% | 37% | 16.1W | 70/79 |
+| 1 Traced | 97.5 | 86% | 62% | 18.3W | 79/82 |
+| 2 V2 | 96.5 | 88% | 64% | 16.4W | 81/83 |
+| **3 FSR3** | **134.7** | **85%** | 74% | 18.8W | 84/88 |
+
+**FSR3 = +45% over Default while using the LEAST GPU** (FPS and GPU% move in opposite directions ⇒ not scene noise). UNDERSTATED: temps rose monotonically through the in-order sweep, so m3 was measured hottest/most-throttled. Mechanism = base render rate (at 2×, presented ≈ 2× the game's own rate ⇒ m0 ~46 real fps vs m3 ~67): the FG pass simply stops stealing GPU from the game. m1≈m2 within ~1 FPS = exactly what the 6-shader overlap predicts (`kV2ShaderMap` has 13 entries but model 1's graph only dispatches idx 3,4,30-53, so only 3/30/31/32/33/34 actually land).
+
+**⚠️ STILL UNANSWERED — model 3 QUALITY.** Parked = ~zero motion ⇒ that sweep is a clean COST measurement and a worthless QUALITY one. FSR3's cut search window (8×8/±8 → 3×3/±3, no sub-pixel, backward flow = −forward, LDR only) produces a WEAK flow field, which is both cheap AND clean-looking on a straight road with uniform forward motion — exactly what every m3 screenshot shows. **MUST stress fast LATERAL motion (tight corner, trackside fencing/posts) + occlusion edges before m3 is treated as good or considered as a default.**
+
+**🐞 TWO STAGING BUGS FIXED (both silent, both long-standing):**
+1. **Bundled layers never reached devices.** `MainActivity` calls `SplashViewModel.installIfNeeded`, which early-returns once imagefs is current — so `ImageFsInstaller.installIfNeeded`, whose else-branch stages bionic-fg/lsfg-vk/ffmpeg8, had **no callers at all**. Layers only ever landed on a full imagefs re-extract. ✅ DEVICE-VERIFIED FIX: restored the old .so, cold-started, watched it replace itself with correct owner/perms.
+2. **Staging decided by file SIZE alone** → a same-size rebuild would be skipped forever. Now stamped `versionCode:assetSize` (`.bionic-fg-stamp` / `.lsfg-vk-stamp`), with the size check KEPT alongside (stamp catches same-size updates, size catches on-disk drift). Also staged on the **direct game-launch path** (`XServerDisplayActivity` is exported; home-screen shortcuts bypass MainActivity), and both layers now land via temp-file + atomic rename.
+
+**🔑 PRECEDENCE CORRECTION (cost a near-miss test):** `readConf()` (layer.cpp:250) reads env vars as DEFAULTS FIRST, then `parseConfigFile` OVERWRITES them — *"A config file, when present, wins."* So **conf.toml beats `BIONIC_FG_MODEL`**, not the reverse. Since the app rewrites conf.toml every launch, the env var is INERT whenever the app drives. Setting it would silently keep the old model — a test that looks like it ran and didn't. Inert vars removed from the Dirt 3 and GTA IV shortcuts (backups in /sdcard/Download).
+
+**🎛️ UI DECISION (user):** keep the flow SLIDER continuous (0.2-1.0) + MODEL chips as a separate row. Rejected GameHub-style bundled presets and clintOnSky's flow chips — orthogonal controls let the user hunt the best flow×model COMBINATION, and flow has only ever been tested at 1.00. (GameHub can bundle because they ship 2 models; at our 4 that's 20 combos.)
+
+**⚠️ NEAR-MISS worth remembering:** scripted (python) edits silently converted two CRLF files to LF — `XServerDisplayActivity.java` and `ImageFsInstaller.java` — turning both into whole-file rewrites (583 changed lines for 64 real ones) and destroying blame. Caught by checking the diffstat before pushing; fixed in `91111fcc`. **Check `--stat` (and `-w`) before merging scripted edits.**
+
+**▶️ NEXT (tomorrow):** port clintOnSky's PR #96 present-path fix into the fork as real source (NOT the retired patch file) — `waitLastDispatch()` on the dispatch's own fence + bounded timeout, replacing the per-frame `vkQueueWaitIdle(device_.computeQueue())` still at `layer.cpp:1471`. Confirmed ABSENT from tonight's build, so every number above was measured with that stall in place. Prediction: all four models rise; if FSR3 rises least, part of its lead was just spending less time in the shared stall. Then the m3 lateral-motion quality test.

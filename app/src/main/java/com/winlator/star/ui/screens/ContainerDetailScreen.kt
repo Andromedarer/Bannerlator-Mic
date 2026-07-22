@@ -715,6 +715,28 @@ private fun TopLevelFields(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 52.dp, top = 2.dp, bottom = 4.dp)
             )
+            // Interpolation model. Default (0) is the long-standing chain; 1-3 are newer engines
+            // that are not yet device-proven, hence the explicit "experimental" labelling.
+            val fgModelLabels = listOf(
+                stringResource(R.string.frame_generation_model_default),
+                stringResource(R.string.frame_generation_model_traced),
+                stringResource(R.string.frame_generation_model_v2),
+                stringResource(R.string.frame_generation_model_fsr3)
+            )
+            LabeledDropdown(
+                label = stringResource(R.string.frame_generation_model),
+                options = fgModelLabels,
+                selectedOption = fgModelLabels[viewModel.frameGenModel.coerceIn(0, 3)],
+                onSelect = { viewModel.frameGenModel = fgModelLabels.indexOf(it) }
+            )
+            if (viewModel.frameGenModel != 0) {
+                Text(
+                    text = stringResource(R.string.frame_generation_model_experimental_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 52.dp, top = 2.dp, bottom = 4.dp)
+                )
+            }
         }
         if (viewModel.frameGenEngine == "lsfg") {
             Text(
@@ -2660,6 +2682,13 @@ internal fun FpsCounterConfigDialog(
     var showClock    by remember { mutableStateOf(bool("showClock", "showClock", "0")) }
     var showCpuGraph by remember { mutableStateOf(bool("showCPUGraph", "showCPUGraph", "0")) }
     var showGpuGraph by remember { mutableStateOf(bool("showGPUGraph", "showGPUGraph", "0")) }
+    // Temperature display — same keys as the in-game drawer pane, so the two stay interchangeable.
+    var tempUnitF  by remember { mutableStateOf(cfg.getOrDefault("tempUnit", "c").equals("f", true)) }
+    var tempBands  by remember { mutableStateOf(cfg.getOrDefault("tempBands", "1") != "0") }
+    var tempAuto   by remember { mutableStateOf(cfg.getOrDefault("tempAuto", "1") != "0") }
+    var tempRedCpu by remember { mutableStateOf(cfg.getOrDefault("tempRedCpu", "90").toIntOrNull() ?: 90) }
+    var tempRedGpu by remember { mutableStateOf(cfg.getOrDefault("tempRedGpu", "90").toIntOrNull() ?: 90) }
+    var tempRedBat by remember { mutableStateOf(cfg.getOrDefault("tempRedBat", "48").toIntOrNull() ?: 48) }
 
     var hudScale by remember { mutableStateOf(cfg.getOrDefault("hudScale", Container.DEFAULT_HUD_SCALE.toString()).toIntOrNull() ?: Container.DEFAULT_HUD_SCALE) }
     var hudOpacity by remember { mutableStateOf(cfg.getOrDefault("hudOpacity", "80").toIntOrNull() ?: 80) }
@@ -2696,6 +2725,12 @@ internal fun FpsCounterConfigDialog(
         "showClock=${i(showClock)}",
         "showCPUGraph=${i(showCpuGraph)}",
         "showGPUGraph=${i(showGpuGraph)}",
+        "tempUnit=${if (tempUnitF) "f" else "c"}",
+        "tempBands=${i(tempBands)}",
+        "tempAuto=${i(tempAuto)}",
+        "tempRedCpu=$tempRedCpu",
+        "tempRedGpu=$tempRedGpu",
+        "tempRedBat=$tempRedBat",
         "hudSkin=$skin",
         "hudColor=$color",
         "hudOutline=$outlineValue",
@@ -2762,6 +2797,54 @@ internal fun FpsCounterConfigDialog(
                     if (gameHub) add(Triple("Dual battery", dualBattery) { dualBattery = !dualBattery })
                 }
                 ModeChipGrid(metricChips, perRow = 3)
+
+                // ── Temperature display ── only meaningful when a temperature is on screen.
+                if (showTemp || (gameNative && (showGpuTemp || showBattery))) {
+                    Spacer(Modifier.height(12.dp))
+                    HudThreeStop("Temp unit", listOf("\u00B0C", "\u00B0F"), if (tempUnitF) 1 else 0) {
+                        tempUnitF = it == 1
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    // Danger bands as one 3-way rather than two toggles: "bands off but auto on"
+                    // isn't a distinct state worth exposing.
+                    val bandMode = if (!tempBands) 0 else if (tempAuto) 1 else 2
+                    HudThreeStop("Danger colors", listOf("Off", "Auto", "Manual"), bandMode) {
+                        tempBands = it != 0
+                        tempAuto = it != 2
+                    }
+                    Text(
+                        when (bandMode) {
+                            0 -> "Temperatures use their normal color."
+                            1 -> "Thresholds read from your device's own thermal trip points, falling back to safe defaults."
+                            else -> "Set the red point per sensor; amber sits just below it."
+                        },
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    if (bandMode == 2) {
+                        // Red point only; amber is derived. Always \u00B0C — thresholds never convert.
+                        Spacer(Modifier.height(4.dp))
+                        Text("CPU red at: $tempRedCpu\u00B0C", style = MaterialTheme.typography.bodySmall)
+                        Slider(
+                            value = tempRedCpu.toFloat(),
+                            onValueChange = { tempRedCpu = it.toInt() },
+                            valueRange = 50f..110f, steps = 59
+                        )
+                        if (gameNative && showGpuTemp) {
+                            Text("GPU red at: $tempRedGpu\u00B0C", style = MaterialTheme.typography.bodySmall)
+                            Slider(
+                                value = tempRedGpu.toFloat(),
+                                onValueChange = { tempRedGpu = it.toInt() },
+                                valueRange = 50f..110f, steps = 59
+                            )
+                        }
+                        Text("Battery red at: $tempRedBat\u00B0C", style = MaterialTheme.typography.bodySmall)
+                        Slider(
+                            value = tempRedBat.toFloat(),
+                            onValueChange = { tempRedBat = it.toInt() },
+                            valueRange = 35f..60f, steps = 24
+                        )
+                    }
+                }
 
                 Spacer(Modifier.height(12.dp))
                 Text("HUD Scale: $hudScale%", style = MaterialTheme.typography.bodySmall)

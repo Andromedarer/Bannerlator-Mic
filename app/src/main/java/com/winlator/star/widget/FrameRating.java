@@ -42,6 +42,9 @@ public class FrameRating extends FrameLayout implements Runnable {
 
     // Device-complete metric readers (GPU load / CPU temp) live in the single shared collector.
     private final HudMetrics metrics;
+    private HudMetrics.TempDisplay tempDisplay = HudMetrics.TempDisplay.from(null);
+    private int defaultCpuTempColor = 0xFFFFFFFF;
+    private int defaultBatteryTempColor = 0xFFFFFFFF;
 
     private final TextView tvFPS;
     private final TextView tvRenderer;
@@ -103,6 +106,11 @@ public class FrameRating extends FrameLayout implements Runnable {
         tvBatteryTemp = findViewById(R.id.TVBatteryTemp);
         tvBatteryVoltage = findViewById(R.id.TVBatteryVoltage);
         tvLatency = findViewById(R.id.TVLatency);
+        // Captured once so a temperature row can be restored when danger bands are switched off.
+        // Safe to snapshot here: nothing else in this overlay recolours these views (only FPS is
+        // dynamically coloured, and that's a different TextView).
+        defaultCpuTempColor = tvCPUTemp != null ? tvCPUTemp.getCurrentTextColor() : 0xFFFFFFFF;
+        defaultBatteryTempColor = tvBatteryTemp != null ? tvBatteryTemp.getCurrentTextColor() : 0xFFFFFFFF;
 
         rowFPS = findViewById(R.id.RowFPS);
         rowRAM = findViewById(R.id.RowRAM);
@@ -161,6 +169,7 @@ public class FrameRating extends FrameLayout implements Runnable {
         if (rowGPULoad != null) rowGPULoad.setVisibility(config.get("showGPULoad", "0").equals("1") ? VISIBLE : GONE);
         if (rowBatteryTemp != null) rowBatteryTemp.setVisibility(config.get("showBatteryTemp", "0").equals("1") ? VISIBLE : GONE);
         if (rowBatteryVoltage != null) rowBatteryVoltage.setVisibility(config.get("showBatteryVoltage", "0").equals("1") ? VISIBLE : GONE);
+        tempDisplay = HudMetrics.TempDisplay.from(config);
 
         int rendererVis = config.get("showRenderer", "0").equals("1") ? VISIBLE : GONE;
         if (rowRenderer != null) rowRenderer.setVisibility(rendererVis);
@@ -278,10 +287,18 @@ public class FrameRating extends FrameLayout implements Runnable {
             tvLatency.setText(String.format(Locale.ENGLISH, "%.1fms", latencyMs));
         }
         if (tvRAM != null) tvRAM.setText(getAvailableRAM() + " Used / " + totalRAM);
-        if (tvCPUTemp != null) tvCPUTemp.setText(String.format(Locale.ENGLISH, "%.1f°C", cpuTemp));
+        applyTemp(tvCPUTemp, cpuTemp, HudMetrics.TempSensor.CPU, defaultCpuTempColor);
         if (tvGPULoad != null) tvGPULoad.setText(gpuLoad + "%");
 
-        if (tvBatteryTemp != null) tvBatteryTemp.setText(String.format(Locale.ENGLISH, "%.1f°C", batteryTemp));
+        applyTemp(tvBatteryTemp, batteryTemp, HudMetrics.TempSensor.BATTERY, defaultBatteryTempColor);
         if (tvBatteryVoltage != null) tvBatteryVoltage.setText(String.format(Locale.ENGLISH, "%.2fW", batteryWattage));
+    }
+
+    /** Writes a temperature in the user's unit and colours the row by danger band. */
+    private void applyTemp(TextView tv, float celsius, HudMetrics.TempSensor sensor, int defaultColor) {
+        if (tv == null) return;
+        HudMetrics.Thresholds t = metrics.resolveThresholds(sensor, tempDisplay);
+        tv.setText(HudMetrics.formatTemp(celsius, tempDisplay, true));
+        tv.setTextColor(HudMetrics.tempColor(celsius, t, tempDisplay, defaultColor));
     }
 }
