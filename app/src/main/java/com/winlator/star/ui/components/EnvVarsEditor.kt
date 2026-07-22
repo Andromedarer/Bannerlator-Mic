@@ -240,10 +240,15 @@ internal object DllOverrides {
      */
     fun disable(overrides: String, baseline: String): String {
         val entries = parse(overrides).filterNot { isSignature(it) }.toMutableList()
-        val baselineEntries = parse(baseline)
-        for (dll in PREFER_GAME_FOLDER) {
-            if (entries.any { it.has(dll) }) continue
-            baselineEntries.firstOrNull { it.keys.size == 1 && it.has(dll) }?.let { entries += it }
+        // Put back whatever the baseline said about the safe-list DLLs we just dropped.
+        // A grouped entry is restored with only the DLLs that are actually missing, so a
+        // hand-written "version,winmm=b" comes back intact even though enabling had to
+        // split it apart.
+        for (entry in parse(baseline)) {
+            val missing = entry.keys.filter { key ->
+                PREFER_GAME_FOLDER.any { it.equals(key, ignoreCase = true) } && entries.none { it.has(key) }
+            }
+            if (missing.isNotEmpty()) entries += Entry(missing, entry.order)
         }
         return render(entries)
     }
