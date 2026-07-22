@@ -45,6 +45,28 @@ object WinePath {
     }
 
     /**
+     * The inverse of [resolveWindowsPath]: maps a Wine-side Windows path (e.g.
+     * `F:\Games\foo\foo.exe`) back to a file on the Android side using [container]'s
+     * drive map, with C: resolving to the container's own prefix. Returns null when the
+     * letter isn't mapped or the path isn't drive-qualified — callers treat that as
+     * "unknown location" rather than guessing.
+     */
+    fun resolveAndroidPath(container: Container, winPath: String): File? {
+        val path = winPath.trim().trim('"')
+        if (path.length < 3 || path[1] != ':') return null
+        val letter = path.substring(0, 1).uppercase()
+        val rel = path.substring(2).trimStart('\\', '/').replace("\\", "/")
+        val root: String = if (letter == "C") {
+            File(container.getRootDir(), ".wine/drive_c").absolutePath
+        } else {
+            container.drivesIterator()
+                .firstOrNull { it[0].equals(letter, ignoreCase = true) }
+                ?.get(1)?.trimEnd('/') ?: return null
+        }
+        return if (rel.isEmpty()) File(root) else File(root, rel)
+    }
+
+    /**
      * Escapes a Windows path for an `Exec=wine ...` line, using 4-backslash
      * separators per Winlator's two-pass [StringUtils.unescape].
      */
