@@ -424,7 +424,7 @@ public class ControlElement {
     public Shape getGridCellShape() { return gridCellShape != null ? gridCellShape : Shape.ROUND_RECT; }
     public void setGridCellShape(Shape s) { this.gridCellShape = s != null ? s : Shape.ROUND_RECT; boundingBoxNeedsUpdate = true; }
     public float getGridSpacing() { return gridSpacing; }
-    public void setGridSpacing(float spacing) { gridSpacing = clampFinite(spacing, 0f, 1f, 0f); }
+    public void setGridSpacing(float spacing) { gridSpacing = clampFinite(spacing, 0f, 1f, 0f); boundingBoxNeedsUpdate = true; }
     public Binding[] getCombo(int index) { return (comboBindings != null && index >= 0 && index < comboBindings.length) ? comboBindings[index] : null; }
     public boolean blocksTouchscreenMouseButtonsAt(int index) {
         return !isValidBindingIndex(index) || blockTouchscreenMouseButtons[index];
@@ -674,8 +674,11 @@ public class ControlElement {
             case BUTTON_GRID: {
                 int cols = getEffectiveGridCols();
                 int rows = getEffectiveGridRows();
-                halfWidth = snappingSize * (getGridCellShape() == Shape.SQUARE ? 2 : 3) * cols;
-                halfHeight = snappingSize * 2 * rows;
+                float cellWidth = snappingSize * (getGridCellShape() == Shape.SQUARE ? 4f : 6f);
+                float cellHeight = snappingSize * 4f;
+                float gap = snappingSize * gridSpacing;
+                halfWidth = Math.round((cellWidth * cols + gap * (cols - 1)) * 0.5f);
+                halfHeight = Math.round((cellHeight * rows + gap * (rows - 1)) * 0.5f);
                 break;
             }
             case RANGE_BUTTON: {
@@ -1178,8 +1181,9 @@ public class ControlElement {
             case BUTTON_GRID: {
                 int cols = getEffectiveGridCols();
                 int rows = getEffectiveGridRows();
-                float cellW = (float)boundingBox.width() / cols;
-                float cellH = (float)boundingBox.height() / rows;
+                float gap = getGridSpacingPx();
+                float cellW = (boundingBox.width() - gap * (cols - 1)) / cols;
+                float cellH = (boundingBox.height() - gap * (rows - 1)) / rows;
                 int oldColor = paint.getColor();
                 Shape cellShape = getGridCellShape(); // use configured cell shape
                 long now = System.currentTimeMillis();
@@ -1187,8 +1191,8 @@ public class ControlElement {
                 for (int r = 0; r < rows; r++) {
                     for (int c = 0; c < cols; c++) {
                         int cellIdx = r * cols + c;
-                        float left = boundingBox.left + c * cellW;
-                        float top = boundingBox.top + r * cellH;
+                        float left = boundingBox.left + c * (cellW + gap);
+                        float top = boundingBox.top + r * (cellH + gap);
                         float right = left + cellW;
                         float bottom = top + cellH;
                         // Build cell rect for shape drawing
@@ -1604,16 +1608,17 @@ public class ControlElement {
             case BUTTON_GRID: {
                 int cols = getEffectiveGridCols();
                 int rows = getEffectiveGridRows();
-                float cellW = (float)boundingBox.width() / cols;
-                float cellH = (float)boundingBox.height() / rows;
+                float gap = getGridSpacingPx();
+                float cellW = (boundingBox.width() - gap * (cols - 1)) / cols;
+                float cellH = (boundingBox.height() - gap * (rows - 1)) / rows;
                 Shape cellShape = getGridCellShape();
                 long now = System.currentTimeMillis();
 
                 for (int r = 0; r < rows; r++) {
                     for (int c = 0; c < cols; c++) {
                         int cellIdx = r * cols + c;
-                        float left = boundingBox.left + c * cellW;
-                        float top = boundingBox.top + r * cellH;
+                        float left = boundingBox.left + c * (cellW + gap);
+                        float top = boundingBox.top + r * (cellH + gap);
                         float right = left + cellW;
                         float bottom = top + cellH;
                         boolean pressed = cellIdx < states.length && states[cellIdx];
@@ -1709,9 +1714,11 @@ public class ControlElement {
     }
 
     private Rect getGridCellRect(float left, float top, float right, float bottom) {
-        int inset = Math.round(inputControlsView.getSnappingSize() * gridSpacing * scale * 0.5f);
-        return new Rect(Math.round(left) + inset, Math.round(top) + inset,
-                Math.round(right) - inset, Math.round(bottom) - inset);
+        return new Rect(Math.round(left), Math.round(top), Math.round(right), Math.round(bottom));
+    }
+
+    private float getGridSpacingPx() {
+        return inputControlsView.getSnappingSize() * gridSpacing * scale;
     }
 
     private int applyGridPressFlash(int cellIndex, int fillColor, boolean pressed, long now) {
@@ -2354,11 +2361,12 @@ public class ControlElement {
         int cols = getEffectiveGridCols();
         Rect box = getBoundingBox();
         if (box.width() <= 0 || box.height() <= 0) return -1;
-        float cellW = (float)box.width() / cols;
-        float cellH = (float)box.height() / rows;
-        int col = (int)((x - box.left) / cellW);
-        int row = (int)((y - box.top) / cellH);
-        if (col < 0 || col >= cols || row < 0 || row >= rows) return -1;
+        if (x < box.left || x >= box.right || y < box.top || y >= box.bottom) return -1;
+        float gap = getGridSpacingPx();
+        float cellW = (box.width() - gap * (cols - 1)) / cols;
+        float cellH = (box.height() - gap * (rows - 1)) / rows;
+        int col = Math.min(cols - 1, (int)((x - box.left + gap * 0.5f) / (cellW + gap)));
+        int row = Math.min(rows - 1, (int)((y - box.top + gap * 0.5f) / (cellH + gap)));
         return row * cols + col;
     }
 
