@@ -1594,7 +1594,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             String toml = "# Written by Bannerlator (per-container frame generation)\n"
                     + "multiplier = " + multiplier + "\n"
                     + "flow_scale = " + String.format(java.util.Locale.US, "%.2f", flowScale) + "\n"
-                    + "model = " + Math.max(0, Math.min(3, model)) + "\n"
+                    + "model = " + Math.max(0, Math.min(4, model)) + "\n"
                     + "fps_limit_enabled = " + (fpsLimiterEnabled ? "true" : "false") + "\n"
                     + "fps_limit = " + fpsLimitValue + "\n";
             FileUtils.writeString(confFile, toml);
@@ -4530,7 +4530,7 @@ return true;
         if (shortcut == null) return fallback;
         try {
             int m = Integer.parseInt(shortcut.getExtra("frameGenModel", String.valueOf(fallback)));
-            return (m < 0 || m > 3) ? fallback : m;
+            return (m < 0 || m > 4) ? fallback : m;
         }
         catch (NumberFormatException e) {
             return fallback;

@@ -547,6 +547,7 @@
     <string name="frame_generation_model_traced">Traced graph (experimental)</string>
     <string name="frame_generation_model_v2">V2 engine (experimental)</string>
     <string name="frame_generation_model_fsr3">FidelityFX optical flow (experimental)</string>
+    <string name="frame_generation_model_fsr3_v2">FidelityFX optical flow v2 (experimental)</string>
     <string name="frame_generation_model_experimental_hint">Experimental model — may render incorrectly or cost more performance than it gains. Switch back to Default if a game misbehaves.</string>
     <string name="frame_generation_lsfg_hint">Uses your imported Lossless.dll (set it at the bottom of Settings). Tune the multiplier &amp; flow scale live from the in-game side menu.</string>
     <string name="fg_performance_mode">Performance mode</string>

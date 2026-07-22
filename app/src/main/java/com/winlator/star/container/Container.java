@@ -438,17 +438,21 @@ public class Container {
         putExtra("frameGenFlowScale", String.valueOf(flowScale));
     }
 
-    // bionic-fg interpolation model (conf.toml `model`, layer clamp 0-3):
+    // bionic-fg interpolation model (conf.toml `model`, layer clamp 0-4):
     //   0 = hand-written optical-flow chain (the long-standing default)
     //   1 = GameScopeVK's traced dispatch graph
     //   2 = same graph fed libGameScopeV2's shader variants
     //   3 = FidelityFX Optical Flow
-    // 1-3 are unproven on device; 0 stays the default so behaviour is unchanged unless chosen.
+    //   4 = FidelityFX Optical Flow v2 — 3's front-end with a per-block search, a wider
+    //       match window, sub-pixel refinement and a true bidirectional solve whose
+    //       forward/backward disagreement gates the flow at occlusion edges. 3 is kept
+    //       unchanged alongside it so the two can be compared live in the same scene.
+    // 1-4 are unproven on device; 0 stays the default so behaviour is unchanged unless chosen.
     // BIONIC_FG_MODEL in the container/shortcut env vars still overrides this at the layer.
     public int getFrameGenModel() {
         try {
             int m = Integer.parseInt(getExtra("frameGenModel", String.valueOf(FRAMEGEN_DEFAULT_MODEL)));
-            return (m < 0 || m > 3) ? FRAMEGEN_DEFAULT_MODEL : m;
+            return (m < 0 || m > 4) ? FRAMEGEN_DEFAULT_MODEL : m;
         }
         catch (NumberFormatException e) {
             return FRAMEGEN_DEFAULT_MODEL;

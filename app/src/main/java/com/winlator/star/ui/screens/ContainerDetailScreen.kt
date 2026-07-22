@@ -729,12 +729,13 @@ private fun TopLevelFields(
                 stringResource(R.string.frame_generation_model_default),
                 stringResource(R.string.frame_generation_model_traced),
                 stringResource(R.string.frame_generation_model_v2),
-                stringResource(R.string.frame_generation_model_fsr3)
+                stringResource(R.string.frame_generation_model_fsr3),
+                stringResource(R.string.frame_generation_model_fsr3_v2)
             )
             LabeledDropdown(
                 label = stringResource(R.string.frame_generation_model),
                 options = fgModelLabels,
-                selectedOption = fgModelLabels[viewModel.frameGenModel.coerceIn(0, 3)],
+                selectedOption = fgModelLabels[viewModel.frameGenModel.coerceIn(0, 4)],
                 onSelect = { viewModel.frameGenModel = fgModelLabels.indexOf(it) }
             )
             if (viewModel.frameGenModel != 0) {

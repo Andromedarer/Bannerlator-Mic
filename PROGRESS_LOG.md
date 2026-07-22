@@ -1,5 +1,26 @@
 # Star-Compose — Progress Log
 
+## 2026-07-22 — 🎞️ bionic-fg **model 4 "FSR3+"** — block-grid optical flow, sub-pixel, true bidirectional (branch `feat/model3.1-layer`, vc stays 48)
+
+> **Model 3's FSR3 optical flow reworked, added as a SEPARATE 5th model rather than replacing it.** Model 3 stays bit-identical so the two can be A/B'd live in the same scene — its own quality was only ever measured on a *parked* Dirt 3 scene (zero motion = a cost measurement, a worthless quality one), so replacing it in place would have destroyed the baseline before it was ever validated.
+>
+> **What model 3 got wrong:** flow searched **per pixel** with a 3×3 match window (441 texture fetches/pixel), integer-only matching, and `backward = -forward`. That is both expensive and weakest exactly where frame generation is most visible — occlusion boundaries and slow pans.
+>
+> **Four changes (fork `The412Banner/bionic-fg` `c4fc0ce`, branch `feat/model3.1-block-flow`, layer CI `29946023559`):**
+> - **Block grid** — one invocation solves one `kBlock`×`kBlock` block (`kBlock` = 4) as the FidelityFX SDK does, not one per pixel. Flow images are 1/4 of each level's extent; every consumer samples flow by normalised uv so the coarser grid **bilinear-upsamples for free**. Removes 16× the invocations, which pays for everything else. 🔑 Model 3 passes `kBlock = 1`, making `blockExtent == levelExtent` — that is how it stays unchanged through the now-shared builder. `kBlock` is 4 not the SDK's 8 because **FSR3 leans on game motion vectors for fine detail and a colour-only layer has none**.
+> - **Match window 3×3 → 5×5** — a 3×3 window is badly aperture-limited and locks onto the wrong candidate on low-contrast or edge-dominated blocks. The main accuracy fix.
+> - **Sub-pixel refinement** — parabola fit through the SAD either side of the integer winner, per axis, with a denominator guard so it only applies at a true minimum. Integer-only matching quantises slow pans to whole texels → judder.
+> - **True bidirectional flow** — forward in `.xy`, an independently searched backward field in `.zw`. `of3_expand_m4` gates on their disagreement relative to claimed magnitude: where the two fail to cancel, something was occluded or revealed, so flow is attenuated toward zero and the warp/blend degrades to a **cross-fade** instead of warping along a wrong vector. **A hard cut attenuates everywhere and cross-fades, so no separate scene-change pass is needed.**
+>
+> **Net search cost ~2.7× LOWER than model 3** despite searching both directions with a 25-tap window. Coarse-to-fine reach over 5 levels is ±SR·(1+2+4+8+16) = **±93 full-res px**, so keeping SR at ±3 costs no motion range.
+>
+> **🐛 Silent-clamp bug caught before it shipped:** `XServerDisplayActivity.writeBionicFgConfig` clamped `model` with `Math.min(3, model)` — selecting FSR3+ would have silently written `model = 3` to `conf.toml` and run **model 3 while the UI showed model 4**. Exactly the class of "test that looks like it ran and didn't" as the inert-`BIONIC_FG_MODEL` near-miss. **Five clamp sites** widened 3 → 4 in total: the conf writer, `Container.getFrameGenModel`, `XServerDisplayActivity.resolvedFrameGenModel`, `XServerDrawerState.setFrameGenModel`, `ContainerDetailScreen`'s dropdown.
+>
+> **App side:** 5th chip **"FSR3+"** in the in-game Controls drawer (`FgModelButtons`), new `frame_generation_model_fsr3_v2` string + entry in the container-detail dropdown. Registry grew 70 → 72 blobs (`shader_70` = `of3_flow_m4`, `shader_71` = `of3_expand_m4`); shaders 66-69 byte-identical. `tools/splice_spv.py` added to the fork so regenerating embedded SPIR-V is reproducible instead of a scratch script.
+>
+> **Verified:** all six model-3/4 shaders glslang-clean (Vulkan 1.1 / SPIR-V 1.3), all 72 blobs parse to an exact `OpFunctionEnd`, `framegen_context`/`session`/`vk_impl` pass `g++ -fsyntax-only` against real Vulkan headers, layer CI green (`.so` md5 `238d2f45`, 6,572,168 B, model-4 strings confirmed present in the binary). ⚠️ **NOT yet device-verified — no visual or perf result exists for model 4 yet.** The test that matters is the one model 3 never had: **fast lateral motion (tight corner, trackside fencing/posts) and occlusion edges**, model 3 vs model 4 back-to-back in the same scene.
+
+
 ## 2026-07-21 — 📖 Graphics wrapper & driver selection guide `docs/graphics-wrappers-guide.md` (`41d5c706`)
 
 > **No user-facing wrapper doc existed** (only the internal `WRAPPER_MANAGER_PLAN.md`). Written from live sources: the **live catalog** `raw.githubusercontent.com/The412Banner/winlator-contents/main/wrappers.json` (**18 entries**, per the sync-repo rule — not a local clone), `bundled_wrappers.json`, `WrapperCatalog.kt`, `XServerDisplayActivity` driver-extraction + env gating, and `GPUInformation.isCompatLayerSupportedGpu`.
