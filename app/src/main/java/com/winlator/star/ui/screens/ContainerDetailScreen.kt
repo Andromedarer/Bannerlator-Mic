@@ -852,6 +852,39 @@ private fun TopLevelFields(
             )
         }
 
+        // Ceiling on what the GAME may pick in its own graphics menu. Distinct from the two settings
+        // above: those drive the host Android panel, this bounds the mode list Wine advertises. Not
+        // gated on vrrCapable — a game choosing 120 Hz is meaningful even where the panel can't do VRR.
+        if (supportedRates.isNotEmpty()) {
+            Text(
+                stringResource(R.string.max_game_refresh_rate),
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(start = 52.dp, top = 2.dp)
+            )
+            Row(modifier = Modifier.padding(start = 52.dp, top = 2.dp)) {
+                FilterChip(
+                    selected = viewModel.maxGameRefreshRate == 0,
+                    onClick = { viewModel.maxGameRefreshRate = 0 },
+                    label = { Text(stringResource(R.string.max_game_refresh_rate_unlimited)) },
+                    modifier = Modifier.padding(end = 6.dp)
+                )
+                supportedRates.forEach { rate ->
+                    FilterChip(
+                        selected = viewModel.maxGameRefreshRate == rate,
+                        onClick = { viewModel.maxGameRefreshRate = rate },
+                        label = { Text("$rate") },
+                        modifier = Modifier.padding(end = 6.dp)
+                    )
+                }
+            }
+            Text(
+                text = stringResource(R.string.max_game_refresh_rate_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 52.dp, top = 2.dp, bottom = 4.dp)
+            )
+        }
+
         // ReShade multi-effect loadout (vkBasalt drop-in), per-container default. The per-game shortcut
         // editor has the same picker and overrides this. Only applies to DXVK/VKD3D (Vulkan) games.
         val reshadeWrapper = StringUtils.parseIdentifier(viewModel.selectedDXWrapper ?: "")

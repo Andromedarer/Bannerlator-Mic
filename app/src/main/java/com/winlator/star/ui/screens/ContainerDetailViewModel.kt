@@ -121,6 +121,9 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     var matchRefreshRate by mutableStateOf(true)
     // Manual refresh-rate lock (Hz) used when Auto (matchRefreshRate) is OFF. 0 = none/native.
     var manualRefreshRate by mutableStateOf(0)
+    // Ceiling (Hz) on the rates advertised to the GAME via RandR, which is what fills its own
+    // in-game refresh dropdown. 0 = no cap. Separate axis from the two above (host panel rate).
+    var maxGameRefreshRate by mutableStateOf(0)
 
     // ReShade multi-effect LOADOUT (Tier 1), per-container default. The per-game shortcut can override.
     // ReshadeLoadoutState holds the ordered effects, per-effect enabled + params, and the solo/stack
@@ -390,6 +393,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         fpsLimiterEnabled  = c?.isFpsLimiterEnabled == true
         matchRefreshRate   = c?.isMatchRefreshRate != false   // default ON for new/unset containers
         manualRefreshRate  = c?.manualRefreshRate ?: 0
+        maxGameRefreshRate = c?.maxGameRefreshRate ?: 0
 
         // ReShade: scan the drop-in folder, then load the loadout (migrating a legacy single effect).
         reshadeEffects = com.winlator.star.reshade.ReshadeManager.scanEffects(context)
@@ -694,6 +698,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             c.setFpsLimiterEnabled(fpsLimiterEnabled)
             c.setMatchRefreshRate(matchRefreshRate)
             c.setManualRefreshRate(manualRefreshRate)
+            c.setMaxGameRefreshRate(maxGameRefreshRate)
             c.setReshadeLoadout(reshadeLoadout.loadoutJsonOrNull())
             c.setReshadeMode(reshadeLoadout.mode)
             c.setReshadeParams(reshadeLoadout.paramsJsonOrNull())
@@ -799,6 +804,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
                     created.setFpsLimiterEnabled(fpsLimiterEnabled)
                     created.setMatchRefreshRate(matchRefreshRate)
                     created.setManualRefreshRate(manualRefreshRate)
+                    created.setMaxGameRefreshRate(maxGameRefreshRate)
                     created.setReshadeLoadout(reshadeLoadout.loadoutJsonOrNull())
                     created.setReshadeMode(reshadeLoadout.mode)
                     created.setReshadeParams(reshadeLoadout.paramsJsonOrNull())

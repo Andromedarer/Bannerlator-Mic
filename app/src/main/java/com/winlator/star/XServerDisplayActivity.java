@@ -498,11 +498,20 @@ public class XServerDisplayActivity extends AppCompatActivity {
         android.view.Display.Mode[] modes = display.getSupportedModes();
         if (modes == null || modes.length == 0) return;
 
+        // 0 = no cap. A cap below every supported rate would leave an empty list, so the lowest
+        // supported rate is always kept — a game with no modes at all is worse than one capped
+        // slightly higher than asked.
+        final int cap = resolvedMaxGameRefreshRate();
+
         java.util.TreeSet<Short> distinct = new java.util.TreeSet<>(java.util.Collections.reverseOrder());
+        short lowest = Short.MAX_VALUE;
         for (android.view.Display.Mode mode : modes) {
             short hz = (short)Math.round(mode.getRefreshRate());
-            if (hz > 0) distinct.add(hz);
+            if (hz <= 0) continue;
+            if (hz < lowest) lowest = hz;
+            if (cap <= 0 || hz <= cap) distinct.add(hz);
         }
+        if (distinct.isEmpty() && lowest != Short.MAX_VALUE) distinct.add(lowest);
         if (distinct.isEmpty()) return;
 
         short[] rates = new short[distinct.size()];
@@ -4671,6 +4680,21 @@ return true;
 
     // Per-game override for the manual refresh-rate lock (shortcut wins over the container default).
     // Mirrors resolvedMatchRefreshRate(). 0 = no manual lock. Null-safe for early calls.
+    // Per-game override for the guest-side refresh ceiling (shortcut wins over the container
+    // default). Mirrors resolvedManualRefreshRate(). 0 = no cap. Null-safe for early calls.
+    private int resolvedMaxGameRefreshRate() {
+        if (container == null) return 0;
+        if (shortcut != null) {
+            try {
+                return Integer.parseInt(shortcut.getExtra("maxGameRefreshRate",
+                    String.valueOf(container.getMaxGameRefreshRate())));
+            } catch (NumberFormatException e) {
+                return container.getMaxGameRefreshRate();
+            }
+        }
+        return container.getMaxGameRefreshRate();
+    }
+
     private int resolvedManualRefreshRate() {
         if (container == null) return 0;
         if (shortcut != null) {

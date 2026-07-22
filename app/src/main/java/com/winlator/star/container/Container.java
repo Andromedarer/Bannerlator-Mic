@@ -724,6 +724,20 @@ public class Container {
         putExtra("manualRefreshRate", String.valueOf(rate));
     }
 
+    // Ceiling (Hz) on the refresh rates our RandR extension advertises to Wine, which is what
+    // populates a game's own in-game refresh/display dropdown. 0 = no cap (offer every rate the
+    // panel supports). NOTE this is the GUEST-side list and is a different axis from
+    // matchRefreshRate/manualRefreshRate above, which drive the HOST Android surface: this one
+    // bounds what the game is allowed to ask for, those decide what the panel actually runs at.
+    public int getMaxGameRefreshRate() {
+        try { return Integer.parseInt(getExtra("maxGameRefreshRate", "0")); }
+        catch (NumberFormatException e) { return 0; }
+    }
+
+    public void setMaxGameRefreshRate(int rate) {
+        putExtra("maxGameRefreshRate", String.valueOf(rate));
+    }
+
     // --- ReShade effect (vkBasalt drop-in), per-container default; the per-game shortcut can
     // override both keys via its extras (resolvedReshade* in XServerDisplayActivity). "None" / empty
     // = no effect. reshadeParams is a JSON object of {uniformName: value} overriding the .fx defaults.

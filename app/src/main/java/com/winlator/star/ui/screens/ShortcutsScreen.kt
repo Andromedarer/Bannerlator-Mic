@@ -3846,6 +3846,14 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
         mutableStateOf(shortcut.getExtra("renderScale", shortcut.container.getExtra("renderScale", "1.0")))
     }
 
+    // Ceiling on the refresh rates advertised to THIS game via RandR (fills its own in-game display
+    // dropdown) — per-game override of the container default. "0" = unlimited. Distinct from the
+    // host panel rate settings; see Container.getMaxGameRefreshRate.
+    var maxGameRefreshRate by remember {
+        mutableStateOf(shortcut.getExtra("maxGameRefreshRate",
+            shortcut.container.maxGameRefreshRate.toString()))
+    }
+
     // Frame Generation engine (off / bionic / lsfg) — per-game override.
     val fgEngines = remember { listOf("off", "bionic", "lsfg") }
     var frameGenEngine by remember {
@@ -4154,6 +4162,7 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
             putExtra("swapRB", if (vkSwapRB) "true" else "false")
             putExtra("presentMode", vkPresentMode)
             putExtra("renderScale", if (renderScale == "1.0") null else renderScale)
+            putExtra("maxGameRefreshRate", maxGameRefreshRate)
             putExtra("frameGenEngine", frameGenEngine)
             putExtra("fpsLimiterEnabled", if (fpsLimiterEnabled) "1" else "0")
             putExtra("dxwrapper", StringUtils.parseIdentifier(selectedDxWrapper))
@@ -4407,6 +4416,29 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                             selectedOption = renderScaleLabels[rsIdx],
                             onSelect = { renderScale = renderScaleValues[renderScaleLabels.indexOf(it)] }
                         )
+                    }
+
+                    // Max in-game refresh rate — per-game override of the container default. Only
+                    // meaningful where the panel has more than one rate to offer.
+                    run {
+                        val panelRates = remember {
+                            com.winlator.star.widget.XServerView.getSupportedRefreshRates(
+                                if (android.os.Build.VERSION.SDK_INT >= 30) context.display
+                                else (context.getSystemService(android.content.Context.WINDOW_SERVICE)
+                                        as android.view.WindowManager).defaultDisplay)
+                        }
+                        if (panelRates.isNotEmpty()) {
+                            val rrValues = listOf("0") + panelRates.map { it.toString() }
+                            val rrLabels = listOf(stringResource(R.string.max_game_refresh_rate_unlimited)) +
+                                panelRates.map { "$it Hz" }
+                            val rrIdx = rrValues.indexOf(maxGameRefreshRate).coerceAtLeast(0)
+                            LabeledDropdown(
+                                label = stringResource(R.string.max_game_refresh_rate),
+                                options = rrLabels,
+                                selectedOption = rrLabels[rrIdx],
+                                onSelect = { maxGameRefreshRate = rrValues[rrLabels.indexOf(it)] }
+                            )
+                        }
                     }
 
                     // Frame Generation engine — per-game override (lsfg grayed without Lossless.dll).
