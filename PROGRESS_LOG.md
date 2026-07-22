@@ -4517,3 +4517,37 @@ Resume recipe: launch GL container xuser-3 -> AIO DX11 cube -> enable perf HUD -
 4. **model 3** — known deviations (subgroup-free GLSL, 3×3/±3 search, no sub-pixel): perf is the risk, not correctness.
 
 Select via `conf.toml` or `BIONIC_FG_MODEL`. Bundling (rather than hand-injecting) sidesteps the `ImageFsInstaller.installBionicFgLayer` clobber, which re-copies the bundled asset over any manual drop whenever sizes differ.
+
+
+## 🎞️ BIONIC-FG SHADER POOL + 4 MODELS — ✅ MERGED TO MAIN `763f46ed` (2026-07-22), DEVICE-PROVEN
+**versionCode STAYS 48.** Default behaviour unchanged (model 0). Branch `feat/bionic-fg-pool-on-main` merged --no-ff; final CI `29889458926` green on all 3 flavours.
+
+**Why this existed:** the shipped frame-gen layer had been `9136405c` (2026-06-21) the whole time — predating every model built since. Models 1/2/3 and the pooled shaders had never been in ANY release.
+
+**Layer now bundled = `971e6aaa`, 6,557,856 B**, built from fork `The412Banner/bionic-fg` @ `2eb68ef` (branch `feat/fsr3-on-main`), which replays the Track-3 work on top of current upstream `68497bf`. ⚠️ Do NOT `git rebase` the old branches to do this — they sit on the PRE-SQUASH compat commits so every one conflicts against main's squashed copy. Correct method = apply the 12-file delta onto main (verified `git diff --diff-filter=D origin/main 603d26e` is EMPTY first, i.e. nothing exists only in main). **The rebuilt .so came out byte-identical to the pre-rebase build — same md5 from two independent branches — proving the rebase is functionally inert.**
+
+**✅ ALL FOUR MODELS DEVICE-PROVEN** (Dirt 3, Adreno 750/Turnip, arm64ec+FEXCore+unixlib, 2× / flow 1.00). Clean `FramegenContext rebuilt` each way, zero `config rebuild failed`, zero errors. Live switching works end-to-end: chip → conf.toml → layer mtime watch → context rebuild.
+
+**📊 CONTROLLED SWEEP** (parked 000 MPH, identical scene `2:56.683`, all 4 within 31 s):
+| Model | FPS | GPU | CPU | PWR | CPU°C/GPU°C |
+|---|---|---|---|---|---|
+| 0 Default | 92.7 | 88% | 37% | 16.1W | 70/79 |
+| 1 Traced | 97.5 | 86% | 62% | 18.3W | 79/82 |
+| 2 V2 | 96.5 | 88% | 64% | 16.4W | 81/83 |
+| **3 FSR3** | **134.7** | **85%** | 74% | 18.8W | 84/88 |
+
+**FSR3 = +45% over Default while using the LEAST GPU** (FPS and GPU% move in opposite directions ⇒ not scene noise). UNDERSTATED: temps rose monotonically through the in-order sweep, so m3 was measured hottest/most-throttled. Mechanism = base render rate (at 2×, presented ≈ 2× the game's own rate ⇒ m0 ~46 real fps vs m3 ~67): the FG pass simply stops stealing GPU from the game. m1≈m2 within ~1 FPS = exactly what the 6-shader overlap predicts (`kV2ShaderMap` has 13 entries but model 1's graph only dispatches idx 3,4,30-53, so only 3/30/31/32/33/34 actually land).
+
+**⚠️ STILL UNANSWERED — model 3 QUALITY.** Parked = ~zero motion ⇒ that sweep is a clean COST measurement and a worthless QUALITY one. FSR3's cut search window (8×8/±8 → 3×3/±3, no sub-pixel, backward flow = −forward, LDR only) produces a WEAK flow field, which is both cheap AND clean-looking on a straight road with uniform forward motion — exactly what every m3 screenshot shows. **MUST stress fast LATERAL motion (tight corner, trackside fencing/posts) + occlusion edges before m3 is treated as good or considered as a default.**
+
+**🐞 TWO STAGING BUGS FIXED (both silent, both long-standing):**
+1. **Bundled layers never reached devices.** `MainActivity` calls `SplashViewModel.installIfNeeded`, which early-returns once imagefs is current — so `ImageFsInstaller.installIfNeeded`, whose else-branch stages bionic-fg/lsfg-vk/ffmpeg8, had **no callers at all**. Layers only ever landed on a full imagefs re-extract. ✅ DEVICE-VERIFIED FIX: restored the old .so, cold-started, watched it replace itself with correct owner/perms.
+2. **Staging decided by file SIZE alone** → a same-size rebuild would be skipped forever. Now stamped `versionCode:assetSize` (`.bionic-fg-stamp` / `.lsfg-vk-stamp`), with the size check KEPT alongside (stamp catches same-size updates, size catches on-disk drift). Also staged on the **direct game-launch path** (`XServerDisplayActivity` is exported; home-screen shortcuts bypass MainActivity), and both layers now land via temp-file + atomic rename.
+
+**🔑 PRECEDENCE CORRECTION (cost a near-miss test):** `readConf()` (layer.cpp:250) reads env vars as DEFAULTS FIRST, then `parseConfigFile` OVERWRITES them — *"A config file, when present, wins."* So **conf.toml beats `BIONIC_FG_MODEL`**, not the reverse. Since the app rewrites conf.toml every launch, the env var is INERT whenever the app drives. Setting it would silently keep the old model — a test that looks like it ran and didn't. Inert vars removed from the Dirt 3 and GTA IV shortcuts (backups in /sdcard/Download).
+
+**🎛️ UI DECISION (user):** keep the flow SLIDER continuous (0.2-1.0) + MODEL chips as a separate row. Rejected GameHub-style bundled presets and clintOnSky's flow chips — orthogonal controls let the user hunt the best flow×model COMBINATION, and flow has only ever been tested at 1.00. (GameHub can bundle because they ship 2 models; at our 4 that's 20 combos.)
+
+**⚠️ NEAR-MISS worth remembering:** scripted (python) edits silently converted two CRLF files to LF — `XServerDisplayActivity.java` and `ImageFsInstaller.java` — turning both into whole-file rewrites (583 changed lines for 64 real ones) and destroying blame. Caught by checking the diffstat before pushing; fixed in `91111fcc`. **Check `--stat` (and `-w`) before merging scripted edits.**
+
+**▶️ NEXT (tomorrow):** port clintOnSky's PR #96 present-path fix into the fork as real source (NOT the retired patch file) — `waitLastDispatch()` on the dispatch's own fence + bounded timeout, replacing the per-frame `vkQueueWaitIdle(device_.computeQueue())` still at `layer.cpp:1471`. Confirmed ABSENT from tonight's build, so every number above was measured with that stall in place. Prediction: all four models rise; if FSR3 rises least, part of its lead was just spending less time in the shared stall. Then the m3 lateral-motion quality test.
