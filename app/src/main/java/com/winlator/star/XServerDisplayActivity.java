@@ -129,6 +129,7 @@ import com.winlator.star.xenvironment.components.XServerComponent;
 import com.winlator.star.xserver.Pointer;
 import com.winlator.star.xserver.Property;
 import com.winlator.star.xserver.ScreenInfo;
+import com.winlator.star.xserver.extensions.RandrExtension;
 import com.winlator.star.xserver.Window;
 import com.winlator.star.xserver.WindowManager;
 import com.winlator.star.xserver.XServer;
@@ -480,6 +481,38 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
     }
     
+    /**
+     * Publish the panel's real refresh rates through RandR so Wine can offer them to games.
+     *
+     * <p>Wine builds its display-mode list from what our X server reports; with no RandR at all it
+     * used its "NoRes" fallback, which hardcodes a single 60 Hz mode — the reason every in-game
+     * refresh dropdown was stuck at 60 on a high-refresh panel. Rates are de-duplicated after
+     * rounding (panels commonly report 59.95/60.0 as separate modes, which would otherwise show up
+     * as two identical "60 Hz" entries) and sorted highest-first.
+     */
+    private void advertisePanelRefreshRates() {
+        RandrExtension randr = xServer.getExtension(RandrExtension.MAJOR_OPCODE);
+        if (randr == null) return;
+
+        android.view.Display display = getWindowManager().getDefaultDisplay();
+        android.view.Display.Mode[] modes = display.getSupportedModes();
+        if (modes == null || modes.length == 0) return;
+
+        java.util.TreeSet<Short> distinct = new java.util.TreeSet<>(java.util.Collections.reverseOrder());
+        for (android.view.Display.Mode mode : modes) {
+            short hz = (short)Math.round(mode.getRefreshRate());
+            if (hz > 0) distinct.add(hz);
+        }
+        if (distinct.isEmpty()) return;
+
+        short[] rates = new short[distinct.size()];
+        int i = 0;
+        for (short hz : distinct) rates[i++] = hz;
+        randr.setRefreshRates(rates);
+
+        Log.d("XServerDisplayActivity", "RandR advertising refresh rates " + java.util.Arrays.toString(rates));
+    }
+
     private float pickHighestRefreshRate() {
     	android.view.Display display = getWindowManager().getDefaultDisplay();
     	android.view.Display.Mode[] modes = display.getSupportedModes();
@@ -1151,6 +1184,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         inputControlsManager = new InputControlsManager(this);
         xServer = new XServer(new ScreenInfo(screenSize));
         xServer.setWinHandler(winHandler);
+        advertisePanelRefreshRates();
 
         // Add the OnWindowModificationListener for dynamic workarounds
         xServer.windowManager.addOnWindowModificationListener(new WindowManager.OnWindowModificationListener() {
