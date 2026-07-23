@@ -108,6 +108,8 @@ object GameIdentifier {
         s = s.replace(":", " - ")                              // colon → dash separator (safe + readable)
         s = s.replace(Regex("""[\\/]"""), " ")                 // path separators → space
         s = s.replace(Regex("""["*?<>|]"""), "")               // other illegal chars → drop
+        // Drop trailing generic descriptors a PE FileDescription tacks on ("DiRT 3 Executable" → "DiRT 3").
+        s = s.replace(Regex("""(?i)[ \-]+(executable|application|launcher|redistributable|installer|setup)$"""), "")
         s = s.replace(Regex("""\s+"""), " ").trim()            // collapse whitespace
         return s.trim(' ', '-').trim()                          // tidy stray leading/trailing dashes
     }

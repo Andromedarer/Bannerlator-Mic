@@ -117,12 +117,14 @@ object DependencyDetector {
                     if (SKIP_DIR_RE.matches(lower)) continue
                     val isRedistDir = insideRedist || REDIST_DIR_RE.matches(lower)
                     if (isRedistDir) consider(f, isDir = true)
-                    // Descend redist containers (and their whole subtree once inside), plus a shallow
-                    // top-level sweep so a redist container nested one level down is still found.
-                    if (isRedistDir || depth < 2) walk(f, depth + 1, isRedistDir)
-                } else if (insideRedist || depth <= 1) {
-                    // Installer files: classified only under a redist dir, or loose in the game root.
-                    consider(f, isDir = false)
+                    // Aggressive coverage: descend redist containers fully, and otherwise sweep the game
+                    // tree a few levels deep so runtime libraries the game ships (in bin/, etc.) are seen.
+                    if (isRedistDir || depth < 3) walk(f, depth + 1, isRedistDir)
+                } else {
+                    // Classify installers + runtime libraries (.dll/.exe/.msi) anywhere in the scanned
+                    // tree; other files are ignored. Recommendations are advisory, so cast a wide net.
+                    val ext = lower.substringAfterLast('.', "")
+                    if (insideRedist || ext == "dll" || ext == "exe" || ext == "msi") consider(f, isDir = false)
                 }
             }
         }
@@ -170,10 +172,17 @@ object DependencyDetector {
                 else -> listOf(VCREDIST_LOOSE)    // loose installer, no year → resolved post-walk
             }
         }
-        if (path.contains("openal") || name.startsWith("oalinst")) return listOf("oalinst")
-        if (path.contains("physx")) return listOf("physx")
-        if (path.contains("xact") || name.startsWith("xactengine")) return listOf("xact", "xact_x64")
-        if (path.contains("gfwlive") || path.contains("xliveredist") || name.startsWith("gfwlivesetup")) return listOf("XLiveRedist")
+        // VC++ runtime DLL the game ships (msvcp140.dll → 2015-2022, msvcp120.dll → 2013, …).
+        VCRUNTIME_DLL.entries.firstOrNull { name.startsWith(it.key) }?.let { return listOf(it.value) }
+        if (path.contains("openal") || name.startsWith("oalinst") || name == "openal32.dll" || name == "wrap_oal.dll") return listOf("oalinst")
+        if (path.contains("physx") || name.startsWith("physx")) return listOf("physx")
+        if (path.contains("xact") || name.startsWith("xactengine") || name.startsWith("x3daudio")) return listOf("xact", "xact_x64")
+        // Games for Windows Live — the redist folder, OR a GFWL library the game ships (xlive.dll,
+        // Codemasters' dbxLive32/64, gfwl*): GFWL titles need XLiveRedist to run even when they don't
+        // bundle the redist itself.
+        if (path.contains("xliveredist") || name.contains("xlive") || name.startsWith("gfwl") || name.startsWith("dbxlive")) {
+            return listOf("XLiveRedist")
+        }
         if (path.contains("xna")) return listOf(if (path.contains("3.1") || path.contains("3_1") || path.contains("v31")) "xna31" else "xna40")
         // .NET — Framework and Core/Desktop runtimes.
         if (path.contains("dotnet") || path.contains(".net") || name.startsWith("ndp") || name.startsWith("dotnetfx") || name.contains("windowsdesktop-runtime")) {
@@ -184,12 +193,29 @@ object DependencyDetector {
                 else -> listOf("dotnet48")    // unlabeled .NET Framework installer file → sensible default
             }
         }
-        // Legacy DirectX web / June-2010 redist ships d3dx9_xx (DXVK doesn't provide those helper DLLs).
-        if (name.startsWith("dxsetup") || name.startsWith("dxwebsetup") || (path.contains("directx") && name.endsWith(".exe"))) {
-            return listOf("d3dx9")
-        }
+        // DirectX 11 helper DLLs the game ships (d3dx11_43.dll).
+        if (D3DX11_RE.matches(name)) return listOf("d3dx11")
+        // DirectX 9 helper DLLs / d3dcompiler / June-2010 DX redist (DXVK provides core d3d9 but NOT
+        // these helper DLLs).
+        if (name.startsWith("dxsetup") || name.startsWith("dxwebsetup") ||
+            D3DX9_RE.matches(name) || D3DCOMPILER_RE.matches(name) ||
+            (path.contains("directx") && name.endsWith(".exe"))
+        ) return listOf("d3dx9")
         return emptyList()
     }
+
+    /** Runtime DLL prefix → the VC++ redistributable that provides it (checked with startsWith). */
+    private val VCRUNTIME_DLL = linkedMapOf(
+        "vcruntime140" to "vcredist2022", "msvcp140" to "vcredist2022", "msvcr140" to "vcredist2022", "concrt140" to "vcredist2022",
+        "msvcp120" to "vcredist2013", "msvcr120" to "vcredist2013",
+        "msvcp110" to "vcredist2012", "msvcr110" to "vcredist2012",
+        "msvcp100" to "vcredist2010", "msvcr100" to "vcredist2010",
+        "msvcp90" to "vcredist2008", "msvcr90" to "vcredist2008",
+        "msvcp80" to "vcredist2005", "msvcr80" to "vcredist2005",
+    )
+    private val D3DX9_RE = Regex("""d3dx9_\d+\.dll""")
+    private val D3DX11_RE = Regex("""d3dx11_\d+\.dll""")
+    private val D3DCOMPILER_RE = Regex("""d3dcompiler_\d+\.dll""")
 
     /** Resolve a .NET component from installer/path text, or null when no version is discernible. */
     private fun dotnetComponent(s: String): String? = when {

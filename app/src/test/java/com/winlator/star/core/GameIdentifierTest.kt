@@ -164,6 +164,10 @@ class GameIdentifierTest {
         val d3 = tmp.newFolder("ds3")
         File(d3, "goggame-3.info").writeText("""{"name":"DARK SOULS(TM): REMASTERED"}""")
         assertEquals("DARK SOULS - REMASTERED", GameIdentifier.identify(exeIn(d3)).name)
+        // Trailing PE descriptors dropped (DiRT 3's FileDescription is "DiRT 3 Executable").
+        val d4 = tmp.newFolder("dirt")
+        File(d4, "goggame-4.info").writeText("""{"name":"DiRT 3 Executable"}""")
+        assertEquals("DiRT 3", GameIdentifier.identify(exeIn(d4)).name)
     }
 
     @Test

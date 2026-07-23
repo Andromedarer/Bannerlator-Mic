@@ -94,6 +94,33 @@ class DependencyDetectorTest {
     }
 
     @Test
+    fun gfwlWrapperDll_recommendsXLiveRedist() {
+        val g = tmp.newFolder("DiRT 3 Complete Edition")
+        touch(g, "dbxLive32.dll")           // Codemasters GFWL wrapper
+        touch(g, "dirt3_game.exe")
+        touch(g, "_CommonRedist/vcredist/2010/vcredist_x64.exe")
+        touch(g, "_CommonRedist/OpenAL/oalinst.exe")
+        val n = names(g)
+        assertTrue(n.contains("XLiveRedist"))
+        assertTrue(n.contains("vcredist2010"))
+        assertTrue(n.contains("oalinst"))
+    }
+
+    @Test
+    fun shippedRuntimeDlls_detected_versionAware() {
+        val g = tmp.newFolder("SomeGame")
+        touch(g, "msvcp120.dll")   // VC++ 2013
+        touch(g, "d3dx9_43.dll")   // DX9 helper
+        touch(g, "OpenAL32.dll")   // OpenAL
+        touch(g, "PhysXLoader.dll") // PhysX
+        val n = names(g)
+        assertTrue(n.contains("vcredist2013"))
+        assertTrue(n.contains("d3dx9"))
+        assertTrue(n.contains("oalinst"))
+        assertTrue(n.contains("physx"))
+    }
+
+    @Test
     fun noRedist_returnsEmpty() {
         val g = tmp.newFolder("BareGame")
         touch(g, "game.exe")
