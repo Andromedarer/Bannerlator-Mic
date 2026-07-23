@@ -46,6 +46,7 @@ import com.winlator.star.xserver.XServer;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Collections;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -752,15 +753,16 @@ public class InputControlsView extends View {
         }
 
         Set<Binding> previousBindings = activeControllerBindings.get(controller);
+        if (previousBindings == null) previousBindings = Collections.emptySet();
         Map<Binding, Integer> previousCounts = new EnumMap<>(Binding.class);
         previousCounts.putAll(activeControllerBindingCounts);
-        if (previousBindings != null) {
-            for (Binding binding : previousBindings) {
-                if (!currentBindings.contains(binding)) adjustBindingCount(activeControllerBindingCounts, binding, -1);
+        for (Binding binding : previousBindings) {
+            if (!isMomentaryBinding(binding) && !currentBindings.contains(binding)) {
+                adjustBindingCount(activeControllerBindingCounts, binding, -1);
             }
         }
         for (Binding binding : currentBindings) {
-            if (previousBindings == null || !previousBindings.contains(binding)) {
+            if (!isMomentaryBinding(binding) && !previousBindings.contains(binding)) {
                 adjustBindingCount(activeControllerBindingCounts, binding, 1);
             }
         }
@@ -769,19 +771,30 @@ public class InputControlsView extends View {
         else activeControllerBindings.put(controller, currentBindings);
         dispatchControllerBindingTransitions(
                 controller,
-                calculateBindingTransitions(previousCounts, activeControllerBindingCounts),
+                calculateControllerBindingTransitions(
+                        previousBindings, currentBindings, previousCounts, activeControllerBindingCounts),
                 mappedInputs);
     }
 
     private void releaseTrackedControllerMappings() {
         Map<Binding, Integer> previousCounts = new EnumMap<>(Binding.class);
         previousCounts.putAll(activeControllerBindingCounts);
+        Set<Binding> emptyBindings = Collections.emptySet();
+        Map<Binding, Float> emptyInputs = new EnumMap<>(Binding.class);
+        for (Map.Entry<ExternalController, Set<Binding>> entry : activeControllerBindings.entrySet()) {
+            dispatchControllerBindingTransitions(
+                    entry.getKey(),
+                    calculateControllerBindingTransitions(
+                            entry.getValue(), emptyBindings, previousCounts, previousCounts),
+                    emptyInputs);
+        }
         activeControllerBindings.clear();
         activeControllerBindingCounts.clear();
         dispatchControllerBindingTransitions(
                 null,
-                calculateBindingTransitions(previousCounts, activeControllerBindingCounts),
-                new EnumMap<>(Binding.class));
+                calculateControllerBindingTransitions(
+                        emptyBindings, emptyBindings, previousCounts, activeControllerBindingCounts),
+                emptyInputs);
     }
 
     private void releaseControllerMappings(ExternalController controller) {
@@ -789,10 +802,13 @@ public class InputControlsView extends View {
         if (bindings != null) {
             Map<Binding, Integer> previousCounts = new EnumMap<>(Binding.class);
             previousCounts.putAll(activeControllerBindingCounts);
-            for (Binding binding : bindings) adjustBindingCount(activeControllerBindingCounts, binding, -1);
+            for (Binding binding : bindings) {
+                if (!isMomentaryBinding(binding)) adjustBindingCount(activeControllerBindingCounts, binding, -1);
+            }
             dispatchControllerBindingTransitions(
                     controller,
-                    calculateBindingTransitions(previousCounts, activeControllerBindingCounts),
+                    calculateControllerBindingTransitions(
+                            bindings, Collections.emptySet(), previousCounts, activeControllerBindingCounts),
                     new EnumMap<>(Binding.class));
         }
         activeControllerKeys.remove(controller);
@@ -819,12 +835,29 @@ public class InputControlsView extends View {
         else counts.remove(binding);
     }
 
-    public static Map<Binding, Boolean> calculateBindingTransitions(
-            Map<Binding, Integer> previousCounts, Map<Binding, Integer> currentCounts) {
+    public static boolean isMomentaryBinding(Binding binding) {
+        if (binding == null) return false;
+        Pointer.Button pointerButton = binding.getPointerButton();
+        return binding == Binding.SHOW_ANDROID_KEYBOARD
+                || binding.isMouseMove()
+                || pointerButton == Pointer.Button.BUTTON_SCROLL_UP
+                || pointerButton == Pointer.Button.BUTTON_SCROLL_DOWN;
+    }
+
+    public static Map<Binding, Boolean> calculateControllerBindingTransitions(
+            Set<Binding> previousControllerBindings,
+            Set<Binding> currentControllerBindings,
+            Map<Binding, Integer> previousGlobalCounts,
+            Map<Binding, Integer> currentGlobalCounts) {
         Map<Binding, Boolean> transitions = new EnumMap<>(Binding.class);
         for (Binding binding : Binding.values()) {
-            boolean wasActive = previousCounts.getOrDefault(binding, 0) > 0;
-            boolean isActive = currentCounts.getOrDefault(binding, 0) > 0;
+            boolean momentary = isMomentaryBinding(binding);
+            boolean wasActive = momentary
+                    ? previousControllerBindings.contains(binding)
+                    : previousGlobalCounts.getOrDefault(binding, 0) > 0;
+            boolean isActive = momentary
+                    ? currentControllerBindings.contains(binding)
+                    : currentGlobalCounts.getOrDefault(binding, 0) > 0;
             if (wasActive != isActive) transitions.put(binding, isActive);
         }
         return transitions;
@@ -1423,12 +1456,7 @@ public class InputControlsView extends View {
 
     public void handleCountedInputEvent(Binding binding, boolean isActionDown, float offset, boolean sendUpdate) {
         if (binding == null || binding == Binding.NONE) return;
-        Pointer.Button pointerButton = binding.getPointerButton();
-        boolean momentary = binding == Binding.SHOW_ANDROID_KEYBOARD
-                || binding.isMouseMove()
-                || pointerButton == Pointer.Button.BUTTON_SCROLL_UP
-                || pointerButton == Pointer.Button.BUTTON_SCROLL_DOWN;
-        if (momentary) {
+        if (isMomentaryBinding(binding)) {
             handleInputEvent(null, binding, isActionDown, offset, sendUpdate);
             return;
         }

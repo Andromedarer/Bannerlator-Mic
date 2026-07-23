@@ -528,20 +528,35 @@ class InputControlsFormatTest {
     fun controllerBindingTransitions_emitInitialPress() {
         assertEquals(
             mapOf(Binding.MOUSE_SCROLL_UP to true),
-            InputControlsView.calculateBindingTransitions(
+            InputControlsView.calculateControllerBindingTransitions(
+                emptySet(),
+                setOf(Binding.MOUSE_SCROLL_UP),
                 emptyMap(),
-                mapOf(Binding.MOUSE_SCROLL_UP to 1),
+                emptyMap(),
             ),
         )
     }
 
     @Test
-    fun controllerBindingTransitions_skipUnchangedState() {
+    fun momentaryControllerBindingTransitions_areIndependentPerController() {
+        val activeBindings = setOf(Binding.SHOW_ANDROID_KEYBOARD)
+
         assertTrue(
-            InputControlsView.calculateBindingTransitions(
-                mapOf(Binding.SHOW_ANDROID_KEYBOARD to 1),
-                mapOf(Binding.SHOW_ANDROID_KEYBOARD to 1),
+            InputControlsView.calculateControllerBindingTransitions(
+                activeBindings,
+                activeBindings,
+                emptyMap(),
+                emptyMap(),
             ).isEmpty(),
+        )
+        assertEquals(
+            mapOf(Binding.SHOW_ANDROID_KEYBOARD to true),
+            InputControlsView.calculateControllerBindingTransitions(
+                emptySet(),
+                activeBindings,
+                emptyMap(),
+                emptyMap(),
+            ),
         )
     }
 
@@ -549,7 +564,9 @@ class InputControlsFormatTest {
     fun controllerBindingTransitions_emitFinalRelease() {
         assertEquals(
             mapOf(Binding.KEY_A to false),
-            InputControlsView.calculateBindingTransitions(
+            InputControlsView.calculateControllerBindingTransitions(
+                setOf(Binding.KEY_A),
+                emptySet(),
                 mapOf(Binding.KEY_A to 1),
                 emptyMap(),
             ),
@@ -560,24 +577,40 @@ class InputControlsFormatTest {
     fun controllerBindingTransitions_keepSharedOutputActiveUntilLastSourceReleases() {
         assertEquals(
             mapOf(Binding.MOUSE_LEFT_BUTTON to true),
-            InputControlsView.calculateBindingTransitions(
+            InputControlsView.calculateControllerBindingTransitions(
+                emptySet(),
+                setOf(Binding.MOUSE_LEFT_BUTTON),
                 emptyMap(),
                 mapOf(Binding.MOUSE_LEFT_BUTTON to 2),
             ),
         )
         assertTrue(
-            InputControlsView.calculateBindingTransitions(
+            InputControlsView.calculateControllerBindingTransitions(
+                setOf(Binding.MOUSE_LEFT_BUTTON),
+                emptySet(),
                 mapOf(Binding.MOUSE_LEFT_BUTTON to 2),
                 mapOf(Binding.MOUSE_LEFT_BUTTON to 1),
             ).isEmpty(),
         )
         assertEquals(
             mapOf(Binding.MOUSE_LEFT_BUTTON to false),
-            InputControlsView.calculateBindingTransitions(
+            InputControlsView.calculateControllerBindingTransitions(
+                setOf(Binding.MOUSE_LEFT_BUTTON),
+                emptySet(),
                 mapOf(Binding.MOUSE_LEFT_BUTTON to 1),
                 emptyMap(),
             ),
         )
+    }
+
+    @Test
+    fun momentaryBindingClassification_matchesCountedInputDispatch() {
+        assertTrue(InputControlsView.isMomentaryBinding(Binding.MOUSE_SCROLL_UP))
+        assertTrue(InputControlsView.isMomentaryBinding(Binding.MOUSE_SCROLL_DOWN))
+        assertTrue(InputControlsView.isMomentaryBinding(Binding.SHOW_ANDROID_KEYBOARD))
+        assertTrue(InputControlsView.isMomentaryBinding(Binding.MOUSE_MOVE_LEFT))
+        assertFalse(InputControlsView.isMomentaryBinding(Binding.MOUSE_LEFT_BUTTON))
+        assertFalse(InputControlsView.isMomentaryBinding(Binding.KEY_A))
     }
 
     @Test
