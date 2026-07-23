@@ -47,6 +47,7 @@ class InputControlsFormatTest {
             .put("customAreaColor", 0xFF112233.toInt())
             .put("customAreaOpacity", 0.5)
             .put("gridSpacing", 0.5)
+            .put("gridMultitouchEnabled", true)
             .put("blockTouchscreenMouseButtons", JSONArray().put(false))
             .put("forkField", "keep")
 
@@ -63,6 +64,7 @@ class InputControlsFormatTest {
         assertFalse(copy.has("customAreaColor"))
         assertFalse(copy.has("customAreaOpacity"))
         assertFalse(copy.has("gridSpacing"))
+        assertFalse(copy.has("gridMultitouchEnabled"))
         assertFalse(copy.has("blockTouchscreenMouseButtons"))
         assertEquals("keep", copy.getString("forkField"))
     }
@@ -400,6 +402,57 @@ class InputControlsFormatTest {
         assertEquals(1f, element.gridSpacing)
         element.gridSpacing = Float.NaN
         assertEquals(0f, element.gridSpacing)
+    }
+
+    @Test
+    fun gridMultitouch_defaultsOffAndCanBeEnabled() {
+        val element = ControlElement(null)
+        element.setType(ControlElement.Type.BUTTON_GRID)
+
+        assertFalse(element.isGridMultitouchEnabled)
+        element.isGridMultitouchEnabled = true
+        assertTrue(element.isGridMultitouchEnabled)
+    }
+
+    @Test
+    fun buttonGridTouchState_countsSharedCellOwnershipUntilLastPointerLeaves() {
+        val state = ButtonGridTouchState(4)
+
+        assertTrue(state.trackPointer(1, 2))
+        assertTrue(state.trackPointer(2, 2))
+        assertEquals(2, state.getCellOwnerCount(2))
+
+        assertTrue(state.movePointer(1, 3))
+        assertEquals(1, state.getCellOwnerCount(2))
+        assertEquals(1, state.getCellOwnerCount(3))
+
+        assertTrue(state.untrackPointer(2))
+        assertEquals(0, state.getCellOwnerCount(2))
+        assertEquals(1, state.getCellOwnerCount(3))
+
+        state.clear()
+        assertEquals(0, state.getCellOwnerCount(3))
+        assertFalse(state.hasTrackedPointers())
+    }
+
+    @Test
+    fun importedProfileValidation_requiresBooleanGridMultitouchFlag() {
+        val element = JSONObject()
+            .put("type", "BUTTON_GRID")
+            .put("shape", "RECT")
+            .put("toggleSwitch", false)
+            .put("x", 0.5)
+            .put("y", 0.5)
+            .put("scale", 1.0)
+            .put("text", "")
+            .put("iconId", 0)
+            .put("bindings", JSONArray().put("KEY_A"))
+            .put("gridMultitouchEnabled", true)
+        val profile = JSONObject().put("name", "Test").put("elements", JSONArray().put(element))
+
+        assertTrue(InputControlsManager.isValidImportedProfile(profile))
+        element.put("gridMultitouchEnabled", "true")
+        assertFalse(InputControlsManager.isValidImportedProfile(profile))
     }
 
     @Test

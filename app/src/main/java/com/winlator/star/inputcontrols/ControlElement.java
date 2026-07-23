@@ -124,6 +124,8 @@ public class ControlElement {
     private int gridCols;             // columns in button grid (for BUTTON_GRID)
     private Shape gridCellShape;      // shape for each grid cell (default ROUND_RECT)
     private float gridSpacing;        // spacing between grid cells in snapping-size units
+    private boolean gridMultitouchEnabled;
+    private final ButtonGridTouchState buttonGridTouchState = new ButtonGridTouchState(MAX_BINDING_COUNT);
     private PointF mouseAreaLastPos;  // last touch position in MOUSE_AREA
     private Binding[][] comboBindings; // multi-key combos per binding slot (null = single key)
     private String[][] rawComboBindingNames;
@@ -181,6 +183,8 @@ public class ControlElement {
         gridCols = 0;
         gridCellShape = Shape.ROUND_RECT;
         gridSpacing = 0;
+        gridMultitouchEnabled = false;
+        buttonGridTouchState.clear();
         mouseAreaLastPos = null;
         holdKey = Binding.NONE;
         holdKeyActive = false;
@@ -426,6 +430,8 @@ public class ControlElement {
     public void setGridCellShape(Shape s) { this.gridCellShape = s != null ? s : Shape.ROUND_RECT; boundingBoxNeedsUpdate = true; }
     public float getGridSpacing() { return gridSpacing; }
     public void setGridSpacing(float spacing) { gridSpacing = clampFinite(spacing, 0f, 1f, 0f); boundingBoxNeedsUpdate = true; }
+    public boolean isGridMultitouchEnabled() { return gridMultitouchEnabled; }
+    public void setGridMultitouchEnabled(boolean enabled) { gridMultitouchEnabled = enabled; }
     public Binding[] getCombo(int index) { return (comboBindings != null && index >= 0 && index < comboBindings.length) ? comboBindings[index] : null; }
     public boolean blocksTouchscreenMouseButtonsAt(int index) {
         return !isValidBindingIndex(index) || blockTouchscreenMouseButtons[index];
@@ -1267,7 +1273,8 @@ public class ControlElement {
     }
 
     private boolean isEngaged() {
-        return expanded || currentPointerId != -1 || (toggleSwitch && selected);
+        return expanded || currentPointerId != -1 || buttonGridTouchState.hasTrackedPointers()
+                || (toggleSwitch && selected);
     }
 
     private int resolveAccentColor() {
@@ -2194,6 +2201,7 @@ public class ControlElement {
             if (type == Type.BUTTON_GRID) {
                 elementJSONObject.put("gridRows", getEffectiveGridRows());
                 elementJSONObject.put("gridCols", getEffectiveGridCols());
+                elementJSONObject.put("gridMultitouchEnabled", gridMultitouchEnabled);
                 if (gridCellShape != null && gridCellShape != Shape.ROUND_RECT) {
                     elementJSONObject.put("gridCellShape", gridCellShape.name());
                 }
@@ -2257,7 +2265,8 @@ public class ControlElement {
         String[] optionalKeys = {
                 "range", "orientation", "groupId", "areaWidthRatio", "areaHeightRatio",
                 "stickRadiusRatio", "areaWidth", "areaHeight", "stickRadius",
-                "mouseSensitivity", "gridRows", "gridCols", "gridCellShape", "gridSpacing", "combos", "holdKey",
+                "mouseSensitivity", "gridRows", "gridCols", "gridCellShape", "gridSpacing",
+                "gridMultitouchEnabled", "combos", "holdKey",
                 "blockTouchscreenMouseButtons",
                 "expandableChildCount", "expandableLayout", "expandableDirection",
                 "customAreaAppearanceEnabled", "customAreaColor", "customAreaOpacity"
@@ -2322,6 +2331,9 @@ public class ControlElement {
     }
 
     public boolean handleTouchDown(int pointerId, float x, float y) {
+        if (type == Type.BUTTON_GRID && gridMultitouchEnabled) {
+            return handleGridMultitouchDown(pointerId, x, y);
+        }
         if (currentPointerId == -1 && containsPoint(x, y)) {
             currentPointerId = pointerId;
             if (type == Type.BUTTON) {
@@ -2405,6 +2417,54 @@ public class ControlElement {
         return row * cols + col;
     }
 
+    private boolean handleGridMultitouchDown(int pointerId, float x, float y) {
+        if (!containsPoint(x, y)) return false;
+        int cell = getGridCellIndex(x, y);
+        if (!isValidBindingIndex(cell)) cell = ButtonGridTouchState.NO_CELL;
+        if (!buttonGridTouchState.trackPointer(pointerId, cell)) return false;
+        if (cell != ButtonGridTouchState.NO_CELL && buttonGridTouchState.getCellOwnerCount(cell) == 1) {
+            states[cell] = true;
+            setCellPressTime(cell, System.currentTimeMillis());
+            pressBindingSlot(cell);
+            inputControlsView.invalidate();
+        }
+        return true;
+    }
+
+    private boolean handleGridMultitouchMove(int pointerId, float x, float y) {
+        if (!buttonGridTouchState.isPointerTracked(pointerId)) return false;
+        int oldCell = buttonGridTouchState.getPointerCell(pointerId);
+        int newCell = getGridCellIndex(x, y);
+        if (!isValidBindingIndex(newCell)) newCell = ButtonGridTouchState.NO_CELL;
+        if (newCell != oldCell && buttonGridTouchState.movePointer(pointerId, newCell)) {
+            if (oldCell != ButtonGridTouchState.NO_CELL
+                    && buttonGridTouchState.getCellOwnerCount(oldCell) == 0) {
+                states[oldCell] = false;
+                releaseBindingSlot(oldCell);
+            }
+            if (newCell != ButtonGridTouchState.NO_CELL
+                    && buttonGridTouchState.getCellOwnerCount(newCell) == 1) {
+                states[newCell] = true;
+                setCellPressTime(newCell, System.currentTimeMillis());
+                pressBindingSlot(newCell);
+            }
+        }
+        inputControlsView.invalidate();
+        return true;
+    }
+
+    private boolean handleGridMultitouchUp(int pointerId) {
+        if (!buttonGridTouchState.isPointerTracked(pointerId)) return false;
+        int cell = buttonGridTouchState.getPointerCell(pointerId);
+        buttonGridTouchState.untrackPointer(pointerId);
+        if (cell != ButtonGridTouchState.NO_CELL && buttonGridTouchState.getCellOwnerCount(cell) == 0) {
+            states[cell] = false;
+            releaseBindingSlot(cell);
+        }
+        inputControlsView.invalidate();
+        return true;
+    }
+
     /** Press all keys in a slot's combo (or single binding). */
     private void pressBindingSlot(int index) {
         handleBindingSlot(index, true, 0);
@@ -2480,6 +2540,7 @@ public class ControlElement {
         if (states != null) {
             Arrays.fill(states, false);
         }
+        buttonGridTouchState.clear();
         if (type == Type.BUTTON && selected) {
             releaseBindingSlot(0);
             releaseBindingSlot(1);
@@ -2507,6 +2568,9 @@ public class ControlElement {
     }
 
     public boolean handleTouchMove(int pointerId, float x, float y) {
+        if (type == Type.BUTTON_GRID && gridMultitouchEnabled) {
+            return handleGridMultitouchMove(pointerId, x, y);
+        }
         if (pointerId == currentPointerId && (type == Type.D_PAD || type == Type.STICK || type == Type.TRACKPAD || type == Type.DYNAMIC_STICK || type == Type.MOUSE_AREA || type == Type.BUTTON_GRID)) {
             float deltaX, deltaY;
             Rect boundingBox = getBoundingBox();
@@ -2754,6 +2818,9 @@ public class ControlElement {
     }
 
     public boolean handleTouchUp(int pointerId) {
+        if (type == Type.BUTTON_GRID && gridMultitouchEnabled) {
+            return handleGridMultitouchUp(pointerId);
+        }
         if (pointerId == currentPointerId) {
             if (type == Type.BUTTON) {
                 states[0] = false;

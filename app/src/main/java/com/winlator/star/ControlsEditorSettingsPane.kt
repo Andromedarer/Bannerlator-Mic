@@ -177,6 +177,7 @@ fun ControlsEditorSettingsPane(
     var gridCols by remember { mutableStateOf(element.getGridCols().coerceAtLeast(1)) }
     var gridCellShapeIndex by remember { mutableStateOf(element.getGridCellShape().ordinal) }
     var gridSpacingPct by remember { mutableStateOf((element.getGridSpacing() * 100f).roundToInt()) }
+    var gridMultitouchEnabled by remember { mutableStateOf(element.isGridMultitouchEnabled()) }
     var holdKeyIndex by remember { mutableStateOf(holdKeyOptions.indexOf(element.getHoldKey().toString()).coerceAtLeast(0)) }
     var toggleSwitch by remember { mutableStateOf(element.isToggleSwitch()) }
     var customText by remember { mutableStateOf(element.getText()) }
@@ -281,6 +282,7 @@ fun ControlsEditorSettingsPane(
         gridCols = element.getGridCols().coerceAtLeast(1)
         gridCellShapeIndex = element.getGridCellShape().ordinal
         gridSpacingPct = (element.getGridSpacing() * 100f).roundToInt()
+        gridMultitouchEnabled = element.isGridMultitouchEnabled()
         holdKeyIndex = holdKeyOptions.indexOf(element.getHoldKey().toString()).coerceAtLeast(0)
         toggleSwitch = element.isToggleSwitch()
         customText = element.getText()
@@ -626,6 +628,16 @@ fun ControlsEditorSettingsPane(
         }
 
         SettingsSection(title = stringResource(R.string.button_grid), visible = selectedType == ControlElement.Type.BUTTON_GRID) {
+            SettingSwitch(
+                label = stringResource(R.string.grid_multitouch),
+                checked = gridMultitouchEnabled,
+                visible = true,
+                onCheckedChange = { enabled ->
+                    gridMultitouchEnabled = enabled
+                    element.setGridMultitouchEnabled(enabled)
+                    saveAndInvalidate()
+                },
+            )
             NumberPickerRow(
                 label = stringResource(R.string.grid_rows),
                 value = gridRows,

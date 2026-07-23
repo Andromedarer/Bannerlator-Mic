@@ -517,6 +517,8 @@ public class InputControlsManager {
                 if (!(blockTouchscreenMouseButtons.opt(i) instanceof Boolean)) return false;
             }
         }
+        if (element.has("gridMultitouchEnabled")
+                && !(element.opt("gridMultitouchEnabled") instanceof Boolean)) return false;
         String[] optionalNumbers = {"deadZone", "mouseSensitivity", "customAreaOpacity", "gridSpacing",
                 "areaWidthRatio", "areaHeightRatio", "stickRadiusRatio"};
         for (String key : optionalNumbers) {

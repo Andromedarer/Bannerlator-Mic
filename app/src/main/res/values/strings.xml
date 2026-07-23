@@ -122,6 +122,7 @@
     <string name="button_grid">Button Grid</string>
     <string name="cell_shape">Cell Shape</string>
     <string name="grid_spacing">Button spacing</string>
+    <string name="grid_multitouch">Multitouch</string>
     <string name="custom_icons">Custom Icons</string>
     <string name="icon_content_description">Icon %1$d</string>
     <string name="clear">Clear</string>

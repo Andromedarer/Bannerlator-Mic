@@ -512,6 +512,9 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
                     if (elementJSONObject.has("gridRows")) element.setGridRows(elementJSONObject.getInt("gridRows"));
                     if (elementJSONObject.has("gridCols")) element.setGridCols(elementJSONObject.getInt("gridCols"));
                     if (elementJSONObject.has("gridSpacing")) element.setGridSpacing((float)elementJSONObject.getDouble("gridSpacing"));
+                    if (elementJSONObject.has("gridMultitouchEnabled")) {
+                        element.setGridMultitouchEnabled(elementJSONObject.getBoolean("gridMultitouchEnabled"));
+                    }
                     if (element.getType() == ControlElement.Type.EXPANDABLE_BUTTON) {
                         element.setExpandableChildCount(elementJSONObject.optInt("expandableChildCount", 4));
                         if (elementJSONObject.has("expandableLayout")) {
