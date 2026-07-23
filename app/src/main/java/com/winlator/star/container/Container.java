@@ -361,6 +361,13 @@ public class Container {
         }
     }
 
+    // Whether an extra was explicitly written (vs. absent and only serving a default). Used to tell an
+    // untouched default apart from a deliberate user choice — e.g. so the refresh-unlock "needs a
+    // compatible layer" Toast only nags users who actually opted in, not every default container.
+    public boolean hasExtra(String name) {
+        return extraData != null && extraData.has(name);
+    }
+
     public void putExtra(String name, Object value) {
         if (extraData == null) extraData = new JSONObject();
         try {

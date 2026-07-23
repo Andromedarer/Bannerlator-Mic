@@ -4946,14 +4946,28 @@ return true;
                 registryEditor.removeValue(x11DriverKey, "EmulateModeset");
             }
         }
-        Log.d("XServerDisplayActivity", "In-game refresh unlock: toggle=" + (unlock ? "on" : "off")
-                + " layerXrandrCapable=" + capable + " -> keys " + (writeKeys ? "WRITTEN" : "removed"));
+        boolean explicit = isRefreshUnlockExplicit();
+        Log.d("XServerDisplayActivity", "In-game refresh unlock: setting=" + (unlock ? "unlock" : "locked")
+                + (explicit ? " (explicit)" : " (default)") + " layerXrandrCapable=" + capable
+                + " -> keys " + (writeKeys ? "WRITTEN" : "removed"));
 
-        // Toggle asked for the unlock but the selected layer can't deliver it — tell the user why.
-        if (unlock && !capable) {
+        // The user EXPLICITLY chose a non-Locked rate but the selected layer can't deliver it — tell
+        // them why. Suppressed for the untouched default (extra absent) so we never nag users who never
+        // opted in; the capability guard above already prevents the functional regression regardless.
+        if (unlock && !capable && explicit) {
             runOnUiThread(() -> Toast.makeText(this,
                     R.string.refresh_unlock_needs_compatible_layer, Toast.LENGTH_LONG).show());
         }
+    }
+
+    // Whether the guest-side refresh setting was explicitly chosen by the user (extra present) vs. left
+    // at the untouched default (extra absent). A per-game override that inherits (no shortcut extra)
+    // defers to the container's explicitness. Keyed on the unlockGameRefreshRate extra, which the merged
+    // "In-game refresh rate" dropdown always writes alongside the cap when a concrete option is picked.
+    private boolean isRefreshUnlockExplicit() {
+        if (container == null) return false;
+        if (shortcut != null && shortcut.hasExtra("unlockGameRefreshRate")) return true;
+        return container.hasExtra("unlockGameRefreshRate");
     }
 
     // True when the SELECTED wine/Proton layer's unix winex11 driver was compiled with xrandr. The scan

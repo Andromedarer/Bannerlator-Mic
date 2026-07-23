@@ -71,6 +71,18 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     // toggle when the selected Proton can't. Cached per layer id in WineRandrSupport (cheap to recall).
     fun isWineXrandrCapable(wineVersion: String): Boolean =
         com.winlator.star.core.WineRandrSupport.isXrandrCapable(context, contentsManager, wineVersion)
+
+    // Persist the guest-side refresh setting, but ONLY when it's a deliberate non-default (or the
+    // container already had it set). Leaving the pure default (unlock + no cap = Unlimited) unwritten
+    // keeps an untouched container "default", so the launch-time compatible-layer Toast never nags a
+    // user who never opted in. Both extras are written together so the dropdown round-trips.
+    private fun applyRefreshSettings(c: com.winlator.star.container.Container) {
+        val isDefault = unlockGameRefreshRate && maxGameRefreshRate == 0
+        if (refreshWasExplicit || !isDefault) {
+            c.setUnlockGameRefreshRate(unlockGameRefreshRate)
+            c.setMaxGameRefreshRate(maxGameRefreshRate)
+        }
+    }
     var wineVersionEnabled by mutableStateOf(true); private set
     var isArm64EC by mutableStateOf(false); private set
 
@@ -130,9 +142,12 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     // Ceiling (Hz) on the rates advertised to the GAME via RandR, which is what fills its own
     // in-game refresh dropdown. 0 = no cap. Separate axis from the two above (host panel rate).
     var maxGameRefreshRate by mutableStateOf(0)
-    // Turn off Wine's display-mode emulation so games see the RandR rates (unlocks their in-game
-    // refresh dropdown past 60). Default ON; off reverts to Wine's emulated {60, current}.
+    // Guest-side refresh: unlockGameRefreshRate (off = Locked 60) + maxGameRefreshRate (cap; 0 =
+    // Unlimited) together back the single "In-game refresh rate" dropdown. Default = unlock + no cap
+    // (Unlimited). refreshWasExplicit tracks whether the loaded container had actually set the extra, so
+    // an untouched default is NOT persisted (keeps it "default" → no compatible-layer nag at launch).
     var unlockGameRefreshRate by mutableStateOf(true)
+    private var refreshWasExplicit = false
 
     // ReShade multi-effect LOADOUT (Tier 1), per-container default. The per-game shortcut can override.
     // ReshadeLoadoutState holds the ordered effects, per-effect enabled + params, and the solo/stack
@@ -404,6 +419,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         manualRefreshRate  = c?.manualRefreshRate ?: 0
         maxGameRefreshRate = c?.maxGameRefreshRate ?: 0
         unlockGameRefreshRate = c?.isUnlockGameRefreshRate != false  // default ON for new/unset containers
+        refreshWasExplicit = c?.hasExtra("unlockGameRefreshRate") == true
 
         // ReShade: scan the drop-in folder, then load the loadout (migrating a legacy single effect).
         reshadeEffects = com.winlator.star.reshade.ReshadeManager.scanEffects(context)
@@ -708,8 +724,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             c.setFpsLimiterEnabled(fpsLimiterEnabled)
             c.setMatchRefreshRate(matchRefreshRate)
             c.setManualRefreshRate(manualRefreshRate)
-            c.setMaxGameRefreshRate(maxGameRefreshRate)
-            c.setUnlockGameRefreshRate(unlockGameRefreshRate)
+            applyRefreshSettings(c)
             c.setReshadeLoadout(reshadeLoadout.loadoutJsonOrNull())
             c.setReshadeMode(reshadeLoadout.mode)
             c.setReshadeParams(reshadeLoadout.paramsJsonOrNull())
@@ -815,8 +830,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
                     created.setFpsLimiterEnabled(fpsLimiterEnabled)
                     created.setMatchRefreshRate(matchRefreshRate)
                     created.setManualRefreshRate(manualRefreshRate)
-                    created.setMaxGameRefreshRate(maxGameRefreshRate)
-                    created.setUnlockGameRefreshRate(unlockGameRefreshRate)
+                    applyRefreshSettings(created)
                     created.setReshadeLoadout(reshadeLoadout.loadoutJsonOrNull())
                     created.setReshadeMode(reshadeLoadout.mode)
                     created.setReshadeParams(reshadeLoadout.paramsJsonOrNull())

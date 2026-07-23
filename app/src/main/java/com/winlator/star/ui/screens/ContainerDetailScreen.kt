@@ -852,57 +852,42 @@ private fun TopLevelFields(
             )
         }
 
-        // Ceiling on what the GAME may pick in its own graphics menu. Distinct from the two settings
-        // above: those drive the host Android panel, this bounds the mode list Wine advertises. Not
+        // Single guest-side refresh control. Collapses the unlock toggle + rate cap into one dropdown:
+        //   Locked (60)  -> emulation stays on, game sits at 60 (unlockGameRefreshRate = false)
+        //   <rate> Hz    -> unlock on, capped at that rate (unlock = true, maxGameRefreshRate = rate)
+        //   Unlimited    -> unlock on, no cap (unlock = true, maxGameRefreshRate = 0)
+        // Default Unlimited. Drives the two underlying extras so the launch resolver is unchanged. Not
         // gated on vrrCapable — a game choosing 120 Hz is meaningful even where the panel can't do VRR.
         if (supportedRates.isNotEmpty()) {
-            Text(
-                stringResource(R.string.max_game_refresh_rate),
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(start = 52.dp, top = 2.dp)
-            )
-            Row(modifier = Modifier.padding(start = 52.dp, top = 2.dp)) {
-                FilterChip(
-                    selected = viewModel.maxGameRefreshRate == 0,
-                    onClick = { viewModel.maxGameRefreshRate = 0 },
-                    label = { Text(stringResource(R.string.max_game_refresh_rate_unlimited)) },
-                    modifier = Modifier.padding(end = 6.dp)
-                )
-                supportedRates.forEach { rate ->
-                    FilterChip(
-                        selected = viewModel.maxGameRefreshRate == rate,
-                        onClick = { viewModel.maxGameRefreshRate = rate },
-                        label = { Text("$rate") },
-                        modifier = Modifier.padding(end = 6.dp)
-                    )
+            val lockedLabel = stringResource(R.string.in_game_refresh_locked)
+            val unlimitedLabel = stringResource(R.string.max_game_refresh_rate_unlimited)
+            // Only rates ABOVE 60 are cap options — "Locked (60)" already covers 60.
+            val ratesAbove60 = supportedRates.filter { it > 60 }
+            // value model: -1 = Locked, 0 = Unlimited, N = cap N
+            val rrOptionValues = listOf(-1, 0) + ratesAbove60
+            val rrOptionLabels = listOf(lockedLabel, unlimitedLabel) + ratesAbove60.map { "$it Hz" }
+            val rrCurrentValue = if (!viewModel.unlockGameRefreshRate) -1 else viewModel.maxGameRefreshRate
+            val rrIdx = rrOptionValues.indexOf(rrCurrentValue).let { if (it >= 0) it else 1 } // fall back to Unlimited
+            LabeledDropdown(
+                label = stringResource(R.string.in_game_refresh_rate),
+                options = rrOptionLabels,
+                selectedOption = rrOptionLabels[rrIdx],
+                onSelect = {
+                    when (val v = rrOptionValues[rrOptionLabels.indexOf(it)]) {
+                        -1 -> { viewModel.unlockGameRefreshRate = false; viewModel.maxGameRefreshRate = 0 }
+                        else -> { viewModel.unlockGameRefreshRate = true; viewModel.maxGameRefreshRate = v }
+                    }
                 }
-            }
+            )
             Text(
-                text = stringResource(R.string.max_game_refresh_rate_hint),
+                text = stringResource(R.string.in_game_refresh_rate_hint),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 52.dp, top = 2.dp, bottom = 4.dp)
             )
-
-            // Turns off Wine's display-mode emulation so the rates above actually reach the game's own
-            // in-game display dropdown (otherwise Wine hardcodes it to {60, current}). Default ON; leave
-            // it on unless a game misbehaves with the container-res-capped resolution ladder this produces.
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Switch(
-                    checked = viewModel.unlockGameRefreshRate,
-                    onCheckedChange = { viewModel.unlockGameRefreshRate = it }
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(stringResource(R.string.unlock_game_refresh_rate), modifier = Modifier.weight(1f))
-            }
-            Text(
-                text = stringResource(R.string.unlock_game_refresh_rate_hint),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 52.dp, top = 2.dp, bottom = 4.dp)
-            )
-            // Warn when the selected Proton has no xrandr — the unlock will be skipped at launch. Keyed
-            // on the selected wine version so the (cached) probe only re-runs when the layer changes.
+            // Warn when a non-Locked choice is set but the selected Proton has no xrandr — the unlock
+            // will be skipped at launch. Keyed on the wine version so the cached probe only re-runs when
+            // the layer changes.
             val wineXrandrCapable = remember(viewModel.selectedWineVersion) {
                 viewModel.isWineXrandrCapable(viewModel.selectedWineVersion)
             }
