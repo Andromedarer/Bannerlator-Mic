@@ -49,7 +49,9 @@ Stage APK, install, add: (a) Goldberg game w/ `steam_appid.txt`, (b) GOG game, (
 
 ---
 
-## PILLAR 2 — Component recommendation — ⬜ NOT STARTED (gated on Pillar 1 proven)
+> **PILLAR 1 (Smart Game Import) — ✅ COMPLETE & DEVICE-PROVEN 2026-07-23.** Auto-identify → Steam name+art by appId → "Confirm game" dialog w/ Search Steam picker. Passing: God of War, GTA IV, GTA V, Dark Souls. Phase B (full Edit Game screen) DEFERRED to the very end per user. **NEXT = Pillar 2 (component recommendation).**
+
+## PILLAR 2 — Component recommendation — 🟡 STARTING 2026-07-23 (user-directed, Pillar 1 proven)
 - **2.1 Detection** `components/DependencyDetector.kt`: scan `<gameDir>/_CommonRedist/**` → curation table → match to 142-catalog (`vcredist/`→vcredist201x, `PhysX/`→physx, `XNA/`→xna40, `dotNetFx45/`→dotnet45; **drop DirectX that DXVK covers**). Generalize the GOG redist scan.
 - **2.2 UI indicators**: chips on the new shortcut + in `ShortcutSettingsDialogScreen`; each one-tap installs via existing `ComponentsSheet`. Reuse `component_installs` prefs.
 - **2.3 Device verify gate**: chips appear, install one, verify it lands in prefix.
