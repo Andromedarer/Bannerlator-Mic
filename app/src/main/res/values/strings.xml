@@ -547,6 +547,7 @@
     <string name="frame_generation_model_traced">Traced graph (experimental)</string>
     <string name="frame_generation_model_v2">V2 engine (experimental)</string>
     <string name="frame_generation_model_fsr3">FidelityFX optical flow (experimental)</string>
+    <string name="frame_generation_model_fsr3_v2">FidelityFX optical flow v2 (experimental)</string>
     <string name="frame_generation_model_experimental_hint">Experimental model — may render incorrectly or cost more performance than it gains. Switch back to Default if a game misbehaves.</string>
     <string name="frame_generation_lsfg_hint">Uses your imported Lossless.dll (set it at the bottom of Settings). Tune the multiplier &amp; flow scale live from the in-game side menu.</string>
     <string name="fg_performance_mode">Performance mode</string>
@@ -559,6 +560,13 @@
     <string name="auto_match_fps">Auto (match FPS)</string>
     <string name="manual_refresh_rate">Manual refresh rate</string>
     <string name="manual_refresh_rate_hint">When Auto is off, lock the display panel to a chosen rate (independent of the FPS cap). Off = panel runs free.</string>
+    <string name="max_game_refresh_rate_unlimited">Unlimited</string>
+    <string name="in_game_refresh_rate">In-game refresh rate</string>
+    <string name="in_game_refresh_locked">Locked (60)</string>
+    <string name="in_game_refresh_rate_hint">Highest rate the game may pick in its own display menu. Locked keeps games at 60 Hz; a rate or Unlimited unlocks them (needs a Proton layer with refresh-rate support). Most games only read this at startup.</string>
+    <string name="refresh_unlock_needs_compatible_layer">In-game refresh unlock needs a Proton layer with refresh-rate support — install the Refreshed Proton 10.0-4 / 11.0-1 build.</string>
+    <string name="refresh_unlock_layer_incompatible_hint">The selected Proton for this container has no refresh-rate support — install the Refreshed Proton 10.0-4 / 11.0-1 build for this to take effect.</string>
+    <string name="use_container_default">Use container default</string>
     <string name="export_container">Export Container</string>
     <string name="exporting_container">Exporting Container...</string>
     <string name="importing_container">Importing Container...</string>

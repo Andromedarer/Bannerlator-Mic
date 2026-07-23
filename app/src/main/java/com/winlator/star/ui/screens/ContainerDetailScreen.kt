@@ -729,12 +729,13 @@ private fun TopLevelFields(
                 stringResource(R.string.frame_generation_model_default),
                 stringResource(R.string.frame_generation_model_traced),
                 stringResource(R.string.frame_generation_model_v2),
-                stringResource(R.string.frame_generation_model_fsr3)
+                stringResource(R.string.frame_generation_model_fsr3),
+                stringResource(R.string.frame_generation_model_fsr3_v2)
             )
             LabeledDropdown(
                 label = stringResource(R.string.frame_generation_model),
                 options = fgModelLabels,
-                selectedOption = fgModelLabels[viewModel.frameGenModel.coerceIn(0, 3)],
+                selectedOption = fgModelLabels[viewModel.frameGenModel.coerceIn(0, 4)],
                 onSelect = { viewModel.frameGenModel = fgModelLabels.indexOf(it) }
             )
             if (viewModel.frameGenModel != 0) {
@@ -849,6 +850,55 @@ private fun TopLevelFields(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 52.dp, top = 2.dp, bottom = 4.dp)
             )
+        }
+
+        // Single guest-side refresh control. Collapses the unlock toggle + rate cap into one dropdown:
+        //   Locked (60)  -> emulation stays on, game sits at 60 (unlockGameRefreshRate = false)
+        //   <rate> Hz    -> unlock on, capped at that rate (unlock = true, maxGameRefreshRate = rate)
+        //   Unlimited    -> unlock on, no cap (unlock = true, maxGameRefreshRate = 0)
+        // Default Unlimited. Drives the two underlying extras so the launch resolver is unchanged. Not
+        // gated on vrrCapable — a game choosing 120 Hz is meaningful even where the panel can't do VRR.
+        if (supportedRates.isNotEmpty()) {
+            val lockedLabel = stringResource(R.string.in_game_refresh_locked)
+            val unlimitedLabel = stringResource(R.string.max_game_refresh_rate_unlimited)
+            // Only rates ABOVE 60 are cap options — "Locked (60)" already covers 60.
+            val ratesAbove60 = supportedRates.filter { it > 60 }
+            // value model: -1 = Locked, 0 = Unlimited, N = cap N
+            val rrOptionValues = listOf(-1, 0) + ratesAbove60
+            val rrOptionLabels = listOf(lockedLabel, unlimitedLabel) + ratesAbove60.map { "$it Hz" }
+            val rrCurrentValue = if (!viewModel.unlockGameRefreshRate) -1 else viewModel.maxGameRefreshRate
+            val rrIdx = rrOptionValues.indexOf(rrCurrentValue).let { if (it >= 0) it else 1 } // fall back to Unlimited
+            LabeledDropdown(
+                label = stringResource(R.string.in_game_refresh_rate),
+                options = rrOptionLabels,
+                selectedOption = rrOptionLabels[rrIdx],
+                onSelect = {
+                    when (val v = rrOptionValues[rrOptionLabels.indexOf(it)]) {
+                        -1 -> { viewModel.unlockGameRefreshRate = false; viewModel.maxGameRefreshRate = 0 }
+                        else -> { viewModel.unlockGameRefreshRate = true; viewModel.maxGameRefreshRate = v }
+                    }
+                }
+            )
+            Text(
+                text = stringResource(R.string.in_game_refresh_rate_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 52.dp, top = 2.dp, bottom = 4.dp)
+            )
+            // Warn when a non-Locked choice is set but the selected Proton has no xrandr — the unlock
+            // will be skipped at launch. Keyed on the wine version so the cached probe only re-runs when
+            // the layer changes.
+            val wineXrandrCapable = remember(viewModel.selectedWineVersion) {
+                viewModel.isWineXrandrCapable(viewModel.selectedWineVersion)
+            }
+            if (viewModel.unlockGameRefreshRate && !wineXrandrCapable) {
+                Text(
+                    text = stringResource(R.string.refresh_unlock_layer_incompatible_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(start = 52.dp, top = 2.dp, bottom = 4.dp)
+                )
+            }
         }
 
         // ReShade multi-effect loadout (vkBasalt drop-in), per-container default. The per-game shortcut

@@ -3846,6 +3846,17 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
         mutableStateOf(shortcut.getExtra("renderScale", shortcut.container.getExtra("renderScale", "1.0")))
     }
 
+    // Single guest-side refresh control (per-game override). Backed by two extras that the merged
+    // "In-game refresh rate" dropdown drives together: unlockGameRefreshRate ("" inherit / "1" / "0")
+    // and maxGameRefreshRate ("" inherit / "0" unlimited / "N" cap). Both empty = inherit container.
+    // See Container.isUnlockGameRefreshRate / getMaxGameRefreshRate.
+    var maxGameRefreshRate by remember {
+        mutableStateOf(shortcut.getExtra("maxGameRefreshRate", ""))
+    }
+    var unlockGameRefreshRate by remember {
+        mutableStateOf(shortcut.getExtra("unlockGameRefreshRate", ""))
+    }
+
     // Frame Generation engine (off / bionic / lsfg) — per-game override.
     val fgEngines = remember { listOf("off", "bionic", "lsfg") }
     var frameGenEngine by remember {
@@ -4154,6 +4165,10 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
             putExtra("swapRB", if (vkSwapRB) "true" else "false")
             putExtra("presentMode", vkPresentMode)
             putExtra("renderScale", if (renderScale == "1.0") null else renderScale)
+            // "In-game refresh rate" per-game override: both extras written together, "" = inherit the
+            // container (store null so the extra is cleared, not left empty → keeps the shortcut default).
+            putExtra("maxGameRefreshRate", maxGameRefreshRate.ifEmpty { null })
+            putExtra("unlockGameRefreshRate", unlockGameRefreshRate.ifEmpty { null })
             putExtra("frameGenEngine", frameGenEngine)
             putExtra("fpsLimiterEnabled", if (fpsLimiterEnabled) "1" else "0")
             putExtra("dxwrapper", StringUtils.parseIdentifier(selectedDxWrapper))
@@ -4407,6 +4422,48 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                             selectedOption = renderScaleLabels[rsIdx],
                             onSelect = { renderScale = renderScaleValues[renderScaleLabels.indexOf(it)] }
                         )
+                    }
+
+                    // In-game refresh rate — single per-game override of the container default. Options:
+                    // Use container default (inherit) / Locked (60) / <rate> Hz / Unlimited. Drives the
+                    // two underlying extras (unlock + cap) together; empty = inherit.
+                    run {
+                        val panelRates = remember {
+                            com.winlator.star.widget.XServerView.getSupportedRefreshRates(
+                                if (android.os.Build.VERSION.SDK_INT >= 30) context.display
+                                else (context.getSystemService(android.content.Context.WINDOW_SERVICE)
+                                        as android.view.WindowManager).defaultDisplay)
+                        }
+                        if (panelRates.isNotEmpty()) {
+                            // Only rates ABOVE 60 are cap options — "Locked (60)" already covers 60.
+                            val ratesAbove60 = panelRates.filter { it > 60 }
+                            // Sentinel value model: "" = inherit, "locked" = Locked(60), "0" = Unlimited,
+                            // "N" = cap N. Maps to the (unlock, cap) extra pair on select.
+                            val rrValues = listOf("", "locked", "0") + ratesAbove60.map { it.toString() }
+                            val rrLabels = listOf(
+                                stringResource(R.string.use_container_default),
+                                stringResource(R.string.in_game_refresh_locked),
+                                stringResource(R.string.max_game_refresh_rate_unlimited)) +
+                                ratesAbove60.map { "$it Hz" }
+                            val currentValue = when {
+                                unlockGameRefreshRate.isEmpty() && maxGameRefreshRate.isEmpty() -> ""
+                                unlockGameRefreshRate == "0" -> "locked"
+                                else -> maxGameRefreshRate.ifEmpty { "0" }
+                            }
+                            val rrIdx = rrValues.indexOf(currentValue).coerceAtLeast(0)
+                            LabeledDropdown(
+                                label = stringResource(R.string.in_game_refresh_rate),
+                                options = rrLabels,
+                                selectedOption = rrLabels[rrIdx],
+                                onSelect = {
+                                    when (val v = rrValues[rrLabels.indexOf(it)]) {
+                                        ""       -> { unlockGameRefreshRate = "";  maxGameRefreshRate = "" }
+                                        "locked" -> { unlockGameRefreshRate = "0"; maxGameRefreshRate = "0" }
+                                        else     -> { unlockGameRefreshRate = "1"; maxGameRefreshRate = v }
+                                    }
+                                }
+                            )
+                        }
                     }
 
                     // Frame Generation engine — per-game override (lsfg grayed without Lossless.dll).

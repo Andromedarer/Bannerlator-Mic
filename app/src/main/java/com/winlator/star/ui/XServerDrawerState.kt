@@ -247,7 +247,7 @@ object XServerDrawerState {
     fun setFrameGenEnabled(v: Boolean)     { _frameGenEnabled.value = v }
     fun setFrameGenMultiplier(v: Int)      { _frameGenMultiplier.value = v }
     fun setFrameGenFlowScale(v: Float)     { _frameGenFlowScale.value = v }
-    fun setFrameGenModel(v: Int)           { _frameGenModel.value = v.coerceIn(0, 3) }
+    fun setFrameGenModel(v: Int)           { _frameGenModel.value = v.coerceIn(0, 4) }
     fun setFrameGenEngine(v: String)       { _frameGenEngine.value = v }
     fun setLsfgPerformanceMode(v: Boolean) { _lsfgPerformanceMode.value = v }
     fun setFpsLimiterEnabled(v: Boolean)   { _fpsLimiterEnabled.value = v }

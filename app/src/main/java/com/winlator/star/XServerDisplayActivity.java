@@ -129,6 +129,7 @@ import com.winlator.star.xenvironment.components.XServerComponent;
 import com.winlator.star.xserver.Pointer;
 import com.winlator.star.xserver.Property;
 import com.winlator.star.xserver.ScreenInfo;
+import com.winlator.star.xserver.extensions.RandrExtension;
 import com.winlator.star.xserver.Window;
 import com.winlator.star.xserver.WindowManager;
 import com.winlator.star.xserver.XServer;
@@ -480,6 +481,47 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
     }
     
+    /**
+     * Publish the panel's real refresh rates through RandR so Wine can offer them to games.
+     *
+     * <p>Wine builds its display-mode list from what our X server reports; with no RandR at all it
+     * used its "NoRes" fallback, which hardcodes a single 60 Hz mode — the reason every in-game
+     * refresh dropdown was stuck at 60 on a high-refresh panel. Rates are de-duplicated after
+     * rounding (panels commonly report 59.95/60.0 as separate modes, which would otherwise show up
+     * as two identical "60 Hz" entries) and sorted highest-first.
+     */
+    private void advertisePanelRefreshRates() {
+        RandrExtension randr = xServer.getExtension(RandrExtension.MAJOR_OPCODE);
+        if (randr == null) return;
+
+        android.view.Display display = getWindowManager().getDefaultDisplay();
+        android.view.Display.Mode[] modes = display.getSupportedModes();
+        if (modes == null || modes.length == 0) return;
+
+        // 0 = no cap. A cap below every supported rate would leave an empty list, so the lowest
+        // supported rate is always kept — a game with no modes at all is worse than one capped
+        // slightly higher than asked.
+        final int cap = resolvedMaxGameRefreshRate();
+
+        java.util.TreeSet<Short> distinct = new java.util.TreeSet<>(java.util.Collections.reverseOrder());
+        short lowest = Short.MAX_VALUE;
+        for (android.view.Display.Mode mode : modes) {
+            short hz = (short)Math.round(mode.getRefreshRate());
+            if (hz <= 0) continue;
+            if (hz < lowest) lowest = hz;
+            if (cap <= 0 || hz <= cap) distinct.add(hz);
+        }
+        if (distinct.isEmpty() && lowest != Short.MAX_VALUE) distinct.add(lowest);
+        if (distinct.isEmpty()) return;
+
+        short[] rates = new short[distinct.size()];
+        int i = 0;
+        for (short hz : distinct) rates[i++] = hz;
+        randr.setRefreshRates(rates);
+
+        Log.d("XServerDisplayActivity", "RandR advertising refresh rates " + java.util.Arrays.toString(rates));
+    }
+
     private float pickHighestRefreshRate() {
     	android.view.Display display = getWindowManager().getDefaultDisplay();
     	android.view.Display.Mode[] modes = display.getSupportedModes();
@@ -1151,6 +1193,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         inputControlsManager = new InputControlsManager(this);
         xServer = new XServer(new ScreenInfo(screenSize));
         xServer.setWinHandler(winHandler);
+        advertisePanelRefreshRates();
 
         // Add the OnWindowModificationListener for dynamic workarounds
         xServer.windowManager.addOnWindowModificationListener(new WindowManager.OnWindowModificationListener() {
@@ -1253,6 +1296,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     setupWineSystemFiles();
                     extractGraphicsDriverFiles();
                     changeWineAudioDriver();
+                    applyGameRefreshRateUnlock();
                     stage[0] = "Building environment";
                     setupXEnvironment();
                 } catch (Exception e) {
@@ -1594,7 +1638,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             String toml = "# Written by Bannerlator (per-container frame generation)\n"
                     + "multiplier = " + multiplier + "\n"
                     + "flow_scale = " + String.format(java.util.Locale.US, "%.2f", flowScale) + "\n"
-                    + "model = " + Math.max(0, Math.min(3, model)) + "\n"
+                    + "model = " + Math.max(0, Math.min(4, model)) + "\n"
                     + "fps_limit_enabled = " + (fpsLimiterEnabled ? "true" : "false") + "\n"
                     + "fps_limit = " + fpsLimitValue + "\n";
             FileUtils.writeString(confFile, toml);
@@ -4530,7 +4574,7 @@ return true;
         if (shortcut == null) return fallback;
         try {
             int m = Integer.parseInt(shortcut.getExtra("frameGenModel", String.valueOf(fallback)));
-            return (m < 0 || m > 3) ? fallback : m;
+            return (m < 0 || m > 4) ? fallback : m;
         }
         catch (NumberFormatException e) {
             return fallback;
@@ -4637,6 +4681,33 @@ return true;
 
     // Per-game override for the manual refresh-rate lock (shortcut wins over the container default).
     // Mirrors resolvedMatchRefreshRate(). 0 = no manual lock. Null-safe for early calls.
+    // Per-game override for the guest-side refresh ceiling (shortcut wins over the container
+    // default). Mirrors resolvedManualRefreshRate(). 0 = no cap. Null-safe for early calls.
+    private int resolvedMaxGameRefreshRate() {
+        if (container == null) return 0;
+        if (shortcut != null) {
+            try {
+                return Integer.parseInt(shortcut.getExtra("maxGameRefreshRate",
+                    String.valueOf(container.getMaxGameRefreshRate())));
+            } catch (NumberFormatException e) {
+                return container.getMaxGameRefreshRate();
+            }
+        }
+        return container.getMaxGameRefreshRate();
+    }
+
+    // Per-game override for the in-game refresh unlock (shortcut wins over the container default).
+    // The shortcut extra is tri-state: "" = inherit the container, "1" = on, "0" = off.
+    private boolean resolvedUnlockGameRefreshRate() {
+        if (container == null) return true;
+        if (shortcut != null) {
+            String extra = shortcut.getExtra("unlockGameRefreshRate", "");
+            if (extra.equals("1")) return true;
+            if (extra.equals("0")) return false;
+        }
+        return container.isUnlockGameRefreshRate();
+    }
+
     private int resolvedManualRefreshRate() {
         if (container == null) return 0;
         if (shortcut != null) {
@@ -4839,6 +4910,70 @@ return true;
             container.putExtra("audioDriver", audioDriver);
             container.saveData();
         }
+    }
+
+    // Turn Wine's win32u display-mode EMULATION off (or back on) in the ACTIVE prefix so games see the
+    // discrete refresh rates our RandR extension advertises instead of the emulated {60, current}.
+    // Under HKCU [Software\Wine\X11 Driver], "EmulateModelist"/"EmulateModeset"="Y" DISABLE emulation
+    // (sysparams.c:6201 emulate_modelist = !IS_OPTION_TRUE) — device-proven (Dirt 3 cycled 60→120).
+    // Written on every launch (idempotent) so it survives a prefix regen (applyGeneralPatches) and
+    // retrofits already-created containers; imageFs.getRootDir()+WINEPREFIX resolves through the
+    // xuser symlink to the launching container's own .wine. When the toggle is OFF the values are
+    // removed, reverting to Wine's default (emulation on). Runs AFTER setupWineSystemFiles so any
+    // prefix regen this launch is already done.
+    //
+    // GATED ON LAYER CAPABILITY: disabling emulation only helps on a Proton/Wine layer whose winex11
+    // was COMPILED WITH xrandr (the Refreshed Proton 10.0-4 / 11.0-1 builds). On an old layer it gives
+    // no refresh benefit AND shrinks the resolution list (NoRes single mode), a mild regression — so
+    // when the selected layer isn't xrandr-capable we DON'T write the keys (and remove any left by a
+    // previous run), then Toast the user to install a compatible layer.
+    private void applyGameRefreshRateUnlock() {
+        final String x11DriverKey = "Software\\Wine\\X11 Driver";
+        boolean unlock = resolvedUnlockGameRefreshRate();
+        boolean capable = isSelectedLayerXrandrCapable();
+        boolean writeKeys = unlock && capable;
+
+        File rootDir = imageFs.getRootDir();
+        File userRegFile = new File(rootDir, ImageFs.WINEPREFIX+"/user.reg");
+        try (WineRegistryEditor registryEditor = new WineRegistryEditor(userRegFile)) {
+            if (writeKeys) {
+                registryEditor.setStringValue(x11DriverKey, "EmulateModelist", "Y");
+                registryEditor.setStringValue(x11DriverKey, "EmulateModeset", "Y");
+            }
+            else {
+                // Toggle off OR incapable layer: strip the keys so no stale resolution regression lingers.
+                registryEditor.removeValue(x11DriverKey, "EmulateModelist");
+                registryEditor.removeValue(x11DriverKey, "EmulateModeset");
+            }
+        }
+        boolean explicit = isRefreshUnlockExplicit();
+        Log.d("XServerDisplayActivity", "In-game refresh unlock: setting=" + (unlock ? "unlock" : "locked")
+                + (explicit ? " (explicit)" : " (default)") + " layerXrandrCapable=" + capable
+                + " -> keys " + (writeKeys ? "WRITTEN" : "removed"));
+
+        // The user EXPLICITLY chose a non-Locked rate but the selected layer can't deliver it — tell
+        // them why. Suppressed for the untouched default (extra absent) so we never nag users who never
+        // opted in; the capability guard above already prevents the functional regression regardless.
+        if (unlock && !capable && explicit) {
+            runOnUiThread(() -> Toast.makeText(this,
+                    R.string.refresh_unlock_needs_compatible_layer, Toast.LENGTH_LONG).show());
+        }
+    }
+
+    // Whether the guest-side refresh setting was explicitly chosen by the user (extra present) vs. left
+    // at the untouched default (extra absent). A per-game override that inherits (no shortcut extra)
+    // defers to the container's explicitness. Keyed on the unlockGameRefreshRate extra, which the merged
+    // "In-game refresh rate" dropdown always writes alongside the cap when a concrete option is picked.
+    private boolean isRefreshUnlockExplicit() {
+        if (container == null) return false;
+        if (shortcut != null && shortcut.hasExtra("unlockGameRefreshRate")) return true;
+        return container.hasExtra("unlockGameRefreshRate");
+    }
+
+    // True when the SELECTED wine/Proton layer's unix winex11 driver was compiled with xrandr. The scan
+    // + per-layer cache lives in WineRandrSupport (shared with the container editor's warning hint).
+    private boolean isSelectedLayerXrandrCapable() {
+        return com.winlator.star.core.WineRandrSupport.isXrandrCapable(wineInfo);
     }
 
     private void applyGeneralPatches(Container container) {
