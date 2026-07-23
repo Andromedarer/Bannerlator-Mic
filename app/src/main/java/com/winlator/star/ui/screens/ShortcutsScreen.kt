@@ -3854,6 +3854,13 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
             shortcut.container.maxGameRefreshRate.toString()))
     }
 
+    // In-game refresh unlock — per-game override of the container default. Tri-state: "" = inherit the
+    // container, "1" = force on, "0" = force off. Disables Wine's mode emulation so this game sees the
+    // RandR rates in its own display menu. See Container.isUnlockGameRefreshRate.
+    var unlockGameRefreshRate by remember {
+        mutableStateOf(shortcut.getExtra("unlockGameRefreshRate", ""))
+    }
+
     // Frame Generation engine (off / bionic / lsfg) — per-game override.
     val fgEngines = remember { listOf("off", "bionic", "lsfg") }
     var frameGenEngine by remember {
@@ -4163,6 +4170,8 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
             putExtra("presentMode", vkPresentMode)
             putExtra("renderScale", if (renderScale == "1.0") null else renderScale)
             putExtra("maxGameRefreshRate", maxGameRefreshRate)
+            // "" = inherit the container default; store null so the extra is cleared, not left empty.
+            putExtra("unlockGameRefreshRate", unlockGameRefreshRate.ifEmpty { null })
             putExtra("frameGenEngine", frameGenEngine)
             putExtra("fpsLimiterEnabled", if (fpsLimiterEnabled) "1" else "0")
             putExtra("dxwrapper", StringUtils.parseIdentifier(selectedDxWrapper))
@@ -4437,6 +4446,20 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                                 options = rrLabels,
                                 selectedOption = rrLabels[rrIdx],
                                 onSelect = { maxGameRefreshRate = rrValues[rrLabels.indexOf(it)] }
+                            )
+
+                            // In-game refresh unlock — per-game override (inherit / on / off).
+                            val urrValues = listOf("", "1", "0")
+                            val urrLabels = listOf(
+                                stringResource(R.string.use_container_default),
+                                stringResource(R.string.on),
+                                stringResource(R.string.off))
+                            val urrIdx = urrValues.indexOf(unlockGameRefreshRate).coerceAtLeast(0)
+                            LabeledDropdown(
+                                label = stringResource(R.string.unlock_game_refresh_rate),
+                                options = urrLabels,
+                                selectedOption = urrLabels[urrIdx],
+                                onSelect = { unlockGameRefreshRate = urrValues[urrLabels.indexOf(it)] }
                             )
                         }
                     }

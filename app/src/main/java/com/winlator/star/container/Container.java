@@ -738,6 +738,20 @@ public class Container {
         putExtra("maxGameRefreshRate", String.valueOf(rate));
     }
 
+    // Unlock the game's own in-game refresh dropdown by turning OFF Wine's win32u display-mode
+    // emulation (which otherwise discards the rates our RandR extension advertises and hardcodes the
+    // guest to {60, current}). Applied as the two "X11 Driver" registry values EmulateModelist /
+    // EmulateModeset = "Y" (INVERTED semantics: "Y" disables emulation). Default ON — the whole
+    // refresh feature is opt-in-by-hardware; the toggle lets a user turn it off if a game misbehaves
+    // with the reduced (container-res-capped) resolution ladder emulation-off produces.
+    public boolean isUnlockGameRefreshRate() {
+        return getExtra("unlockGameRefreshRate", "1").equals("1");
+    }
+
+    public void setUnlockGameRefreshRate(boolean unlock) {
+        putExtra("unlockGameRefreshRate", unlock ? "1" : "0");
+    }
+
     // --- ReShade effect (vkBasalt drop-in), per-container default; the per-game shortcut can
     // override both keys via its extras (resolvedReshade* in XServerDisplayActivity). "None" / empty
     // = no effect. reshadeParams is a JSON object of {uniformName: value} overriding the .fx defaults.

@@ -1296,6 +1296,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     setupWineSystemFiles();
                     extractGraphicsDriverFiles();
                     changeWineAudioDriver();
+                    applyGameRefreshRateUnlock();
                     stage[0] = "Building environment";
                     setupXEnvironment();
                 } catch (Exception e) {
@@ -4695,6 +4696,18 @@ return true;
         return container.getMaxGameRefreshRate();
     }
 
+    // Per-game override for the in-game refresh unlock (shortcut wins over the container default).
+    // The shortcut extra is tri-state: "" = inherit the container, "1" = on, "0" = off.
+    private boolean resolvedUnlockGameRefreshRate() {
+        if (container == null) return true;
+        if (shortcut != null) {
+            String extra = shortcut.getExtra("unlockGameRefreshRate", "");
+            if (extra.equals("1")) return true;
+            if (extra.equals("0")) return false;
+        }
+        return container.isUnlockGameRefreshRate();
+    }
+
     private int resolvedManualRefreshRate() {
         if (container == null) return 0;
         if (shortcut != null) {
@@ -4897,6 +4910,33 @@ return true;
             container.putExtra("audioDriver", audioDriver);
             container.saveData();
         }
+    }
+
+    // Turn Wine's win32u display-mode EMULATION off (or back on) in the ACTIVE prefix so games see the
+    // discrete refresh rates our RandR extension advertises instead of the emulated {60, current}.
+    // Under HKCU [Software\Wine\X11 Driver], "EmulateModelist"/"EmulateModeset"="Y" DISABLE emulation
+    // (sysparams.c:6201 emulate_modelist = !IS_OPTION_TRUE) — device-proven (Dirt 3 cycled 60→120).
+    // Written on every launch (idempotent) so it survives a prefix regen (applyGeneralPatches) and
+    // retrofits already-created containers; imageFs.getRootDir()+WINEPREFIX resolves through the
+    // xuser symlink to the launching container's own .wine. When the toggle is OFF the values are
+    // removed, reverting to Wine's default (emulation on). Runs AFTER setupWineSystemFiles so any
+    // prefix regen this launch is already done.
+    private void applyGameRefreshRateUnlock() {
+        final String x11DriverKey = "Software\\Wine\\X11 Driver";
+        boolean unlock = resolvedUnlockGameRefreshRate();
+        File rootDir = imageFs.getRootDir();
+        File userRegFile = new File(rootDir, ImageFs.WINEPREFIX+"/user.reg");
+        try (WineRegistryEditor registryEditor = new WineRegistryEditor(userRegFile)) {
+            if (unlock) {
+                registryEditor.setStringValue(x11DriverKey, "EmulateModelist", "Y");
+                registryEditor.setStringValue(x11DriverKey, "EmulateModeset", "Y");
+            }
+            else {
+                registryEditor.removeValue(x11DriverKey, "EmulateModelist");
+                registryEditor.removeValue(x11DriverKey, "EmulateModeset");
+            }
+        }
+        Log.d("XServerDisplayActivity", "In-game refresh unlock " + (unlock ? "ENABLED" : "disabled") + " (EmulateModelist/Modeset)");
     }
 
     private void applyGeneralPatches(Container container) {

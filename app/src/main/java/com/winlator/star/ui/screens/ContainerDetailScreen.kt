@@ -883,6 +883,24 @@ private fun TopLevelFields(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 52.dp, top = 2.dp, bottom = 4.dp)
             )
+
+            // Turns off Wine's display-mode emulation so the rates above actually reach the game's own
+            // in-game display dropdown (otherwise Wine hardcodes it to {60, current}). Default ON; leave
+            // it on unless a game misbehaves with the container-res-capped resolution ladder this produces.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(
+                    checked = viewModel.unlockGameRefreshRate,
+                    onCheckedChange = { viewModel.unlockGameRefreshRate = it }
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.unlock_game_refresh_rate), modifier = Modifier.weight(1f))
+            }
+            Text(
+                text = stringResource(R.string.unlock_game_refresh_rate_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 52.dp, top = 2.dp, bottom = 4.dp)
+            )
         }
 
         // ReShade multi-effect loadout (vkBasalt drop-in), per-container default. The per-game shortcut

@@ -563,6 +563,11 @@
     <string name="max_game_refresh_rate">Max in-game refresh rate</string>
     <string name="max_game_refresh_rate_unlimited">Unlimited</string>
     <string name="max_game_refresh_rate_hint">Highest rate offered to the game in its own graphics settings. Unlimited offers every rate the panel supports. Most games only read this at startup.</string>
+    <string name="unlock_game_refresh_rate">Unlock in-game refresh rates</string>
+    <string name="unlock_game_refresh_rate_hint">Lets the game pick the rates above in its own display menu (games are otherwise locked to 60 Hz). Turn off if a game misbehaves with the resolution list this produces.</string>
+    <string name="use_container_default">Use container default</string>
+    <string name="on">On</string>
+    <string name="off">Off</string>
     <string name="export_container">Export Container</string>
     <string name="exporting_container">Exporting Container...</string>
     <string name="importing_container">Importing Container...</string>
