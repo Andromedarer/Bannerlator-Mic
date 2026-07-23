@@ -100,7 +100,7 @@ object GameIdentifier {
      * '_' downstream (e.g. "DARK SOULS: REMASTERED" → "DARK SOULS_ REMASTERED"). Strips trademark
      * marks, turns title punctuation into safe equivalents, and collapses whitespace.
      */
-    private fun normalizeName(raw: String): String {
+    fun normalizeName(raw: String): String {
         var s = raw
         s = s.replace("™", "").replace("®", "").replace("©", "")
         s = s.replace(Regex("""(?i)\(\s*(tm|r|c)\s*\)"""), "") // "(TM)" / "(R)" / "(C)"

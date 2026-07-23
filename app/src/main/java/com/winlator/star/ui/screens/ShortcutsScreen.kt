@@ -12,6 +12,9 @@ import android.media.MediaScannerConnection
 import android.os.Environment
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import coil.compose.SubcomposeAsyncImage
+import coil.request.CachePolicy
+import coil.request.ImageRequest
 import android.graphics.drawable.Icon
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -189,6 +192,7 @@ import com.winlator.star.inputcontrols.ControlsProfile
 import com.winlator.star.inputcontrols.InputControlsManager
 import com.winlator.star.midi.MidiManager
 import com.winlator.star.store.StarLaunchBridge
+import com.winlator.star.store.SteamStoreSearch
 import com.winlator.star.ui.theme.Divider as DividerColor
 import com.winlator.star.ui.theme.LocalAccentDim
 import com.winlator.star.ui.theme.OnSurface
@@ -232,8 +236,14 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     // When checked, the shortcut import uses the system SAF picker instead of the in-app File Manager.
     var importUseSystemPicker by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
-    var renameDialogName by remember { mutableStateOf("") }
+    var renameDialogName by remember { mutableStateOf("") }          // current on-disk base (Save's oldName)
     var renameDialogContainerIndex by remember { mutableStateOf(-1) }
+    // Confirm-game dialog (upgraded rename dialog) state.
+    var confirmNameField by remember { mutableStateOf("") }          // editable name text field
+    var confirmNameEdited by remember { mutableStateOf(false) }      // user typed → stop auto-overwriting
+    var confirmAppId by remember { mutableStateOf<Int?>(null) }      // detected/selected Steam appId
+    var steamSearchResults by remember { mutableStateOf<List<SteamStoreSearch.SteamSuggestion>>(emptyList()) }
+    var steamSearching by remember { mutableStateOf(false) }
     var scrapeTarget by remember { mutableStateOf<Shortcut?>(null) }
     val scrapeCovers = remember { mutableStateListOf<Pair<Bitmap, String>>() }
     var scrapeLoading by remember { mutableStateOf(false) }
@@ -478,6 +488,11 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                 is ImportResult.Success -> {
                     renameDialogContainerIndex = pendingImportContainerIndex
                     renameDialogName = result.shortcutName
+                    confirmNameField = result.shortcutName
+                    confirmNameEdited = false
+                    confirmAppId = result.appId
+                    steamSearchResults = emptyList()
+                    steamSearching = false
                     showRenameDialog = true
                 }
                 is ImportResult.Error -> Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
@@ -714,24 +729,135 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
         )
     }
 
-    // Rename after import
+    // Follow the importer's async Steam-name auto-rename inside an open confirm dialog: keep the
+    // Save target (renameDialogName = the on-disk base) in sync, and update the editable field
+    // unless the user has already typed into it. Race-free — all on the main thread, one file writer.
+    val importedNameUpdate by vm.importedNameUpdate.collectAsState()
+    LaunchedEffect(importedNameUpdate) {
+        val update = importedNameUpdate ?: return@LaunchedEffect
+        if (showRenameDialog && renameDialogName == update.oldBase) {
+            renameDialogName = update.newBase
+            if (!confirmNameEdited) confirmNameField = update.newBase
+        }
+        vm.consumeImportedNameUpdate()
+    }
+
+    // Confirm game after import: editable name + "Search Steam" picker (fixes launcher-named
+    // shortcuts + wrong cover art). Reuses the existing rename mechanism on Save.
     if (showRenameDialog) {
-        var newName by remember { mutableStateOf(renameDialogName) }
+        val confirmContainer = vm.containers().getOrNull(renameDialogContainerIndex)
         OutlinedAlertDialog(
             onDismissRequest = { showRenameDialog = false },
-            title = { Text("Rename Shortcut") },
+            title = { Text("Confirm game") },
             text = {
-                OutlinedTextField(
-                    value = newName,
-                    onValueChange = { newName = it },
-                    label = { Text("Shortcut name") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 460.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    OutlinedTextField(
+                        value = confirmNameField,
+                        onValueChange = { confirmNameField = it; confirmNameEdited = true },
+                        label = { Text("Game name") },
+                        singleLine = true,
+                        trailingIcon = {
+                            if (confirmNameField.isNotEmpty()) {
+                                IconButton(onClick = { confirmNameField = ""; confirmNameEdited = true }) {
+                                    Icon(Icons.Default.Close, contentDescription = "Clear")
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+
+                    Button(
+                        onClick = {
+                            val query = confirmNameField.trim()
+                            if (query.isEmpty() || confirmContainer == null) return@Button
+                            steamSearching = true
+                            steamSearchResults = emptyList()
+                            scope.launch(Dispatchers.IO) {
+                                val results = SteamStoreSearch.searchByName(query)
+                                withContext(Dispatchers.Main) {
+                                    steamSearchResults = results
+                                    steamSearching = false
+                                }
+                            }
+                        },
+                        enabled = !steamSearching && confirmNameField.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        if (steamSearching) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Searching…")
+                        } else {
+                            Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Search Steam")
+                        }
+                    }
+
+                    if (steamSearchResults.isNotEmpty()) {
+                        Text(
+                            "Tap a result to set the name + cover art:",
+                            color = OnSurfaceVariant,
+                            fontSize = 12.sp,
+                        )
+                        steamSearchResults.forEach { hit ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        // Set name + record appId; edit-guard off so the async
+                                        // auto-rename won't clobber the user's explicit pick.
+                                        confirmNameField = hit.name
+                                        confirmNameEdited = true
+                                        confirmAppId = hit.appId
+                                        // Apply this appId's cover art to the current on-disk shortcut.
+                                        if (confirmContainer != null) {
+                                            val base = renameDialogName
+                                            scope.launch(Dispatchers.IO) {
+                                                val bmp = applySteamCover(confirmContainer, base, hit.appId)
+                                                if (bmp != null) withContext(Dispatchers.Main) {
+                                                    vm.reloadShortcut(
+                                                        File(confirmContainer.getDesktopDir(), "$base.desktop").path,
+                                                        bmp,
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                    .padding(vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                SteamResultThumbnail(hit.appId)
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(hit.name, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text("App ID: ${hit.appId}", fontSize = 11.sp, color = OnSurfaceVariant)
+                                }
+                            }
+                        }
+                    } else if (!steamSearching) {
+                        Text(
+                            "Not the right game? Edit the name and tap Search Steam to pick the correct one.",
+                            color = OnSurfaceVariant,
+                            fontSize = 12.sp,
+                        )
+                    }
+                }
             },
             confirmButton = {
                 TextButton(onClick = {
-                    val name = newName.trim()
+                    val name = confirmNameField.trim()
+                    // Record the confirmed appId on the current file first, so it rides through the rename.
+                    confirmAppId?.let { id ->
+                        confirmContainer?.let { c -> recordSteamAppId(c, renameDialogName, id) }
+                    }
                     if (name.isNotEmpty()) {
                         vm.renameImportedShortcut(renameDialogContainerIndex, renameDialogName, name)
                     }
@@ -5089,6 +5215,85 @@ private fun ScAdvancedTab(
 // ─────────────────────────────────────────────────────────────────────────────
 // Non-composable helpers
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Small portrait thumbnail for a Steam search result: loads the 600x900 library cover via Coil,
+ * falling back to the landscape header when the portrait 404s, then to a plain placeholder box.
+ * Disk cache is disabled so Coil never serves a cached 404 for a since-published cover.
+ */
+@Composable
+private fun SteamResultThumbnail(appId: Int) {
+    val context = LocalContext.current
+    var useHeader by remember(appId) { mutableStateOf(false) }
+    val url = if (useHeader) SteamStoreSearch.headerUrl(appId) else SteamStoreSearch.coverUrl(appId)
+    val request = remember(url) {
+        ImageRequest.Builder(context)
+            .data(url)
+            .diskCachePolicy(CachePolicy.DISABLED)
+            .memoryCachePolicy(CachePolicy.ENABLED)
+            .build()
+    }
+    SubcomposeAsyncImage(
+        model = request,
+        contentDescription = null,
+        contentScale = ContentScale.Crop,
+        modifier = Modifier
+            .size(width = 34.dp, height = 50.dp)
+            .clip(RoundedCornerShape(4.dp)),
+        loading = {
+            Box(Modifier.fillMaxSize().background(OnSurfaceVariant.copy(alpha = 0.1f)))
+        },
+        error = {
+            if (!useHeader) useHeader = true
+            else Box(Modifier.fillMaxSize().background(OnSurfaceVariant.copy(alpha = 0.15f)))
+        },
+    )
+}
+
+/** Record the resolved Steam [appId] as a shortcut extra (rides with the .desktop through renames). */
+private fun recordSteamAppId(container: Container, base: String, appId: Int) {
+    val f = File(container.getDesktopDir(), "$base.desktop")
+    if (!f.isFile) return
+    runCatching { Shortcut(container, f).apply { putExtra("steamAppId", appId.toString()); saveData() } }
+}
+
+/** Best-effort blocking image download (call off the main thread). Null on any failure. */
+private fun downloadBitmapOrNull(url: String): Bitmap? = try {
+    val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+    conn.connectTimeout = 15000
+    conn.readTimeout = 20000
+    conn.setRequestProperty("User-Agent", "Mozilla/5.0")
+    val bmp = if (conn.responseCode in 200..299) BitmapFactory.decodeStream(conn.inputStream) else null
+    conn.disconnect()
+    bmp
+} catch (_: Exception) { null }
+
+/**
+ * Apply the Steam [appId] to the shortcut named [base] in [container]: records the appId as a
+ * shortcut extra (seeds later redist detection; it rides with the .desktop through any rename) and
+ * sets its cover art — Steam CDN 600x900 portrait, falling back to the landscape header. Writes
+ * both customCoverArt and the grid-tile icon PNG (keyed on the current base). Returns the bitmap or null.
+ */
+private fun applySteamCover(container: Container, base: String, appId: Int): Bitmap? {
+    val shortcutFile = File(container.getDesktopDir(), "$base.desktop")
+    if (!shortcutFile.isFile) return null
+    val bmp = downloadBitmapOrNull(SteamStoreSearch.coverUrl(appId))
+        ?: downloadBitmapOrNull(SteamStoreSearch.headerUrl(appId))
+    return try {
+        val shortcut = Shortcut(container, shortcutFile)
+        shortcut.putExtra("steamAppId", appId.toString())
+        if (bmp != null) {
+            shortcut.saveCustomCoverArt(bmp) // persists cover + saveData() (writes the extra too)
+            container.getIconsDir(64)?.let { iconsDir ->
+                if (!iconsDir.exists()) iconsDir.mkdirs()
+                FileUtils.saveBitmapToFile(bmp, File(iconsDir, "$base.png"))
+            }
+        } else {
+            shortcut.saveData() // no art, but still persist the recorded appId
+        }
+        bmp
+    } catch (_: Exception) { null }
+}
 
 private fun renameShortcut(shortcut: Shortcut, newName: String) {
     val parent = shortcut.file.parentFile ?: return

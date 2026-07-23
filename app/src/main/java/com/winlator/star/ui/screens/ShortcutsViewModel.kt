@@ -57,9 +57,15 @@ import java.util.Collections
 enum class ShortcutSortOrder { NAME_ASC, NAME_DESC, CONTAINER }
 
 sealed class ImportResult {
-    data class Success(val shortcutName: String) : ImportResult()
+    /** [appId] = the Steam appId identified on disk (if any), so the confirm dialog can seed
+     *  its "Search Steam" box and apply the right cover art. */
+    data class Success(val shortcutName: String, val appId: Int? = null) : ImportResult()
     data class Error(val message: String) : ImportResult()
 }
+
+/** An asynchronous auto-rename applied by the importer's background thread (Steam name upgrade),
+ *  surfaced so an open confirm/rename dialog can keep its Save target and pre-filled name in sync. */
+data class ImportedNameUpdate(val oldBase: String, val newBase: String)
 
 /**
  * Result of matching a shortcut against the community-config index. [match] is null when nothing
@@ -133,6 +139,13 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs = app.getSharedPreferences("shortcuts_prefs", Context.MODE_PRIVATE)
 
     private val _shortcuts = MutableStateFlow<List<Shortcut>>(emptyList())
+
+    // Emitted when the importer's background thread upgrades a shortcut's name to Steam's
+    // authoritative title. The Shortcuts screen observes this to follow the rename in an open
+    // confirm dialog. One-shot: consumed via [consumeImportedNameUpdate].
+    private val _importedNameUpdate = MutableStateFlow<ImportedNameUpdate?>(null)
+    val importedNameUpdate: StateFlow<ImportedNameUpdate?> = _importedNameUpdate
+    fun consumeImportedNameUpdate() { _importedNameUpdate.value = null }
 
     private val _sortOrder = MutableStateFlow(
         ShortcutSortOrder.entries[
@@ -910,9 +923,16 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
             // thread and calls back via onCoverArtReady once the icon lands.
             val shortcutFile = ExeShortcutImporter.addToShortcuts(
                 context, container, exeFile, displayName, identity.appId,
-            ) { refresh() }
+                onCoverArtReady = { refresh() },
+                onNameResolved = { newBase ->
+                    // Background thread upgraded the name to Steam's authoritative title; publish
+                    // it so an open confirm dialog follows the on-disk rename. Fires on the main thread.
+                    _importedNameUpdate.value = ImportedNameUpdate(shortcutFile.nameWithoutExtension, newBase)
+                    refresh()
+                },
+            )
             refresh()
-            ImportResult.Success(shortcutFile.nameWithoutExtension)
+            ImportResult.Success(shortcutFile.nameWithoutExtension, identity.appId)
         } catch (e: IOException) {
             Log.e(TAG, "Failed to write EXE shortcut", e)
             ImportResult.Error("Failed to write shortcut: ${e.message ?: e.javaClass.simpleName}")
@@ -1012,17 +1032,14 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
     fun containers() = liveContainers()
 
     fun renameImportedShortcut(containerIndex: Int, oldName: String, newName: String) {
-        if (oldName == newName || newName.isBlank()) return
+        val safe = newName.replace(Regex("""[\\/:*?"<>|]"""), "_").trim()
+        if (oldName == safe || safe.isBlank()) return
         val containers = liveContainers()
         if (containerIndex < 0 || containerIndex >= containers.size) return
-        val container = containers[containerIndex]
-        val desktopDir = container.getDesktopDir()
-        val oldFile = File(desktopDir, "$oldName.desktop")
-        val newFile = File(desktopDir, "$newName.desktop")
-        if (oldFile.isFile && !newFile.isFile && oldFile.renameTo(newFile)) {
-            val oldLnk = File(desktopDir, "$oldName.lnk")
-            val newLnk = File(desktopDir, "$newName.lnk")
-            if (oldLnk.isFile) oldLnk.renameTo(newLnk)
+        // Robust rename (moves .desktop/.lnk + icon PNGs + cover-art PNG, rewrites Icon= and
+        // customCoverArtPath) so a renamed import keeps its scraped art. Shared with the importer's
+        // auto-rename via ExeShortcutImporter.renameShortcutFiles so the two never drift.
+        if (ExeShortcutImporter.renameShortcutFiles(containers[containerIndex], oldName, safe)) {
             refresh()
         }
     }

@@ -67,13 +67,26 @@ Stage APK, install, add: (a) Goldberg game w/ `steam_appid.txt`, (b) GOG game, (
 - Curation table (redist → component id) authored once; small/static/editable.
 - mono/gecko are prefix-level, NOT per-game → never in the per-game recommend list.
 
-### Phase 1.3 — device gate (auto-name + auto-art) — 🟡 IN PROGRESS
+### Phase 1.3 — device gate (auto-name + auto-art) — 🟡 IN PROGRESS (test #1 ✅ PASS)
 - Test 1 (God of War, FLT crack, `/storage/emulated/0/Winlator/Games/GodOfWar/GoW.exe`): shortcut named **"GoW"**, **no cover art**. Root-caused (all local/main-thread-safe):
   1. appid lived in **`flt.ini`** (`[GameSettings] AppId=1593500`) — emu-ini reader didn't check it → **FIX: read flt.ini + broad `*.ini` scan.**
   2. no appId→name resolution (network) — deferred; not needed for this game.
   3. `bestName` preferred ProductName ("GoW") over FileDescription ("God of War") — **FIX: prefer FileDescription when ProductName is a spaceless abbreviation.** (PE parser itself verified correct via python port.)
 - Note: the app already shows a **"Rename Shortcut" (Skip/Save)** dialog on import, pre-filled with our name → 1.2c editable-confirm is effectively already shipped.
 - After fixes, GoW should resolve name "God of War" (PE FileDescription) + art via SGDB-by-appid 1593500, no network.
+
+### Device test findings (2026-07-23)
+- ✅ **God of War** — name + art correct after flt.ini + bestName fixes.
+- 🟡 **Dark Souls Remastered** — art correct; name was "DARK SOULS_ REMASTERED" (PE ProductName has a colon → shortcut writer sanitizes ':'→'_' since display name = .desktop filename). FIXED by name normalization (':'→' - ', strip ™).
+- 🟡 **GTA IV** — art correct (appId 12210 from `Play - GTA IV.ini` ColdClientLoader); name "GSE" (user picked the launcher exe, PE ProductName = "GSE"). The ini even has `Exe=.\Game\...\GTAIV.exe` (real exe) — a signal we could follow.
+- 🟡 **GTA V Enhanced** — user picked `PlayGTAV.exe` (Rockstar launcher) → name "Rockstar Games Launcher", art = Rockstar logo (wrong). No appId (not Steam-cracked). Real exe `GTA5_Enhanced.exe` sits alongside. Folder has BattlEye/D3D12-REDIST/Redistributables (→ Pillar 2 fodder).
+- **Root pattern:** users pick LAUNCHER exes; launcher metadata ≠ game. Pure auto-detection can't win this.
+
+## PILLAR 1.5 — Steam-powered naming + Search-Steam picker — 🟡 IN PROGRESS (user-directed 2026-07-23)
+Decision: use Steam's own store API (port from user's BannersComponentInjector `SteamRepository`): `storesearch` (name→[{appId,name}]), Steam CDN `library_600x900.jpg` (cover by appId), `appdetails` (name by appId). Chosen UX = **both**: Phase A dialog now, Phase B full Edit screen later.
+- **Phase A (building, android-app-engineer):** (1) Steam store helper; (2) auto path — appId → authoritative Steam name+art, beats launcher PE names, off-main-thread with rename-race guard; (3) upgrade the existing "Rename Shortcut" dialog into a "Confirm game" dialog w/ editable name + Search Steam button + tap-a-result list (cover+name+appId) that auto-fills name+art+appId.
+- **Phase B (later):** full "Edit Game" screen from shortcut settings (name, Search Steam, cover, App-ID link/unlink, genres) — ported from injector `GameEditSheet`.
+- Bonus: the picked appId also feeds Pillar 2 (component detection).
 
 ## Changelog
 - 2026-07-23 — Branch cut off `main` (`ade2cb05`). Phase 1.1 code + tests. Phase 1.2a/b importer wiring. Phase 1.3 device test #1 (God of War) → 2 fixes (flt.ini reader, bestName heuristic) + regression tests. Rebuild held for compile-review agent.
