@@ -103,6 +103,24 @@ class InputControlsFormatTest {
         assertEquals(0.9f, ControlElement.calculateAspectFitScale(100, 200, 180f, 180f))
         assertEquals(0.5f, ControlElement.calculateAspectFitScale(200, 100, 300f, 50f))
         assertEquals(0f, ControlElement.calculateAspectFitScale(0, 100, 180f, 180f))
+        val extremeScale = ControlElement.calculateAspectFitScale(2048, 1, 10f, 10f)
+        assertTrue(extremeScale > 0f)
+        assertTrue(extremeScale < 1f)
+    }
+
+    @Test
+    fun customIconOpacity_usesVisualStyleAndClampsInputs() {
+        assertEquals(64, ControlElement.calculateCustomIconAlpha(VisualStyle.ORIGINAL, 0.9f, 64))
+        assertEquals(128, ControlElement.calculateCustomIconAlpha(VisualStyle.GAMEHUB, 0.5f, 64))
+        assertEquals(0, ControlElement.calculateCustomIconAlpha(VisualStyle.GAMEHUB, -1f, 64))
+        assertEquals(255, ControlElement.calculateCustomIconAlpha(VisualStyle.GAMEHUB, 2f, 64))
+    }
+
+    @Test
+    fun imageAsButton_skipsStandardRenderingOnlyAfterSuccessfulDraw() {
+        assertTrue(ControlElement.shouldSkipStandardButtonRendering(true, true))
+        assertFalse(ControlElement.shouldSkipStandardButtonRendering(true, false))
+        assertFalse(ControlElement.shouldSkipStandardButtonRendering(false, true))
     }
 
     @Test
