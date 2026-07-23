@@ -100,9 +100,15 @@ public class ControlElement {
     private boolean[] blockTouchscreenMouseButtons = {true, true, true, true};
     private boolean holdKeyActive;
     private final Path path = new Path();
+    private final Rect iconSourceRect = new Rect();
+    private final Rect iconDestinationRect = new Rect();
+    private PorterDuffColorFilter iconColorFilter;
+    private int iconColorFilterColor;
     private boolean boundingBoxNeedsUpdate = true;
     private String text = "";
     private short iconId;
+    private boolean customIconTintEnabled = true;
+    private boolean customIconAsButton;
     private Range range;
     private byte orientation;
     private PointF currentPosition;
@@ -247,6 +253,8 @@ public class ControlElement {
 
         text = "";
         iconId = 0;
+        customIconTintEnabled = true;
+        customIconAsButton = false;
         range = null;
         boundingBoxNeedsUpdate = true;
     }
@@ -646,6 +654,34 @@ public class ControlElement {
         this.iconId = (short)Math.max(0, Math.min(255, normalizedId));
     }
 
+    public boolean isCustomIconTintEnabled() {
+        return customIconTintEnabled;
+    }
+
+    public void setCustomIconTintEnabled(boolean enabled) {
+        customIconTintEnabled = enabled;
+    }
+
+    public boolean isCustomIconAsButton() {
+        return customIconAsButton;
+    }
+
+    public void setCustomIconAsButton(boolean enabled) {
+        customIconAsButton = enabled;
+    }
+
+    void loadCustomIconOptions(JSONObject elementJSONObject) throws JSONException {
+        customIconTintEnabled = !elementJSONObject.has("customIconTintEnabled")
+                || elementJSONObject.getBoolean("customIconTintEnabled");
+        customIconAsButton = elementJSONObject.has("customIconAsButton")
+                && elementJSONObject.getBoolean("customIconAsButton");
+    }
+
+    void writeCustomIconOptions(JSONObject elementJSONObject) throws JSONException {
+        elementJSONObject.put("customIconTintEnabled", customIconTintEnabled);
+        elementJSONObject.put("customIconAsButton", customIconAsButton);
+    }
+
     private static float clampFinite(float value, float min, float max, float fallback) {
         return Float.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
     }
@@ -812,6 +848,12 @@ public class ControlElement {
                 boolean pressed = type == Type.EXPANDABLE_BUTTON ? expanded : states[0];
                 int activeColor = pressed ? inputControlsView.getAccentBrightColor() : inputControlsView.getAccentColor();
 
+                if (shouldDrawCustomIconAsButton()) {
+                    drawIcon(canvas, cx, cy, boundingBox.width(), boundingBox.height(), iconId, true);
+                    paint.setColor(oldColor);
+                    break;
+                }
+
                 if (isL3R3) {
                     // Render L3/R3 like joystick circles
                     float radius = boundingBox.width() * 0.5f;
@@ -824,7 +866,7 @@ public class ControlElement {
                     canvas.drawCircle(cx, cy, radius, paint);
 
                     if (iconId > 0) {
-                        drawIcon(canvas, cx, cy, boundingBox.width(), boundingBox.height(), iconId);
+                        drawIcon(canvas, cx, cy, boundingBox.width(), boundingBox.height(), iconId, false);
                     } else {
                         String text = getDisplayText();
                         paint.setTextSize(Math.min(getTextSizeForWidth(paint, text, boundingBox.width() - strokeWidth * 2), snappingSize * 2 * scale));
@@ -876,7 +918,7 @@ public class ControlElement {
 
                 // Text/Icon - glow blue when pressed
                 if (iconId > 0) {
-                    drawIcon(canvas, cx, cy, boundingBox.width(), boundingBox.height(), iconId);
+                    drawIcon(canvas, cx, cy, boundingBox.width(), boundingBox.height(), iconId, false);
                 }
                 else {
                     String text = getDisplayText();
@@ -1356,6 +1398,12 @@ public class ControlElement {
                 GameHubLayout.RenderShape triggerShape = gameHubTriggerShape();
                 boolean isTrigger = triggerShape != null;
 
+                if (shouldDrawCustomIconAsButton()) {
+                    paint.setAlpha(textAlpha);
+                    drawIcon(canvas, cx, cy, boundingBox.width(), boundingBox.height(), iconId, true);
+                    break;
+                }
+
                 if (isTrigger) {
                     GameHubLayout.buildTriggerPath(
                             path, triggerShape,
@@ -1387,7 +1435,7 @@ public class ControlElement {
                 }
 
                 if (iconId > 0) {
-                    drawIcon(canvas, cx, cy, boundingBox.width(), boundingBox.height(), iconId);
+                    drawIcon(canvas, cx, cy, boundingBox.width(), boundingBox.height(), iconId, false);
                 } else {
                     String label = getDisplayText();
                     paint.setStyle(Paint.Style.FILL);
@@ -1879,20 +1927,58 @@ public class ControlElement {
         inputControlsView.setVisualStyle(saved);
     }
 
-    private void drawIcon(Canvas canvas, float cx, float cy, float width, float height, int iconId) {
+    private boolean shouldDrawCustomIconAsButton() {
+        return customIconAsButton
+                && iconId >= CustomIconManager.CUSTOM_ICON_ID_OFFSET
+                && (type == Type.BUTTON || type == Type.EXPANDABLE_BUTTON);
+    }
+
+    static float calculateAspectFitScale(
+            int sourceWidth, int sourceHeight, float availableWidth, float availableHeight) {
+        if (sourceWidth <= 0 || sourceHeight <= 0 || availableWidth <= 0 || availableHeight <= 0) return 0;
+        return Math.min(availableWidth / sourceWidth, availableHeight / sourceHeight);
+    }
+
+    private void drawIcon(
+            Canvas canvas, float cx, float cy, float width, float height, int iconId, boolean fitBoundingBox) {
         Bitmap icon = inputControlsView.getIcon(iconId);
         if (icon == null) return;
 
         Paint paint = inputControlsView.getPaint();
         boolean pressed = type == Type.BUTTON && states[0];
-        // Imported images are control glyphs too, so use their alpha as the accent mask.
-        paint.setColorFilter(new PorterDuffColorFilter(pressed ? inputControlsView.getAccentBrightColor() : inputControlsView.getAccentColor(), PorterDuff.Mode.SRC_IN));
-        int margin = (int)(inputControlsView.getSnappingSize() * (shape == Shape.CIRCLE || shape == Shape.SQUARE ? 2.0f : 1.0f) * scale);
-        int halfSize = (int)((Math.min(width, height) - margin) * 0.5f);
+        boolean tintIcon = iconId < CustomIconManager.CUSTOM_ICON_ID_OFFSET || customIconTintEnabled;
+        if (tintIcon) {
+            int tintColor = pressed ? inputControlsView.getAccentBrightColor() : inputControlsView.getAccentColor();
+            if (iconColorFilter == null || iconColorFilterColor != tintColor) {
+                iconColorFilter = new PorterDuffColorFilter(tintColor, PorterDuff.Mode.SRC_IN);
+                iconColorFilterColor = tintColor;
+            }
+            paint.setColorFilter(iconColorFilter);
+        }
+        else paint.setColorFilter(null);
 
-        Rect srcRect = new Rect(0, 0, icon.getWidth(), icon.getHeight());
-        Rect dstRect = new Rect((int)(cx - halfSize), (int)(cy - halfSize), (int)(cx + halfSize), (int)(cy + halfSize));
-        canvas.drawBitmap(icon, srcRect, dstRect, paint);
+        iconSourceRect.set(0, 0, icon.getWidth(), icon.getHeight());
+        if (fitBoundingBox) {
+            paint.clearShadowLayer();
+            paint.setShader(null);
+            float padding = Math.max(1f, inputControlsView.getSnappingSize() * 0.5f * scale);
+            float fitScale = calculateAspectFitScale(
+                    icon.getWidth(), icon.getHeight(), width - padding * 2, height - padding * 2);
+            float halfWidth = icon.getWidth() * fitScale * 0.5f;
+            float halfHeight = icon.getHeight() * fitScale * 0.5f;
+            iconDestinationRect.set(
+                    Math.round(cx - halfWidth), Math.round(cy - halfHeight),
+                    Math.round(cx + halfWidth), Math.round(cy + halfHeight));
+        }
+        else {
+            int margin = (int)(inputControlsView.getSnappingSize()
+                    * (shape == Shape.CIRCLE || shape == Shape.SQUARE ? 2.0f : 1.0f) * scale);
+            int halfSize = (int)((Math.min(width, height) - margin) * 0.5f);
+            iconDestinationRect.set(
+                    (int)(cx - halfSize), (int)(cy - halfSize),
+                    (int)(cx + halfSize), (int)(cy + halfSize));
+        }
+        canvas.drawBitmap(icon, iconSourceRect, iconDestinationRect, paint);
         paint.setColorFilter(null);
     }
 
@@ -2173,6 +2259,7 @@ public class ControlElement {
             elementJSONObject.put("toggleSwitch", toggleSwitch);
             elementJSONObject.put("text", text);
             elementJSONObject.put("iconId", iconId);
+            writeCustomIconOptions(elementJSONObject);
 
             if (type == Type.RANGE_BUTTON && range != null) {
                 elementJSONObject.put("range", range.name());
@@ -2269,7 +2356,8 @@ public class ControlElement {
                 "gridMultitouchEnabled", "combos", "holdKey",
                 "blockTouchscreenMouseButtons",
                 "expandableChildCount", "expandableLayout", "expandableDirection",
-                "customAreaAppearanceEnabled", "customAreaColor", "customAreaOpacity"
+                "customAreaAppearanceEnabled", "customAreaColor", "customAreaOpacity",
+                "customIconTintEnabled", "customIconAsButton"
         };
         for (String key : optionalKeys) elementJSONObject.remove(key);
         return elementJSONObject;

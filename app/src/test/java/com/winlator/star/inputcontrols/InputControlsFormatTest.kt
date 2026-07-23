@@ -49,6 +49,8 @@ class InputControlsFormatTest {
             .put("gridSpacing", 0.5)
             .put("gridMultitouchEnabled", true)
             .put("blockTouchscreenMouseButtons", JSONArray().put(false))
+            .put("customIconTintEnabled", false)
+            .put("customIconAsButton", true)
             .put("forkField", "keep")
 
         val copy = ControlElement.copyForSerialization(source)
@@ -66,7 +68,41 @@ class InputControlsFormatTest {
         assertFalse(copy.has("gridSpacing"))
         assertFalse(copy.has("gridMultitouchEnabled"))
         assertFalse(copy.has("blockTouchscreenMouseButtons"))
+        assertFalse(copy.has("customIconTintEnabled"))
+        assertFalse(copy.has("customIconAsButton"))
         assertEquals("keep", copy.getString("forkField"))
+    }
+
+    @Test
+    fun customIconOptions_useBackwardCompatibleDefaultsAndPersistSetters() {
+        val element = ControlElement(null)
+        assertTrue(element.isCustomIconTintEnabled)
+        assertFalse(element.isCustomIconAsButton)
+
+        element.loadCustomIconOptions(JSONObject())
+        assertTrue(element.isCustomIconTintEnabled)
+        assertFalse(element.isCustomIconAsButton)
+
+        element.setCustomIconTintEnabled(false)
+        element.setCustomIconAsButton(true)
+        val serialized = JSONObject()
+        element.writeCustomIconOptions(serialized)
+
+        assertFalse(serialized.getBoolean("customIconTintEnabled"))
+        assertTrue(serialized.getBoolean("customIconAsButton"))
+
+        val reloaded = ControlElement(null)
+        reloaded.loadCustomIconOptions(serialized)
+        assertFalse(reloaded.isCustomIconTintEnabled)
+        assertTrue(reloaded.isCustomIconAsButton)
+    }
+
+    @Test
+    fun customIconAspectFit_preservesSourceProportions() {
+        assertEquals(0.9f, ControlElement.calculateAspectFitScale(200, 100, 180f, 180f))
+        assertEquals(0.9f, ControlElement.calculateAspectFitScale(100, 200, 180f, 180f))
+        assertEquals(0.5f, ControlElement.calculateAspectFitScale(200, 100, 300f, 50f))
+        assertEquals(0f, ControlElement.calculateAspectFitScale(0, 100, 180f, 180f))
     }
 
     @Test
@@ -197,6 +233,16 @@ class InputControlsFormatTest {
         val profile = JSONObject().put("name", "Test").put("elements", JSONArray().put(validElement))
 
         assertTrue(InputControlsManager.isValidImportedProfile(profile))
+        validElement
+            .put("customIconTintEnabled", false)
+            .put("customIconAsButton", true)
+        assertTrue(InputControlsManager.isValidImportedProfile(profile))
+        validElement.put("customIconTintEnabled", "false")
+        assertFalse(InputControlsManager.isValidImportedProfile(profile))
+        validElement.put("customIconTintEnabled", false).put("customIconAsButton", 1)
+        assertFalse(InputControlsManager.isValidImportedProfile(profile))
+        validElement.remove("customIconTintEnabled")
+        validElement.remove("customIconAsButton")
         validElement.put("blockTouchscreenMouseButtons", JSONArray().put(true))
         assertTrue(InputControlsManager.isValidImportedProfile(profile))
         validElement.put("blockTouchscreenMouseButtons", JSONArray().put("true"))

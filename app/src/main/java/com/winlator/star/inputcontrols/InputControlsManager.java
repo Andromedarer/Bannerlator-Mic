@@ -519,6 +519,10 @@ public class InputControlsManager {
         }
         if (element.has("gridMultitouchEnabled")
                 && !(element.opt("gridMultitouchEnabled") instanceof Boolean)) return false;
+        if (element.has("customIconTintEnabled")
+                && !(element.opt("customIconTintEnabled") instanceof Boolean)) return false;
+        if (element.has("customIconAsButton")
+                && !(element.opt("customIconAsButton") instanceof Boolean)) return false;
         String[] optionalNumbers = {"deadZone", "mouseSensitivity", "customAreaOpacity", "gridSpacing",
                 "areaWidthRatio", "areaHeightRatio", "stickRadiusRatio"};
         for (String key : optionalNumbers) {

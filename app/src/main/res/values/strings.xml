@@ -124,6 +124,8 @@
     <string name="grid_spacing">Button spacing</string>
     <string name="grid_multitouch">Multitouch</string>
     <string name="custom_icons">Custom Icons</string>
+    <string name="tint_custom_icon">Tint custom icon with accent</string>
+    <string name="use_custom_icon_as_button">Use custom icon as button</string>
     <string name="icon_content_description">Icon %1$d</string>
     <string name="clear">Clear</string>
     <string name="no_items_to_display_saves">Register a save file directory from one of your containers to get started!</string>

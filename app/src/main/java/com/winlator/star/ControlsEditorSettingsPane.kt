@@ -182,6 +182,8 @@ fun ControlsEditorSettingsPane(
     var toggleSwitch by remember { mutableStateOf(element.isToggleSwitch()) }
     var customText by remember { mutableStateOf(element.getText()) }
     var selectedIconId by remember { mutableStateOf(element.getIconId().toInt() and 0xFF) }
+    var customIconTintEnabled by remember { mutableStateOf(element.isCustomIconTintEnabled()) }
+    var customIconAsButton by remember { mutableStateOf(element.isCustomIconAsButton()) }
     var bindingCount by remember { mutableStateOf(element.getBindingCount().coerceAtLeast(1)) }
     var groupId by remember { mutableStateOf(element.groupId ?: "") }
     var showCreateGroupDialog by remember { mutableStateOf(false) }
@@ -287,6 +289,8 @@ fun ControlsEditorSettingsPane(
         toggleSwitch = element.isToggleSwitch()
         customText = element.getText()
         selectedIconId = element.getIconId().toInt() and 0xFF
+        customIconTintEnabled = element.isCustomIconTintEnabled()
+        customIconAsButton = element.isCustomIconAsButton()
         bindingCount = element.getBindingCount().coerceAtLeast(1)
         expandableChildCount = element.getExpandableChildCount().coerceAtLeast(1)
         expandableLayoutIndex = element.getExpandableLayout().ordinal
@@ -886,6 +890,26 @@ fun ControlsEditorSettingsPane(
                     onSelected = { id ->
                         selectedIconId = id
                         element.setIconId(id)
+                        saveAndInvalidate()
+                    },
+                )
+                SettingSwitch(
+                    label = stringResource(R.string.tint_custom_icon),
+                    checked = customIconTintEnabled,
+                    visible = selectedIconId >= CustomIconManager.CUSTOM_ICON_ID_OFFSET,
+                    onCheckedChange = { checked ->
+                        customIconTintEnabled = checked
+                        element.setCustomIconTintEnabled(checked)
+                        saveAndInvalidate()
+                    },
+                )
+                SettingSwitch(
+                    label = stringResource(R.string.use_custom_icon_as_button),
+                    checked = customIconAsButton,
+                    visible = selectedIconId >= CustomIconManager.CUSTOM_ICON_ID_OFFSET,
+                    onCheckedChange = { checked ->
+                        customIconAsButton = checked
+                        element.setCustomIconAsButton(checked)
                         saveAndInvalidate()
                     },
                 )
