@@ -57,8 +57,9 @@ object GameIdentifier {
         val acf = resolveSteamManifest(exeFile, dirs)
         // GOG: goggame-<id>.info JSON with the real title.
         val gog = dirs.firstNotNullOfOrNull { readGogInfo(it) }
-        // PE ProductName / FileDescription.
-        val peName = PeVersionInfo.bestName(PeVersionInfo.read(exeFile))
+        // PE ProductName / FileDescription — but not when it merely names a launcher/loader
+        // ("Rockstar Games Launcher Redirector", "GSE", …), which must not become the game name.
+        val peName = PeVersionInfo.bestName(PeVersionInfo.read(exeFile))?.takeUnless { isJunkPeName(it) }
 
         val appId = acf?.appId ?: steamAppId ?: emuAppId
 
@@ -217,20 +218,57 @@ object GameIdentifier {
     private val REPACK_TOKENS = setOf(
         "fitgirl", "dodi", "codex", "plaza", "skidrow", "rune", "empress", "flt", "tenoke",
         "reloaded", "elamigos", "razor1911", "hoodlum", "gog", "repack", "multi", "goldberg",
+        // repack/site tags that show up in folder names
+        "ankergames", "steamrip", "onlinefix", "online-fix", "gload", "fitgirlrepacks",
     )
     private val EXE_SUFFIX_RE = Regex("""(?i)[-_. ]*(win64|win32|shipping|wingdk|client|launcher|game|x64|x86|64bit|32bit)""")
     private val VERSION_TOKEN_RE = Regex("""(?i)\b(v?\d+([._]\d+)+|build[-_ ]?\d+|update[-_ ]?\d+)\b""")
 
     /**
-     * Prefer the game's install-folder name (usually the real title) over the exe basename
-     * when the exe looks like a UE-style shipping binary; then strip repack/suffix noise.
+     * True when an exe basename is a launcher/loader rather than the game — its parent folder is the
+     * better title. Catches "PlayGTAV"/"Play - GTA IV"/"LaunchGame"/"MyLauncher"/"GSE" but NOT a real
+     * title that merely starts with those letters ("PlayerUnknown"). A "play|launch|start|run" prefix
+     * counts only when it's a whole token — followed by a separator or a camelCase uppercase boundary,
+     * not another lowercase letter (checked case-sensitively, so it survives the case-insensitive JUNK
+     * matching used elsewhere).
+     */
+    private fun isLauncherExe(base: String): Boolean {
+        val lower = base.lowercase()
+        if (lower == "gse" || lower.endsWith("launcher") || lower.endsWith("redirector")) return true
+        for (p in arrayOf("play", "launch", "start", "run")) {
+            if (!lower.startsWith(p)) continue
+            val rest = base.substring(p.length)
+            if (rest.isEmpty()) return true                         // exactly "Play"
+            val c = rest[0]
+            if (!c.isLetterOrDigit() || c.isUpperCase()) return true // "Play - GTA IV" / camelCase "PlayGTAV"
+            // lowercase continuation ("Player…") → part of a longer word, not a launcher
+        }
+        return false
+    }
+
+    /** A PE ProductName/FileDescription that describes a launcher/loader, not the game — reject it so it
+     *  doesn't become the shortcut name (e.g. "Rockstar Games Launcher Redirector", "GSE", "Steam"). */
+    private val JUNK_NAME_RE = Regex(
+        """(?i)^(gse|steam|steam client|goldberg.*|launcher|game|play|start|setup|.* launcher.*|.*launcher redirector|.* redirector|rockstar games launcher.*|epic games launcher|smartsteamemu|coldclient.*|steamemu.*)$"""
+    )
+
+    /** True when a PE name is a launcher/loader label rather than a real game title. */
+    fun isJunkPeName(name: String): Boolean {
+        val n = name.trim()
+        return n.isEmpty() || JUNK_NAME_RE.matches(n)
+    }
+
+    /**
+     * Prefer the game's install-folder name (usually the real title) over the exe basename when the
+     * exe is a UE-style shipping binary OR a launcher/loader; then strip repack/suffix noise.
      */
     private fun cleanedFallbackName(exeFile: File): String? {
         val exeBase = exeFile.nameWithoutExtension
-        val looksLikeEngineBinary = EXE_SUFFIX_RE.containsMatchIn(exeBase) ||
-            exeBase.equals("game", true) || exeBase.equals("launcher", true) || exeBase.equals("start", true)
+        val preferFolder = EXE_SUFFIX_RE.containsMatchIn(exeBase) ||
+            isLauncherExe(exeBase) ||
+            exeBase.equals("game", true) || exeBase.equals("start", true)
         val folder = exeFile.absoluteFile.parentFile?.name
-        val raw = if (looksLikeEngineBinary && !folder.isNullOrBlank()) folder else exeBase
+        val raw = if (preferFolder && !folder.isNullOrBlank()) folder else exeBase
         return cleanName(raw)
     }
 

@@ -1,6 +1,7 @@
 package com.winlator.star.core
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -163,6 +164,41 @@ class GameIdentifierTest {
         val d3 = tmp.newFolder("ds3")
         File(d3, "goggame-3.info").writeText("""{"name":"DARK SOULS(TM): REMASTERED"}""")
         assertEquals("DARK SOULS - REMASTERED", GameIdentifier.identify(exeIn(d3)).name)
+    }
+
+    @Test
+    fun launcherExe_prefersFolderName_overLauncher() {
+        // GTA V Enhanced: user picks the Rockstar launcher PlayGTAV.exe (no Steam id, PE = junk on
+        // a real exe). Fallback must use the folder title, not "PlayGTAV".
+        val dir = tmp.newFolder("Grand Theft Auto V Enhanced")
+        val id = GameIdentifier.identify(exeIn(dir, "PlayGTAV.exe"))
+        assertEquals("Grand Theft Auto V Enhanced", id.name)
+        assertEquals(GameIdentifier.Source.FILENAME, id.source)
+    }
+
+    @Test
+    fun launcherExe_withSeparator_prefersFolder_andStripsSiteTag() {
+        val dir = tmp.newFolder("Grand-Theft-Auto-IV-AnkerGames")
+        val id = GameIdentifier.identify(exeIn(dir, "Play - GTA IV.exe"))
+        assertEquals("Grand Theft Auto IV", id.name) // "AnkerGames" site tag stripped
+    }
+
+    @Test
+    fun nonLauncherExe_startingWithPlay_keepsItsOwnName() {
+        // "PlayerUnknown" must NOT be treated as a launcher (would wrongly use the folder name).
+        val dir = tmp.newFolder("SomeInstallFolder")
+        val id = GameIdentifier.identify(exeIn(dir, "PlayerUnknown.exe"))
+        assertEquals("PlayerUnknown", id.name)
+    }
+
+    @Test
+    fun isJunkPeName_flagsLaunchersNotGames() {
+        for (junk in listOf("Rockstar Games Launcher Redirector", "GSE", "Steam", "Launcher", "Epic Games Launcher")) {
+            assertTrue("expected junk: $junk", GameIdentifier.isJunkPeName(junk))
+        }
+        for (real in listOf("God of War", "Grand Theft Auto V", "DARK SOULS: REMASTERED", "Hades")) {
+            assertFalse("expected real: $real", GameIdentifier.isJunkPeName(real))
+        }
     }
 
     @Test
