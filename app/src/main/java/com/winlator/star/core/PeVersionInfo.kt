@@ -33,14 +33,23 @@ object PeVersionInfo {
         null
     }
 
-    /** Best display name from a version map: ProductName, then FileDescription. Trimmed; null if neither is meaningful. */
+    /**
+     * Best display name from a version map. ProductName is usually the cleanest title, but is
+     * sometimes an internal abbreviation (e.g. God of War ships ProductName "GoW" while
+     * FileDescription is "God of War"). When ProductName is a single spaceless token and
+     * FileDescription is a normal multi-word title, prefer FileDescription. Trimmed; null if
+     * neither is meaningful.
+     */
     fun bestName(map: Map<String, String>?): String? {
         if (map == null) return null
-        for (k in arrayOf("ProductName", "FileDescription")) {
-            val v = map[k]?.trim()
-            if (!v.isNullOrEmpty()) return v
+        val product = map["ProductName"]?.trim()?.takeIf { it.isNotEmpty() }
+        val desc = map["FileDescription"]?.trim()?.takeIf { it.isNotEmpty() }
+        if (product != null && desc != null &&
+            !product.contains(' ') && desc.contains(' ') && desc.length <= 60
+        ) {
+            return desc
         }
-        return null
+        return product ?: desc
     }
 
     // ── locate the RT_VERSION resource blob (mirrors PeIconExtractor's navigation) ──

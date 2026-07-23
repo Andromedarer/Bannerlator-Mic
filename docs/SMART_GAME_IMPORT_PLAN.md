@@ -67,5 +67,13 @@ Stage APK, install, add: (a) Goldberg game w/ `steam_appid.txt`, (b) GOG game, (
 - Curation table (redist → component id) authored once; small/static/editable.
 - mono/gecko are prefix-level, NOT per-game → never in the per-game recommend list.
 
+### Phase 1.3 — device gate (auto-name + auto-art) — 🟡 IN PROGRESS
+- Test 1 (God of War, FLT crack, `/storage/emulated/0/Winlator/Games/GodOfWar/GoW.exe`): shortcut named **"GoW"**, **no cover art**. Root-caused (all local/main-thread-safe):
+  1. appid lived in **`flt.ini`** (`[GameSettings] AppId=1593500`) — emu-ini reader didn't check it → **FIX: read flt.ini + broad `*.ini` scan.**
+  2. no appId→name resolution (network) — deferred; not needed for this game.
+  3. `bestName` preferred ProductName ("GoW") over FileDescription ("God of War") — **FIX: prefer FileDescription when ProductName is a spaceless abbreviation.** (PE parser itself verified correct via python port.)
+- Note: the app already shows a **"Rename Shortcut" (Skip/Save)** dialog on import, pre-filled with our name → 1.2c editable-confirm is effectively already shipped.
+- After fixes, GoW should resolve name "God of War" (PE FileDescription) + art via SGDB-by-appid 1593500, no network.
+
 ## Changelog
-- 2026-07-23 — Branch cut off `main` (`ade2cb05`). Phase 1.1 code + tests written. Plan doc added.
+- 2026-07-23 — Branch cut off `main` (`ade2cb05`). Phase 1.1 code + tests. Phase 1.2a/b importer wiring. Phase 1.3 device test #1 (God of War) → 2 fixes (flt.ini reader, bestName heuristic) + regression tests. Rebuild held for compile-review agent.

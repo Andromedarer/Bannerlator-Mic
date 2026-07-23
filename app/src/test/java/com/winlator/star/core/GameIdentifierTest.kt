@@ -118,6 +118,39 @@ class GameIdentifierTest {
     }
 
     @Test
+    fun fltIni_gameSettingsAppId_isParsed() {
+        // Real God of War (FLT release) layout: flt.ini holds the appid under [GameSettings].
+        val dir = tmp.newFolder("GodOfWar")
+        File(dir, "flt.ini").writeText("[GameSettings]\nAppId=1593500\nUserName=X\nBuildId=7969425\n")
+        File(dir, "settings.ini").writeText("[Settings]\nVideoDevice=Wrapper\nMonitor=0\n") // no AppId -> ignored
+        val id = GameIdentifier.identify(exeIn(dir, "GoW.exe"))
+        assertEquals(1593500, id.appId)
+        assertEquals(GameIdentifier.Confidence.HIGH, id.confidence)
+    }
+
+    @Test
+    fun genericIni_withAppId_isFoundByBroadScan() {
+        val dir = tmp.newFolder("g")
+        File(dir, "whatever_crack.ini").writeText("[cfg]\nappid = 220\n")
+        assertEquals(220, GameIdentifier.identify(exeIn(dir)).appId)
+    }
+
+    @Test
+    fun bestName_prefersFileDescriptionWhenProductNameIsAbbreviation() {
+        // God of War ships ProductName "GoW" but FileDescription "God of War".
+        assertEquals(
+            "God of War",
+            PeVersionInfo.bestName(mapOf("ProductName" to "GoW", "FileDescription" to "God of War")),
+        )
+        // Normal case: ProductName is the full title -> keep it.
+        assertEquals(
+            "Cyberpunk 2077",
+            PeVersionInfo.bestName(mapOf("ProductName" to "Cyberpunk 2077", "FileDescription" to "Cyberpunk 2077")),
+        )
+        assertNull(PeVersionInfo.bestName(null))
+    }
+
+    @Test
     fun emptyWhenNothingIdentifiable() {
         val dir = tmp.newFolder("x")
         val id = GameIdentifier.identify(exeIn(dir, "Game.exe")) // engine-ish base → folder "x"

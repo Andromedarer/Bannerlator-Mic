@@ -114,17 +114,33 @@ object GameIdentifier {
     /** steam_appid.txt directly in [dir] or in a steam_settings/ subdir. */
     private fun readSteamAppIdTxt(dir: File): Int? {
         for (candidate in arrayOf(File(dir, "steam_appid.txt"), File(dir, "steam_settings/steam_appid.txt"))) {
-            val id = readSmallTextFile(candidate)?.trim()?.takeWhile { it.isDigit() }?.toIntOrNull()
+            // Strip a leading UTF-8 BOM (trim() doesn't) before reading the digits.
+            val id = readSmallTextFile(candidate)?.removePrefix("\uFEFF")?.trim()
+                ?.takeWhile { it.isDigit() }?.toIntOrNull()
             if (id != null && id > 0) return id
         }
         return null
     }
 
-    /** First `AppId=<n>` in a ColdClientLoader.ini / steam_emu.ini / hlm.ini next to the game. */
+    /**
+     * First `AppId=<n>` in a crack/emu config .ini next to the game (ColdClientLoader, steam_emu,
+     * flt, hlm, …). Known names are tried first, then any other `.ini` in the dir — only crack
+     * configs carry an `AppId=` key, game settings .ini files (settings.ini, graphics.ini) don't,
+     * so the broad scan is safe.
+     */
     private fun readEmuIniAppId(dir: File): Int? {
         val re = Regex("""(?im)^\s*appid\s*=\s*(\d+)""")
-        for (name in arrayOf("ColdClientLoader.ini", "steam_emu.ini", "hlm.ini", "valve.ini", "cream_api.ini")) {
-            val text = readSmallTextFile(File(dir, name)) ?: continue
+        val named = arrayOf(
+            "ColdClientLoader.ini", "steam_emu.ini", "flt.ini", "hlm.ini",
+            "valve.ini", "cream_api.ini", "SmartSteamEmu.ini", "GreenLuma.ini",
+        )
+        val seen = HashSet<String>()
+        val candidates = ArrayList<File>()
+        for (n in named) File(dir, n).let { if (it.isFile) { candidates.add(it); seen.add(n.lowercase()) } }
+        (dir.listFiles { f -> f.isFile && f.name.endsWith(".ini", ignoreCase = true) && f.name.lowercase() !in seen }
+            ?: emptyArray()).sortedBy { it.name }.forEach { candidates.add(it) }
+        for (f in candidates) {
+            val text = readSmallTextFile(f) ?: continue
             val id = re.find(text)?.groupValues?.getOrNull(1)?.toIntOrNull()
             if (id != null && id > 0) return id
         }
