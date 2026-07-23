@@ -18,17 +18,19 @@ import java.io.File
  */
 object PrefixInstalledDetector {
 
-    fun detect(container: Container): Set<String> = try {
-        val wine = File(container.rootDir, ".wine")
-        if (!wine.isDirectory) return emptySet()
-        val out = HashSet<String>()
-        if (File(wine, "drive_c/windows/system32/OpenAL32.dll").isFile) out += "oalinst"
-        if (File(wine, "drive_c/windows/mono").isDirectory) out += "mono"
-        if (hasPhysX(wine)) out += "physx"
-        if (registryContains(wine, "Games for Windows")) out += "XLiveRedist"
-        out
-    } catch (_: Throwable) {
-        emptySet()
+    fun detect(container: Container): Set<String> {
+        return try {
+            val wine = File(container.rootDir, ".wine")
+            if (!wine.isDirectory) return emptySet()
+            val out = HashSet<String>()
+            if (File(wine, "drive_c/windows/system32/OpenAL32.dll").isFile) out += "oalinst"
+            if (File(wine, "drive_c/windows/mono").isDirectory) out += "mono"
+            if (hasPhysX(wine)) out += "physx"
+            if (registryContains(wine, "Games for Windows")) out += "XLiveRedist"
+            out
+        } catch (_: Throwable) {
+            emptySet()
+        }
     }
 
     private fun hasPhysX(wine: File): Boolean {
