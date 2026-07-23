@@ -65,6 +65,12 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
 
     var wineVersionEntries by mutableStateOf(emptyList<String>()); private set
     var selectedWineVersion by mutableStateOf("")
+
+    // Whether the given wine/Proton layer has xrandr compiled in — i.e. can actually deliver the
+    // in-game refresh unlock. The editor uses this to warn under the "Unlock in-game refresh rates"
+    // toggle when the selected Proton can't. Cached per layer id in WineRandrSupport (cheap to recall).
+    fun isWineXrandrCapable(wineVersion: String): Boolean =
+        com.winlator.star.core.WineRandrSupport.isXrandrCapable(context, contentsManager, wineVersion)
     var wineVersionEnabled by mutableStateOf(true); private set
     var isArm64EC by mutableStateOf(false); private set
 

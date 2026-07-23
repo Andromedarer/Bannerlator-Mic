@@ -4921,22 +4921,45 @@ return true;
     // xuser symlink to the launching container's own .wine. When the toggle is OFF the values are
     // removed, reverting to Wine's default (emulation on). Runs AFTER setupWineSystemFiles so any
     // prefix regen this launch is already done.
+    //
+    // GATED ON LAYER CAPABILITY: disabling emulation only helps on a Proton/Wine layer whose winex11
+    // was COMPILED WITH xrandr (the Refreshed Proton 10.0-4 / 11.0-1 builds). On an old layer it gives
+    // no refresh benefit AND shrinks the resolution list (NoRes single mode), a mild regression — so
+    // when the selected layer isn't xrandr-capable we DON'T write the keys (and remove any left by a
+    // previous run), then Toast the user to install a compatible layer.
     private void applyGameRefreshRateUnlock() {
         final String x11DriverKey = "Software\\Wine\\X11 Driver";
         boolean unlock = resolvedUnlockGameRefreshRate();
+        boolean capable = isSelectedLayerXrandrCapable();
+        boolean writeKeys = unlock && capable;
+
         File rootDir = imageFs.getRootDir();
         File userRegFile = new File(rootDir, ImageFs.WINEPREFIX+"/user.reg");
         try (WineRegistryEditor registryEditor = new WineRegistryEditor(userRegFile)) {
-            if (unlock) {
+            if (writeKeys) {
                 registryEditor.setStringValue(x11DriverKey, "EmulateModelist", "Y");
                 registryEditor.setStringValue(x11DriverKey, "EmulateModeset", "Y");
             }
             else {
+                // Toggle off OR incapable layer: strip the keys so no stale resolution regression lingers.
                 registryEditor.removeValue(x11DriverKey, "EmulateModelist");
                 registryEditor.removeValue(x11DriverKey, "EmulateModeset");
             }
         }
-        Log.d("XServerDisplayActivity", "In-game refresh unlock " + (unlock ? "ENABLED" : "disabled") + " (EmulateModelist/Modeset)");
+        Log.d("XServerDisplayActivity", "In-game refresh unlock: toggle=" + (unlock ? "on" : "off")
+                + " layerXrandrCapable=" + capable + " -> keys " + (writeKeys ? "WRITTEN" : "removed"));
+
+        // Toggle asked for the unlock but the selected layer can't deliver it — tell the user why.
+        if (unlock && !capable) {
+            runOnUiThread(() -> Toast.makeText(this,
+                    R.string.refresh_unlock_needs_compatible_layer, Toast.LENGTH_LONG).show());
+        }
+    }
+
+    // True when the SELECTED wine/Proton layer's unix winex11 driver was compiled with xrandr. The scan
+    // + per-layer cache lives in WineRandrSupport (shared with the container editor's warning hint).
+    private boolean isSelectedLayerXrandrCapable() {
+        return com.winlator.star.core.WineRandrSupport.isXrandrCapable(wineInfo);
     }
 
     private void applyGeneralPatches(Container container) {

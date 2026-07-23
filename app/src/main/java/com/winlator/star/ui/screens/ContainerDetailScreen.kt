@@ -901,6 +901,19 @@ private fun TopLevelFields(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 52.dp, top = 2.dp, bottom = 4.dp)
             )
+            // Warn when the selected Proton has no xrandr — the unlock will be skipped at launch. Keyed
+            // on the selected wine version so the (cached) probe only re-runs when the layer changes.
+            val wineXrandrCapable = remember(viewModel.selectedWineVersion) {
+                viewModel.isWineXrandrCapable(viewModel.selectedWineVersion)
+            }
+            if (viewModel.unlockGameRefreshRate && !wineXrandrCapable) {
+                Text(
+                    text = stringResource(R.string.refresh_unlock_layer_incompatible_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(start = 52.dp, top = 2.dp, bottom = 4.dp)
+                )
+            }
         }
 
         // ReShade multi-effect loadout (vkBasalt drop-in), per-container default. The per-game shortcut
