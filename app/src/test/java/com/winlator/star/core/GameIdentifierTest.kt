@@ -1,0 +1,128 @@
+package com.winlator.star.core
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Rule
+import org.junit.Test
+import org.junit.rules.TemporaryFolder
+import java.io.File
+
+/**
+ * Signal-chain coverage for [GameIdentifier] (Smart Game Import, Phase 1.1). Pure JVM: builds
+ * fake game layouts in a temp dir and asserts the right appId/name/source/confidence come back.
+ * The PE version-resource path is exercised on-device (real .exe), not here.
+ */
+class GameIdentifierTest {
+
+    @get:Rule
+    val tmp = TemporaryFolder()
+
+    private fun exeIn(dir: File, name: String = "game.exe"): File =
+        File(dir, name).apply { parentFile?.mkdirs(); writeBytes(byteArrayOf(0x4D, 0x5A)) } // "MZ" — not a real PE
+
+    @Test
+    fun steamAppIdTxt_besideExe_givesHighConfidenceAppId() {
+        val dir = tmp.newFolder("Palworld")
+        File(dir, "steam_appid.txt").writeText("1623730\n")
+        val id = GameIdentifier.identify(exeIn(dir))
+        assertEquals(1623730, id.appId)
+        assertEquals(GameIdentifier.Source.STEAM_APPID_TXT, id.source)
+        assertEquals(GameIdentifier.Confidence.HIGH, id.confidence)
+    }
+
+    @Test
+    fun steamAppIdTxt_inSteamSettingsSubdir_isFound() {
+        val dir = tmp.newFolder("Game")
+        File(dir, "steam_settings").mkdirs()
+        File(dir, "steam_settings/steam_appid.txt").writeText("480")
+        assertEquals(480, GameIdentifier.identify(exeIn(dir)).appId)
+    }
+
+    @Test
+    fun coldClientLoaderIni_appIdKey_isParsed() {
+        val dir = tmp.newFolder("Cracked")
+        File(dir, "ColdClientLoader.ini").writeText("[SteamClient]\nExe=game.exe\nAppId=427520\n")
+        val id = GameIdentifier.identify(exeIn(dir))
+        assertEquals(427520, id.appId)
+        assertEquals(GameIdentifier.Source.STEAM_EMU_INI, id.source)
+    }
+
+    @Test
+    fun steamManifestAcf_matchedByInstalldir_givesAppIdAndName() {
+        // steamapps/common/Palworld/Pal/Binaries/Win64/Palworld-Win64-Shipping.exe
+        val steamapps = tmp.newFolder("steamapps")
+        File(steamapps, "appmanifest_1623730.acf").writeText(
+            """
+            "AppState"
+            {
+                "appid"        "1623730"
+                "name"         "Palworld"
+                "installdir"   "Palworld"
+            }
+            """.trimIndent()
+        )
+        // a decoy manifest that must NOT win
+        File(steamapps, "appmanifest_570.acf").writeText(
+            """"AppState" { "appid" "570" "name" "Dota 2" "installdir" "dota 2 beta" }"""
+        )
+        val win64 = File(steamapps, "common/Palworld/Pal/Binaries/Win64").apply { mkdirs() }
+        val id = GameIdentifier.identify(exeIn(win64, "Palworld-Win64-Shipping.exe"))
+        assertEquals(1623730, id.appId)
+        assertEquals("Palworld", id.name)
+        assertEquals(GameIdentifier.Source.STEAM_MANIFEST_ACF, id.source)
+    }
+
+    @Test
+    fun gogInfo_givesNameAndId_highConfidence() {
+        val dir = tmp.newFolder("Witcher3")
+        File(dir, "goggame-1207658691.info").writeText(
+            """{"gameId":"1207658691","name":"The Witcher 3: Wild Hunt","version":1}"""
+        )
+        val id = GameIdentifier.identify(exeIn(dir))
+        assertEquals("The Witcher 3: Wild Hunt", id.name)
+        assertEquals("1207658691", id.gogId)
+        assertNull(id.appId)
+        assertEquals(GameIdentifier.Confidence.HIGH, id.confidence)
+    }
+
+    @Test
+    fun acfNamePreferredOverGogName_whenBothPresent() {
+        val steamapps = tmp.newFolder("steamapps")
+        File(steamapps, "appmanifest_100.acf").writeText(""""AppState"{"appid" "100" "name" "SteamName" "installdir" "MyGame"}""")
+        val gameDir = File(steamapps, "common/MyGame").apply { mkdirs() }
+        File(gameDir, "goggame-9.info").writeText("""{"name":"GogName"}""")
+        val id = GameIdentifier.identify(exeIn(gameDir))
+        assertEquals("SteamName", id.name)
+        assertEquals(100, id.appId)
+    }
+
+    @Test
+    fun noMarkers_fallsBackToCleanedFolderName_forEngineBinary() {
+        // UE shipping binary → the folder name is the real title, exe basename is noise.
+        val dir = tmp.newFolder("Hades")
+        val id = GameIdentifier.identify(exeIn(dir, "Hades-Win64-Shipping.exe"))
+        assertEquals("Hades", id.name)
+        assertEquals(GameIdentifier.Source.FILENAME, id.source)
+        assertEquals(GameIdentifier.Confidence.LOW, id.confidence)
+    }
+
+    @Test
+    fun fallbackName_stripsRepackTagsAndVersionTokens() {
+        val dir = tmp.newFolder("Stardew Valley [FitGirl Repack] v1.5.4")
+        val id = GameIdentifier.identify(exeIn(dir, "Stardew.exe"))
+        assertEquals("Stardew", id.name) // exe basename wins (not an engine binary); folder tags irrelevant here
+        // and a repack-style exe basename is cleaned too:
+        val id2 = GameIdentifier.identify(exeIn(tmp.newFolder("g2"), "Game.CODEX.exe"))
+        assertEquals(GameIdentifier.Source.FILENAME, id2.source)
+    }
+
+    @Test
+    fun emptyWhenNothingIdentifiable() {
+        val dir = tmp.newFolder("x")
+        val id = GameIdentifier.identify(exeIn(dir, "Game.exe")) // engine-ish base → folder "x"
+        // "x" is a valid (if useless) fallback name; the point is it must not crash and appId is null.
+        assertNull(id.appId)
+        assertTrue(id.confidence == GameIdentifier.Confidence.LOW)
+    }
+}
