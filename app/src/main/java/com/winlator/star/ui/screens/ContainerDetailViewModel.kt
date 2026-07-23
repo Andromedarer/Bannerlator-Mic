@@ -67,10 +67,17 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     var selectedWineVersion by mutableStateOf("")
 
     // Whether the given wine/Proton layer has xrandr compiled in — i.e. can actually deliver the
-    // in-game refresh unlock. The editor uses this to warn under the "Unlock in-game refresh rates"
-    // toggle when the selected Proton can't. Cached per layer id in WineRandrSupport (cheap to recall).
-    fun isWineXrandrCapable(wineVersion: String): Boolean =
-        com.winlator.star.core.WineRandrSupport.isXrandrCapable(context, contentsManager, wineVersion)
+    // in-game refresh unlock. The editor uses this to warn under the "In-game refresh rate" control
+    // when the selected Proton can't. Cached per layer id in WineRandrSupport (cheap to recall).
+    //
+    // MUST be safe during early composition and in the create-new-container flow: contentsManager is a
+    // lateinit set in init(), which runs AFTER the first compose pass, and a brand-new container has no
+    // chosen layer yet. When we can't probe (uninitialized manager or empty version), return the benign
+    // "capable" default so the incompatible-layer hint simply doesn't show and nothing throws.
+    fun isWineXrandrCapable(wineVersion: String): Boolean {
+        if (!::contentsManager.isInitialized || wineVersion.isEmpty()) return true
+        return com.winlator.star.core.WineRandrSupport.isXrandrCapable(context, contentsManager, wineVersion)
+    }
 
     // Persist the guest-side refresh setting, but ONLY when it's a deliberate non-default (or the
     // container already had it set). Leaving the pure default (unlock + no cap = Unlimited) unwritten
