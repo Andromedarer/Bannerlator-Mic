@@ -924,10 +924,10 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
             val shortcutFile = ExeShortcutImporter.addToShortcuts(
                 context, container, exeFile, displayName, identity.appId,
                 onCoverArtReady = { refresh() },
-                onNameResolved = { newBase ->
+                onNameResolved = { oldBase, newBase ->
                     // Background thread upgraded the name to Steam's authoritative title; publish
                     // it so an open confirm dialog follows the on-disk rename. Fires on the main thread.
-                    _importedNameUpdate.value = ImportedNameUpdate(shortcutFile.nameWithoutExtension, newBase)
+                    _importedNameUpdate.value = ImportedNameUpdate(oldBase, newBase)
                     refresh()
                 },
             )

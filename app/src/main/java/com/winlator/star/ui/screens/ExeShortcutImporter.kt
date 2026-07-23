@@ -44,7 +44,7 @@ internal object ExeShortcutImporter {
         displayName: String,
         steamAppId: Int? = null,
         onCoverArtReady: () -> Unit = {},
-        onNameResolved: (String) -> Unit = {},
+        onNameResolved: (oldBase: String, newBase: String) -> Unit = { _, _ -> },
     ): File {
         val shortcutFile = writeExeShortcut(container, exeFile, displayName)
         val appCtx = context.applicationContext
@@ -93,7 +93,7 @@ internal object ExeShortcutImporter {
                         File(desktopDir, "$base.desktop").isFile &&
                         renameShortcutFiles(container, base, better)
                     ) {
-                        main.post { onNameResolved(better) }
+                        main.post { onNameResolved(base, better) }
                     }
                 }
             } catch (e: Exception) {
