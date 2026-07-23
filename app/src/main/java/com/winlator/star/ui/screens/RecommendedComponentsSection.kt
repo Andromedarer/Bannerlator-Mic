@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import com.winlator.star.components.Component
 import com.winlator.star.components.ComponentCatalog
 import com.winlator.star.components.ComponentExecInstaller
+import com.winlator.star.components.ComponentInstallReturn
 import com.winlator.star.components.ComponentInstaller
 import com.winlator.star.components.DependencyDetector
 import com.winlator.star.components.DependencyDetector.Recommendation
@@ -71,6 +72,11 @@ fun RecommendedComponentsSection(
     container: Container,
     exeFile: File? = null,
     gameDir: File? = null,
+    // The originating shortcut's base name, when this section is shown for a specific game (the
+    // "Confirm game" import dialog or a shortcut's Win Components tab). Persisted as a Tier-2 return
+    // target so an installer-based component that restarts the app can bring the user back to THIS
+    // shortcut's recommendations. null (container editor) → Tier-1 (Games) return only.
+    shortcutBaseName: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -128,15 +134,22 @@ fun RecommendedComponentsSection(
     // when it ends. Mirrors ComponentsSheet.runExecInstall.
     fun runExecInstall(c: Component) {
         installing = c.name
+        // Record a session-return target BEFORE launching: an install_exe/msi component opens a
+        // container session that restarts the app, so this must be persisted first to survive it.
+        // Cleared again below if no session actually launched (inline set_windows/uninstall, or error).
+        ComponentInstallReturn.set(context, container.id, shortcutBaseName)
         scope.launch {
             val res = withContext(Dispatchers.IO) {
                 ComponentExecInstaller.startInstall(context, container, c) { /* progress not surfaced on chips */ }
             }
             installing = null
             when (res) {
-                is ComponentExecInstaller.Result.Launched -> { /* session launched; app continues there */ }
-                is ComponentExecInstaller.Result.Done -> markInstalled(c.name)
-                is ComponentExecInstaller.Result.Error -> message = "Couldn't install ${c.name}: ${res.message}"
+                is ComponentExecInstaller.Result.Launched -> { /* session launched; return target consumed after restart */ }
+                is ComponentExecInstaller.Result.Done -> { markInstalled(c.name); ComponentInstallReturn.clear(context) }
+                is ComponentExecInstaller.Result.Error -> {
+                    message = "Couldn't install ${c.name}: ${res.message}"
+                    ComponentInstallReturn.clear(context)
+                }
             }
         }
     }

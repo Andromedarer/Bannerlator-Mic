@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import com.winlator.star.components.Component
 import com.winlator.star.components.ComponentCatalog
 import com.winlator.star.components.ComponentExecInstaller
+import com.winlator.star.components.ComponentInstallReturn
 import com.winlator.star.components.ComponentInstaller
 import com.winlator.star.components.PrefixInstalledDetector
 import com.winlator.star.container.Container
@@ -63,6 +64,10 @@ fun ComponentsSheet(container: Container, onDismiss: () -> Unit) {
     // Run an installer-based component: download its installer, then launch the container session.
     fun runExecInstall(c: Component) {
         installing = c.name; progress = 0f
+        // Container editor has no originating shortcut → container-only return target (Tier 1: land
+        // back on Games instead of stranding the user after the install session restarts the app).
+        // Cleared below if no session actually launched (inline set_windows/uninstall, or error).
+        ComponentInstallReturn.set(context, container.id, null)
         scope.launch {
             val res = withContext(Dispatchers.IO) {
                 ComponentExecInstaller.startInstall(context, container, c) { f ->
@@ -71,10 +76,12 @@ fun ComponentsSheet(container: Container, onDismiss: () -> Unit) {
             }
             installing = null
             when (res) {
-                is ComponentExecInstaller.Result.Launched -> { /* session launched; app continues there */ }
-                is ComponentExecInstaller.Result.Done -> markInstalled(c.name)
-                is ComponentExecInstaller.Result.Error ->
+                is ComponentExecInstaller.Result.Launched -> { /* session launched; return target consumed after restart */ }
+                is ComponentExecInstaller.Result.Done -> { markInstalled(c.name); ComponentInstallReturn.clear(context) }
+                is ComponentExecInstaller.Result.Error -> {
                     message = "Couldn't install ${c.name}: ${res.message}"
+                    ComponentInstallReturn.clear(context)
+                }
             }
         }
     }

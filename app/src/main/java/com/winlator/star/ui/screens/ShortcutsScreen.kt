@@ -132,6 +132,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import com.winlator.star.ui.AccountAvatar
 import com.winlator.star.ui.AccountUiBus
+import com.winlator.star.ui.ComponentReturnBus
 import com.winlator.star.ui.LocalTopBarActions
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -546,6 +547,18 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
             showMyAccount = true
         }
     }
+    // Tier-2 session-return: after an installer-based component install finishes and MainActivity has
+    // routed us here, re-open the originating shortcut's settings (defaults to the Win Components tab,
+    // where its recommended-components chips live). Keyed on the shortcuts list too, since it loads
+    // async — wait for it, then resolve by container + base name. Best-effort: no match ⇒ stay on Games.
+    LaunchedEffect(ComponentReturnBus.openShortcutSettings, shortcuts) {
+        val target = ComponentReturnBus.openShortcutSettings ?: return@LaunchedEffect
+        if (shortcuts.isEmpty()) return@LaunchedEffect // still loading (or none) — retry when it changes
+        ComponentReturnBus.openShortcutSettings = null
+        shortcuts.firstOrNull {
+            it.container.id == target.containerId && it.name == target.shortcutBase
+        }?.let { settingsShortcut = it }
+    }
 
     val topBarActions = LocalTopBarActions.current
     // LaunchedEffect — not SideEffect — so this runs in the same dispatcher queue as
@@ -864,7 +877,11 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                         }
                         if (importedExe != null) {
                             Divider(color = DividerColor)
-                            RecommendedComponentsSection(container = confirmContainer, exeFile = importedExe)
+                            RecommendedComponentsSection(
+                                container = confirmContainer,
+                                exeFile = importedExe,
+                                shortcutBaseName = renameDialogName,
+                            )
                         }
                     }
                 }
@@ -4875,6 +4892,7 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                                 container = shortcut.container,
                                 exeFile = gameExe,
                                 gameDir = gameDir,
+                                shortcutBaseName = shortcut.name,
                             )
                             ScWinComponentsTab(winComponents)
                         }
