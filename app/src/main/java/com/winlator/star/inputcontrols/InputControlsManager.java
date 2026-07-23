@@ -215,6 +215,7 @@ public class InputControlsManager {
             if (schemaVersion == null || minEditorVersion == null || !isValidImportedProfile(data)) return null;
             if (schemaVersion > ControlsProfile.SCHEMA_VERSION
                     || minEditorVersion > ControlsProfile.EDITOR_VERSION) return null;
+            truncateProfileCombos(data);
 
             int foundIndex = -1;
             for (int i = 0; i < profiles.size(); i++) {
@@ -431,6 +432,29 @@ public class InputControlsManager {
 
     static int normalizeLegacyIconId(int iconId) {
         return iconId >= Byte.MIN_VALUE && iconId < 0 ? iconId & 0xFF : iconId;
+    }
+
+    static void truncateProfileCombos(JSONObject data) {
+        JSONArray elements = data.optJSONArray("elements");
+        if (elements == null) return;
+        for (int i = 0; i < elements.length(); i++) {
+            JSONObject element = elements.optJSONObject(i);
+            JSONArray combos = element != null ? element.optJSONArray("combos") : null;
+            if (combos == null) continue;
+            for (int j = 0; j < combos.length(); j++) {
+                JSONArray entry = combos.optJSONArray(j);
+                JSONArray keys = entry != null ? entry.optJSONArray(1) : null;
+                if (keys == null || keys.length() <= ControlElement.MAX_COMBO_BINDINGS) continue;
+                JSONArray truncatedKeys = new JSONArray();
+                for (int k = 0; k < ControlElement.MAX_COMBO_BINDINGS; k++) {
+                    truncatedKeys.put(keys.opt(k));
+                }
+                try {
+                    entry.put(1, truncatedKeys);
+                }
+                catch (JSONException ignored) {}
+            }
+        }
     }
 
     static boolean isValidImportedProfile(JSONObject data) {

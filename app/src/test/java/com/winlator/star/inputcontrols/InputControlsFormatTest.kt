@@ -328,6 +328,58 @@ class InputControlsFormatTest {
     }
 
     @Test
+    fun oversizedCombos_areTruncatedDeterministicallyAcrossSettersAndProfileJson() {
+        val bindings = arrayOf(
+            Binding.KEY_A, Binding.KEY_B, Binding.KEY_C, Binding.KEY_D,
+            Binding.KEY_E, Binding.KEY_F, Binding.KEY_G, Binding.KEY_H,
+            Binding.KEY_I, Binding.KEY_J, Binding.KEY_K, Binding.KEY_L,
+        )
+        val element = ControlElement(null)
+
+        element.setCombo(0, bindings)
+
+        assertEquals(ControlElement.MAX_COMBO_BINDINGS, element.getCombo(0)!!.size)
+        assertEquals(bindings.take(ControlElement.MAX_COMBO_BINDINGS), element.getCombo(0)!!.toList())
+
+        val rawNames = arrayOf(
+            "KEY_A", "FORK_UNKNOWN", "KEY_B", "KEY_C", "KEY_D", "KEY_E",
+            "KEY_F", "KEY_G", "KEY_H", "KEY_I", "KEY_J", "KEY_K",
+        )
+        val loadedBindings = rawNames.map(Binding::fromString)
+            .filter { it != Binding.NONE }
+            .toTypedArray()
+        element.setLoadedCombo(0, loadedBindings, rawNames)
+
+        assertEquals(
+            listOf(
+                Binding.KEY_A, Binding.KEY_B, Binding.KEY_C, Binding.KEY_D, Binding.KEY_E,
+                Binding.KEY_F, Binding.KEY_G, Binding.KEY_H, Binding.KEY_I,
+            ),
+            element.getCombo(0)!!.toList(),
+        )
+
+        val serializedKeys = JSONArray()
+        rawNames.forEach(serializedKeys::put)
+        val data = JSONObject().put(
+            "elements",
+            JSONArray().put(JSONObject().put("combos", JSONArray().put(JSONArray().put(0).put(serializedKeys)))),
+        )
+
+        InputControlsManager.truncateProfileCombos(data)
+
+        val truncatedKeys = data.getJSONArray("elements").getJSONObject(0)
+            .getJSONArray("combos").getJSONArray(0).getJSONArray(1)
+        assertEquals(ControlElement.MAX_COMBO_BINDINGS, truncatedKeys.length())
+        assertEquals("KEY_A", truncatedKeys.getString(0))
+        assertEquals("KEY_I", truncatedKeys.getString(ControlElement.MAX_COMBO_BINDINGS - 1))
+    }
+
+    @Test
+    fun fakeInputWriter_bufferFitsOneCompleteXboxUpdate() {
+        assertEquals(29, FakeInputWriter.MAX_EVENTS_PER_UPDATE)
+    }
+
+    @Test
     fun touchscreenMousePriority_defaultsOnAndSurvivesBindingArrayResize() {
         val element = ControlElement(null)
         assertTrue(element.blocksTouchscreenMouseButtonsAt(0))

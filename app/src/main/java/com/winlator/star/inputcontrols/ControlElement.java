@@ -45,6 +45,7 @@ public class ControlElement {
     private static final float MAX_SCALE = 1.5f;
     private static final long GRID_FLASH_DURATION_MS = 150;
     public static final int MAX_EXPANDABLE_CHILDREN = 10;
+    public static final int MAX_COMBO_BINDINGS = 10;
     public enum Type {
         BUTTON, D_PAD, RANGE_BUTTON, STICK, TRACKPAD, DYNAMIC_STICK, MOUSE_AREA, BUTTON_GRID, EXPANDABLE_BUTTON;
 
@@ -449,9 +450,19 @@ public class ControlElement {
     void setLoadedCombo(int index, Binding[] combo, String[] rawNames) {
         if (!isValidBindingIndex(index)) return;
         if (comboBindings == null) comboBindings = new Binding[bindings.length][];
-        comboBindings[index] = sanitizeCombo(combo);
+        String[] sanitizedRawNames = sanitizeRawComboNames(rawNames);
+        if (sanitizedRawNames != null) {
+            Binding[] loadedCombo = new Binding[sanitizedRawNames.length];
+            for (int i = 0; i < sanitizedRawNames.length; i++) {
+                loadedCombo[i] = Binding.fromString(sanitizedRawNames[i]);
+            }
+            comboBindings[index] = sanitizeCombo(loadedCombo);
+        }
+        else {
+            comboBindings[index] = sanitizeCombo(combo);
+        }
         if (rawComboBindingNames == null) rawComboBindingNames = new String[bindings.length][];
-        rawComboBindingNames[index] = rawNames != null ? Arrays.copyOf(rawNames, rawNames.length) : null;
+        rawComboBindingNames[index] = sanitizedRawNames;
     }
     public boolean hasCombo(int index) { return getCombo(index) != null && getCombo(index).length > 0; }
     public void setCellPressTime(int index, long time) {
@@ -481,13 +492,30 @@ public class ControlElement {
     }
     public boolean isInGroup() { return groupId != null && inputControlsView.getProfile() != null && inputControlsView.getProfile().getGroup(groupId) != null; }
 
-    private Binding[] sanitizeCombo(Binding[] combo) {
-        Binding[] sanitized = new Binding[combo.length];
+    private static Binding[] sanitizeCombo(Binding[] combo) {
+        if (combo == null || combo.length == 0) return new Binding[0];
+        Binding[] sanitized = new Binding[Math.min(combo.length, MAX_COMBO_BINDINGS)];
         int count = 0;
         for (Binding binding : combo) {
-            if (binding != null && binding != Binding.NONE) sanitized[count++] = binding;
+            if (binding != null && binding != Binding.NONE) {
+                sanitized[count++] = binding;
+                if (count == MAX_COMBO_BINDINGS) break;
+            }
         }
-        return count == combo.length ? sanitized : Arrays.copyOf(sanitized, count);
+        return count == sanitized.length ? sanitized : Arrays.copyOf(sanitized, count);
+    }
+
+    private static String[] sanitizeRawComboNames(String[] rawNames) {
+        if (rawNames == null) return null;
+        String[] sanitized = new String[Math.min(rawNames.length, MAX_COMBO_BINDINGS)];
+        int count = 0;
+        for (String rawName : rawNames) {
+            if (rawName != null) {
+                sanitized[count++] = rawName;
+                if (count == MAX_COMBO_BINDINGS) break;
+            }
+        }
+        return count == sanitized.length ? sanitized : Arrays.copyOf(sanitized, count);
     }
 
     Binding[] getEffectiveBindingsForSlot(int index) {
@@ -2191,10 +2219,15 @@ public class ControlElement {
                     entry.put(i); // index
                     JSONArray keys = new JSONArray();
                     if (rawNames != null) {
-                        for (String rawName : rawNames) if (rawName != null) keys.put(rawName);
+                        for (int j = 0; j < Math.min(rawNames.length, MAX_COMBO_BINDINGS); j++) {
+                            if (rawNames[j] != null) keys.put(rawNames[j]);
+                        }
                     }
                     else {
-                        for (Binding b : combo) if (b != null && b != Binding.NONE) keys.put(b.name());
+                        for (int j = 0; j < Math.min(combo.length, MAX_COMBO_BINDINGS); j++) {
+                            Binding binding = combo[j];
+                            if (binding != null && binding != Binding.NONE) keys.put(binding.name());
+                        }
                     }
                     if (keys.length() == 0) continue;
                     entry.put(keys);

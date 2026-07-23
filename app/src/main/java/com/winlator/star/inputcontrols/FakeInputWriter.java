@@ -12,7 +12,7 @@ import java.nio.channels.FileChannel;
 public class FakeInputWriter {
     private static final String TAG = "FakeInputWriter";
     private static final int EVENT_SIZE = 24;
-    private static final int MAX_EVENTS_PER_UPDATE = 20; // Buttons + axes + sync
+    static final int MAX_EVENTS_PER_UPDATE = 29; // 10 buttons * 2 + 4 sticks + 2 triggers + 2 D-pad + SYN
     private static final int BUFFER_SIZE = EVENT_SIZE * MAX_EVENTS_PER_UPDATE;
 
     // Event types

@@ -252,7 +252,7 @@ fun ControlsEditorSettingsPane(
     }
 
     fun saveBindingSlot(index: Int, binding: Binding, combo: List<Binding>, blockTouchscreenMouseButtons: Boolean) {
-        val cleanCombo = combo.filter { it != Binding.NONE }.distinct()
+        val cleanCombo = combo.filter { it != Binding.NONE }.distinct().take(ControlElement.MAX_COMBO_BINDINGS)
         val mainBinding = if (binding != Binding.NONE) binding else cleanCombo.lastOrNull() ?: Binding.NONE
         element.setBindingAt(index, mainBinding)
         element.setCombo(index, if (cleanCombo.isEmpty()) null else cleanCombo.toTypedArray())
@@ -1327,7 +1327,7 @@ private fun BindingSetupDialog(
     onSave: (Binding, List<Binding>, Boolean) -> Unit,
 ) {
     val cleanInitialCombo = remember(initialCombo) {
-        initialCombo.filter { it != Binding.NONE }.distinct()
+        initialCombo.filter { it != Binding.NONE }.distinct().take(ControlElement.MAX_COMBO_BINDINGS)
     }
     val initialSelection = remember(initialBinding, cleanInitialCombo) {
         if (initialBinding != Binding.NONE) initialBinding else cleanInitialCombo.lastOrNull() ?: Binding.NONE
@@ -1356,7 +1356,8 @@ private fun BindingSetupDialog(
     val selectedIndex = filteredOptions.indexOf(selectedBinding).coerceAtLeast(0)
     val typedBinding = bindingFromTypedValue(typedValue)
     val addCandidate = typedBinding ?: selectedBinding
-    val canAddCandidate = addCandidate != Binding.NONE && !combo.contains(addCandidate)
+    val canAddCandidate = combo.size < ControlElement.MAX_COMBO_BINDINGS &&
+        addCandidate != Binding.NONE && !combo.contains(addCandidate)
     val hasTouchscreenMouseButton = (combo + selectedBinding).any {
         it == Binding.MOUSE_LEFT_BUTTON || it == Binding.MOUSE_RIGHT_BUTTON
     }

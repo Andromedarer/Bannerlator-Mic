@@ -361,6 +361,7 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
             if (controllersJSONArray.length() > 0) data.put("controllers", controllersJSONArray);
             else data.remove("controllers");
 
+            InputControlsManager.truncateProfileCombos(data);
             return InputControlsManager.writeStringAtomically(file, data.toString());
         }
         catch (JSONException | IOException e) {
@@ -583,7 +584,8 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
 
                                 ArrayList<Binding> combo = new ArrayList<>();
                                 ArrayList<String> rawNames = new ArrayList<>();
-                                for (int k = 0; k < keys.length(); k++) {
+                                int comboBindingLimit = Math.min(keys.length(), ControlElement.MAX_COMBO_BINDINGS);
+                                for (int k = 0; k < comboBindingLimit; k++) {
                                     String rawName = keys.optString(k, null);
                                     if (rawName == null) continue;
                                     rawNames.add(rawName);
