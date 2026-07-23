@@ -202,6 +202,17 @@ object ComponentExecInstaller {
 
     // ---- install_exe / install_msi --------------------------------------------------------------
 
+    /** Install-argument tokens that suppress the installer UI — dropped so the wizard is visible on
+     *  the container desktop (functional flags like /norestart or TRANSFORMS=… are kept). */
+    private val SILENT_ARGS = setOf(
+        "/q", "/qn", "/qb", "/quiet", "/silent", "/s", "/passive", "/verysilent",
+        "-q", "-qn", "-quiet", "-silent", "-s", "-passive",
+    )
+
+    /** Remove silent/quiet flags from an installer's argument string. */
+    private fun visibleArgs(args: String): String =
+        args.split(Regex("""\s+""")).filter { it.isNotBlank() && it.lowercase() !in SILENT_ARGS }.joinToString(" ")
+
     /** Resolve an install step's file fields from either the top level or a nested `environment` object. */
     private fun installFields(step: ComponentStep): Pair<JSONObject, JSONObject?> {
         val env = step.obj.optJSONObject("environment")
@@ -228,10 +239,13 @@ object ComponentExecInstaller {
             throw IllegalStateException("$name: download failed ($safe)")
 
         // Wine runs an .exe directly and associates .msi with msiexec, so handing either to
-        // `wine <path>` works; we pass the manifest's arguments through unchanged.
+        // `wine <path>` works. The container session already opens a Wine desktop
+        // (XServerDisplayActivity: `wine explorer /desktop=shell,…`), so instead of running the
+        // installer SILENTLY (which draws nothing → the user just sees a black desktop), we strip
+        // the silent flags so the installer's own wizard is visible and clickable on that desktop.
         val winPath = WinePath.resolveWindowsPath(container, installer.absolutePath)
         val execTarget = WinePath.escapeForExec(winPath)
-        val execArgs = fields.optString("arguments").trim()
+        val execArgs = visibleArgs(fields.optString("arguments").trim())
 
         // Env vars = whatever's in the environment object that isn't a file field (e.g. WINEDLLOVERRIDES).
         val envPairs = StringBuilder()

@@ -209,9 +209,9 @@ fun RecommendedComponentsSection(
             title = { Text("Install ${c.name}", color = cs.onSurface) },
             text = {
                 Text(
-                    "This installs ${c.name} into this game's container by running its installer inside " +
-                        "the container (shared by every shortcut on it). The container will open and run the " +
-                        "installer — when it finishes, close it to complete the install.",
+                    "This installs ${c.name} into this game's container (shared by every shortcut on it). " +
+                        "The container opens to a Windows desktop and runs the installer — click through the " +
+                        "installer window, then close the container to finish. You'll return here afterward.",
                     color = cs.onSurface,
                 )
             },

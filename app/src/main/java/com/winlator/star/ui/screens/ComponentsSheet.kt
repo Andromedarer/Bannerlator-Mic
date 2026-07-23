@@ -114,9 +114,9 @@ fun ComponentsSheet(container: Container, onDismiss: () -> Unit) {
             title = { Text("Run ${c.name} installer", color = cs.onSurface) },
             text = {
                 Text(
-                    "This installs ${c.name} by running its installer inside the container. " +
-                        "The container will open and run the installer — when it finishes, close it and " +
-                        "you'll be prompted to complete the install.",
+                    "This opens the container to a Windows desktop and runs the ${c.name} installer. " +
+                        "Click through the installer window that appears, then close the container when it's " +
+                        "done — you'll be brought back to finish setup.",
                     color = cs.onSurface,
                 )
             },
