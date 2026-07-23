@@ -51,7 +51,15 @@ Stage APK, install, add: (a) Goldberg game w/ `steam_appid.txt`, (b) GOG game, (
 
 > **PILLAR 1 (Smart Game Import) — ✅ COMPLETE & DEVICE-PROVEN 2026-07-23.** Auto-identify → Steam name+art by appId → "Confirm game" dialog w/ Search Steam picker. Passing: God of War, GTA IV, GTA V, Dark Souls. Phase B (full Edit Game screen) DEFERRED to the very end per user. **NEXT = Pillar 2 (component recommendation).**
 
-## PILLAR 2 — Component recommendation — 🟡 STARTING 2026-07-23 (user-directed, Pillar 1 proven)
+## PILLAR 2 — Component recommendation — 🟡 BUILT 2026-07-23 (device test pending)
+- **2.1 DependencyDetector** ✅ (`478d9dd7`) — scans redist folders → catalog names, Wine-aware curation, version-aware.
+- **2.2 RecommendedComponentsSection** ✅ (`7e31804d`) — chips in Confirm dialog + shortcut settings; one-tap install reusing ComponentsSheet routing + prefix-exists gate; ComponentsSheet sorts installed-to-top.
+- **Installed-state fix** ✅ (`7e31804d`) — exec/session installs weren't recorded (component_installs was empty). `ComponentExecInstaller.recordInstalled` at Result.Done + new `PrefixInstalledDetector` (OpenAL/mono/PhysX/GFWL prefix markers, verified vs fresh Proton-11). Union recorded∪detected in both UIs.
+  - 🔑 Wine baseline: vcredist/dotnet/gecko/d3dx/xact ship builtin/baseline → NOT retro-detectable; only non-baseline footprints detectable. Prefixes at `imagefs/home/xuser-<id>/.wine`.
+- Build p2 run 30036309321. Device gate: DiRT 3 chips + existing container shows OpenAL/mono/PhysX/GFWL checked.
+
+<!-- superseded plan below kept for reference -->
+### (original 2.x outline)
 - **2.1 Detection** `components/DependencyDetector.kt`: scan `<gameDir>/_CommonRedist/**` → curation table → match to 142-catalog (`vcredist/`→vcredist201x, `PhysX/`→physx, `XNA/`→xna40, `dotNetFx45/`→dotnet45; **drop DirectX that DXVK covers**). Generalize the GOG redist scan.
 - **2.2 UI indicators**: chips on the new shortcut + in `ShortcutSettingsDialogScreen`; each one-tap installs via existing `ComponentsSheet`. Reuse `component_installs` prefs.
 - **2.3 Device verify gate**: chips appear, install one, verify it lands in prefix.
