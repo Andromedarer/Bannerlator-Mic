@@ -2461,9 +2461,9 @@ public class ControlElement {
         inputControlsView.handleCountedInputEvent(getHoldKey(), false, 0, true);
     }
 
-    private boolean usesUnifiedGamepadStick() {
+    boolean usesUnifiedGamepadStick() {
         return (type == Type.STICK || type == Type.DYNAMIC_STICK || type == Type.TRACKPAD)
-                && getBindingAt(0).isGamepad();
+                && InputControlsView.isThumbBinding(getBindingAt(0));
     }
 
     private void releaseUnifiedGamepadStick() {
@@ -2558,7 +2558,7 @@ public class ControlElement {
                 float normY = dist > 0 ? dy / sRadius : 0;
 
                 Binding firstBinding = getBindingAt(0);
-                if (firstBinding.isGamepad()) {
+                if (usesUnifiedGamepadStick()) {
                     float magnitude = (float)Math.sqrt(normX * normX + normY * normY);
                     float finalX = 0, finalY = 0;
                     if (magnitude > deadZone) {
@@ -2627,9 +2627,9 @@ public class ControlElement {
                 currentPosition.x = boundingBox.left + deltaX * radius + radius;
                 currentPosition.y = boundingBox.top + deltaY * radius + radius;
 
-                // Check if any binding is gamepad - if so, use unified stick input
+                // Directional thumb bindings use unified axes; all others dispatch per slot.
                 Binding firstBinding = getBindingAt(0);
-                if (firstBinding.isGamepad()) {
+                if (usesUnifiedGamepadStick()) {
                     // Use radial deadzone to prevent angle snapping
                     float magnitude = (float)Math.sqrt(deltaX * deltaX + deltaY * deltaY);
 
@@ -2671,9 +2671,9 @@ public class ControlElement {
                 inputControlsView.invalidate();
             }
             else if (type == Type.TRACKPAD) {
-                // Check if gamepad bindings - use unified handling
+                // Directional thumb bindings use unified axes; all others dispatch per slot.
                 Binding firstBinding = getBindingAt(0);
-                if (firstBinding.isGamepad()) {
+                if (usesUnifiedGamepadStick()) {
                     // Apply interpolation to both axes
                     if (interpolator == null) interpolator = new CubicBezierInterpolator();
                     interpolator.set(0.075f, 0.95f, 0.45f, 0.95f);
@@ -2697,7 +2697,7 @@ public class ControlElement {
                         this.states[i] = true;
                     }
                 } else {
-                    // Mouse movement handling
+                    // Per-direction handling for mouse, keyboard, and non-thumb gamepad bindings.
                     final boolean[] states = {deltaY <= -TRACKPAD_MIN_SPEED, deltaX >= TRACKPAD_MIN_SPEED, deltaY >= TRACKPAD_MIN_SPEED, deltaX <= -TRACKPAD_MIN_SPEED};
                     int cursorDx = 0;
                     int cursorDy = 0;

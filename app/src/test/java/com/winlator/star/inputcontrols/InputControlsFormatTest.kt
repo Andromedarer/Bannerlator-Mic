@@ -482,4 +482,49 @@ class InputControlsFormatTest {
             ),
         )
     }
+
+    @Test
+    fun unifiedStickClassification_acceptsOnlyDirectionalThumbBindings() {
+        val thumbBindings = setOf(
+            Binding.GAMEPAD_LEFT_THUMB_UP,
+            Binding.GAMEPAD_LEFT_THUMB_RIGHT,
+            Binding.GAMEPAD_LEFT_THUMB_DOWN,
+            Binding.GAMEPAD_LEFT_THUMB_LEFT,
+            Binding.GAMEPAD_RIGHT_THUMB_UP,
+            Binding.GAMEPAD_RIGHT_THUMB_RIGHT,
+            Binding.GAMEPAD_RIGHT_THUMB_DOWN,
+            Binding.GAMEPAD_RIGHT_THUMB_LEFT,
+        )
+
+        Binding.values().forEach { binding ->
+            assertEquals(binding in thumbBindings, InputControlsView.isThumbBinding(binding))
+        }
+    }
+
+    @Test
+    fun analogTouchElements_fallBackForEveryNonThumbGamepadBinding() {
+        val thumbBindings = setOf(
+            Binding.GAMEPAD_LEFT_THUMB_UP,
+            Binding.GAMEPAD_LEFT_THUMB_RIGHT,
+            Binding.GAMEPAD_LEFT_THUMB_DOWN,
+            Binding.GAMEPAD_LEFT_THUMB_LEFT,
+            Binding.GAMEPAD_RIGHT_THUMB_UP,
+            Binding.GAMEPAD_RIGHT_THUMB_RIGHT,
+            Binding.GAMEPAD_RIGHT_THUMB_DOWN,
+            Binding.GAMEPAD_RIGHT_THUMB_LEFT,
+        )
+
+        listOf(
+            ControlElement.Type.STICK,
+            ControlElement.Type.DYNAMIC_STICK,
+            ControlElement.Type.TRACKPAD,
+        ).forEach { type ->
+            val element = ControlElement(null)
+            element.setType(type)
+            Binding.gamepadBindingValues().forEach { binding ->
+                element.setBindingAt(0, binding)
+                assertEquals(binding in thumbBindings, element.usesUnifiedGamepadStick())
+            }
+        }
+    }
 }

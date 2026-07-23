@@ -1067,7 +1067,7 @@ public class InputControlsView extends View {
     }
 
     public void handleStickInput(ControlElement owner, Binding firstBinding, float deltaX, float deltaY) {
-        if (!firstBinding.isGamepad()) return;
+        if (!isThumbBinding(firstBinding)) return;
         if (deltaX == 0 && deltaY == 0) activeVirtualSticks.remove(owner);
         else activeVirtualSticks.put(owner, new VirtualStickState(firstBinding, deltaX, deltaY));
 
@@ -1156,7 +1156,7 @@ public class InputControlsView extends View {
         }
     }
 
-    private static boolean isThumbBinding(Binding binding) {
+    public static boolean isThumbBinding(Binding binding) {
         return binding == Binding.GAMEPAD_LEFT_THUMB_UP
                 || binding == Binding.GAMEPAD_LEFT_THUMB_RIGHT
                 || binding == Binding.GAMEPAD_LEFT_THUMB_DOWN
