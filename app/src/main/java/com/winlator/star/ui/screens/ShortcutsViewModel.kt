@@ -36,6 +36,7 @@ import com.winlator.star.container.Container
 import com.winlator.star.container.ContainerManager
 import com.winlator.star.container.Shortcut
 import com.winlator.star.core.GPUInformation
+import com.winlator.star.core.GameIdentifier
 import com.winlator.star.ui.screens.adrenodownload.DriverSources
 import com.winlator.star.ui.screens.adrenodownload.RemoteDriverRepository
 import kotlinx.coroutines.CompletableDeferred
@@ -895,13 +896,20 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
         if (!exeFile.isFile) {
             return ImportResult.Error("Could not access EXE on disk: $realPath")
         }
-        val displayName = sourceName.substringBeforeLast('.', sourceName)
+        // Identify the game from its on-disk footprint (steam_appid.txt / Steam & GOG
+        // manifests / PE version info) so the shortcut gets the real title — which is
+        // then what the SGDB cover-art search runs on — instead of the raw exe filename.
+        val identity = GameIdentifier.identify(exeFile)
+        val fallbackName = sourceName.substringBeforeLast('.', sourceName)
+        val displayName = identity.name?.takeIf { it.isNotBlank() } ?: fallbackName
+        Log.d(TAG, "importExe: identified '$displayName' (appId=${identity.appId}, source=${identity.source})")
         return try {
             // Delegate to the shared importer so the "+" flow and the File Manager's
-            // "Add to shortcuts" action write shortcuts identically. Refresh once now for
-            // the .desktop, then again from onCoverArtReady when the icon lands.
+            // "Add to shortcuts" action write shortcuts identically. The proper name is
+            // written first; cover art (SGDB by appId → by name) resolves on a background
+            // thread and calls back via onCoverArtReady once the icon lands.
             val shortcutFile = ExeShortcutImporter.addToShortcuts(
-                context, container, exeFile, displayName,
+                context, container, exeFile, displayName, identity.appId,
             ) { refresh() }
             refresh()
             ImportResult.Success(shortcutFile.nameWithoutExtension)

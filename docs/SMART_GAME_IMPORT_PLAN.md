@@ -40,10 +40,9 @@ Tests: `app/src/test/java/com/winlator/star/core/GameIdentifierTest.kt` (JVM, si
 - [ ] CI compile-verify of the two main classes
 - Note: CI `assemble` compiles main classes but does NOT run the `test` source set; unit tests are runnable in Android Studio / a future test job.
 
-### Phase 1.2 — Wire into the importer — ⬜ NOT STARTED
-- Replace the `safeName = nameWithoutExtension` default in `ExeShortcutImporter` with `GameIdentifier.identify(...)`.
-- If appId found → SGDB lookup by appid (exact art); resolve name from appId if local name absent (Steam library cache / picsGetProductInfo). Else name fuzzy-search (current path).
-- Surface the detected name as an **editable, confirmable field** in the add flow — never silently rename.
+### Phase 1.2 — Wire into the importer — 🟡 IN PROGRESS
+- [x] **1.2a/b auto-name + cover art** (done): `ShortcutsViewModel.importExe` runs `GameIdentifier.identify(exe)`; the identified title becomes the shortcut name (fallback = exe filename) and is **written first**; then the cover-art thread searches **SGDB by appId → by that written name** (`ExeShortcutImporter.addToShortcuts` gained a `steamAppId` param; `StarLaunchBridge` gained `sgdbFetchCoverBySteamAppId` + a 6-arg `saveCoverArt`). File Manager add-path left name-based for now (out of scope).
+- [ ] **1.2c editable confirm field** — show the detected name (editable) + source before saving, so a wrong auto-name can be corrected at add-time. Deferred until after the device gate confirms auto-naming hit-rate (the dialog's default value depends on it).
 
 ### Phase 1.3 — Device verify gate — ⬜ NOT STARTED (hard stop)
 Stage APK, install, add: (a) Goldberg game w/ `steam_appid.txt`, (b) GOG game, (c) bare-exe game → confirm name + art resolve. Checkpoint memory + PROGRESS_LOG before Pillar 2.

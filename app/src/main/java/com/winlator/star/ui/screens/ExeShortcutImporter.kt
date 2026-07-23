@@ -29,16 +29,17 @@ internal object ExeShortcutImporter {
         container: Container,
         exeFile: File,
         displayName: String,
+        steamAppId: Int? = null,
         onCoverArtReady: () -> Unit = {},
     ): File {
         val shortcutFile = writeExeShortcut(container, exeFile, displayName)
         // Cover art on a background thread — SteamGridDB lookup involves network I/O.
-        // Fallback chain: store URL (none here) → SGDB → PE icon extraction from the EXE.
+        // Fallback chain: exact SGDB-by-Steam-appid (when known) → SGDB name search → PE icon.
         val safeName = shortcutFile.nameWithoutExtension
         val appCtx = context.applicationContext
         Thread({
             try {
-                StarLaunchBridge.saveCoverArt(appCtx, container, shortcutFile, safeName, null)
+                StarLaunchBridge.saveCoverArt(appCtx, container, shortcutFile, safeName, null, steamAppId)
                 val iconFile = container.getIconsDir(64)?.let { File(it, "$safeName.png") }
                 if (iconFile == null || !iconFile.exists()) {
                     // SGDB miss — try extracting an icon from the EXE itself.
