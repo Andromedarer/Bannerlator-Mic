@@ -2489,7 +2489,7 @@ public class ControlElement {
         releaseUnifiedGamepadStick();
         releaseHoldKey();
         if (type == Type.RANGE_BUTTON && scroller != null) {
-            scroller.handleTouchUp();
+            scroller.releaseActiveInputs();
         }
         if (type == Type.DYNAMIC_STICK) {
             stickVisible = false;
