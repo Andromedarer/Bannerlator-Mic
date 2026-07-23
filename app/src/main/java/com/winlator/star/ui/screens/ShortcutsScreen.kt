@@ -849,6 +849,24 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                             fontSize = 12.sp,
                         )
                     }
+
+                    // Recommended components — the redists this game bundles, one-tap installable into
+                    // its container. Detection runs off-main-thread inside the section (Pillar 2/2.2).
+                    if (confirmContainer != null) {
+                        val importedExe = remember(confirmContainer, renameDialogName) {
+                            runCatching {
+                                val sc = Shortcut(
+                                    confirmContainer,
+                                    File(confirmContainer.getDesktopDir(), "$renameDialogName.desktop"),
+                                )
+                                WinePath.resolveAndroidPath(confirmContainer, sc.path)
+                            }.getOrNull()
+                        }
+                        if (importedExe != null) {
+                            Divider(color = DividerColor)
+                            RecommendedComponentsSection(container = confirmContainer, exeFile = importedExe)
+                        }
+                    }
                 }
             },
             confirmButton = {
@@ -4134,6 +4152,11 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
         runCatching { WinePath.resolveAndroidPath(shortcut.container, shortcut.path)?.parentFile }
             .getOrNull()
     }
+    // The game's .exe on the Android side — feeds DependencyDetector's game-root resolution for the
+    // "Recommended components" chips in the Win Components tab.
+    val gameExe = remember(shortcut) {
+        runCatching { WinePath.resolveAndroidPath(shortcut.container, shortcut.path) }.getOrNull()
+    }
 
     // AndroidView refs
     val cpuListViewRef = remember { mutableStateOf<CPUListView?>(null) }
@@ -4847,7 +4870,14 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
 
                     // Tab content
                     when (selectedTab) {
-                        0 -> ScWinComponentsTab(winComponents)
+                        0 -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            RecommendedComponentsSection(
+                                container = shortcut.container,
+                                exeFile = gameExe,
+                                gameDir = gameDir,
+                            )
+                            ScWinComponentsTab(winComponents)
+                        }
                         1 -> ScEnvVarsTab(envVarsStr, { envVarsStr = it }, gameDir)
          2 -> ScAdvancedTab(
             isArm64EC = isArm64EC,

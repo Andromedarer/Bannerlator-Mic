@@ -100,6 +100,15 @@ object ComponentExecInstaller {
 
     fun clearPlan(context: Context) = prefs(context).edit().remove(PREF_PLAN).apply()
 
+    /** Record a completed install into the shared per-container store the UI reads (component_installs,
+     *  key "c<id>"). Called at Result.Done so session/resume installs are finally tracked. */
+    private fun recordInstalled(context: Context, containerId: Int, name: String) {
+        val p = context.getSharedPreferences("component_installs", Context.MODE_PRIVATE)
+        val key = "c$containerId"
+        val cur = p.getStringSet(key, emptySet()) ?: emptySet()
+        if (name !in cur) p.edit().putStringSet(key, cur + name).apply()
+    }
+
     private fun savePlan(context: Context, containerId: Int, name: String, steps: List<ComponentStep>, cursor: Int) {
         val arr = JSONArray()
         steps.forEach { arr.put(it.obj) }
@@ -176,6 +185,10 @@ object ComponentExecInstaller {
             // Reached the end with no further installer — done. Drop the staged installer exes.
             File(root, ".wine/drive_c/windows/temp/bannerlator_components").deleteRecursively()
             clearPlan(context)
+            // Record the install at the SOURCE so it sticks even though completion happens after the
+            // container session restarts the app (the resume path lands here too). Same store/key the
+            // ComponentsSheet + recommendation chips read, so installed-state is finally accurate.
+            recordInstalled(context, container.id, name)
             onProgress(1f)
             return Result.Done
         } catch (e: Exception) {

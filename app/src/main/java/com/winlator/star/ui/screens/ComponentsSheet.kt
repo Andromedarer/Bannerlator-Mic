@@ -20,6 +20,7 @@ import com.winlator.star.components.Component
 import com.winlator.star.components.ComponentCatalog
 import com.winlator.star.components.ComponentExecInstaller
 import com.winlator.star.components.ComponentInstaller
+import com.winlator.star.components.PrefixInstalledDetector
 import com.winlator.star.container.Container
 import com.winlator.star.ui.findActivity
 import com.winlator.star.ui.theme.Divider as DividerColor
@@ -79,7 +80,11 @@ fun ComponentsSheet(container: Container, onDismiss: () -> Unit) {
     }
 
     LaunchedEffect(Unit) {
-        installed = installsPrefs.getStringSet(installKey, emptySet())?.toSet() ?: emptySet()
+        val recorded = installsPrefs.getStringSet(installKey, emptySet())?.toSet() ?: emptySet()
+        // Backfill: components installed before we recorded installs (or by hand) that leave a
+        // non-baseline prefix footprint (OpenAL/mono/PhysX/GFWL) — so they show as installed too.
+        val detected = withContext(Dispatchers.IO) { PrefixInstalledDetector.detect(container) }
+        installed = recorded + detected
         val list = withContext(Dispatchers.IO) { ComponentCatalog.load() }
         components = list
         loadError = list.isEmpty()
@@ -140,10 +145,13 @@ fun ComponentsSheet(container: Container, onDismiss: () -> Unit) {
                     Text("Couldn't load the component catalog.", color = cs.onSurfaceVariant)
                 }
                 else -> {
-                    val shown = remember(components, query) {
+                    // Installed components float to the top (checked), so what the container already
+                    // has is obvious and users don't reinstall. Stable within each group; re-sorts
+                    // live when something finishes installing (installed is a key).
+                    val shown = remember(components, query, installed) {
                         components.filter {
                             query.isBlank() || it.name.contains(query, true) || it.description.contains(query, true)
-                        }
+                        }.sortedByDescending { it.name in installed }
                     }
                     Box(Modifier.fillMaxWidth().weight(1f)) {
                         LazyColumn(Modifier.fillMaxSize()) {
