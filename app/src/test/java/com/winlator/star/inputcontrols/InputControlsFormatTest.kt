@@ -543,48 +543,55 @@ class InputControlsFormatTest {
     }
 
     @Test
-    fun controllerBindingTransitions_emitInitialPress() {
-        assertEquals(
-            mapOf(Binding.MOUSE_SCROLL_UP to true),
-            InputControlsView.calculateControllerBindingTransitions(
-                emptySet(),
-                setOf(Binding.MOUSE_SCROLL_UP),
-                emptyMap(),
-                emptyMap(),
-            ),
-        )
-    }
-
-    @Test
-    fun momentaryControllerBindingTransitions_areIndependentPerController() {
-        val activeBindings = setOf(Binding.SHOW_ANDROID_KEYBOARD)
-
+    fun controllerPulseSourceEdges_emitInitialPress() {
         assertTrue(
-            InputControlsView.calculateControllerBindingTransitions(
-                activeBindings,
-                activeBindings,
-                emptyMap(),
-                emptyMap(),
-            ).isEmpty(),
-        )
-        assertEquals(
-            mapOf(Binding.SHOW_ANDROID_KEYBOARD to true),
-            InputControlsView.calculateControllerBindingTransitions(
-                emptySet(),
-                activeBindings,
-                emptyMap(),
-                emptyMap(),
+            InputControlsView.isControllerPulseRisingEdge(
+                emptyMap(), 96, Binding.MOUSE_SCROLL_UP,
             ),
         )
     }
 
     @Test
-    fun controllerBindingTransitions_emitFinalRelease() {
+    fun controllerPulseSourceEdges_trackTwoKeyCodesIndependently() {
+        val firstKeyCode = 96
+        val secondKeyCode = 97
+        val previousSources = mapOf(firstKeyCode to Binding.SHOW_ANDROID_KEYBOARD)
+
+        assertFalse(
+            InputControlsView.isControllerPulseRisingEdge(
+                previousSources, firstKeyCode, Binding.SHOW_ANDROID_KEYBOARD,
+            ),
+        )
+        assertTrue(
+            InputControlsView.isControllerPulseRisingEdge(
+                previousSources, secondKeyCode, Binding.SHOW_ANDROID_KEYBOARD,
+            ),
+        )
+    }
+
+    @Test
+    fun controllerPulseSourceEdges_keepControllerStateIndependent() {
+        val sourceKeyCode = 96
+        val firstControllerSources = mapOf(sourceKeyCode to Binding.MOUSE_SCROLL_DOWN)
+        val secondControllerSources = emptyMap<Int, Binding>()
+
+        assertFalse(
+            InputControlsView.isControllerPulseRisingEdge(
+                firstControllerSources, sourceKeyCode, Binding.MOUSE_SCROLL_DOWN,
+            ),
+        )
+        assertTrue(
+            InputControlsView.isControllerPulseRisingEdge(
+                secondControllerSources, sourceKeyCode, Binding.MOUSE_SCROLL_DOWN,
+            ),
+        )
+    }
+
+    @Test
+    fun heldControllerBindingTransitions_emitFinalRelease() {
         assertEquals(
             mapOf(Binding.KEY_A to false),
-            InputControlsView.calculateControllerBindingTransitions(
-                setOf(Binding.KEY_A),
-                emptySet(),
+            InputControlsView.calculateHeldBindingTransitions(
                 mapOf(Binding.KEY_A to 1),
                 emptyMap(),
             ),
@@ -592,29 +599,23 @@ class InputControlsFormatTest {
     }
 
     @Test
-    fun controllerBindingTransitions_keepSharedOutputActiveUntilLastSourceReleases() {
+    fun heldControllerBindingTransitions_keepSharedOutputActiveUntilLastSourceReleases() {
         assertEquals(
             mapOf(Binding.MOUSE_LEFT_BUTTON to true),
-            InputControlsView.calculateControllerBindingTransitions(
-                emptySet(),
-                setOf(Binding.MOUSE_LEFT_BUTTON),
+            InputControlsView.calculateHeldBindingTransitions(
                 emptyMap(),
                 mapOf(Binding.MOUSE_LEFT_BUTTON to 2),
             ),
         )
         assertTrue(
-            InputControlsView.calculateControllerBindingTransitions(
-                setOf(Binding.MOUSE_LEFT_BUTTON),
-                emptySet(),
+            InputControlsView.calculateHeldBindingTransitions(
                 mapOf(Binding.MOUSE_LEFT_BUTTON to 2),
                 mapOf(Binding.MOUSE_LEFT_BUTTON to 1),
             ).isEmpty(),
         )
         assertEquals(
             mapOf(Binding.MOUSE_LEFT_BUTTON to false),
-            InputControlsView.calculateControllerBindingTransitions(
-                setOf(Binding.MOUSE_LEFT_BUTTON),
-                emptySet(),
+            InputControlsView.calculateHeldBindingTransitions(
                 mapOf(Binding.MOUSE_LEFT_BUTTON to 1),
                 emptyMap(),
             ),
@@ -622,13 +623,21 @@ class InputControlsFormatTest {
     }
 
     @Test
-    fun momentaryBindingClassification_matchesCountedInputDispatch() {
-        assertTrue(InputControlsView.isMomentaryBinding(Binding.MOUSE_SCROLL_UP))
-        assertTrue(InputControlsView.isMomentaryBinding(Binding.MOUSE_SCROLL_DOWN))
-        assertTrue(InputControlsView.isMomentaryBinding(Binding.SHOW_ANDROID_KEYBOARD))
+    fun pulseBindingClassification_excludesContinuousMouseMovement() {
+        assertTrue(InputControlsView.isWheelPulseBinding(Binding.MOUSE_SCROLL_UP))
+        assertTrue(InputControlsView.isWheelPulseBinding(Binding.MOUSE_SCROLL_DOWN))
+        assertTrue(InputControlsView.isPulseBinding(Binding.SHOW_ANDROID_KEYBOARD))
+        assertFalse(InputControlsView.isPulseBinding(Binding.MOUSE_MOVE_LEFT))
         assertTrue(InputControlsView.isMomentaryBinding(Binding.MOUSE_MOVE_LEFT))
-        assertFalse(InputControlsView.isMomentaryBinding(Binding.MOUSE_LEFT_BUTTON))
-        assertFalse(InputControlsView.isMomentaryBinding(Binding.KEY_A))
+        assertFalse(InputControlsView.isPulseBinding(Binding.MOUSE_LEFT_BUTTON))
+    }
+
+    @Test
+    fun wheelPulseDelta_ignoresPhysicalRelease() {
+        assertEquals(120, InputControlsView.getWheelPulseDelta(Binding.MOUSE_SCROLL_UP, true))
+        assertEquals(-120, InputControlsView.getWheelPulseDelta(Binding.MOUSE_SCROLL_DOWN, true))
+        assertEquals(0, InputControlsView.getWheelPulseDelta(Binding.MOUSE_SCROLL_UP, false))
+        assertEquals(0, InputControlsView.getWheelPulseDelta(Binding.MOUSE_SCROLL_DOWN, false))
     }
 
     @Test
