@@ -151,6 +151,21 @@ class GameIdentifierTest {
     }
 
     @Test
+    fun name_isNormalizedToBeFilesystemSafeAndTidy() {
+        // Colon → " - " (would otherwise be sanitized to '_' by the shortcut writer).
+        val d1 = tmp.newFolder("ds")
+        File(d1, "goggame-1.info").writeText("""{"name":"Dark Souls: Remastered"}""")
+        assertEquals("Dark Souls - Remastered", GameIdentifier.identify(exeIn(d1)).name)
+        // Trademark marks (symbol and text forms) stripped.
+        val d2 = tmp.newFolder("gow2")
+        File(d2, "goggame-2.info").writeText("""{"name":"God of War™"}""")
+        assertEquals("God of War", GameIdentifier.identify(exeIn(d2)).name)
+        val d3 = tmp.newFolder("ds3")
+        File(d3, "goggame-3.info").writeText("""{"name":"DARK SOULS(TM): REMASTERED"}""")
+        assertEquals("DARK SOULS - REMASTERED", GameIdentifier.identify(exeIn(d3)).name)
+    }
+
+    @Test
     fun emptyWhenNothingIdentifiable() {
         val dir = tmp.newFolder("x")
         val id = GameIdentifier.identify(exeIn(dir, "Game.exe")) // engine-ish base → folder "x"

@@ -88,10 +88,27 @@ object GameIdentifier {
         return GameIdentity(
             appId = appId,
             gogId = gog?.id,
-            name = nameHit?.first,
+            name = nameHit?.first?.let(::normalizeName)?.takeIf { it.isNotBlank() },
             source = primary,
             confidence = confidence,
         )
+    }
+
+    /**
+     * Make an identified title both readable and filesystem-safe, since the shortcut's display
+     * name is its `.desktop` filename (Shortcut.name) — a raw ':' would otherwise be sanitized to
+     * '_' downstream (e.g. "DARK SOULS: REMASTERED" → "DARK SOULS_ REMASTERED"). Strips trademark
+     * marks, turns title punctuation into safe equivalents, and collapses whitespace.
+     */
+    private fun normalizeName(raw: String): String {
+        var s = raw
+        s = s.replace("™", "").replace("®", "").replace("©", "")
+        s = s.replace(Regex("""(?i)\(\s*(tm|r|c)\s*\)"""), "") // "(TM)" / "(R)" / "(C)"
+        s = s.replace(":", " - ")                              // colon → dash separator (safe + readable)
+        s = s.replace(Regex("""[\\/]"""), " ")                 // path separators → space
+        s = s.replace(Regex("""["*?<>|]"""), "")               // other illegal chars → drop
+        s = s.replace(Regex("""\s+"""), " ").trim()            // collapse whitespace
+        return s.trim(' ', '-').trim()                          // tidy stray leading/trailing dashes
     }
 
     // ── directory walk ──
