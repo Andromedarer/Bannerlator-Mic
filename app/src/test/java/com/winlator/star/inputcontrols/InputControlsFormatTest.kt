@@ -426,6 +426,62 @@ class InputControlsFormatTest {
     }
 
     @Test
+    fun controllerBindingTransitions_emitInitialPress() {
+        assertEquals(
+            mapOf(Binding.MOUSE_SCROLL_UP to true),
+            InputControlsView.calculateBindingTransitions(
+                emptyMap(),
+                mapOf(Binding.MOUSE_SCROLL_UP to 1),
+            ),
+        )
+    }
+
+    @Test
+    fun controllerBindingTransitions_skipUnchangedState() {
+        assertTrue(
+            InputControlsView.calculateBindingTransitions(
+                mapOf(Binding.SHOW_ANDROID_KEYBOARD to 1),
+                mapOf(Binding.SHOW_ANDROID_KEYBOARD to 1),
+            ).isEmpty(),
+        )
+    }
+
+    @Test
+    fun controllerBindingTransitions_emitFinalRelease() {
+        assertEquals(
+            mapOf(Binding.KEY_A to false),
+            InputControlsView.calculateBindingTransitions(
+                mapOf(Binding.KEY_A to 1),
+                emptyMap(),
+            ),
+        )
+    }
+
+    @Test
+    fun controllerBindingTransitions_keepSharedOutputActiveUntilLastSourceReleases() {
+        assertEquals(
+            mapOf(Binding.MOUSE_LEFT_BUTTON to true),
+            InputControlsView.calculateBindingTransitions(
+                emptyMap(),
+                mapOf(Binding.MOUSE_LEFT_BUTTON to 2),
+            ),
+        )
+        assertTrue(
+            InputControlsView.calculateBindingTransitions(
+                mapOf(Binding.MOUSE_LEFT_BUTTON to 2),
+                mapOf(Binding.MOUSE_LEFT_BUTTON to 1),
+            ).isEmpty(),
+        )
+        assertEquals(
+            mapOf(Binding.MOUSE_LEFT_BUTTON to false),
+            InputControlsView.calculateBindingTransitions(
+                mapOf(Binding.MOUSE_LEFT_BUTTON to 1),
+                emptyMap(),
+            ),
+        )
+    }
+
+    @Test
     fun opposingMappedDirections_areCombinedByDestinationAxis() {
         val inputs = linkedMapOf(
             Binding.GAMEPAD_LEFT_THUMB_LEFT to 0f,

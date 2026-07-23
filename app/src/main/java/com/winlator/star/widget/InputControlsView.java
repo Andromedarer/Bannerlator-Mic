@@ -46,6 +46,7 @@ import com.winlator.star.xserver.XServer;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
@@ -109,6 +110,9 @@ public class InputControlsView extends View {
     private ControlElement expandedElement;
     private final SparseBooleanArray swallowedExpandablePointers = new SparseBooleanArray();
     private final Map<ExternalController, Set<Integer>> activeControllerKeys = new IdentityHashMap<>();
+    private final Map<ExternalController, Set<Binding>> activeControllerBindings = new IdentityHashMap<>();
+    private final Map<Binding, Integer> activeControllerBindingCounts = new EnumMap<>(Binding.class);
+    private final Map<ExternalController, Integer> controllerDeviceIds = new IdentityHashMap<>();
 
     private static class VirtualStickState {
         final Binding binding;
@@ -190,7 +194,7 @@ public class InputControlsView extends View {
 
     public void setEditMode(boolean editMode) {
         if (this.editMode == editMode) return;
-        releaseActiveControls();
+        releaseAllInputs();
         cancelEditorLongPress();
         if (timeoutHandler != null && hideControlsRunnable != null) {
             timeoutHandler.removeCallbacks(hideControlsRunnable);
@@ -453,8 +457,7 @@ public class InputControlsView extends View {
     }
 
     public synchronized void setProfile(ControlsProfile profile) {
-        releaseActiveControls();
-        activeControllerKeys.clear();
+        releaseAllInputs();
         stopMouseMoveTimer();
         if (profile != null) {
             this.profile = profile;
@@ -485,14 +488,12 @@ public class InputControlsView extends View {
 
     public synchronized void releaseAllInputs() {
         releaseActiveControls();
+        releaseTrackedControllerMappings();
         activeControllerKeys.clear();
+        controllerDeviceIds.clear();
         if (profile == null) return;
         WinHandler winHandler = xServer != null ? xServer.getWinHandler() : null;
         for (ExternalController controller : profile.getControllers()) {
-            for (int i = 0; i < controller.getControllerBindingCount(); i++) {
-                Binding binding = controller.getControllerBindingAt(i).getBinding();
-                handleInputEvent(controller, binding, false, 0, false);
-            }
             controller.state.reset();
             controller.remappedState.reset();
             if (winHandler != null) winHandler.sendGamepadState(controller);
@@ -637,7 +638,7 @@ public class InputControlsView extends View {
     @Override
     protected void onDetachedFromWindow() {
         cancelEditorLongPress();
-        releaseActiveControls();
+        releaseAllInputs();
         stopMouseMoveTimer();
         super.onDetachedFromWindow();
     }
@@ -732,17 +733,101 @@ public class InputControlsView extends View {
                 controllerMouseMoveOffsets.put(controller, new PointF(controllerMouseX, controllerMouseY));
         }
         if (controllerMouseX != 0 || controllerMouseY != 0) createMouseMoveTimer();
-        for (Map.Entry<Binding, Float> output : mappedAxes.entrySet()) {
-            Binding binding = output.getKey();
-            if (binding.isGamepad() || binding.isMouseMove()) continue;
-            float value = output.getValue();
-            handleInputEvent(controller, binding, Math.abs(value) > ControlElement.STICK_DEAD_ZONE, value, false);
-        }
+        updateControllerBindingState(controller, mappedAxes);
 
         WinHandler winHandler = xServer != null ? xServer.getWinHandler() : null;
         if (winHandler != null) {
             winHandler.sendGamepadState(controller);
         }
+    }
+
+    private void updateControllerBindingState(ExternalController controller, Map<Binding, Float> mappedInputs) {
+        Set<Binding> currentBindings = new HashSet<>();
+        for (Map.Entry<Binding, Float> input : mappedInputs.entrySet()) {
+            Binding binding = input.getKey();
+            if (!binding.isGamepad() && !binding.isMouseMove()
+                    && Math.abs(input.getValue()) > ControlElement.STICK_DEAD_ZONE) {
+                currentBindings.add(binding);
+            }
+        }
+
+        Set<Binding> previousBindings = activeControllerBindings.get(controller);
+        Map<Binding, Integer> previousCounts = new EnumMap<>(Binding.class);
+        previousCounts.putAll(activeControllerBindingCounts);
+        if (previousBindings != null) {
+            for (Binding binding : previousBindings) {
+                if (!currentBindings.contains(binding)) adjustBindingCount(activeControllerBindingCounts, binding, -1);
+            }
+        }
+        for (Binding binding : currentBindings) {
+            if (previousBindings == null || !previousBindings.contains(binding)) {
+                adjustBindingCount(activeControllerBindingCounts, binding, 1);
+            }
+        }
+
+        if (currentBindings.isEmpty()) activeControllerBindings.remove(controller);
+        else activeControllerBindings.put(controller, currentBindings);
+        dispatchControllerBindingTransitions(
+                controller,
+                calculateBindingTransitions(previousCounts, activeControllerBindingCounts),
+                mappedInputs);
+    }
+
+    private void releaseTrackedControllerMappings() {
+        Map<Binding, Integer> previousCounts = new EnumMap<>(Binding.class);
+        previousCounts.putAll(activeControllerBindingCounts);
+        activeControllerBindings.clear();
+        activeControllerBindingCounts.clear();
+        dispatchControllerBindingTransitions(
+                null,
+                calculateBindingTransitions(previousCounts, activeControllerBindingCounts),
+                new EnumMap<>(Binding.class));
+    }
+
+    private void releaseControllerMappings(ExternalController controller) {
+        Set<Binding> bindings = activeControllerBindings.remove(controller);
+        if (bindings != null) {
+            Map<Binding, Integer> previousCounts = new EnumMap<>(Binding.class);
+            previousCounts.putAll(activeControllerBindingCounts);
+            for (Binding binding : bindings) adjustBindingCount(activeControllerBindingCounts, binding, -1);
+            dispatchControllerBindingTransitions(
+                    controller,
+                    calculateBindingTransitions(previousCounts, activeControllerBindingCounts),
+                    new EnumMap<>(Binding.class));
+        }
+        activeControllerKeys.remove(controller);
+        controllerDeviceIds.remove(controller);
+        synchronized (controllerMouseMoveOffsets) {
+            controllerMouseMoveOffsets.remove(controller);
+        }
+    }
+
+    private void dispatchControllerBindingTransitions(
+            ExternalController controller,
+            Map<Binding, Boolean> transitions,
+            Map<Binding, Float> mappedInputs) {
+        for (Map.Entry<Binding, Boolean> transition : transitions.entrySet()) {
+            boolean active = transition.getValue();
+            handleInputEvent(controller, transition.getKey(), active,
+                    active ? mappedInputs.getOrDefault(transition.getKey(), 0f) : 0f, false);
+        }
+    }
+
+    private static void adjustBindingCount(Map<Binding, Integer> counts, Binding binding, int delta) {
+        int count = counts.getOrDefault(binding, 0) + delta;
+        if (count > 0) counts.put(binding, count);
+        else counts.remove(binding);
+    }
+
+    public static Map<Binding, Boolean> calculateBindingTransitions(
+            Map<Binding, Integer> previousCounts, Map<Binding, Integer> currentCounts) {
+        Map<Binding, Boolean> transitions = new EnumMap<>(Binding.class);
+        for (Binding binding : Binding.values()) {
+            boolean wasActive = previousCounts.getOrDefault(binding, 0) > 0;
+            boolean isActive = currentCounts.getOrDefault(binding, 0) > 0;
+            if (wasActive != isActive) transitions.put(binding, isActive);
+        }
+        return transitions;
     }
 
     public static void mergeAxisBindingState(
@@ -759,6 +844,7 @@ public class InputControlsView extends View {
         if (!editMode && profile != null) {
             ExternalController controller = profile.getController(event.getDeviceId());
             if (controller != null && controller.updateStateFromMotionEvent(event)) {
+                controllerDeviceIds.put(controller, event.getDeviceId());
                 processControllerMappings(controller);
                 return true;
             }
@@ -1038,6 +1124,7 @@ public class InputControlsView extends View {
             if (controller != null) {
                 ExternalControllerBinding controllerBinding = controller.getControllerBinding(event.getKeyCode());
                 if (controllerBinding != null) {
+                    controllerDeviceIds.put(controller, event.getDeviceId());
                     int action = event.getAction();
                     if (action == KeyEvent.ACTION_DOWN) {
                         activeControllerKeys.computeIfAbsent(controller, ignored -> new HashSet<>())
@@ -1056,6 +1143,23 @@ public class InputControlsView extends View {
             }
         }
         return false;
+    }
+
+    public synchronized void onControllerDisconnected(int deviceId) {
+        ExternalController disconnectedController = null;
+        for (Map.Entry<ExternalController, Integer> entry : controllerDeviceIds.entrySet()) {
+            if (entry.getValue() == deviceId) {
+                disconnectedController = entry.getKey();
+                break;
+            }
+        }
+        if (disconnectedController == null) return;
+
+        releaseControllerMappings(disconnectedController);
+        disconnectedController.state.reset();
+        disconnectedController.remappedState.reset();
+        WinHandler winHandler = xServer != null ? xServer.getWinHandler() : null;
+        if (winHandler != null) winHandler.sendGamepadState(disconnectedController);
     }
 
     public void handleInputEvent(Binding binding, boolean isActionDown) {

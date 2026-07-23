@@ -235,6 +235,8 @@ public class WinHandler {
 
             @Override
             public void onInputDeviceRemoved(int deviceId) {
+                InputControlsView inputControlsView = activity.getInputControlsView();
+                if (inputControlsView != null) inputControlsView.onControllerDisconnected(deviceId);
                 releaseSlot(deviceId);
             }
 
