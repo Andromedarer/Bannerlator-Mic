@@ -9,15 +9,18 @@ import android.content.Context
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -30,6 +33,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -78,6 +82,9 @@ fun RecommendedComponentsSection(
     var recs by remember { mutableStateOf<List<Recommendation>>(emptyList()) }
     var catalog by remember { mutableStateOf<Map<String, Component>>(emptyMap()) }
     var installed by remember { mutableStateOf<Set<String>>(emptySet()) }
+    // Detection + catalog-load run off-main; `loading` gates a spinner row so the section isn't a blank
+    // gap the user reads as "no recommendations" and skips past.
+    var loading by remember { mutableStateOf(true) }
     var installing by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     var confirmExec by remember { mutableStateOf<Component?>(null) }
@@ -94,6 +101,7 @@ fun RecommendedComponentsSection(
     // Detect (filesystem I/O) + load the catalog off the main thread when the dialog opens / target
     // changes. Keyed on the exe/gameDir path so re-opening on a different game re-detects.
     LaunchedEffect(container.id, exeFile?.path, gameDir?.path) {
+        loading = true
         val found = withContext(Dispatchers.IO) {
             runCatching {
                 when {
@@ -103,7 +111,7 @@ fun RecommendedComponentsSection(
                 }
             }.getOrDefault(emptyList())
         }
-        if (found.isEmpty()) { recs = emptyList(); return@LaunchedEffect }
+        if (found.isEmpty()) { recs = emptyList(); loading = false; return@LaunchedEffect }
         val cat = withContext(Dispatchers.IO) {
             runCatching { ComponentCatalog.load() }.getOrDefault(emptyList())
         }.associateBy { it.name }
@@ -113,6 +121,7 @@ fun RecommendedComponentsSection(
         installed = recorded + detected
         // Keep only recommendations whose component exists in the catalog (else we can't install it).
         recs = found.filter { cat.containsKey(it.componentName) }
+        loading = false
     }
 
     // Run an installer-based component (vcredist/.NET): opens a container session; the app restarts
@@ -141,20 +150,27 @@ fun RecommendedComponentsSection(
             message = "Launch the game once first, then install its components from the game's settings."
             return
         }
+        // Prefer the file-drop `_dll` variant when the catalog carries one (e.g. vcredist2010_dll): it
+        // copies DLLs straight into the prefix, so there's no container session — no black screen, no
+        // app restart (the Confirm dialog stays open), and it works on Proton 11. Falls back to the base
+        // component when no `_dll` variant exists. We still record installed-state under the BASE name
+        // (below), so the chip + `component_installs` prefs + PrefixInstalledDetector stay consistent.
+        val target = catalog["${c.name}_dll"] ?: c
         // Same reason logic ComponentsSheet's row uses (exec-driver vs file-drop installer).
-        val reason = if (ComponentExecInstaller.handlesComponent(c)) ComponentExecInstaller.execBlockedReason(c)
-                     else ComponentInstaller.blockedReason(c)
+        val reason = if (ComponentExecInstaller.handlesComponent(target)) ComponentExecInstaller.execBlockedReason(target)
+                     else ComponentInstaller.blockedReason(target)
         if (reason != null) { message = reason; return }
         when {
-            // Has an installer step → confirm (the container will open), then run a session.
-            ComponentExecInstaller.isExecComponent(c) -> confirmExec = c
+            // Has an installer step → confirm (the container will open), then run a session. Only the
+            // base component reaches here; `_dll` variants are file-drop and take the else branch.
+            ComponentExecInstaller.isExecComponent(target) -> confirmExec = target
             // Local-only but not pure file-drop (set_windows/uninstall) → run inline; no session.
-            ComponentExecInstaller.handlesComponent(c) -> runExecInstall(c)
+            ComponentExecInstaller.handlesComponent(target) -> runExecInstall(target)
             else -> {
-                installing = c.name
+                installing = c.name // spinner/installed-state keyed on the BASE name the chip renders
                 scope.launch {
                     val err = withContext(Dispatchers.IO) {
-                        ComponentInstaller.install(context, container, c) { /* progress not surfaced on chips */ }
+                        ComponentInstaller.install(context, container, target) { /* progress not surfaced on chips */ }
                     }
                     installing = null
                     if (err == null) markInstalled(c.name)
@@ -193,20 +209,83 @@ fun RecommendedComponentsSection(
         )
     }
 
+    // Still detecting / loading the catalog → a small spinner row, so an in-progress scan doesn't read
+    // as "nothing recommended". Once loading finishes with no recs, the section hides entirely.
+    if (loading) {
+        Row(
+            modifier = modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "Looking for recommended components…",
+                style = MaterialTheme.typography.bodySmall,
+                color = cs.onSurfaceVariant,
+            )
+        }
+        return
+    }
+
     // Nothing detected (or catalog unavailable) → render nothing at all.
     if (recs.isEmpty()) return
 
+    // Split by how each was found: BUNDLED = redist installers the game ships (meant to install);
+    // SHIPPED = loose runtime DLLs that usually already work. When both are present, label the two
+    // groups distinctly so the user knows which are actually worth installing; with a single kind,
+    // show just that one group (no empty header).
+    val bundled = recs.filter { it.kind == DependencyDetector.Kind.BUNDLED }
+    val shipped = recs.filter { it.kind == DependencyDetector.Kind.SHIPPED }
+
     Column(modifier = modifier.fillMaxWidth()) {
-        Text(
-            "Recommended components",
-            style = MaterialTheme.typography.titleSmall,
-            color = cs.onSurface,
-        )
-        Text(
-            "Redistributables this game bundles — tap to install into its container.",
-            style = MaterialTheme.typography.labelSmall,
-            color = cs.onSurfaceVariant,
-        )
+        if (bundled.isNotEmpty() && shipped.isNotEmpty()) {
+            RecommendedChipGroup(
+                title = "Recommended",
+                subtitle = "Redistributables this game bundles.",
+                recs = bundled, catalog = catalog, installed = installed, installing = installing,
+                cs = cs, onChipTap = ::onChipTap,
+            )
+            Spacer(Modifier.height(12.dp))
+            RecommendedChipGroup(
+                title = "Optional",
+                subtitle = "Ships with the game — install only if it misbehaves.",
+                recs = shipped, catalog = catalog, installed = installed, installing = installing,
+                cs = cs, onChipTap = ::onChipTap,
+            )
+        } else if (shipped.isNotEmpty()) {
+            RecommendedChipGroup(
+                title = "Optional components",
+                subtitle = "Ships with the game — install only if it misbehaves.",
+                recs = shipped, catalog = catalog, installed = installed, installing = installing,
+                cs = cs, onChipTap = ::onChipTap,
+            )
+        } else {
+            RecommendedChipGroup(
+                title = "Recommended components",
+                subtitle = "Redistributables this game bundles — tap to install into its container.",
+                recs = bundled, catalog = catalog, installed = installed, installing = installing,
+                cs = cs, onChipTap = ::onChipTap,
+            )
+        }
+    }
+}
+
+/** One labeled group of recommendation chips (header + subtitle + wrapping chip row). Extracted so the
+ *  BUNDLED / SHIPPED split renders the same chip logic twice without duplication. */
+@Composable
+private fun RecommendedChipGroup(
+    title: String,
+    subtitle: String,
+    recs: List<Recommendation>,
+    catalog: Map<String, Component>,
+    installed: Set<String>,
+    installing: String?,
+    cs: ColorScheme,
+    onChipTap: (Component) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth()) {
+        Text(title, style = MaterialTheme.typography.titleSmall, color = cs.onSurface)
+        Text(subtitle, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
         Spacer(Modifier.height(6.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             recs.forEach { rec ->

@@ -17,9 +17,18 @@ import java.util.Locale
  */
 object DependencyDetector {
 
-    /** A recommended component: the catalog [componentName] to install, a display [label], and the
-     *  on-disk redist that triggered it ([reason], e.g. "_CommonRedist/vcredist/2010"). */
-    data class Recommendation(val componentName: String, val label: String, val reason: String)
+    /** How a recommendation was found — drives the UI's "recommended vs optional" split. */
+    enum class Kind {
+        /** The game bundles the redist installer (in _CommonRedist etc.) — meant to be installed. */
+        BUNDLED,
+        /** A runtime DLL the game ships loose — usually already works from the game folder; install
+         *  only if the game misbehaves. */
+        SHIPPED,
+    }
+
+    /** A recommended component: the catalog [componentName] to install, a display [label], the on-disk
+     *  redist that triggered it ([reason]), and [kind] (bundled installer vs shipped DLL). */
+    data class Recommendation(val componentName: String, val label: String, val reason: String, val kind: Kind = Kind.BUNDLED)
 
     private const val MAX_DEPTH = 5
     private const val MAX_ENTRIES = 8000 // cost guard against giant game trees
@@ -98,11 +107,18 @@ object DependencyDetector {
         val hits = LinkedHashMap<String, Recommendation>() // componentName -> first recommendation
         var visited = 0
 
-        fun consider(f: File, isDir: Boolean) {
+        fun consider(f: File, isDir: Boolean, insideRedist: Boolean) {
+            val name = f.name.lowercase(Locale.US)
             val path = f.path.replace('\\', '/').lowercase(Locale.US)
-            for (comp in classify(path, f.name.lowercase(Locale.US), isDir)) {
-                hits.getOrPut(comp) {
-                    Recommendation(comp, LABELS[comp] ?: comp, relativeReason(gameDir, f))
+            // Bundled = in a redist container or an installer (exe/msi/cab); shipped = a loose runtime DLL.
+            val kind = if (insideRedist || isDir || name.endsWith(".exe") || name.endsWith(".msi") || name.endsWith(".cab"))
+                Kind.BUNDLED else Kind.SHIPPED
+            for (comp in classify(path, name, isDir)) {
+                val existing = hits[comp]
+                if (existing == null) {
+                    hits[comp] = Recommendation(comp, LABELS[comp] ?: comp, relativeReason(gameDir, f), kind)
+                } else if (existing.kind == Kind.SHIPPED && kind == Kind.BUNDLED) {
+                    hits[comp] = existing.copy(kind = Kind.BUNDLED) // a bundled installer outranks a shipped DLL
                 }
             }
         }
@@ -116,7 +132,7 @@ object DependencyDetector {
                 if (f.isDirectory) {
                     if (SKIP_DIR_RE.matches(lower)) continue
                     val isRedistDir = insideRedist || REDIST_DIR_RE.matches(lower)
-                    if (isRedistDir) consider(f, isDir = true)
+                    if (isRedistDir) consider(f, isDir = true, insideRedist = true)
                     // Aggressive coverage: descend redist containers fully, and otherwise sweep the game
                     // tree a few levels deep so runtime libraries the game ships (in bin/, etc.) are seen.
                     if (isRedistDir || depth < 3) walk(f, depth + 1, isRedistDir)
@@ -124,7 +140,7 @@ object DependencyDetector {
                     // Classify installers + runtime libraries (.dll/.exe/.msi) anywhere in the scanned
                     // tree; other files are ignored. Recommendations are advisory, so cast a wide net.
                     val ext = lower.substringAfterLast('.', "")
-                    if (insideRedist || ext == "dll" || ext == "exe" || ext == "msi") consider(f, isDir = false)
+                    if (insideRedist || ext == "dll" || ext == "exe" || ext == "msi") consider(f, isDir = false, insideRedist = insideRedist)
                 }
             }
         }
