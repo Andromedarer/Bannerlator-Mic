@@ -1,6 +1,18 @@
 # Star-Compose — Progress Log
 
-## 2026-07-24 — 📁 **Games folder import: add a whole library in one pick** (same branch `fix/drive-letter-exhaustion` `78972029`, CI GREEN, STAGED, ⬜ awaiting device test)
+## 2026-07-24 — ✅ **DEVICE-VERIFIED + MERGED: drive letters, games-folder import, exe override, card menus, SD badges**
+
+> **User: *"everything is working as intended"*** — the folder scan, the confirm screen, the manual exe override, importing in bulk, and launching the imported games. Merged to `main` from `fix/drive-letter-exhaustion` (tip `e778c18f`, 9 commits). **vc stays 49, no release cut.**
+>
+> **🔑 The ranking heuristic — the part no build could validate — was right on a real library.** It chose `dirt3_game.exe` over the `dirt3.exe` launcher, `GTAIV.exe` over GTA IV's launcher variants, and `Hades.exe`; it correctly flagged `re3.exe (folder root)` vs `re3.exe (_Windows 7 Fix)` as ambiguous rather than guessing. Every "check this one" badge fired on a folder that genuinely ships two plausible binaries — i.e. the flag marks *ask the user*, not *bad guess*.
+>
+> **Three UI rounds came out of device screenshots**, each from something only visible on a real screen: (1) menus were bare text on a screen made entirely of cards → new `MenuOptionCard` matching the File Manager rows, applied to Select container, Add games, the found-games list and the exe picker; (2) rows ran together → dividers, then superseded by cards (a border per row made both redundant); (3) at the platform default dialog width the titles and exe names truncated to `aio graphics t…` / `AIO-Graphics-Te…`, which defeats a screen whose only job is letting the user read them → both import dialogs now take 94% width.
+>
+> **SD badge** on games stored on removable media, in grid (over the art's top corner) and list (after the container/resolution line). Detection reuses `storageVolumeRootOf` from the drive-letter work — resolve the shortcut's `Exec` to a real path, take its volume root, treat anything not under `/storage/emulated` as removable.
+>
+> **▶️ KNOWN GAP, deliberately not fixed here (own branch):** the File Manager's *Add to Shortcuts* calls `ExeShortcutImporter.addToShortcuts(context, container, file, file.nameWithoutExtension)` — raw exe basename, **no appId**. That cascades: `ExeShortcutImporter.kt:62` skips the Steam CDN portrait, `:64` skips SGDB-by-appId, `:87` gates off the Steam authoritative rename, and the surviving SGDB-by-name search runs on `dirt3_game`/`SACGUI` rather than a real title. So the same importer produces a markedly worse result than the `+` button or the bulk import. Fix is ~4 lines at the call site (`GameIdentifier.identify` → pass `name` + `appId`), kept separate so it wouldn't invalidate the device testing of this branch.
+
+## 2026-07-24 — 📁 **Games folder import: add a whole library in one pick** (same branch `fix/drive-letter-exhaustion` `78972029`, CI GREEN, STAGED — since device-verified, see above)
 
 > **User ask:** the `+` button only ever added one game at a time. Most users keep every game under one parent folder (user's = `/storage/emulated/0/Winlator/Games`), so importing a library meant dozens of identical trips through the picker. After picking a container there is now a **choice of HOW to add**: *Add game EXE* (existing flow, untouched) or *Add games folder*.
 >
