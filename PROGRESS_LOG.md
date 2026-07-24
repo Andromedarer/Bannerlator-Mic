@@ -1,5 +1,23 @@
 # Star-Compose — Progress Log
 
+## 2026-07-24 — 🗂️ **File Manager overhaul: multi-select, real moves, archive extract, search/sort** (branch `feat/fm-multiselect` `838fe876`, CI GREEN ×3, STAGED, ⬜ awaiting device test)
+
+> User asked for the lot after a survey of what the File Manager does and what it lacks. Built as one branch, one APK to test: `/sdcard/Download/bannerlator-fm-all-838fe87-standard.apk`, sha `553f3b52…` host==device. vc stays 49.
+>
+> **1. Multi-select + bulk ops.** Every action was single-file. Long-press enters selection mode, tap toggles from there; Select All / Copy / Cut / Delete bar. Clipboard became a `List<File>` — cut/copy is a property of the batch, since a clipboard mixing both has no coherent meaning. Bulk delete names the first five victims before confirming so an accidental Select All is visible while still reversible.
+>
+> **🔑 2. Cut was ALWAYS copy-every-byte-then-delete.** `FileUtils.copyWithProgress` had no `renameTo` fast path, so moving a 60 GB folder *within* internal storage rewrote 60 GB the filesystem could have relinked instantly. New `moveWithProgress` tries `renameTo` first — **`renameTo` returning false IS the cross-filesystem signal, so it doubles as the check** — and falls back to copy+delete. Only attempted when the destination is free, because renaming *onto* an existing directory doesn't merge.
+>
+> **3. Paste conflicts asked, not silently renamed** (user chose Overwrite/Merge/Keep-both, recommended option): dropping an updated game folder over an existing one used to give `DiRT 3 (1)` beside the original. 🔑 **Merge needed no new copy logic** — `copyWithProgress` already recurses into an existing directory and truncates existing files, so Overwrite and Merge resolve to the same call and differ only in wording (chosen per item type). Apply-to-all for batches.
+>
+> **4. Archive extract — new `core/ArchiveExtractor.kt`.** zip · 7z · tar(.gz/.xz/.bz2/.zst) · bare compressors, on `commons-compress`/`xz`/`zstd-jni` **already in the build** (so this was wiring, not new capability). `TarCompressorUtils` couldn't be reused — it covers only tar.xz/tar.zst and is built around asset/Uri sources. Two deliberate calls: always extracts to a **named subfolder** (a zip of 400 loose entries would otherwise carpet the folder irreversibly), and every entry path goes through a **Zip Slip guard** — an archive can carry `../../../` entries and a naive `File(dest, name)` writes outside the target. **RAR is detected and reported unsupported** rather than failing silently; commons-compress can't read it.
+>
+> **5. Search / sort / hidden / free space.** Filter-this-folder search; sort by name/date/size with tap-to-flip; 🔑 **folders always lead regardless of direction** — a descending sort that buries every folder under the files is not what "Z to A" means; directory `length()` is meaningless so folders order by name inside the size sort. Dotfile toggle, free space above the list. Sort + hidden persist. Row sizes already existed via `StringUtils.formatBytes`, reused rather than adding a second formatter.
+>
+> **Cancel** now works on any long copy/move/extract — previously the only way out of a wrong multi-gigabyte paste was killing the app.
+>
+> **⬜ DEVICE TEST:** long-press → select several → Copy → paste elsewhere · Cut within the same volume (should be **instant**, that's the renameTo path) · Cut internal→SD (must still copy) · paste onto an existing folder → Merge, confirm it updated rather than duplicating · extract a zip and a 7z · search/sort/hidden toggles · cancel a large copy mid-flight. ⚠️ 7z on a big archive is slow (LZMA on ARM) — expected, not a hang.
+
 ## 2026-07-24 — ✅ **File Manager "Add to Shortcuts" now identifies the game** (branch `fix/fm-add-shortcut-naming`, DEVICE-VERIFIED "works well", merged to main)
 
 > **The importer was never missing anything — the call site was under-feeding it.** `addShortcutInContainer` passed `file.nameWithoutExtension` and no appId, which silently disabled most of the pipeline: `ExeShortcutImporter.kt:62` skips Steam's 600×900 portrait without an appId, `:64` skips the SGDB-by-appId lookup, `:87` gates off the Steam authoritative rename — leaving only an SGDB-by-name search running on strings like `dirt3_game` or `SACGUI`, which finds nothing. Adding DiRT 3 this way produced a shortcut literally called `dirt3_game` with, at best, an icon scraped out of the PE.
