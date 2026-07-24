@@ -33,7 +33,7 @@
 
 ## 2026-07-24 — 🗂️✅ **File Manager overhaul MERGED to main** — multi-select · real moves · archive extract · search/sort · grid + compact views
 
-> Merged from `feat/fm-multiselect`. **vc stays 49, no release cut.** User confirmed on device: multi-select and bulk ops, instant same-volume moves, merge-on-conflict, zip/7z extraction, search/sort/hidden, cancel, and the path-bar rework ("everything works great", "the path bar works great"). ⚠️ **Grid view, compact rows and the pinned free-space figure shipped in the final build and had NO device pass** — worth a look post-merge.
+> Merged from `feat/fm-multiselect`. **vc stays 49, no release cut.** User confirmed on device: multi-select and bulk ops, instant same-volume moves, merge-on-conflict, zip/7z extraction, search/sort/hidden, cancel, and the path-bar rework ("everything works great", "the path bar works great"). ✅ **Grid view, compact rows and the pinned free-space figure were device-confirmed too** (checked after the merge — an earlier note in this entry wrongly recorded them as untested). So the whole overhaul is device-verified.
 >
 > **🔑 Cut was always copy-every-byte-then-delete.** No `renameTo` fast path existed, so moving a 60 GB folder *within* internal storage rewrote 60 GB the filesystem could have relinked instantly. `moveWithProgress` tries `renameTo` first — **its returning false IS the cross-filesystem signal, so it doubles as the check** — falling back to copy+delete. Only when the destination is free: renaming *onto* an existing directory doesn't merge.
 >
