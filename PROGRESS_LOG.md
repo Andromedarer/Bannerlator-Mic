@@ -1,6 +1,11 @@
 # Star-Compose — Progress Log
 
-## 2026-07-24 — 🗂️ **Drive-letter exhaustion: one letter per VOLUME, not per game** (branch `fix/drive-letter-exhaustion` `df67a4dc`, CI GREEN, STAGED, ⬜ awaiting device test)
+## 2026-07-24 — 🗂️✅ **Drive-letter exhaustion: one letter per VOLUME, not per game — DEVICE-VERIFIED** (branch `fix/drive-letter-exhaustion` `df67a4dc`, CI GREEN, ✅ all six checks pass, awaiting merge decision)
+
+> **✅ DEVICE TEST PASSED 2026-07-24 — user: *"everything is working as intended"*.** All six checks green, including the one that could only fail at runtime: **a freshly-imported SD game launches**, which is what proves Part B computes the path relative to the coarser volume-root mount correctly (the old code returned the bare filename). Second SD game reused the drive with no new letter; internal storage unregressed; new containers get `D:`/`E:`/`F:` per volume; no `bannerlator_components` drive (Part C); dropdown ends at `Z:`.
+>
+> **Ready to merge to `main`. vc stays 49, no release cut.** Existing containers keep their per-game `G:`/`I:`/`J:` drives by design — growth stops, no migration.
+
 
 > **Bug:** every game imported from SD/USB claimed its own drive letter, and the pool is ~24, so a large SD library eventually could not import at all. `resolveWindowsPath` mounted the exe's **own parent folder**, and `bestDriveMatch` only reuses a drive that is an **ancestor** of the new path — one game's folder is never an ancestor of the next game's sibling folder.
 >
