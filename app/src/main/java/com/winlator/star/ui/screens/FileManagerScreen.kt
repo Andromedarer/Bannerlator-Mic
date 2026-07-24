@@ -13,6 +13,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,6 +24,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -33,6 +37,7 @@ import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FileCopy
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.ContentCut
@@ -43,6 +48,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Unarchive
+import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Storage
@@ -318,6 +324,10 @@ fun FileManagerScreen(
     var showHidden by remember { mutableStateOf(browsePrefs.getBoolean("fmShowHidden", true)) }
     var showSortMenu by remember { mutableStateOf(false) }
     var pendingExtract by remember { mutableStateOf<File?>(null) }
+    // View mode: list of cards (default) or a thumbnail grid. Density applies to the list only —
+    // a grid tile has no second line to compact.
+    var gridView by remember { mutableStateOf(browsePrefs.getBoolean("fmGridView", false)) }
+    var compactRows by remember { mutableStateOf(browsePrefs.getBoolean("fmCompactRows", false)) }
     var showNewFolderDialog by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<File?>(null) }
     var pendingRun by remember { mutableStateOf<File?>(null) }
@@ -1085,6 +1095,16 @@ fun FileManagerScreen(
             }
 
             if (!showFavorites) {
+                IconButton(onClick = {
+                    gridView = !gridView
+                    browsePrefs.edit().putBoolean("fmGridView", gridView).apply()
+                }) {
+                    Icon(
+                        if (gridView) Icons.Filled.ViewList else Icons.Filled.GridView,
+                        if (gridView) "List view" else "Grid view",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 IconButton(onClick = { showSearch = !showSearch; if (!showSearch) searchQuery = "" }) {
                     Icon(Icons.Filled.Search, "Search", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -1111,6 +1131,14 @@ fun FileManagerScreen(
                                 )
                             }
                         HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+                        DropdownMenuItem(
+                            text = { Text(if (compactRows) "Comfortable rows" else "Compact rows") },
+                            onClick = {
+                                compactRows = !compactRows
+                                browsePrefs.edit().putBoolean("fmCompactRows", compactRows).apply()
+                                showSortMenu = false
+                            },
+                        )
                         DropdownMenuItem(
                             text = { Text(if (showHidden) "Hide hidden files" else "Show hidden files") },
                             onClick = {
@@ -1161,11 +1189,13 @@ fun FileManagerScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 11.sp,
                     maxLines = 1,
-                    modifier = Modifier.weight(1f, fill = false),
+                    // fill = true: the path takes all remaining width, so the free-space figure
+                    // is pinned to the right edge instead of sliding around with the path length.
+                    modifier = Modifier.weight(1f),
                 )
                 if (freeSpace > 0) {
                     Text(
-                        "  \u2022  ${StringUtils.formatBytes(freeSpace)} free",
+                        "${StringUtils.formatBytes(freeSpace)} free",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 11.sp,
                         maxLines = 1,
@@ -1326,6 +1356,45 @@ fun FileManagerScreen(
                 .fillMaxWidth()
                 .nestedScroll(pullState.nestedScrollConnection),
         ) {
+            val shownEntries = if (searchQuery.isBlank()) entries
+            else entries.filter { it.name.contains(searchQuery, ignoreCase = true) }
+
+            if (gridView && entries.isNotEmpty()) {
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(minSize = 104.dp),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(8.dp),
+                ) {
+                    items(shownEntries, key = { it.absolutePath }) { file ->
+                        FileGridTile(
+                            file = file,
+                            selectionMode = selectionMode,
+                            selected = file.absolutePath in selectedPaths,
+                            onLongPress = {
+                                if (!pickMode) {
+                                    selectionMode = true
+                                    selectedPaths = selectedPaths + file.absolutePath
+                                }
+                            },
+                            onToggleSelect = {
+                                selectedPaths = if (file.absolutePath in selectedPaths)
+                                    selectedPaths - file.absolutePath
+                                else selectedPaths + file.absolutePath
+                            },
+                            onTap = {
+                                if (file.isDirectory) loadDirectory(file)
+                                else if (pickMode) {
+                                    if (matchesPickExt(file)) {
+                                        pickPrefs.edit().putString("lastFilePickerDir", currentDir.absolutePath).apply()
+                                        onPick?.invoke(file)
+                                    }
+                                } else if (canRun(file)) runFile(file)
+                            },
+                            onMenu = { showMenuFor = file },
+                        )
+                    }
+                }
+            } else
             LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                 if (entries.isEmpty()) {
                     item {
@@ -1337,8 +1406,7 @@ fun FileManagerScreen(
                         }
                     }
                 } else {
-                    val shown = if (searchQuery.isBlank()) entries
-                    else entries.filter { it.name.contains(searchQuery, ignoreCase = true) }
+                    val shown = shownEntries
                     items(shown, key = { it.absolutePath }) { file ->
                         val isFav = remember(file.absolutePath, favTick) {
                             FavoritesStore.isFavorite(context, file.absolutePath)
@@ -1346,6 +1414,7 @@ fun FileManagerScreen(
                         FileItemRow(
                             file = file,
                             showActions = !pickMode,
+                            compact = compactRows,
                             selectionMode = selectionMode,
                             selected = file.absolutePath in selectedPaths,
                             onLongPress = {
@@ -1440,6 +1509,7 @@ fun FileManagerScreen(
 private fun FileItemRow(
     file: File,
     showActions: Boolean = true,
+    compact: Boolean = false,
     selectionMode: Boolean = false,
     selected: Boolean = false,
     onLongPress: () -> Unit = {},
@@ -1497,7 +1567,7 @@ private fun FileItemRow(
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = if (compact) 3.dp else 8.dp),
         ) {
             if (selectionMode) {
                 androidx.compose.material3.Checkbox(checked = selected, onCheckedChange = { onToggleSelect() })
@@ -1508,19 +1578,19 @@ private fun FileItemRow(
                 exeIcon != null -> Image(
                     bitmap = exeIcon!!,
                     contentDescription = null,
-                    modifier = Modifier.size(36.dp),
+                    modifier = Modifier.size(if (compact) 24.dp else 36.dp),
                 )
                 isExe -> Icon(
                     painter = painterResource(R.drawable.icon_menu_container),
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.size(36.dp),
+                    modifier = Modifier.size(if (compact) 24.dp else 36.dp),
                 )
                 isDir -> Icon(
                     imageVector = Icons.Filled.Folder,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(36.dp),
+                    modifier = Modifier.size(if (compact) 24.dp else 36.dp),
                 )
                 // Real image preview. Falls back to the generic file icon while loading or on decode failure.
                 isImage -> AsyncImage(
@@ -1537,7 +1607,7 @@ private fun FileItemRow(
                     imageVector = Icons.Filled.InsertDriveFile,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.size(36.dp),
+                    modifier = Modifier.size(if (compact) 24.dp else 36.dp),
                 )
             }
             Spacer(Modifier.width(10.dp))
@@ -1748,7 +1818,7 @@ private fun FavoriteCard(
                 imageVector = Icons.Filled.Folder,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(36.dp),
+                modifier = Modifier.size(if (compact) 24.dp else 36.dp),
             )
             Spacer(Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f)) {
@@ -1820,6 +1890,97 @@ private fun FavoriteCard(
                     modifier = Modifier.size(22.dp),
                 )
             }
+        }
+    }
+}
+
+/**
+ * One entry in the File Manager's grid view: a big thumbnail with the name under it.
+ *
+ * Deliberately drops size and date — at this width they truncate to noise. The grid is for
+ * recognising things by sight (screenshots, covers, game folders); the list stays the view for
+ * reading details.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun FileGridTile(
+    file: File,
+    selectionMode: Boolean,
+    selected: Boolean,
+    onLongPress: () -> Unit,
+    onToggleSelect: () -> Unit,
+    onTap: () -> Unit,
+    onMenu: () -> Unit,
+) {
+    val isDir = file.isDirectory
+    val isImage = !isDir && file.extension.lowercase() in IMAGE_THUMB_EXTS
+    var exeIcon by remember(file.absolutePath) { mutableStateOf<ImageBitmap?>(null) }
+    if (!isDir && file.name.lowercase().endsWith(".exe")) {
+        LaunchedEffect(file.absolutePath) {
+            val bmp = withContext(Dispatchers.IO) { PeIconExtractor.extract(file) }
+            if (bmp != null) exeIcon = bmp.asImageBitmap()
+        }
+    }
+    Card(
+        modifier = Modifier
+            .padding(4.dp)
+            .combinedClickable(
+                onClick = { if (selectionMode) onToggleSelect() else onTap() },
+                onLongClick = onLongPress,
+            ),
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+            else MaterialTheme.colorScheme.surfaceContainer,
+        ),
+        border = BorderStroke(
+            1.dp,
+            if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+        ),
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.fillMaxWidth().padding(8.dp),
+        ) {
+            Box(modifier = Modifier.size(56.dp), contentAlignment = Alignment.Center) {
+                when {
+                    exeIcon != null -> Image(bitmap = exeIcon!!, contentDescription = null, modifier = Modifier.size(48.dp))
+                    isDir -> Icon(
+                        Icons.Filled.Folder, null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(48.dp),
+                    )
+                    isImage -> AsyncImage(
+                        model = file,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        placeholder = rememberVectorPainter(Icons.Filled.InsertDriveFile),
+                        error = rememberVectorPainter(Icons.Filled.InsertDriveFile),
+                        modifier = Modifier.size(56.dp).clip(RoundedCornerShape(6.dp)),
+                    )
+                    else -> Icon(
+                        Icons.Filled.InsertDriveFile, null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(44.dp),
+                    )
+                }
+                if (selectionMode) {
+                    androidx.compose.material3.Checkbox(
+                        checked = selected,
+                        onCheckedChange = { onToggleSelect() },
+                        modifier = Modifier.align(Alignment.TopStart),
+                    )
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                file.name,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontSize = 11.sp,
+                maxLines = 2,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
