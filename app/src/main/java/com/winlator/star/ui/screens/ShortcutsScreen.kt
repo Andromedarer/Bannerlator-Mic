@@ -84,6 +84,9 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FileUpload
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.SdCard
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Upload
@@ -100,6 +103,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import com.winlator.star.communityconfigs.AccountManager
 import com.winlator.star.communityconfigs.CanonicalDevice
 import com.winlator.star.communityconfigs.CanonicalGame
@@ -141,6 +145,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -187,6 +192,7 @@ import com.winlator.star.ui.screens.adrenodownload.RemoteDriverEntry
 import com.winlator.star.ui.screens.adrenodownload.RemoteDriverRepository
 import com.winlator.star.core.DefaultVersion
 import com.winlator.star.core.FileUtils
+import com.winlator.star.core.GameFolderScanner
 import com.winlator.star.core.KeyValueSet
 import com.winlator.star.core.StringUtils
 import com.winlator.star.core.WineInfo
@@ -204,6 +210,7 @@ import com.winlator.star.ui.theme.LocalAccentDim
 import com.winlator.star.ui.theme.OnSurface
 import com.winlator.star.ui.theme.OnSurfaceVariant
 import com.winlator.star.ui.theme.Surface as SurfaceColor
+import com.winlator.star.ui.theme.SurfaceVariant
 import com.winlator.star.ui.theme.SurfaceVariant as SurfaceVariantColor
 import com.winlator.star.widget.CPUListView
 import com.winlator.star.ui.components.EnvVarsEditor
@@ -240,6 +247,18 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     var showSortMenu by remember { mutableStateOf(false) }
     var showImportContainerPicker by remember { mutableStateOf(false) }
     var pendingImportContainerIndex by remember { mutableStateOf(-1) }
+    // Bulk games-folder import: pick one folder holding many game folders, scan each for its exe,
+    // then confirm the findings before anything is written to the container.
+    var showImportMethodPicker by remember { mutableStateOf(false) }
+    var folderScanRunning by remember { mutableStateOf(false) }
+    var folderScanResults by remember { mutableStateOf<List<GameFolderScanner.Candidate>>(emptyList()) }
+    var folderScanSelected by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var folderScanRoot by remember { mutableStateOf("") }
+    var folderImportRunning by remember { mutableStateOf(false) }
+    // Manual exe override for a scanned game. The scanner keeps every runner-up, so correcting a
+    // pick is a choice from a list rather than a rescan.
+    var exePickerFor by remember { mutableStateOf<GameFolderScanner.Candidate?>(null) }
+    var exeBrowseForPath by remember { mutableStateOf("") }
     // When checked, the shortcut import uses the system SAF picker instead of the in-app File Manager.
     var importUseSystemPicker by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
@@ -517,6 +536,32 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) InAppFilePicker.pickedUri(result.data)?.let { handleShortcutImport(it) }
     }
+    // Games-folder picker. Uses buildDirIntent (a real absolute path, works on SD) rather than SAF,
+    // which hands back /mnt/media_rw/... paths the scanner can't read.
+    val importFolderLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val path = if (result.resultCode == Activity.RESULT_OK) InAppFilePicker.pickedPath(result.data) else null
+        if (path == null) {
+            pendingImportContainerIndex = -1
+            return@rememberLauncherForActivityResult
+        }
+        val containerIndex = pendingImportContainerIndex
+        folderScanRoot = path
+        folderScanRunning = true
+        scope.launch {
+            // Filesystem-heavy: a large library on SD walks a lot of directories.
+            val found = withContext(Dispatchers.IO) { vm.scanGamesFolder(containerIndex, path) }
+            folderScanResults = found
+            // Pre-select everything importable; duplicates stay off and can't be ticked.
+            folderScanSelected = found.filter { !it.alreadyAdded }.map { it.exe.absolutePath }.toSet()
+            folderScanRunning = false
+            if (found.isEmpty()) {
+                Toast.makeText(context, "No games found in that folder", Toast.LENGTH_LONG).show()
+                pendingImportContainerIndex = -1
+            }
+        }
+    }
     // Phase 3 step 2 — config-import picker (in-app File Manager, `.json` only). A known
     // [importPendingTarget] applies straight to that shortcut; otherwise (from the catalog browser)
     // the picked file is stashed and a target picker is shown.
@@ -710,6 +755,274 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
         }
     }
 
+    /**
+     * Swaps the chosen exe for one scanned game. The user has now made the call explicitly, so the
+     * "check this one" flag is cleared, the previous pick joins the alternatives (in case they want
+     * to go back), and the selection set is re-keyed since it is keyed by exe path.
+     */
+    fun replaceScannedExe(target: GameFolderScanner.Candidate, newExe: File) {
+        val oldKey = target.exe.absolutePath
+        val newKey = newExe.absolutePath
+        folderScanResults = folderScanResults.map { c ->
+            if (c.exe.absolutePath != oldKey) c else c.copy(
+                exe = newExe,
+                uncertain = false,
+                alternatives = (listOf(c.exe) + c.alternatives)
+                    .distinctBy { it.absolutePath }
+                    .filter { it.absolutePath != newKey },
+            )
+        }
+        if (oldKey in folderScanSelected) folderScanSelected = folderScanSelected - oldKey + newKey
+    }
+
+    // "Browse…" result from the exe-override dialog: any file the user points at wins outright.
+    val importExeBrowseLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val path = if (result.resultCode == Activity.RESULT_OK) InAppFilePicker.pickedPath(result.data) else null
+        val target = folderScanResults.firstOrNull { it.exe.absolutePath == exeBrowseForPath }
+        if (path != null && target != null) replaceScannedExe(target, File(path))
+        exeBrowseForPath = ""
+    }
+
+    // Manual exe override — every candidate exe found in that game's folder, best-ranked first.
+    exePickerFor?.let { target ->
+        val options = (listOf(target.exe) + target.alternatives).distinctBy { it.absolutePath }
+        OutlinedAlertDialog(
+            // The platform default width truncates exe names and their subfolder paths, which are
+            // the whole point of this list.
+            modifier = Modifier.fillMaxWidth(0.94f),
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+            onDismissRequest = { exePickerFor = null },
+            title = {
+                Column {
+                    Text("Choose the game's .exe")
+                    Text(
+                        target.name,
+                        color = OnSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            },
+            text = {
+                LazyColumn(modifier = Modifier.heightIn(max = 380.dp)) {
+                    items(options, key = { it.absolutePath }) { exe ->
+                        val current = exe.absolutePath == target.exe.absolutePath
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 3.dp)
+                                .clickable {
+                                    replaceScannedExe(target, exe)
+                                    exePickerFor = null
+                                },
+                            shape = RoundedCornerShape(10.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                        ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(selected = current, onClick = {
+                                replaceScannedExe(target, exe)
+                                exePickerFor = null
+                            })
+                            Spacer(Modifier.width(8.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    exe.name,
+                                    color = OnSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                // Where it sits inside the game folder — the thing that actually
+                                // distinguishes two same-named exes (x86 vs x64, bin/ vs root).
+                                val rel = exe.absolutePath
+                                    .removePrefix(target.folder.absolutePath)
+                                    .removePrefix("/")
+                                Text(
+                                    if (rel.contains('/')) rel.substringBeforeLast('/') else "(folder root)",
+                                    color = OnSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.labelSmall,
+                                )
+                            }
+                        }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                // Escape hatch: the real exe can be missing from the list if it was filtered as an
+                // installer/helper or sits deeper than the scan goes.
+                TextButton(onClick = {
+                    exeBrowseForPath = target.exe.absolutePath
+                    exePickerFor = null
+                    importExeBrowseLauncher.launch(
+                        InAppFilePicker.buildIntent(context, InAppFilePicker.SHORTCUT, "Select the game's .exe")
+                    )
+                }) { Text("Browse…") }
+            },
+            dismissButton = {
+                TextButton(onClick = { exePickerFor = null }) { Text("Cancel") }
+            },
+        )
+    }
+
+    // How to add: one exe (the original flow) or a whole folder of game folders.
+    if (showImportMethodPicker) {
+        OutlinedAlertDialog(
+            onDismissRequest = {
+                showImportMethodPicker = false
+                pendingImportContainerIndex = -1
+            },
+            title = { Text("Add games") },
+            text = {
+                Column {
+                    MenuOptionCard(
+                        title = "Add game EXE",
+                        subtitle = "Pick one game's .exe file",
+                        icon = Icons.Default.InsertDriveFile,
+                    ) {
+                        showImportMethodPicker = false
+                        if (importUseSystemPicker) importFileLauncher.launch("*/*")
+                        else importFileInAppLauncher.launch(
+                            InAppFilePicker.buildIntent(context, InAppFilePicker.SHORTCUT, "Select .exe / .desktop / .lnk")
+                        )
+                    }
+                    MenuOptionCard(
+                        title = "Add games folder",
+                        subtitle = "Pick the folder holding all your games — each one is scanned for its .exe",
+                        icon = Icons.Default.Folder,
+                    ) {
+                        showImportMethodPicker = false
+                        importFolderLauncher.launch(
+                            InAppFilePicker.buildDirIntent(context, "Select your games folder")
+                        )
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = {
+                    showImportMethodPicker = false
+                    pendingImportContainerIndex = -1
+                }) { Text("Cancel") }
+            },
+        )
+    }
+
+    // Scanning progress — a big library on SD takes a moment.
+    if (folderScanRunning) {
+        OutlinedAlertDialog(
+            onDismissRequest = {},
+            title = { Text("Scanning for games") },
+            text = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(12.dp))
+                    Text(folderScanRoot, color = OnSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+            },
+            confirmButton = {},
+        )
+    }
+
+    // Confirm screen — nothing is written until the user accepts this list.
+    if (folderScanResults.isNotEmpty() && !folderScanRunning) {
+        val importable = folderScanResults.filter { !it.alreadyAdded }
+        val selectedCount = folderScanSelected.size
+        OutlinedAlertDialog(
+            // Each row carries art, a checkbox, three lines of text and a Change action; at the
+            // platform default width the titles and the exe name truncate to the point of being
+            // unreadable, which defeats a screen whose whole job is letting the user check them.
+            modifier = Modifier.fillMaxWidth(0.94f),
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+            onDismissRequest = {
+                if (!folderImportRunning) {
+                    folderScanResults = emptyList()
+                    folderScanSelected = emptySet()
+                    pendingImportContainerIndex = -1
+                }
+            },
+            title = {
+                Column {
+                    Text("Found ${importable.size} game${if (importable.size == 1) "" else "s"}")
+                    val skipped = folderScanResults.size - importable.size
+                    if (skipped > 0) {
+                        Text(
+                            "$skipped already added",
+                            color = OnSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            },
+            text = {
+                LazyColumn(modifier = Modifier.heightIn(max = 420.dp)) {
+                    items(folderScanResults, key = { it.exe.absolutePath }) { candidate ->
+                        ScannedGameRow(
+                            candidate = candidate,
+                            checked = candidate.exe.absolutePath in folderScanSelected,
+                            enabled = !candidate.alreadyAdded && !folderImportRunning,
+                            onToggle = {
+                                val key = candidate.exe.absolutePath
+                                folderScanSelected = if (key in folderScanSelected) {
+                                    folderScanSelected - key
+                                } else {
+                                    folderScanSelected + key
+                                }
+                            },
+                            onChangeExe = { exePickerFor = candidate },
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = selectedCount > 0 && !folderImportRunning,
+                    onClick = {
+                        val containerIndex = pendingImportContainerIndex
+                        val chosen = folderScanResults.filter { it.exe.absolutePath in folderScanSelected }
+                        folderImportRunning = true
+                        scope.launch {
+                            val summary = withContext(Dispatchers.IO) {
+                                vm.importScannedGames(containerIndex, chosen, context)
+                            }
+                            folderImportRunning = false
+                            folderScanResults = emptyList()
+                            folderScanSelected = emptySet()
+                            pendingImportContainerIndex = -1
+                            val message = if (summary.failed == 0) {
+                                "Added ${summary.added} game${if (summary.added == 1) "" else "s"}"
+                            } else {
+                                "Added ${summary.added}, ${summary.failed} failed — ${summary.failures.firstOrNull().orEmpty()}"
+                            }
+                            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                        }
+                    },
+                ) {
+                    Text(if (folderImportRunning) "Adding…" else "Add $selectedCount")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !folderImportRunning,
+                    onClick = {
+                        folderScanResults = emptyList()
+                        folderScanSelected = emptySet()
+                        pendingImportContainerIndex = -1
+                    },
+                ) { Text("Cancel") }
+            },
+        )
+    }
+
     // Import container picker
     if (showImportContainerPicker) {
         val containers = vm.containers()
@@ -722,21 +1035,16 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                         Text("No containers found.", color = OnSurfaceVariant)
                     } else {
                         containers.forEachIndexed { index, c ->
-                            Text(
-                                text = c.name,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        showImportContainerPicker = false
-                                        pendingImportContainerIndex = index
-                                        if (importUseSystemPicker) importFileLauncher.launch("*/*")
-                                        else importFileInAppLauncher.launch(
-                                            InAppFilePicker.buildIntent(context, InAppFilePicker.SHORTCUT, "Select .exe / .desktop / .lnk")
-                                        )
-                                    }
-                                    .padding(vertical = 12.dp),
-                                color = OnSurface,
-                            )
+                            MenuOptionCard(
+                                title = c.name,
+                                icon = Icons.Default.Folder,
+                            ) {
+                                showImportContainerPicker = false
+                                pendingImportContainerIndex = index
+                                // Ask HOW to add before asking WHAT to add: one exe, or a whole
+                                // folder of game folders.
+                                showImportMethodPicker = true
+                            }
                         }
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
                             Checkbox(checked = importUseSystemPicker, onCheckedChange = { importUseSystemPicker = it })
@@ -3671,14 +3979,21 @@ private fun ShortcutItemLayoutL(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            if (subtitle.isNotEmpty()) {
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = OnSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (subtitle.isNotEmpty()) {
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = OnSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                }
+                if (remember(shortcut) { WinePath.isOnRemovableStorage(shortcut.container, shortcut.path) }) {
+                    Spacer(Modifier.width(6.dp))
+                    SdCardBadge()
+                }
             }
             // Component specs: bright primary chips (renderer · DXVK · frame-gen) then a
             // muted secondary dot-line (driver · VKD3D · backend). Shared with Containers.
@@ -3834,6 +4149,15 @@ private fun ShortcutGridItem(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(24.dp),
+            )
+        }
+
+        // Removable-storage marker, over the art's top corner so it never fights the title scrim.
+        if (remember(shortcut) { WinePath.isOnRemovableStorage(shortcut.container, shortcut.path) }) {
+            SdCardBadge(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(6.dp),
             )
         }
 
@@ -5774,3 +6098,192 @@ private fun exportShortcut(context: Context, shortcut: Shortcut) {
     }
 }
 
+
+/**
+ * Marks a game whose files live on removable storage (SD card / USB) rather than internal.
+ *
+ * Worth surfacing because it explains behaviour the user would otherwise have to guess at: a game
+ * on a card is slower to load, and it disappears entirely if the card is removed.
+ */
+@Composable
+private fun SdCardBadge(modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(Color.Black.copy(alpha = 0.55f))
+            .padding(horizontal = 5.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Default.SdCard,
+            contentDescription = "On SD card",
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(11.dp),
+        )
+        Spacer(Modifier.width(3.dp))
+        Text(
+            "SD",
+            color = Color.White,
+            style = MaterialTheme.typography.labelSmall,
+        )
+    }
+}
+
+/**
+ * A selectable option card, styled to match the File Manager's rows and the game cards behind the
+ * dialog — outlined rounded rectangle, optional leading icon, title over a dimmer subtitle — so the
+ * import menus read as part of the same surface rather than as bare dialog text.
+ */
+@Composable
+private fun MenuOptionCard(
+    title: String,
+    subtitle: String? = null,
+    icon: ImageVector? = null,
+    onClick: () -> Unit,
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp)
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+        ) {
+            if (icon != null) {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(22.dp),
+                )
+                Spacer(Modifier.width(12.dp))
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, color = OnSurface, style = MaterialTheme.typography.bodyLarge)
+                if (subtitle != null) {
+                    Text(subtitle, color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * One row of the bulk-import confirm list: cover art, resolved title, and the folder it came from.
+ *
+ * Games already in the container are shown dimmed and can't be ticked, so re-scanning the same
+ * library after adding a few titles reads as "these are already here" rather than silently
+ * duplicating them. Uncertain picks are badged instead of hidden — the scanner still chose its best
+ * candidate, but the user gets told which ones are worth a second look before committing.
+ */
+@Composable
+private fun ScannedGameRow(
+    candidate: GameFolderScanner.Candidate,
+    checked: Boolean,
+    enabled: Boolean,
+    onToggle: () -> Unit,
+    onChangeExe: () -> Unit,
+) {
+    val alpha = if (candidate.alreadyAdded) 0.45f else 1f
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp)
+            .clickable(enabled = enabled, onClick = onToggle),
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+    ) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Checkbox(checked = checked, onCheckedChange = { onToggle() }, enabled = enabled)
+        Spacer(Modifier.width(8.dp))
+        SubcomposeAsyncImage(
+            model = ImageRequest.Builder(LocalContext.current)
+                .data(candidate.coverUrl)
+                .memoryCachePolicy(CachePolicy.ENABLED)
+                .crossfade(true)
+                .build(),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(width = 40.dp, height = 56.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .alpha(alpha),
+            loading = {
+                Box(
+                    modifier = Modifier.fillMaxSize().background(SurfaceVariant),
+                    contentAlignment = Alignment.Center,
+                ) { CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 1.5.dp) }
+            },
+            error = {
+                Box(
+                    modifier = Modifier.fillMaxSize().background(SurfaceVariant),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        candidate.name.take(1).uppercase(),
+                        color = OnSurfaceVariant,
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                }
+            },
+        )
+        Spacer(Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f).alpha(alpha)) {
+            Text(
+                candidate.name,
+                color = OnSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Text(
+                candidate.folder.name,
+                color = OnSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            when {
+                candidate.alreadyAdded -> Text(
+                    "Already added",
+                    color = OnSurfaceVariant,
+                    style = MaterialTheme.typography.labelSmall,
+                )
+                // Flagged rows name the exe, because that is what the user is being asked to judge.
+                // Capped at two lines: a long name like AIO-Graphics-Test-64bit.exe otherwise wraps
+                // to three and makes the cards uneven.
+                candidate.uncertain -> Text(
+                    "Check this one — ${candidate.exe.name}",
+                    color = MaterialTheme.colorScheme.tertiary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.labelSmall,
+                )
+                else -> Text(
+                    candidate.exe.name,
+                    color = OnSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+        }
+        // Available on EVERY row, not just flagged ones — a confident pick can still be the wrong
+        // one, and the user is the only one who actually knows.
+        if (!candidate.alreadyAdded) {
+            TextButton(onClick = onChangeExe, enabled = enabled) { Text("Change") }
+        }
+    }
+    }
+}

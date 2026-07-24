@@ -546,7 +546,11 @@ public class Container {
     public static final int GYRO_MODE_RATE = 0;
     public static final int GYRO_MODE_ORIENTATION = 1;
 
-    public static final boolean GYRO_ENABLED_DEFAULT = true;
+    // OFF for new containers: motion aim is a deliberate choice, not something a fresh
+    // container should start doing on its own. Existing containers are unaffected — the
+    // one-time gyro pref migration wrote an explicit gyroEnabled on every container, so this
+    // default is only consulted when the extra is genuinely absent (i.e. a new container).
+    public static final boolean GYRO_ENABLED_DEFAULT = false;
     public static final int GYRO_TARGET_DEFAULT = GYRO_TARGET_RIGHT_STICK;
     public static final float GYRO_DEADZONE_DEFAULT = 0.05f;
     public static final float GYRO_SENSITIVITY_DEFAULT = 2.0f;

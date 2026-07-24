@@ -1,5 +1,169 @@
 # Star-Compose — Progress Log
 
+## 2026-07-24 — 🤝 **PR #96 (@clintOnSky) triaged & closed — fixes already on `main`, contributor credited**
+
+> Downstream fix-pack from **@clintOnSky** (first-time contributor). Verified each of its 7 commits against `main`; closed the PR (not merged) since the wins already landed individually.
+>
+> **✅ Already on `main`:** bionic-fg present-path bounded fence wait (replacing `vkQueueWaitIdle`) + FIFO-pacing guard — landed via upstream `xXJSONDeruloXx/bionic-fg#6`, baked into the submodule, patch step retired in `build-bionic-fg.yml`; Xiaomi `libjpeg.so` symlink-shadow removal (`24d64ea0`, `ImageFsInstaller.java`); sign-agnostic battery wattage for Xiaomi/MTK positive-discharge (`1276f306`, `HudMetrics.java`); `WOWBOX64` content-type for arm64ec Box64 + live version-list refresh after the download sheet (`ShortcutsScreen.kt`).
+>
+> **➖ NOT taken (candidate future work):** HUD CPU% process-tree summation (main kept `/proc/stat` + scaling-freq fallback deliberately); Flow Scale **preset chips** Eco/Flow/Balanced/Boost/Max (main has the slider only); persist in-game frame-gen session multiplier across launches; drawer toggle to **hide store integrations**.
+>
+> Added `@clintOnSky` to README Credits, flagged **🌱 first-time contributor** (`b797ba01` + `02383090`). vc stays 49; README-only, no release.
+
+## 2026-07-24 — 🎯 **New containers start with Motion Aim OFF** (branch `fix/gyro-default-off`, merged to main)
+
+> `Container.GYRO_ENABLED_DEFAULT` was `true`, so a freshly created container began feeding gyro motion input to games without anyone asking for it. Motion aim is a deliberate choice — defaulted off.
+>
+> 🔑 **Checked before flipping, because this constant is NOT only a creation-time default** — it's the fallback for `isGyroEnabled()` whenever the `gyroEnabled` extra is absent, so changing it could have silently switched gyro off for anyone relying on the default. It can't: `ContainerManager.migrateGyroPrefsToContainers()` (one-time, guarded by `gyro_migrated_to_container`) wrote an **explicit** `gyroEnabled` onto every container, verified on-device (xuser-4 `"0"`, xuser-5 `"1"`). So only genuinely new containers see the new default. vc stays 49.
+
+## 2026-07-24 — 🛡️ **ASurfaceTransaction null-guard hardening** (`fix/asurface-transaction-null-guards`, off main `5f495eff`, vc stays 49)
+
+> **Defensive only — fixes no reported symptom.** Audit of every `ASurfaceTransaction_create` call site found the two host-renderer files inconsistent with themselves: some sites checked the result, most didn't. A null return (resource exhaustion) is passed straight into `ST_SETGEO`/`ST_SETBUF`/`ST_SETVIS` → native SIGSEGV, app dies and takes the running game with it. **10 sites fixed across 2 files.**
+>
+> **Scope — NOT the default renderer.** `VulkanRendererContext.cpp` (default `renderer = "vulkan"`, `Container.java:101`) never touches these APIs: **zero** call sites, nothing to fix. Only `ASurfaceRendererContext.cpp` (the opt-in `"surfaceflinger"` renderer) and `scanout/ScanoutContext.cpp` (GL renderer with `rendererNative`, default **false**) were affected. Most users run neither.
+>
+> **🔑 Three sites needed more than a one-line guard:**
+> - `scanoutSetCursorImage` — the guard must land **BEFORE** `int fence = scanoutCursorFence; scanoutCursorFence = -1;`. That pair hands ownership of the `AHardwareBuffer_unlock` fence fd to the transaction. Guarding *after* it orphans the fd (one leaked fd per failure); guarding *before* leaves it owned by the object, closed on the next upload or teardown. The obvious placement is the wrong one.
+> - `applyCursorGeometry` — `scanoutSetCursorPos` records `lastRawCursorX/Y` as applied *before* calling it, and dedupes identical positions. A bare `return` would let the dedupe suppress the retry and strand the cursor at its old position. Guard invalidates the dedupe cache (`SHRT_MIN`) so the next motion event re-issues.
+> - `ScanoutContext` init paths ×2 — `scanoutGameTx`/`scanoutTx` are **paired persistent** transactions. If one succeeds and the other fails, a bare return leaks the survivor, and `scanoutActive` must not go true holding only one. Both paths now delete the survivor, release both SurfaceControls, and (sibling path) fall back to `initFromWindow()`.
+>
+> Also: `updateWindow`'s `currentTx ? currentTx : ST_CREATE()` ternary only ever guarded a null `currentTx`, never `ST_CREATE`'s own result — now guarded. `destroy()`'s best-effort hide is wrapped so teardown still runs (never early-return out of `destroy()`). Added explicit `#include <climits>` — `INT_MAX` at `:183` had been riding a transitive include.
+>
+> **Origin:** comparing against pipetto's `winlator_bionic` DisplayX work, where [`cc4ac7d`](https://github.com/Pipetto-crypto/winlator/commit/cc4ac7d0c5d6db25a5a0d7501ccabcbf4e4ec9e8) fixed the same bug class in his cursor path. His other three DisplayX fixes do **not** apply to us — our ASR has no rendering thread/state machine (his [`bcc5e80`](https://github.com/Pipetto-crypto/winlator/commit/bcc5e804c7b01cd64e79bddc3748217a7e407084), which he partly reverted a day later), our `computeWindowRect` + `adjustRectLT` already handle the fullscreen src/dst case he got backwards, and we `dlsym` the whole `ASurfaceTransaction_*` API at `minSdk 26` so his 284-line Android 10 compat scramble is moot. Our `retireSurfaceControl` already defers release to the transaction-complete callback, which is stronger than his thread hand-off.
+>
+> ⚠️ **COMPILE-VERIFIED ONLY — not device-proven, and not meaningfully device-testable:** transaction-creation failure can't be forced on demand. Treat as hardening, not a repair.
+
+## 2026-07-24 — ✅ **Game-name mangling fixed + a never-passing test corrected** (merged to main)
+
+> **Bug:** `EXE_SUFFIX_RE` was unanchored, so `cleanName()` stripped `win64|shipping|client|launcher|game|x64|…` from ANYWHERE in a title, not just off the end. Device-proven on the real library: folder `Game Controller Test` resolved to **"Controller Test"** — the word "Game" eaten out of the middle. Only affects the fallback naming path (no Steam appid / GOG manifest / usable PE name), which is exactly what repacks and DRM-free copies take — and the new bulk folder import runs it across a whole library at once.
+>
+> **🔑 THE SECOND BUG, found ONLY by device-testing:** anchoring the regex fixed stripping but silently broke a *different* job the same regex was doing. `preferFolder = EXE_SUFFIX_RE.containsMatchIn(exeBase)` asks "does this exe name look like engine boilerplate, so trust the folder instead?" — that question wants **unanchored** matching. Anchoring it meant `GameConTest.exe` stopped preferring its folder and the game would have become **"GameConTest"**. The unit test passed and the diff read correctly; only a real folder on disk exposed it. **Split into two regexes sharing one word list: `EXE_NOISE_RE` (unanchored, boilerplate test) + `EXE_SUFFIX_RE` (anchored, stripping).**
+>
+> **Test 2:** `GameIdentifierTest` asserted `"The Witcher 3: Wild Hunt"` while `normalizeName():108` deliberately converts `:` to `" - "` (illegal in a Windows filename) — the code was right, the test had never passed. Expectation corrected.
+>
+> **✅ DEVICE-VERIFIED against 13 real games:** exactly one name changed (`Controller Test` → `Game Controller Test`), the other 12 byte-identical, same detection/flags/art. Installed APK sha verified as the fix build before testing.
+>
+> Both fixes originate with **arro000**, found buried in the merge commit of draft PR #156 where they were invisible to the diff and unreachable; the regex split is additional. vc stays 49.
+>
+> ⚠️ **NOT included, deliberately:** wiring `gradlew test` into CI. Doing so surfaced **4 pre-existing `ConfigExporterTest` failures** unrelated to this work, so it was pulled back out to keep this branch to the two fixes. Test wiring + those 4 failures are their own job. 🔑 Nothing has EVER run the unit tests in CI.
+
+## 2026-07-24 — 🗂️✅ **File Manager overhaul MERGED to main** — multi-select · real moves · archive extract · search/sort · grid + compact views
+
+> Merged from `feat/fm-multiselect`. **vc stays 49, no release cut.** User confirmed on device: multi-select and bulk ops, instant same-volume moves, merge-on-conflict, zip/7z extraction, search/sort/hidden, cancel, and the path-bar rework ("everything works great", "the path bar works great"). ✅ **Grid view, compact rows and the pinned free-space figure were device-confirmed too** (checked after the merge — an earlier note in this entry wrongly recorded them as untested). So the whole overhaul is device-verified.
+>
+> **🔑 Cut was always copy-every-byte-then-delete.** No `renameTo` fast path existed, so moving a 60 GB folder *within* internal storage rewrote 60 GB the filesystem could have relinked instantly. `moveWithProgress` tries `renameTo` first — **its returning false IS the cross-filesystem signal, so it doubles as the check** — falling back to copy+delete. Only when the destination is free: renaming *onto* an existing directory doesn't merge.
+>
+> **🔑 Merge needed no new copy logic.** `copyWithProgress` already recurses into an existing directory and truncates existing files, so Overwrite and Merge resolve to the same call and differ only in wording (chosen per item type). Previously every paste auto-renamed, so dropping an updated game folder over an existing one gave `DiRT 3 (1)` beside the original.
+>
+> **🔑 Archive extract was wiring, not new capability** — `commons-compress`, `xz` and `zstd-jni` were already in the build. New `core/ArchiveExtractor.kt` (zip · 7z · tar+gz/xz/bz2/zst · bare compressors); `TarCompressorUtils` couldn't be reused (tar.xz/tar.zst only, asset/Uri-shaped). Always extracts to a **named subfolder** — a zip of 400 loose entries would otherwise carpet the folder irreversibly — and every entry goes through a **Zip Slip guard**, since an archive can carry `../../../` entries that a naive `File(dest, name)` writes outside the target. **RAR reported unsupported** rather than failing silently.
+>
+> **UI came from device screenshots, not guesswork:** the path bar ellipsised on the right, so it read `/storage/emulated/0/Winlator/Game…` — hiding the only part that says where you are. Folder name now sits in the bar; the path drops below and **elides from the LEFT** via `elidePathStart` (Compose's TextOverflow can only trim the tail). Free space is pinned right because it slid with path length. Sort keeps folders leading in **both** directions — a descending sort that buries folders isn't what "Z to A" means.
+>
+> **🐞 Self-inflicted build break worth remembering:** a global find-replace of `size(36.dp)` for the compact-row icon also rewrote `FavoriteCard`, which has no `compact` parameter → `Unresolved reference 'compact'`. **Scope find-replace to the function you mean, or verify every hit.**
+
+## 2026-07-24 — 🗂️ **File Manager overhaul: multi-select, real moves, archive extract, search/sort** (branch `feat/fm-multiselect` `838fe876`, CI GREEN ×3, STAGED, ⬜ awaiting device test)
+
+> User asked for the lot after a survey of what the File Manager does and what it lacks. Built as one branch, one APK to test: `/sdcard/Download/bannerlator-fm-all-838fe87-standard.apk`, sha `553f3b52…` host==device. vc stays 49.
+>
+> **1. Multi-select + bulk ops.** Every action was single-file. Long-press enters selection mode, tap toggles from there; Select All / Copy / Cut / Delete bar. Clipboard became a `List<File>` — cut/copy is a property of the batch, since a clipboard mixing both has no coherent meaning. Bulk delete names the first five victims before confirming so an accidental Select All is visible while still reversible.
+>
+> **🔑 2. Cut was ALWAYS copy-every-byte-then-delete.** `FileUtils.copyWithProgress` had no `renameTo` fast path, so moving a 60 GB folder *within* internal storage rewrote 60 GB the filesystem could have relinked instantly. New `moveWithProgress` tries `renameTo` first — **`renameTo` returning false IS the cross-filesystem signal, so it doubles as the check** — and falls back to copy+delete. Only attempted when the destination is free, because renaming *onto* an existing directory doesn't merge.
+>
+> **3. Paste conflicts asked, not silently renamed** (user chose Overwrite/Merge/Keep-both, recommended option): dropping an updated game folder over an existing one used to give `DiRT 3 (1)` beside the original. 🔑 **Merge needed no new copy logic** — `copyWithProgress` already recurses into an existing directory and truncates existing files, so Overwrite and Merge resolve to the same call and differ only in wording (chosen per item type). Apply-to-all for batches.
+>
+> **4. Archive extract — new `core/ArchiveExtractor.kt`.** zip · 7z · tar(.gz/.xz/.bz2/.zst) · bare compressors, on `commons-compress`/`xz`/`zstd-jni` **already in the build** (so this was wiring, not new capability). `TarCompressorUtils` couldn't be reused — it covers only tar.xz/tar.zst and is built around asset/Uri sources. Two deliberate calls: always extracts to a **named subfolder** (a zip of 400 loose entries would otherwise carpet the folder irreversibly), and every entry path goes through a **Zip Slip guard** — an archive can carry `../../../` entries and a naive `File(dest, name)` writes outside the target. **RAR is detected and reported unsupported** rather than failing silently; commons-compress can't read it.
+>
+> **5. Search / sort / hidden / free space.** Filter-this-folder search; sort by name/date/size with tap-to-flip; 🔑 **folders always lead regardless of direction** — a descending sort that buries every folder under the files is not what "Z to A" means; directory `length()` is meaningless so folders order by name inside the size sort. Dotfile toggle, free space above the list. Sort + hidden persist. Row sizes already existed via `StringUtils.formatBytes`, reused rather than adding a second formatter.
+>
+> **Cancel** now works on any long copy/move/extract — previously the only way out of a wrong multi-gigabyte paste was killing the app.
+>
+> **⬜ DEVICE TEST:** long-press → select several → Copy → paste elsewhere · Cut within the same volume (should be **instant**, that's the renameTo path) · Cut internal→SD (must still copy) · paste onto an existing folder → Merge, confirm it updated rather than duplicating · extract a zip and a 7z · search/sort/hidden toggles · cancel a large copy mid-flight. ⚠️ 7z on a big archive is slow (LZMA on ARM) — expected, not a hang.
+
+## 2026-07-24 — ✅ **File Manager "Add to Shortcuts" now identifies the game** (branch `fix/fm-add-shortcut-naming`, DEVICE-VERIFIED "works well", merged to main)
+
+> **The importer was never missing anything — the call site was under-feeding it.** `addShortcutInContainer` passed `file.nameWithoutExtension` and no appId, which silently disabled most of the pipeline: `ExeShortcutImporter.kt:62` skips Steam's 600×900 portrait without an appId, `:64` skips the SGDB-by-appId lookup, `:87` gates off the Steam authoritative rename — leaving only an SGDB-by-name search running on strings like `dirt3_game` or `SACGUI`, which finds nothing. Adding DiRT 3 this way produced a shortcut literally called `dirt3_game` with, at best, an icon scraped out of the PE.
+>
+> Now runs `GameIdentifier.identify(file)` first and passes the resolved name + appId, exactly as `ShortcutsViewModel.importExe` does, falling back to the exe basename when identification finds nothing. **All three entry points finally behave identically** — `+` button, bulk folder import, and File Manager. ✅ Device-verified by the user ("works well"). vc stays 49.
+
+## 2026-07-24 — ✅ **DEVICE-VERIFIED + MERGED: drive letters, games-folder import, exe override, card menus, SD badges**
+
+> **User: *"everything is working as intended"*** — the folder scan, the confirm screen, the manual exe override, importing in bulk, and launching the imported games. Merged to `main` from `fix/drive-letter-exhaustion` (tip `e778c18f`, 9 commits). **vc stays 49, no release cut.**
+>
+> **🔑 The ranking heuristic — the part no build could validate — was right on a real library.** It chose `dirt3_game.exe` over the `dirt3.exe` launcher, `GTAIV.exe` over GTA IV's launcher variants, and `Hades.exe`; it correctly flagged `re3.exe (folder root)` vs `re3.exe (_Windows 7 Fix)` as ambiguous rather than guessing. Every "check this one" badge fired on a folder that genuinely ships two plausible binaries — i.e. the flag marks *ask the user*, not *bad guess*.
+>
+> **Three UI rounds came out of device screenshots**, each from something only visible on a real screen: (1) menus were bare text on a screen made entirely of cards → new `MenuOptionCard` matching the File Manager rows, applied to Select container, Add games, the found-games list and the exe picker; (2) rows ran together → dividers, then superseded by cards (a border per row made both redundant); (3) at the platform default dialog width the titles and exe names truncated to `aio graphics t…` / `AIO-Graphics-Te…`, which defeats a screen whose only job is letting the user read them → both import dialogs now take 94% width.
+>
+> **SD badge** on games stored on removable media, in grid (over the art's top corner) and list (after the container/resolution line). Detection reuses `storageVolumeRootOf` from the drive-letter work — resolve the shortcut's `Exec` to a real path, take its volume root, treat anything not under `/storage/emulated` as removable.
+>
+> **▶️ KNOWN GAP, deliberately not fixed here (own branch):** the File Manager's *Add to Shortcuts* calls `ExeShortcutImporter.addToShortcuts(context, container, file, file.nameWithoutExtension)` — raw exe basename, **no appId**. That cascades: `ExeShortcutImporter.kt:62` skips the Steam CDN portrait, `:64` skips SGDB-by-appId, `:87` gates off the Steam authoritative rename, and the surviving SGDB-by-name search runs on `dirt3_game`/`SACGUI` rather than a real title. So the same importer produces a markedly worse result than the `+` button or the bulk import. Fix is ~4 lines at the call site (`GameIdentifier.identify` → pass `name` + `appId`), kept separate so it wouldn't invalidate the device testing of this branch.
+
+## 2026-07-24 — 📁 **Games folder import: add a whole library in one pick** (same branch `fix/drive-letter-exhaustion` `78972029`, CI GREEN, STAGED — since device-verified, see above)
+
+> **User ask:** the `+` button only ever added one game at a time. Most users keep every game under one parent folder (user's = `/storage/emulated/0/Winlator/Games`), so importing a library meant dozens of identical trips through the picker. After picking a container there is now a **choice of HOW to add**: *Add game EXE* (existing flow, untouched) or *Add games folder*.
+>
+> **Design decisions (user, via AskUserQuestion — all three "recommended"):** (1) the results screen is a **confirmation gate**, nothing is written until accepted; (2) on ambiguity **pick the best candidate but flag it** rather than skipping or prompting per game; (3) games already in the container are **detected and shown as "already added"**, not re-imported.
+>
+> **🔑 THE HARD PART — new `core/GameFolderScanner.kt`. `GameIdentifier` could not be reused for this: it takes an exe the user ALREADY chose and reasons upward. Here the exe is the unknown.** A real install folder holds installers, crash handlers, anti-cheat stubs and launchers beside the game, and the game may sit several levels down (`Game/Binaries/Win64/Game-Win64-Shipping.exe`). So candidates are collected with a **depth-bounded walk (≤4)** and **ranked**: exe named after its folder +100/+60 · `-Win64-Shipping` +70 · `Binaries/Win64` path +30 · launcher-name −40 · junk PE name −30 · depth −8/level · size bonus ≤+30. Skips `_CommonRedist`/`DirectX`/`EasyAntiCheat`/etc. dirs and `unins*`/`vcredist*`/`UnityCrashHandler*`/`dxsetup` names outright.
+>
+> **Confidence falls out of the ranking for free** — below a score threshold, or when the top two are within 15 points, the row is badged *"Check this one — <exe>"*. Deliberately badged, not hidden: the scanner still made its best pick, the user just gets told which are worth a second look.
+>
+> **Reuse, so bulk-added games are indistinguishable from hand-added ones:** naming via `GameIdentifier.identify`, importing via `ExeShortcutImporter.addToShortcuts` — same Steam-name upgrade, same cover-art chain. `isLauncherExe` → **`isLauncherExeName` (public)** so the scanner shares the launcher rules instead of growing a second copy that can drift.
+>
+> **🔑 Cover art on the confirm screen is a URL rendered by Coil, NOT a download.** `saveCoverArt` is coupled to an already-written shortcut, so resolving art pre-import would have meant temp files. Instead `SteamStoreSearch.coverUrl(appId)` gives a URL instantly and only confirmed games fetch/persist. Scanning 40 games pulls zero images into the container.
+>
+> **Duplicate detection** resolves each existing shortcut's `Exec` back through `WinePath.resolveAndroidPath` and compares canonical paths — dimmed, unticked, uncheckable, with "N already added" in the header.
+>
+> **Folder picker uses `InAppFilePicker.buildDirIntent`** (real absolute path, works on SD) — deliberately not SAF, which returns unusable `/mnt/media_rw/…`.
+>
+> **CI GREEN run `30088575796`** (3 flavors, headSha `78972029`). 📲 Staged `/sdcard/Download/bannerlator-folder-import-7897202-standard.apk`, sha256 `404840df…` host==device. vc stays 49. *(Built with the default `1.0-test` label so `stage-apk` works — see the drive-letter entry for why that matters.)*
+>
+> **⚠️ THE RANKING HEURISTIC IS UNPROVEN AND IS THE WHOLE FEATURE.** A green build says nothing about whether it picks the right exe. Only a real library answers that.
+>
+> **⬜ DEVICE TEST:**
+> 1. `+` → container → **Add games folder** → pick `/storage/emulated/0/Winlator/Games`. Every game should be listed, with the **right name and the right art**.
+> 2. **Check what it picked for each** — especially anything badged "Check this one". UE titles (Titanfall 2) and launcher-fronted ones (GTA V's `PlayGTAV.exe`, GTA IV) are the interesting cases.
+> 3. Already-imported games must appear **dimmed and unticked** (this container has 6 → expect all 6 skipped if scanning the same folder).
+> 4. Untick one, press **Add** → only the ticked ones appear, and they **launch**.
+> 5. Run it against the **SD** library too — that path exercises the drive-letter fix at the same time.
+> 6. *Add game EXE* must still behave exactly as before (regression check).
+
+## 2026-07-24 — 🗂️✅ **Drive-letter exhaustion: one letter per VOLUME, not per game — DEVICE-VERIFIED** (branch `fix/drive-letter-exhaustion` `df67a4dc`, CI GREEN, ✅ all six checks pass, awaiting merge decision)
+
+> **✅ DEVICE TEST PASSED 2026-07-24 — user: *"everything is working as intended"*.** All six checks green, including the one that could only fail at runtime: **a freshly-imported SD game launches**, which is what proves Part B computes the path relative to the coarser volume-root mount correctly (the old code returned the bare filename). Second SD game reused the drive with no new letter; internal storage unregressed; new containers get `D:`/`E:`/`F:` per volume; no `bannerlator_components` drive (Part C); dropdown ends at `Z:`.
+>
+> **Ready to merge to `main`. vc stays 49, no release cut.** Existing containers keep their per-game `G:`/`I:`/`J:` drives by design — growth stops, no migration.
+
+
+> **Bug:** every game imported from SD/USB claimed its own drive letter, and the pool is ~24, so a large SD library eventually could not import at all. `resolveWindowsPath` mounted the exe's **own parent folder**, and `bestDriveMatch` only reuses a drive that is an **ancestor** of the new path — one game's folder is never an ancestor of the next game's sibling folder.
+>
+> **🔑 DEVICE-PROVEN SCOPE CORRECTION (2026-07-24, from user screenshots + live dumps): internal storage was NEVER affected, and the user's "it happens on internal too" report did not hold up.** Container-6 dump: `F:`→`/storage/emulated/0` shared by **five** internal games (GTA V, Titanfall 2, The Crew 2, FlatOut 2, God of War — every `Exec` line reads `F:\Winlator\Games\…`), with per-game drives existing **only** for the two SD games. God of War was added live mid-session as the test and correctly reused `F:`, creating nothing. Why it looked otherwise: Container-6 happens to show **5 games and 5 drive rows**, and the Drives tab truncates `G:` and `I:` to the same `…/Winlator/Games/` text, so it reads as one-per-game when it isn't.
+>
+> **🐞 NEW BUG FOUND IN THE SAME SCREENSHOTS (not in the original spec) — the component installer burns a letter per container.** Every container on the device had a drive pointing at `…/.wine/drive_c/windows/temp/bannerlator_components`. Cause: `drivesIterator()` does **not** include `C:`, so any path under `drive_c` misses every drive and allocates. `resolveAndroidPath` has always special-cased `C:` (`WinePath.kt:59-61`) — the two directions were asymmetric. Became **Part C**.
+>
+> **Part A — per-volume defaults for NEW containers** (`ContainerDetailViewModel`): `D:` Downloads, `E:` internal root, `F:` onward per mounted removable volume. **Seeded at the editor seam (`:533`), NOT by changing `Container.DEFAULT_DRIVES`** — that is a `static final` with no Context, and it initialises a field on *every* `Container` object including ones loaded from disk, where the value is immediately overwritten by saved JSON. Two hardening choices beyond the spec: internal/Downloads come from `Environment` (deterministic), and only **genuine volume roots** are pre-declared, because `StorageRoots` deliberately degrades an unreadable volume to the deepest listable dir and would otherwise point `E:`/`F:` at an `Android/data/…` subfolder.
+>
+> **Part B — mount the storage VOLUME ROOT on a miss** (`WinePath`): new pure `storageVolumeRootOf()` handling `/storage/emulated/<n>`, `/storage/<uuid>`, `/mnt/media_rw/<uuid>`; anything else returns null and keeps the old parent-folder behaviour. ⚠️ **Named deliberately unlike `StorageRoots.volumeRootOf` (`StorageRoots.kt:157`), which is a DIFFERENT function** — it walks up from an app-specific dir looking for an `Android` folder. Same name, different job; do not conflate them.
+>
+> **🔑 THE TRAP, handled:** the miss branch used to return `"$letter:\\$fileName"` — the bare filename, correct **only** because the mount was the file's own parent. With a volume-root mount the exe is many folders deep, so it now returns the full path relative to the mount. **This compiles clean and fails only at runtime**, which is why the device test below leads with launching a freshly-imported SD game.
+>
+> **Also:** drive-letter dropdown capped at `Z` (it counted `MAX_DRIVE_LETTERS`=26 steps up from `'D'`, running three past `Z` and offering selectable `"[:"`, `"\:"`, `"]:"`; `addDrive()`'s guard now uses the real option count). Exhaustion throws a typed `NoFreeDriveLetterException` with an actionable message at both call sites instead of a raw `IOException`.
+>
+> **No migration by design.** Existing per-game drives (`G:` DiRT 3, `I:` GTA IV, xuser-4's `J:` DiRT Showdown) stay and keep resolving — `bestDriveMatch` prefers the longest match. Growth stops; collapsing them would mean rewriting every existing shortcut's `Exec`, which is a separate job with its own device test.
+>
+> **Recon confirmed before building** (re-run against current `main`, since Smart Game Import had merged): still exactly **3 writers** (`ExeShortcutImporter:182`, `FileManagerScreen:327`, `ComponentExecInstaller:246`) and **3 readers** (`ShortcutsScreen:883/:4495/:4501`); **only 2 references to `DEFAULT_DRIVES`** in the tree; **zero hardcoded `"F:"`/`"E:"`/`"D:"` literals**, so moving internal to `E:` on new containers breaks nothing.
+>
+> **CI GREEN run `30083172711`** (3 flavors, headSha `df67a4dc` verified). **📲 STAGED `/sdcard/Download/bannerlator-drive-letters-df67a4d-standard.apk`, sha256 `877e7a1e2057b135…` host==device.** vc stays 49. ⚠️ `stage-apk` could not be used — it hardcodes the default `Bannerlator-1.0-test-<flavor>` artifact name and this run was dispatched with `release_number=drive-letters`; staged by hand.
+>
+> **⬜ DEVICE TEST (order matters; #1 is the only one that can really fail):**
+> 1. **Import an SD game and LAUNCH it** — must use a game **not already imported**, since DiRT 3/GTA IV would hit their existing per-game drives and prove nothing.
+> 2. Import a **second** SD game → **no new drive**, and it launches.
+> 3. Import an internal game → still no new drive (God of War is the control).
+> 4. Create a **new** container with the card in → Drives reads `D:` Downloads / `E:` `/storage/emulated/0` / `F:` `/storage/7B7F-E3AA`.
+> 5. Install a component → **no** new `bannerlator_components` drive (Part C).
+> 6. Drive-letter dropdown → last entry `Z:`, no `[:` `\:` `]:`.
+>
+> Logcat marker: `Auto-added drive <X>: -> <path>` — on an SD import it should fire **once** with the bare volume root, and **not at all** on the second SD game.
+
 ## 2026-07-22 — 🖥️ **In-game refresh rate unlocked** — RandR X-server extension + Max-refresh setting (branch `feat/randr-refresh-modes`, vc48→**49**)
 
 > **Every game that exposes a refresh toggle was locked to 60 Hz on a 144 Hz panel, and no client-side setting could change it — the cause was on our side.** The X server implemented BigReq, DRI3, MIT-SHM, Present and Sync but **no RandR at all**. RandR is how `winex11.drv` enumerates display modes; finding none it falls back to its NoRes settings handler (priority 1), whose `nores_get_modes()` returns exactly one mode with `dmDisplayFrequency` hardcoded to 60. That single synthetic mode is what reached the games.
