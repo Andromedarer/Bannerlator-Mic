@@ -1,5 +1,15 @@
 # Star-Compose — Progress Log
 
+## 2026-07-24 — 🤝 **PR #96 (@clintOnSky) triaged & closed — fixes already on `main`, contributor credited**
+
+> Downstream fix-pack from **@clintOnSky** (first-time contributor). Verified each of its 7 commits against `main`; closed the PR (not merged) since the wins already landed individually.
+>
+> **✅ Already on `main`:** bionic-fg present-path bounded fence wait (replacing `vkQueueWaitIdle`) + FIFO-pacing guard — landed via upstream `xXJSONDeruloXx/bionic-fg#6`, baked into the submodule, patch step retired in `build-bionic-fg.yml`; Xiaomi `libjpeg.so` symlink-shadow removal (`24d64ea0`, `ImageFsInstaller.java`); sign-agnostic battery wattage for Xiaomi/MTK positive-discharge (`1276f306`, `HudMetrics.java`); `WOWBOX64` content-type for arm64ec Box64 + live version-list refresh after the download sheet (`ShortcutsScreen.kt`).
+>
+> **➖ NOT taken (candidate future work):** HUD CPU% process-tree summation (main kept `/proc/stat` + scaling-freq fallback deliberately); Flow Scale **preset chips** Eco/Flow/Balanced/Boost/Max (main has the slider only); persist in-game frame-gen session multiplier across launches; drawer toggle to **hide store integrations**.
+>
+> Added `@clintOnSky` to README Credits, flagged **🌱 first-time contributor** (`b797ba01` + `02383090`). vc stays 49; README-only, no release.
+
 ## 2026-07-24 — 🎯 **New containers start with Motion Aim OFF** (branch `fix/gyro-default-off`, merged to main)
 
 > `Container.GYRO_ENABLED_DEFAULT` was `true`, so a freshly created container began feeding gyro motion input to games without anyone asking for it. Motion aim is a deliberate choice — defaulted off.
