@@ -789,6 +789,10 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     exePickerFor?.let { target ->
         val options = (listOf(target.exe) + target.alternatives).distinctBy { it.absolutePath }
         OutlinedAlertDialog(
+            // The platform default width truncates exe names and their subfolder paths, which are
+            // the whole point of this list.
+            modifier = Modifier.fillMaxWidth(0.94f),
+            properties = DialogProperties(usePlatformDefaultWidth = false),
             onDismissRequest = { exePickerFor = null },
             title = {
                 Column {
@@ -804,14 +808,22 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                 LazyColumn(modifier = Modifier.heightIn(max = 380.dp)) {
                     items(options, key = { it.absolutePath }) { exe ->
                         val current = exe.absolutePath == target.exe.absolutePath
-                        Row(
+                        Card(
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .padding(vertical = 3.dp)
                                 .clickable {
                                     replaceScannedExe(target, exe)
                                     exePickerFor = null
-                                }
-                                .padding(vertical = 8.dp),
+                                },
+                            shape = RoundedCornerShape(10.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                        ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             RadioButton(selected = current, onClick = {
@@ -840,6 +852,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                     style = MaterialTheme.typography.labelSmall,
                                 )
                             }
+                        }
                         }
                     }
                 }
@@ -925,6 +938,11 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
         val importable = folderScanResults.filter { !it.alreadyAdded }
         val selectedCount = folderScanSelected.size
         OutlinedAlertDialog(
+            // Each row carries art, a checkbox, three lines of text and a Change action; at the
+            // platform default width the titles and the exe name truncate to the point of being
+            // unreadable, which defeats a screen whose whole job is letting the user check them.
+            modifier = Modifier.fillMaxWidth(0.94f),
+            properties = DialogProperties(usePlatformDefaultWidth = false),
             onDismissRequest = {
                 if (!folderImportRunning) {
                     folderScanResults = emptyList()
@@ -6225,7 +6243,7 @@ private fun ScannedGameRow(
             Text(
                 candidate.name,
                 color = OnSurface,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.bodyMedium,
             )
