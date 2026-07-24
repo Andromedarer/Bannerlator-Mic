@@ -1,5 +1,11 @@
 # Star-Compose — Progress Log
 
+## 2026-07-24 — ✅ **File Manager "Add to Shortcuts" now identifies the game** (branch `fix/fm-add-shortcut-naming`, DEVICE-VERIFIED "works well", merged to main)
+
+> **The importer was never missing anything — the call site was under-feeding it.** `addShortcutInContainer` passed `file.nameWithoutExtension` and no appId, which silently disabled most of the pipeline: `ExeShortcutImporter.kt:62` skips Steam's 600×900 portrait without an appId, `:64` skips the SGDB-by-appId lookup, `:87` gates off the Steam authoritative rename — leaving only an SGDB-by-name search running on strings like `dirt3_game` or `SACGUI`, which finds nothing. Adding DiRT 3 this way produced a shortcut literally called `dirt3_game` with, at best, an icon scraped out of the PE.
+>
+> Now runs `GameIdentifier.identify(file)` first and passes the resolved name + appId, exactly as `ShortcutsViewModel.importExe` does, falling back to the exe basename when identification finds nothing. **All three entry points finally behave identically** — `+` button, bulk folder import, and File Manager. ✅ Device-verified by the user ("works well"). vc stays 49.
+
 ## 2026-07-24 — ✅ **DEVICE-VERIFIED + MERGED: drive letters, games-folder import, exe override, card menus, SD badges**
 
 > **User: *"everything is working as intended"*** — the folder scan, the confirm screen, the manual exe override, importing in bulk, and launching the imported games. Merged to `main` from `fix/drive-letter-exhaustion` (tip `e778c18f`, 9 commits). **vc stays 49, no release cut.**
