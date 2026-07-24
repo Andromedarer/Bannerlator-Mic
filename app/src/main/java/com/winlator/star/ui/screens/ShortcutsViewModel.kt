@@ -36,6 +36,7 @@ import com.winlator.star.container.Container
 import com.winlator.star.container.ContainerManager
 import com.winlator.star.container.Shortcut
 import com.winlator.star.core.GPUInformation
+import com.winlator.star.core.GameFolderScanner
 import com.winlator.star.core.GameIdentifier
 import com.winlator.star.core.WinePath
 import com.winlator.star.ui.screens.adrenodownload.DriverSources
@@ -63,6 +64,10 @@ sealed class ImportResult {
     data class Success(val shortcutName: String, val appId: Int? = null) : ImportResult()
     data class Error(val message: String) : ImportResult()
 }
+
+/** Outcome of a bulk games-folder import. [failures] carries one line per game that couldn't be
+ *  written, so a partial success can say which ones need attention rather than just a count. */
+data class BulkImportSummary(val added: Int, val failed: Int, val failures: List<String>)
 
 /** An asynchronous auto-rename applied by the importer's background thread (Steam name upgrade),
  *  surfaced so an open confirm/rename dialog can keep its Save target and pre-filled name in sync. */
@@ -882,6 +887,69 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
     // getDesktopDir().mkdirs(), which then breaks future container creation. Filtering here keeps
     // stale entries out of the picker AND out of import/clone. (issue #45)
     private fun liveContainers() = manager.getContainers().filter { it.configFile.isFile }
+
+    /**
+     * Scans [folderPath] for games, ready for the bulk-import confirm screen.
+     *
+     * Blocking and filesystem-heavy — call from a background dispatcher. Games already present in
+     * the target container come back flagged rather than removed, so re-scanning the same library
+     * after adding a few titles shows what was skipped instead of silently duplicating everything.
+     */
+    fun scanGamesFolder(containerIndex: Int, folderPath: String): List<GameFolderScanner.Candidate> {
+        val containers = liveContainers()
+        if (containerIndex < 0 || containerIndex >= containers.size) return emptyList()
+        return GameFolderScanner.scan(File(folderPath), importedExePaths(containers[containerIndex]))
+    }
+
+    /** Canonical paths of every exe already imported into [container], for duplicate detection. */
+    private fun importedExePaths(container: Container): Set<String> {
+        val desktopDir = runCatching { container.getDesktopDir() }.getOrNull() ?: return emptySet()
+        val files = desktopDir.listFiles { f -> f.isFile && f.name.endsWith(".desktop") } ?: return emptySet()
+        return files.mapNotNullTo(HashSet()) { f ->
+            runCatching {
+                val exec = f.readLines().firstOrNull { it.startsWith("Exec=") } ?: return@runCatching null
+                // Exec=wine <win path>, written with 4-backslash separators by escapeForExec.
+                val winPath = exec.removePrefix("Exec=").removePrefix("wine ").trim()
+                    .replace("\\\\\\\\", "\\").trim('"')
+                WinePath.resolveAndroidPath(container, winPath)?.canonicalPath
+            }.getOrNull()
+        }
+    }
+
+    /**
+     * Writes a shortcut for each confirmed [candidates] entry, reusing the same importer the
+     * single-exe "+" flow uses so bulk-added games are indistinguishable from hand-added ones
+     * (same naming, same Steam-name upgrade, same cover-art chain).
+     *
+     * Blocking — call from a background dispatcher. One failure does not abort the rest.
+     */
+    fun importScannedGames(
+        containerIndex: Int,
+        candidates: List<GameFolderScanner.Candidate>,
+        context: Context,
+    ): BulkImportSummary {
+        val containers = liveContainers()
+        if (containerIndex < 0 || containerIndex >= containers.size) {
+            return BulkImportSummary(0, candidates.size, listOf("That container no longer exists."))
+        }
+        val container = containers[containerIndex]
+        var added = 0
+        val failures = mutableListOf<String>()
+        for (c in candidates) {
+            try {
+                ExeShortcutImporter.addToShortcuts(
+                    context, container, c.exe, c.name, c.appId,
+                    onCoverArtReady = { refresh() },
+                )
+                added++
+            } catch (e: Exception) {
+                Log.e(TAG, "Bulk import failed for ${c.name}", e)
+                failures += "${c.name}: ${e.message ?: e.javaClass.simpleName}"
+            }
+        }
+        refresh()
+        return BulkImportSummary(added, failures.size, failures)
+    }
 
     fun importShortcut(containerIndex: Int, uri: Uri, context: Context): ImportResult {
         val containers = liveContainers()
