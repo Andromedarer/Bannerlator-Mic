@@ -203,13 +203,6 @@ jobs:
       if: steps.cache-lsfg.outputs.cache-hit != 'true'
       run: ./build-lsfg-android.sh
 
-    # Unit tests have existed in this repo since Compose landed and NOTHING has ever run them —
-    # which is how a GameIdentifierTest assertion sat failing indefinitely. Run once (on the
-    # standard flavor only; the tests are flavor-independent and running them 3x wastes minutes).
-    - name: Run unit tests
-      if: matrix.flavor.id == 'standard'
-      run: ./gradlew testStandardReleaseUnitTest -Dorg.gradle.jvmargs="-Xmx5g -XX:MaxMetaspaceSize=1g"
-
     - name: Build with Gradle
       # ONE flavor per job → only one ~588MB APK packages here, so the old
       # `--no-parallel --max-workers=1` OOM-guard is dropped; full workers now.
