@@ -61,6 +61,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -80,7 +81,10 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.painterResource
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import coil.compose.AsyncImage
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -93,6 +97,7 @@ import com.winlator.star.XServerDisplayActivity
 import com.winlator.star.container.Container
 import com.winlator.star.core.FileUtils
 import com.winlator.star.core.PeIconExtractor
+import com.winlator.star.core.StorageRoots
 import com.winlator.star.core.StringUtils
 import com.winlator.star.core.WinePath
 import com.winlator.star.util.FavoritesStore
@@ -499,19 +504,18 @@ fun FileManagerScreen(
 
     var showDriveMenu by remember { mutableStateOf(false) }
     var showContainerPicker by remember { mutableStateOf(false) }
-    val drives = remember {
-        buildList {
-            add("Internal" to File("/storage/emulated/0"))
-            val external = File("/storage")
-            if (external.exists()) {
-                external.listFiles()?.forEach { child ->
-                    if (child.isDirectory && child.name != "emulated" && child.name != "self") {
-                        add(child.name to child)
-                    }
-                }
-            }
-        }.filter { (_, f) -> f.exists() }
+    // Re-enumerated whenever we come back to the screen: returning from a container can leave this
+    // process on a stale storage view, and the volume set has to be re-read rather than cached.
+    var storageTick by remember { mutableIntStateOf(0) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) storageTick++
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
+    val drives = remember(storageTick) { StorageRoots.list(context) }
 
     // ── Dialogs ──
 
@@ -749,16 +753,29 @@ fun FileManagerScreen(
                             openDrive(imagefsDir)
                         },
                     )
-                    drives.forEach { (label, dir) ->
+                    drives.forEach { drive ->
                         MenuItemDivider()
                         DropdownMenuItem(
-                            text = { Text(label) },
+                            text = { Text(drive.label) },
                             leadingIcon = {
-                                Icon(Icons.Filled.Storage, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                Icon(
+                                    if (drive.removable) Icons.Filled.SdStorage else Icons.Filled.Storage,
+                                    null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp),
+                                )
                             },
                             onClick = {
                                 showDriveMenu = false
-                                openDrive(dir)
+                                if (drive.readable) {
+                                    openDrive(drive.dir)
+                                } else {
+                                    Toast.makeText(
+                                        context,
+                                        "${drive.label} is mounted but not readable right now",
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
+                                }
                             },
                         )
                     }

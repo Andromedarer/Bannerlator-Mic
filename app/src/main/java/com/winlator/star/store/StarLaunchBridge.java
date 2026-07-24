@@ -290,11 +290,31 @@ public final class StarLaunchBridge {
     public static void saveCoverArt(Context ctx, Container container,
                                     File shortcutFile, String safeName,
                                     String url) {
+        saveCoverArt(ctx, container, shortcutFile, safeName, url, null);
+    }
+
+    /**
+     * As {@link #saveCoverArt(Context, Container, File, String, String)} but, when a Steam
+     * {@code steamAppId} is known, tries the exact SteamGridDB "by Steam appid" grid first —
+     * far more reliable than the name search. Order: store {@code url} → SGDB-by-appid →
+     * SGDB-by-name ({@code safeName}, the proper title already written to the shortcut).
+     */
+    public static void saveCoverArt(Context ctx, Container container,
+                                    File shortcutFile, String safeName,
+                                    String url, Integer steamAppId) {
         Bitmap bmp = downloadBitmap(url);
 
-        // If store URL failed, try SteamGridDB as last resort
+        // Exact match by Steam appid (skips the fuzzy name search entirely).
+        if (bmp == null && steamAppId != null && steamAppId > 0) {
+            String appIdUrl = sgdbFetchCoverBySteamAppId(steamAppId);
+            if (appIdUrl != null && !appIdUrl.isEmpty()) {
+                bmp = downloadBitmap(appIdUrl);
+            }
+        }
+
+        // If still nothing, try SteamGridDB by the (now proper) name as last resort.
         if (bmp == null) {
-            Log.w(TAG, "Store cover art download failed for " + safeName + ", trying SteamGridDB");
+            Log.w(TAG, "Store/appid cover art unavailable for " + safeName + ", trying SteamGridDB name search");
             String sgdbUrl = sgdbFetchCover(safeName);
             if (sgdbUrl != null && !sgdbUrl.isEmpty()) {
                 bmp = downloadBitmap(sgdbUrl);
@@ -385,6 +405,27 @@ public final class StarLaunchBridge {
             return imgUrl;
         } catch (Exception e) {
             Log.w(TAG, "sgdbFetchCover failed for \"" + title + "\": " + e.getMessage());
+            return "";
+        }
+    }
+
+    /**
+     * Fetches a 600x900 portrait cover for a Steam {@code appId} directly from SteamGridDB's
+     * by-platform endpoint (no name search — exact game). Returns the image URL or "".
+     */
+    private static String sgdbFetchCoverBySteamAppId(int appId) {
+        try {
+            String gridsJson = httpGet(
+                    "https://www.steamgriddb.com/api/v2/grids/steam/" + appId
+                            + "?dimensions=600x900&mimes=image/jpeg,image/png&limit=1");
+            if (gridsJson == null) return "";
+            JSONArray grids = new JSONObject(gridsJson).optJSONArray("data");
+            if (grids == null || grids.length() == 0) return "";
+            String imgUrl = grids.getJSONObject(0).optString("url", "");
+            Log.d(TAG, "SteamGridDB cover for steam appId " + appId + ": " + imgUrl);
+            return imgUrl;
+        } catch (Exception e) {
+            Log.w(TAG, "sgdbFetchCoverBySteamAppId failed for " + appId + ": " + e.getMessage());
             return "";
         }
     }

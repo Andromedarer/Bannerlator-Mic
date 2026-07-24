@@ -361,6 +361,13 @@ public class Container {
         }
     }
 
+    // Whether an extra was explicitly written (vs. absent and only serving a default). Used to tell an
+    // untouched default apart from a deliberate user choice — e.g. so the refresh-unlock "needs a
+    // compatible layer" Toast only nags users who actually opted in, not every default container.
+    public boolean hasExtra(String name) {
+        return extraData != null && extraData.has(name);
+    }
+
     public void putExtra(String name, Object value) {
         if (extraData == null) extraData = new JSONObject();
         try {
@@ -438,17 +445,21 @@ public class Container {
         putExtra("frameGenFlowScale", String.valueOf(flowScale));
     }
 
-    // bionic-fg interpolation model (conf.toml `model`, layer clamp 0-3):
+    // bionic-fg interpolation model (conf.toml `model`, layer clamp 0-4):
     //   0 = hand-written optical-flow chain (the long-standing default)
     //   1 = GameScopeVK's traced dispatch graph
     //   2 = same graph fed libGameScopeV2's shader variants
     //   3 = FidelityFX Optical Flow
-    // 1-3 are unproven on device; 0 stays the default so behaviour is unchanged unless chosen.
+    //   4 = FidelityFX Optical Flow v2 — 3's front-end with a per-block search, a wider
+    //       match window, sub-pixel refinement and a true bidirectional solve whose
+    //       forward/backward disagreement gates the flow at occlusion edges. 3 is kept
+    //       unchanged alongside it so the two can be compared live in the same scene.
+    // 1-4 are unproven on device; 0 stays the default so behaviour is unchanged unless chosen.
     // BIONIC_FG_MODEL in the container/shortcut env vars still overrides this at the layer.
     public int getFrameGenModel() {
         try {
             int m = Integer.parseInt(getExtra("frameGenModel", String.valueOf(FRAMEGEN_DEFAULT_MODEL)));
-            return (m < 0 || m > 3) ? FRAMEGEN_DEFAULT_MODEL : m;
+            return (m < 0 || m > 4) ? FRAMEGEN_DEFAULT_MODEL : m;
         }
         catch (NumberFormatException e) {
             return FRAMEGEN_DEFAULT_MODEL;
@@ -718,6 +729,34 @@ public class Container {
 
     public void setManualRefreshRate(int rate) {
         putExtra("manualRefreshRate", String.valueOf(rate));
+    }
+
+    // Ceiling (Hz) on the refresh rates our RandR extension advertises to Wine, which is what
+    // populates a game's own in-game refresh/display dropdown. 0 = no cap (offer every rate the
+    // panel supports). NOTE this is the GUEST-side list and is a different axis from
+    // matchRefreshRate/manualRefreshRate above, which drive the HOST Android surface: this one
+    // bounds what the game is allowed to ask for, those decide what the panel actually runs at.
+    public int getMaxGameRefreshRate() {
+        try { return Integer.parseInt(getExtra("maxGameRefreshRate", "0")); }
+        catch (NumberFormatException e) { return 0; }
+    }
+
+    public void setMaxGameRefreshRate(int rate) {
+        putExtra("maxGameRefreshRate", String.valueOf(rate));
+    }
+
+    // Unlock the game's own in-game refresh dropdown by turning OFF Wine's win32u display-mode
+    // emulation (which otherwise discards the rates our RandR extension advertises and hardcodes the
+    // guest to {60, current}). Applied as the two "X11 Driver" registry values EmulateModelist /
+    // EmulateModeset = "Y" (INVERTED semantics: "Y" disables emulation). Default ON — the whole
+    // refresh feature is opt-in-by-hardware; the toggle lets a user turn it off if a game misbehaves
+    // with the reduced (container-res-capped) resolution ladder emulation-off produces.
+    public boolean isUnlockGameRefreshRate() {
+        return getExtra("unlockGameRefreshRate", "1").equals("1");
+    }
+
+    public void setUnlockGameRefreshRate(boolean unlock) {
+        putExtra("unlockGameRefreshRate", unlock ? "1" : "0");
     }
 
     // --- ReShade effect (vkBasalt drop-in), per-container default; the per-game shortcut can

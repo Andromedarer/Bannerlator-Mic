@@ -65,6 +65,31 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
 
     var wineVersionEntries by mutableStateOf(emptyList<String>()); private set
     var selectedWineVersion by mutableStateOf("")
+
+    // Whether the given wine/Proton layer has xrandr compiled in — i.e. can actually deliver the
+    // in-game refresh unlock. The editor uses this to warn under the "In-game refresh rate" control
+    // when the selected Proton can't. Cached per layer id in WineRandrSupport (cheap to recall).
+    //
+    // MUST be safe during early composition and in the create-new-container flow: contentsManager is a
+    // lateinit set in init(), which runs AFTER the first compose pass, and a brand-new container has no
+    // chosen layer yet. When we can't probe (uninitialized manager or empty version), return the benign
+    // "capable" default so the incompatible-layer hint simply doesn't show and nothing throws.
+    fun isWineXrandrCapable(wineVersion: String): Boolean {
+        if (!::contentsManager.isInitialized || wineVersion.isEmpty()) return true
+        return com.winlator.star.core.WineRandrSupport.isXrandrCapable(context, contentsManager, wineVersion)
+    }
+
+    // Persist the guest-side refresh setting, but ONLY when it's a deliberate non-default (or the
+    // container already had it set). Leaving the pure default (unlock + no cap = Unlimited) unwritten
+    // keeps an untouched container "default", so the launch-time compatible-layer Toast never nags a
+    // user who never opted in. Both extras are written together so the dropdown round-trips.
+    private fun applyRefreshSettings(c: com.winlator.star.container.Container) {
+        val isDefault = unlockGameRefreshRate && maxGameRefreshRate == 0
+        if (refreshWasExplicit || !isDefault) {
+            c.setUnlockGameRefreshRate(unlockGameRefreshRate)
+            c.setMaxGameRefreshRate(maxGameRefreshRate)
+        }
+    }
     var wineVersionEnabled by mutableStateOf(true); private set
     var isArm64EC by mutableStateOf(false); private set
 
@@ -121,6 +146,15 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     var matchRefreshRate by mutableStateOf(true)
     // Manual refresh-rate lock (Hz) used when Auto (matchRefreshRate) is OFF. 0 = none/native.
     var manualRefreshRate by mutableStateOf(0)
+    // Ceiling (Hz) on the rates advertised to the GAME via RandR, which is what fills its own
+    // in-game refresh dropdown. 0 = no cap. Separate axis from the two above (host panel rate).
+    var maxGameRefreshRate by mutableStateOf(0)
+    // Guest-side refresh: unlockGameRefreshRate (off = Locked 60) + maxGameRefreshRate (cap; 0 =
+    // Unlimited) together back the single "In-game refresh rate" dropdown. Default = unlock + no cap
+    // (Unlimited). refreshWasExplicit tracks whether the loaded container had actually set the extra, so
+    // an untouched default is NOT persisted (keeps it "default" → no compatible-layer nag at launch).
+    var unlockGameRefreshRate by mutableStateOf(true)
+    private var refreshWasExplicit = false
 
     // ReShade multi-effect LOADOUT (Tier 1), per-container default. The per-game shortcut can override.
     // ReshadeLoadoutState holds the ordered effects, per-effect enabled + params, and the solo/stack
@@ -390,6 +424,9 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         fpsLimiterEnabled  = c?.isFpsLimiterEnabled == true
         matchRefreshRate   = c?.isMatchRefreshRate != false   // default ON for new/unset containers
         manualRefreshRate  = c?.manualRefreshRate ?: 0
+        maxGameRefreshRate = c?.maxGameRefreshRate ?: 0
+        unlockGameRefreshRate = c?.isUnlockGameRefreshRate != false  // default ON for new/unset containers
+        refreshWasExplicit = c?.hasExtra("unlockGameRefreshRate") == true
 
         // ReShade: scan the drop-in folder, then load the loadout (migrating a legacy single effect).
         reshadeEffects = com.winlator.star.reshade.ReshadeManager.scanEffects(context)
@@ -694,6 +731,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             c.setFpsLimiterEnabled(fpsLimiterEnabled)
             c.setMatchRefreshRate(matchRefreshRate)
             c.setManualRefreshRate(manualRefreshRate)
+            applyRefreshSettings(c)
             c.setReshadeLoadout(reshadeLoadout.loadoutJsonOrNull())
             c.setReshadeMode(reshadeLoadout.mode)
             c.setReshadeParams(reshadeLoadout.paramsJsonOrNull())
@@ -799,6 +837,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
                     created.setFpsLimiterEnabled(fpsLimiterEnabled)
                     created.setMatchRefreshRate(matchRefreshRate)
                     created.setManualRefreshRate(manualRefreshRate)
+                    applyRefreshSettings(created)
                     created.setReshadeLoadout(reshadeLoadout.loadoutJsonOrNull())
                     created.setReshadeMode(reshadeLoadout.mode)
                     created.setReshadeParams(reshadeLoadout.paramsJsonOrNull())
@@ -897,9 +936,22 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         } catch (_: Exception) {}
     }
 
+    /**
+     * Drive letters assigned to more than one drive. Two drives sharing a letter collide in the
+     * container, so the editor flags them and saving is blocked until they are resolved.
+     */
+    val duplicateDriveLetters: Set<String>
+        get() = drives.groupingBy { it.letter }.eachCount().filterValues { it > 1 }.keys
+
     fun addDrive() {
         if (drives.size >= Container.MAX_DRIVE_LETTERS) return
-        val letter = driveLetterOptions.getOrElse(drives.size) { "D:" }.first().toString()
+        // Take the first UNUSED letter. Indexing by drives.size hands out a letter that an existing
+        // drive already holds whenever the assigned letters are not the first N in order.
+        val used = drives.mapTo(HashSet()) { it.letter }
+        val letter = driveLetterOptions
+            .map { it.trimEnd(':') }
+            .firstOrNull { it !in used }
+            ?: return
         drives.add(DriveEntry(letter = letter, path = ""))
     }
 

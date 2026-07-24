@@ -3,16 +3,14 @@ package com.winlator.star.ui.screens
 
 import android.app.Activity
 import android.content.Context
-import android.content.Intent
 import android.net.Uri
 import android.view.ContextThemeWrapper
-import android.os.Environment
-import android.provider.DocumentsContract
 import android.view.View
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -61,6 +59,7 @@ import com.winlator.star.core.FileUtils
 import com.winlator.star.core.GPUInformation
 import com.winlator.star.core.ImageUtils
 import com.winlator.star.util.InAppFilePicker
+import java.io.File
 import com.winlator.star.core.StringUtils
 import com.winlator.star.core.WineThemeManager
 import android.graphics.Bitmap
@@ -76,7 +75,7 @@ import com.winlator.star.container.Container
 import com.winlator.star.widget.perfhud.parseHudOutline
 import com.winlator.star.widget.ColorPickerView
 import com.winlator.star.widget.CPUListView
-import com.winlator.star.widget.EnvVarsView
+import com.winlator.star.ui.components.EnvVarsEditor
 
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
@@ -104,7 +103,6 @@ fun ContainerDetailScreen(
     var dxvkRefreshKey           by remember { mutableStateOf(0) }
 
     // AndroidView references for custom views
-    val envVarsViewRef      = remember { mutableStateOf<EnvVarsView?>(null)      }
     val cpuListViewRef      = remember { mutableStateOf<CPUListView?>(null)      }
     val cpuListWoW64Ref     = remember { mutableStateOf<CPUListView?>(null)      }
     val colorPickerViewRef  = remember { mutableStateOf<ColorPickerView?>(null)  }
@@ -121,11 +119,21 @@ fun ContainerDetailScreen(
         floatingActionButton = {
             FloatingActionButton(
                 onClick = {
-                    if (!viewModel.isSaving) viewModel.confirm(
+                    val duplicates = viewModel.duplicateDriveLetters
+                    if (duplicates.isNotEmpty()) {
+                        // Saving would write two drives onto one letter; send the user to the tab.
+                        viewModel.selectedTab = tabTitles.indexOf("DRIVES")
+                        Toast.makeText(
+                            context,
+                            "Two drives share " + duplicates.sorted().joinToString(", ") { "$it:" } +
+                                " — give each drive its own letter",
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    } else if (!viewModel.isSaving) viewModel.confirm(
                         resolvedGraphicsDriverConfig = viewModel.graphicsDriverConfig,
                         resolvedDXWrapperConfig      = viewModel.dxWrapperConfig,
                         resolvedFPSCounterConfig     = viewModel.fpsCounterConfig,
-                        resolvedEnvVars      = envVarsViewRef.value?.envVars ?: viewModel.envVarsStr,
+                        resolvedEnvVars      = viewModel.envVarsStr,
                         resolvedCPUList      = cpuListViewRef.value?.checkedCPUListAsString ?: viewModel.cpuList,
                         resolvedCPUListWoW64 = cpuListWoW64Ref.value?.checkedCPUListAsString ?: viewModel.cpuListWoW64,
                         resolvedColorAsString = colorPickerViewRef.value?.colorAsString ?: "#0277bd",
@@ -178,7 +186,7 @@ fun ContainerDetailScreen(
                         )
                         WineConfigTab(viewModel, colorPickerViewRef)
                     }
-                    1 -> EnvVarsTab(viewModel, envVarsViewRef)
+                    1 -> EnvVarsTab(viewModel)
                     2 -> DrivesTab(viewModel)
                     3 -> WinComponentsTab(viewModel)
                     4 -> Column {
@@ -721,12 +729,13 @@ private fun TopLevelFields(
                 stringResource(R.string.frame_generation_model_default),
                 stringResource(R.string.frame_generation_model_traced),
                 stringResource(R.string.frame_generation_model_v2),
-                stringResource(R.string.frame_generation_model_fsr3)
+                stringResource(R.string.frame_generation_model_fsr3),
+                stringResource(R.string.frame_generation_model_fsr3_v2)
             )
             LabeledDropdown(
                 label = stringResource(R.string.frame_generation_model),
                 options = fgModelLabels,
-                selectedOption = fgModelLabels[viewModel.frameGenModel.coerceIn(0, 3)],
+                selectedOption = fgModelLabels[viewModel.frameGenModel.coerceIn(0, 4)],
                 onSelect = { viewModel.frameGenModel = fgModelLabels.indexOf(it) }
             )
             if (viewModel.frameGenModel != 0) {
@@ -841,6 +850,55 @@ private fun TopLevelFields(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 52.dp, top = 2.dp, bottom = 4.dp)
             )
+        }
+
+        // Single guest-side refresh control. Collapses the unlock toggle + rate cap into one dropdown:
+        //   Locked (60)  -> emulation stays on, game sits at 60 (unlockGameRefreshRate = false)
+        //   <rate> Hz    -> unlock on, capped at that rate (unlock = true, maxGameRefreshRate = rate)
+        //   Unlimited    -> unlock on, no cap (unlock = true, maxGameRefreshRate = 0)
+        // Default Unlimited. Drives the two underlying extras so the launch resolver is unchanged. Not
+        // gated on vrrCapable — a game choosing 120 Hz is meaningful even where the panel can't do VRR.
+        if (supportedRates.isNotEmpty()) {
+            val lockedLabel = stringResource(R.string.in_game_refresh_locked)
+            val unlimitedLabel = stringResource(R.string.max_game_refresh_rate_unlimited)
+            // Only rates ABOVE 60 are cap options — "Locked (60)" already covers 60.
+            val ratesAbove60 = supportedRates.filter { it > 60 }
+            // value model: -1 = Locked, 0 = Unlimited, N = cap N
+            val rrOptionValues = listOf(-1, 0) + ratesAbove60
+            val rrOptionLabels = listOf(lockedLabel, unlimitedLabel) + ratesAbove60.map { "$it Hz" }
+            val rrCurrentValue = if (!viewModel.unlockGameRefreshRate) -1 else viewModel.maxGameRefreshRate
+            val rrIdx = rrOptionValues.indexOf(rrCurrentValue).let { if (it >= 0) it else 1 } // fall back to Unlimited
+            LabeledDropdown(
+                label = stringResource(R.string.in_game_refresh_rate),
+                options = rrOptionLabels,
+                selectedOption = rrOptionLabels[rrIdx],
+                onSelect = {
+                    when (val v = rrOptionValues[rrOptionLabels.indexOf(it)]) {
+                        -1 -> { viewModel.unlockGameRefreshRate = false; viewModel.maxGameRefreshRate = 0 }
+                        else -> { viewModel.unlockGameRefreshRate = true; viewModel.maxGameRefreshRate = v }
+                    }
+                }
+            )
+            Text(
+                text = stringResource(R.string.in_game_refresh_rate_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 52.dp, top = 2.dp, bottom = 4.dp)
+            )
+            // Warn when a non-Locked choice is set but the selected Proton has no xrandr — the unlock
+            // will be skipped at launch. Keyed on the wine version so the cached probe only re-runs when
+            // the layer changes.
+            val wineXrandrCapable = remember(viewModel.selectedWineVersion) {
+                viewModel.isWineXrandrCapable(viewModel.selectedWineVersion)
+            }
+            if (viewModel.unlockGameRefreshRate && !wineXrandrCapable) {
+                Text(
+                    text = stringResource(R.string.refresh_unlock_layer_incompatible_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(start = 52.dp, top = 2.dp, bottom = 4.dp)
+                )
+            }
         }
 
         // ReShade multi-effect loadout (vkBasalt drop-in), per-container default. The per-game shortcut
@@ -1117,51 +1175,15 @@ private fun WinComponentRow(comp: WinComponentEntry, onSelect: (Int) -> Unit) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
-private fun EnvVarsTab(
-    viewModel: ContainerDetailViewModel,
-    envVarsViewRef: MutableState<EnvVarsView?>
-) {
-    var showAddEnvVar by remember { mutableStateOf(false) }
-    // Flush the legacy EnvVarsView's contents back to the ViewModel before the
-    // tab leaves composition, so a tab switch doesn't drop in-progress edits.
-    DisposableEffect(Unit) {
-        onDispose {
-            envVarsViewRef.value?.let { viewModel.envVarsStr = it.envVars }
-            envVarsViewRef.value = null
-        }
-    }
-    Column {
-        AndroidView(
-            factory = { ctx ->
-                EnvVarsView(ctx).also { ev ->
-                    ev.setDarkMode(true)
-                    ev.setEnvVars(com.winlator.star.core.EnvVars(viewModel.envVarsStr))
-                    envVarsViewRef.value = ev
-                }
-            },
-            modifier = Modifier.fillMaxWidth().heightIn(min = 200.dp)
-        )
-        Spacer(Modifier.height(8.dp))
-        Button(
-            onClick = { showAddEnvVar = true },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Icon(Icons.Default.Add, contentDescription = null)
-            Spacer(Modifier.width(4.dp))
-            Text(stringResource(R.string.add) + " " + stringResource(R.string.environment_variables))
-        }
-    }
-    if (showAddEnvVar) {
-        AddEnvVarComposable(
-            onConfirm = { name, value ->
-                envVarsViewRef.value?.let { ev ->
-                    if (name.isNotEmpty() && !ev.containsName(name)) ev.add(name, value)
-                }
-                showAddEnvVar = false
-            },
-            onDismiss = { showAddEnvVar = false }
-        )
-    }
+private fun EnvVarsTab(viewModel: ContainerDetailViewModel) {
+    // The editor writes straight through to the ViewModel on every edit, so a tab switch
+    // can't drop in-progress edits and nothing has to be flushed back on dispose.
+    // gameDir is null here: a container has no single game folder to scan.
+    EnvVarsEditor(
+        value = viewModel.envVarsStr,
+        onValueChange = { viewModel.envVarsStr = it },
+        modifier = Modifier.fillMaxWidth()
+    )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1170,17 +1192,16 @@ private fun DrivesTab(viewModel: ContainerDetailViewModel) {
     val context = LocalContext.current
     var pendingDriveUid by remember { mutableStateOf<Long?>(null) }
 
+    // Uses the built-in picker rather than SAF: it returns a real absolute path, so a folder on the
+    // SD card yields /storage/<uuid>/... The SAF mapping produced /mnt/media_rw/<uuid>/..., the raw
+    // vold mount, which neither the app nor the container can read.
     val dirPickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == android.app.Activity.RESULT_OK) {
-            val uri = result.data?.data
-            if (uri != null && pendingDriveUid != null) {
-                val path = FileUtils.getFilePathFromUri(context, uri)
-                if (path != null) {
-                    viewModel.updateDrivePath(pendingDriveUid!!, path)
-                }
-            }
+            val path = InAppFilePicker.pickedPath(result.data)
+            val uid = pendingDriveUid
+            if (path != null && uid != null) viewModel.updateDrivePath(uid, path)
         }
         pendingDriveUid = null
     }
@@ -1193,21 +1214,34 @@ private fun DrivesTab(viewModel: ContainerDetailViewModel) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+        val duplicateLetters = viewModel.duplicateDriveLetters
         viewModel.drives.forEach { drive ->
             DriveRow(
                 drive = drive,
                 letterOptions = viewModel.driveLetterOptions,
+                isDuplicate = drive.letter in duplicateLetters,
                 onLetterChange = { viewModel.updateDriveLetter(drive.uid, it) },
                 onPathChange   = { viewModel.updateDrivePath(drive.uid, it)   },
                 onBrowse = {
                     pendingDriveUid = drive.uid
-                    val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
-                        putExtra(DocumentsContract.EXTRA_INITIAL_URI,
-                            Uri.fromFile(Environment.getExternalStorageDirectory()))
-                    }
-                    dirPickerLauncher.launch(intent)
+                    dirPickerLauncher.launch(
+                        InAppFilePicker.buildDirIntent(
+                            context,
+                            title = "Select folder for drive ${drive.letter}:",
+                            initialDir = drive.path.takeIf { it.isNotBlank() && File(it).isDirectory },
+                        )
+                    )
                 },
                 onRemove = { viewModel.removeDrive(drive.uid) }
+            )
+        }
+        if (duplicateLetters.isNotEmpty()) {
+            Text(
+                "Each drive needs its own letter. Duplicated: " +
+                    duplicateLetters.sorted().joinToString(", ") { "$it:" },
+                color = MaterialTheme.colorScheme.error,
+                fontSize = 12.sp,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
             )
         }
         Button(
@@ -1226,6 +1260,7 @@ private fun DrivesTab(viewModel: ContainerDetailViewModel) {
 private fun DriveRow(
     drive: DriveEntry,
     letterOptions: List<String>,
+    isDuplicate: Boolean,
     onLetterChange: (String) -> Unit,
     onPathChange: (String) -> Unit,
     onBrowse: () -> Unit,
@@ -1236,7 +1271,14 @@ private fun DriveRow(
             options = letterOptions,
             selectedOption = "${drive.letter}:",
             onSelect = { onLetterChange(it.trimEnd(':')) },
-            modifier = Modifier.width(64.dp)
+            modifier = Modifier
+                .width(64.dp)
+                .then(
+                    if (isDuplicate) Modifier.border(
+                        BorderStroke(1.dp, MaterialTheme.colorScheme.error),
+                        RoundedCornerShape(4.dp),
+                    ) else Modifier
+                )
         )
         OutlinedTextField(
             value = drive.path,
@@ -1611,63 +1653,6 @@ private fun XRTab(viewModel: ContainerDetailViewModel) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared composables
-// ─────────────────────────────────────────────────────────────────────────────
-@Composable
-internal fun AddEnvVarComposable(
-    onConfirm: (name: String, value: String) -> Unit,
-    onDismiss: () -> Unit
-) {
-    var name by remember { mutableStateOf("") }
-    var value by remember { mutableStateOf("") }
-    var showPresets by remember { mutableStateOf(false) }
-
-    val knownNames = remember { EnvVarsView.knownEnvVars.map { it[0] } }
-
-    OutlinedAlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.new_environment_variable)) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Name") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
-                OutlinedTextField(
-                    value = value,
-                    onValueChange = { value = it },
-                    label = { Text("Value") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
-                Box {
-                    OutlinedButton(onClick = { showPresets = true }, modifier = Modifier.fillMaxWidth()) {
-                        Text("Presets")
-                    }
-                    DropdownMenu(expanded = showPresets, onDismissRequest = { showPresets = false }) {
-                        knownNames.forEach { preset ->
-                            DropdownMenuItem(
-                                text = { Text(preset) },
-                                onClick = { name = preset; showPresets = false }
-                            )
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                val n = name.trim().replace(" ", "")
-                val v = value.trim().replace(" ", "")
-                onConfirm(n, v)
-            }) { Text(stringResource(android.R.string.ok)) }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(android.R.string.cancel)) } }
-    )
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable

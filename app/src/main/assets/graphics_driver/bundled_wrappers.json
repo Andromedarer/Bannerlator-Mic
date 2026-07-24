@@ -25,10 +25,10 @@
     "catalogVersion": 1
   },
   "wrapper-gamenative.tzst": {
-    "version": "GameNative 20260719",
-    "notes": "GameNative's wrapper (DX12 + integrated BCn), 32-bit game support.",
+    "version": "GameNative 20260723",
+    "notes": "GameNative's wrapper (DX12 + integrated BCn), 32-bit game support; leegao's changes for older devices (#1762).",
     "catalogId": "gamenative-wrapper",
-    "catalogVersion": 2
+    "catalogVersion": 3
   },
   "leegao_bcn.tzst": {
     "version": "leegao bcn_layer 20260719",

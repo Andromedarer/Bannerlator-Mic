@@ -914,8 +914,11 @@ private fun FrameGenSection(state: XServerDrawerState) {
 private fun FgModelButtons(selected: Int, onSelect: (Int) -> Unit) {
     val accent = MaterialTheme.colorScheme.primary
     val accentDim = LocalAccentDim.current
-    // 0 is the long-standing default chain; 1-3 are newer engines, not yet device-proven.
-    val options = listOf(0 to "Default", 1 to "Traced", 2 to "V2", 3 to "FSR3")
+    // 0 is the long-standing default chain; 1-4 are newer engines, not yet device-proven.
+    // 4 ("FSR3+") is 3's optical flow reworked — per-block search, sub-pixel refinement
+    // and a true bidirectional solve that gates the flow at occlusion edges. 3 is kept
+    // alongside it so the two can be compared live in the same scene.
+    val options = listOf(0 to "Default", 1 to "Traced", 2 to "V2", 3 to "FSR3", 4 to "FSR3+")
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(6.dp)

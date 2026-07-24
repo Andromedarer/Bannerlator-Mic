@@ -160,6 +160,12 @@ import java.nio.file.Files;
             catch (JSONException e) {}
         }
 
+        // Whether this shortcut explicitly overrides the extra (present) vs. inherits the container
+        // (absent). Lets the refresh-unlock Toast distinguish a deliberate per-game choice from inherit.
+        public boolean hasExtra(String name) {
+            return extraData.has(name);
+        }
+
         public void saveData() {
             String content = "[Desktop Entry]\n";
             for (String line : FileUtils.readLines(file)) {

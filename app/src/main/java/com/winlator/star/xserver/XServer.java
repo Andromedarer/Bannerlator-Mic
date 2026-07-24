@@ -10,6 +10,7 @@ import com.winlator.star.xserver.extensions.DRI3Extension;
 import com.winlator.star.xserver.extensions.Extension;
 import com.winlator.star.xserver.extensions.MITSHMExtension;
 import com.winlator.star.xserver.extensions.PresentExtension;
+import com.winlator.star.xserver.extensions.RandrExtension;
 import com.winlator.star.xserver.extensions.SyncExtension;
 
 import java.nio.charset.Charset;
@@ -207,6 +208,7 @@ public class XServer {
         extensions.put(DRI3Extension.MAJOR_OPCODE, new DRI3Extension());
         extensions.put(PresentExtension.MAJOR_OPCODE, new PresentExtension());
         extensions.put(SyncExtension.MAJOR_OPCODE, new SyncExtension());
+        extensions.put(RandrExtension.MAJOR_OPCODE, new RandrExtension(screenInfo));
     }
 
     public <T extends Extension> T getExtension(int opcode) {
