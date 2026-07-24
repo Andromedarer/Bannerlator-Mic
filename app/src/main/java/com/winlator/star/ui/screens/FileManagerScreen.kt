@@ -1818,7 +1818,7 @@ private fun FavoriteCard(
                 imageVector = Icons.Filled.Folder,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(if (compact) 24.dp else 36.dp),
+                modifier = Modifier.size(36.dp),
             )
             Spacer(Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f)) {
