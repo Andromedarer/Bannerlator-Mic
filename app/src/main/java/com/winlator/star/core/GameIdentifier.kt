@@ -223,7 +223,12 @@ object GameIdentifier {
         // repack/site tags that show up in folder names
         "ankergames", "steamrip", "onlinefix", "online-fix", "gload", "fitgirlrepacks",
     )
-    private val EXE_SUFFIX_RE = Regex("""(?i)[-_. ]*(win64|win32|shipping|wingdk|client|launcher|game|x64|x86|64bit|32bit)""")
+    // Anchored to the END and allowed to repeat. Unanchored, this stripped its words from ANYWHERE
+    // in a title — "Game of Thrones" came out as "of Thrones" and "Client Simulator" as
+    // "Simulator". Only the trailing run is noise: "Witcher3-Win64-Shipping" -> "Witcher3".
+    private val EXE_SUFFIX_RE = Regex(
+        """(?i)(?:[-_. ]*(?:win64|win32|shipping|wingdk|client|launcher|game|x64|x86|64bit|32bit))+$"""
+    )
     private val VERSION_TOKEN_RE = Regex("""(?i)\b(v?\d+([._]\d+)+|build[-_ ]?\d+|update[-_ ]?\d+)\b""")
 
     /**
