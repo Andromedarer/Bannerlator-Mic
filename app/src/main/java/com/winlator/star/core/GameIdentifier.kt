@@ -234,7 +234,8 @@ object GameIdentifier {
      * not another lowercase letter (checked case-sensitively, so it survives the case-insensitive JUNK
      * matching used elsewhere).
      */
-    private fun isLauncherExe(base: String): Boolean {
+    /** True when an exe basename looks like a launcher/loader rather than the game itself. */
+    fun isLauncherExeName(base: String): Boolean {
         val lower = base.lowercase()
         if (lower == "gse" || lower.endsWith("launcher") || lower.endsWith("redirector")) return true
         for (p in arrayOf("play", "launch", "start", "run")) {
@@ -267,7 +268,7 @@ object GameIdentifier {
     private fun cleanedFallbackName(exeFile: File): String? {
         val exeBase = exeFile.nameWithoutExtension
         val preferFolder = EXE_SUFFIX_RE.containsMatchIn(exeBase) ||
-            isLauncherExe(exeBase) ||
+            isLauncherExeName(exeBase) ||
             exeBase.equals("game", true) || exeBase.equals("start", true)
         val folder = exeFile.absoluteFile.parentFile?.name
         val raw = if (preferFolder && !folder.isNullOrBlank()) folder else exeBase

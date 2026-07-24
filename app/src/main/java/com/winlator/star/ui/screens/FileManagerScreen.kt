@@ -343,10 +343,14 @@ fun FileManagerScreen(
                             }
                         )
                     }
-                }.getOrNull()
-            }
-            if (shortcutFile == null) {
-                Toast.makeText(context, "Couldn't prepare ${file.name} to run", Toast.LENGTH_SHORT).show()
+                }
+            }.getOrElse { failure ->
+                val message = if (failure is WinePath.NoFreeDriveLetterException) {
+                    "No free drive letters left in this container — remove one you don't need in its Drives tab"
+                } else {
+                    "Couldn't prepare ${file.name} to run"
+                }
+                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
                 return@launch
             }
             val intent = Intent(context, XServerDisplayActivity::class.java)
