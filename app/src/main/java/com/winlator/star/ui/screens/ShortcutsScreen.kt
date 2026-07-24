@@ -100,6 +100,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import com.winlator.star.communityconfigs.AccountManager
 import com.winlator.star.communityconfigs.CanonicalDevice
 import com.winlator.star.communityconfigs.CanonicalGame
@@ -250,6 +251,10 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     var folderScanSelected by remember { mutableStateOf<Set<String>>(emptySet()) }
     var folderScanRoot by remember { mutableStateOf("") }
     var folderImportRunning by remember { mutableStateOf(false) }
+    // Manual exe override for a scanned game. The scanner keeps every runner-up, so correcting a
+    // pick is a choice from a list rather than a rescan.
+    var exePickerFor by remember { mutableStateOf<GameFolderScanner.Candidate?>(null) }
+    var exeBrowseForPath by remember { mutableStateOf("") }
     // When checked, the shortcut import uses the system SAF picker instead of the in-app File Manager.
     var importUseSystemPicker by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
@@ -746,6 +751,112 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
         }
     }
 
+    /**
+     * Swaps the chosen exe for one scanned game. The user has now made the call explicitly, so the
+     * "check this one" flag is cleared, the previous pick joins the alternatives (in case they want
+     * to go back), and the selection set is re-keyed since it is keyed by exe path.
+     */
+    fun replaceScannedExe(target: GameFolderScanner.Candidate, newExe: File) {
+        val oldKey = target.exe.absolutePath
+        val newKey = newExe.absolutePath
+        folderScanResults = folderScanResults.map { c ->
+            if (c.exe.absolutePath != oldKey) c else c.copy(
+                exe = newExe,
+                uncertain = false,
+                alternatives = (listOf(c.exe) + c.alternatives)
+                    .distinctBy { it.absolutePath }
+                    .filter { it.absolutePath != newKey },
+            )
+        }
+        if (oldKey in folderScanSelected) folderScanSelected = folderScanSelected - oldKey + newKey
+    }
+
+    // "Browse…" result from the exe-override dialog: any file the user points at wins outright.
+    val importExeBrowseLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val path = if (result.resultCode == Activity.RESULT_OK) InAppFilePicker.pickedPath(result.data) else null
+        val target = folderScanResults.firstOrNull { it.exe.absolutePath == exeBrowseForPath }
+        if (path != null && target != null) replaceScannedExe(target, File(path))
+        exeBrowseForPath = ""
+    }
+
+    // Manual exe override — every candidate exe found in that game's folder, best-ranked first.
+    exePickerFor?.let { target ->
+        val options = (listOf(target.exe) + target.alternatives).distinctBy { it.absolutePath }
+        OutlinedAlertDialog(
+            onDismissRequest = { exePickerFor = null },
+            title = {
+                Column {
+                    Text("Choose the game's .exe")
+                    Text(
+                        target.name,
+                        color = OnSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            },
+            text = {
+                LazyColumn(modifier = Modifier.heightIn(max = 380.dp)) {
+                    items(options, key = { it.absolutePath }) { exe ->
+                        val current = exe.absolutePath == target.exe.absolutePath
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    replaceScannedExe(target, exe)
+                                    exePickerFor = null
+                                }
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(selected = current, onClick = {
+                                replaceScannedExe(target, exe)
+                                exePickerFor = null
+                            })
+                            Spacer(Modifier.width(8.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    exe.name,
+                                    color = OnSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                // Where it sits inside the game folder — the thing that actually
+                                // distinguishes two same-named exes (x86 vs x64, bin/ vs root).
+                                val rel = exe.absolutePath
+                                    .removePrefix(target.folder.absolutePath)
+                                    .removePrefix("/")
+                                Text(
+                                    if (rel.contains('/')) rel.substringBeforeLast('/') else "(folder root)",
+                                    color = OnSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.labelSmall,
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                // Escape hatch: the real exe can be missing from the list if it was filtered as an
+                // installer/helper or sits deeper than the scan goes.
+                TextButton(onClick = {
+                    exeBrowseForPath = target.exe.absolutePath
+                    exePickerFor = null
+                    importExeBrowseLauncher.launch(
+                        InAppFilePicker.buildIntent(context, InAppFilePicker.SHORTCUT, "Select the game's .exe")
+                    )
+                }) { Text("Browse…") }
+            },
+            dismissButton = {
+                TextButton(onClick = { exePickerFor = null }) { Text("Cancel") }
+            },
+        )
+    }
+
     // How to add: one exe (the original flow) or a whole folder of game folders.
     if (showImportMethodPicker) {
         OutlinedAlertDialog(
@@ -844,6 +955,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                     folderScanSelected + key
                                 }
                             },
+                            onChangeExe = { exePickerFor = candidate },
                         )
                     }
                 }
@@ -5980,6 +6092,7 @@ private fun ScannedGameRow(
     checked: Boolean,
     enabled: Boolean,
     onToggle: () -> Unit,
+    onChangeExe: () -> Unit,
 ) {
     val alpha = if (candidate.alreadyAdded) 0.45f else 1f
     Row(
@@ -6044,12 +6157,25 @@ private fun ScannedGameRow(
                     color = OnSurfaceVariant,
                     style = MaterialTheme.typography.labelSmall,
                 )
+                // Flagged rows name the exe, because that is what the user is being asked to judge.
                 candidate.uncertain -> Text(
                     "Check this one — ${candidate.exe.name}",
                     color = MaterialTheme.colorScheme.tertiary,
                     style = MaterialTheme.typography.labelSmall,
                 )
+                else -> Text(
+                    candidate.exe.name,
+                    color = OnSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.labelSmall,
+                )
             }
+        }
+        // Available on EVERY row, not just flagged ones — a confident pick can still be the wrong
+        // one, and the user is the only one who actually knows.
+        if (!candidate.alreadyAdded) {
+            TextButton(onClick = onChangeExe, enabled = enabled) { Text("Change") }
         }
     }
 }

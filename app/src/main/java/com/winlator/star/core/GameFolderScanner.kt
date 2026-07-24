@@ -26,6 +26,9 @@ object GameFolderScanner {
     /** Two candidates within this margin means nothing clearly won — treat as uncertain. */
     private const val AMBIGUOUS_MARGIN = 15
 
+    /** How many runners-up to keep for the manual "change exe" picker. */
+    private const val MAX_ALTERNATIVES = 20
+
     /** Directories that never contain the game itself. */
     private val SKIP_DIRS = setOf(
         "_commonredist", "commonredist", "redist", "redistributable", "redistributables",
@@ -58,7 +61,12 @@ object GameFolderScanner {
         val coverUrl: String?,
         val uncertain: Boolean,
         val alreadyAdded: Boolean,
-        /** Other plausible exes, best first — lets the UI offer a correction without rescanning. */
+        /**
+         * Every other exe found in this folder, best-ranked first. Kept so the confirm screen can
+         * offer a manual correction without rescanning — which matters because the common flagged
+         * case is a folder that genuinely ships two plausible binaries (`dirt3.exe` vs
+         * `dirt3_game.exe`, an x86 and an x64 `Hades.exe`), where only the user can settle it.
+         */
         val alternatives: List<File>,
     )
 
@@ -111,7 +119,7 @@ object GameFolderScanner {
             coverUrl = identity?.appId?.let { SteamStoreSearch.coverUrl(it) },
             uncertain = uncertain,
             alreadyAdded = canonical(bestExe) in existingExePaths,
-            alternatives = scored.drop(1).take(5).map { it.first },
+            alternatives = scored.drop(1).take(MAX_ALTERNATIVES).map { it.first },
         )
     }
 
