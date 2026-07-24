@@ -54,6 +54,7 @@ import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -84,6 +85,8 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FileUpload
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Upload
@@ -142,6 +145,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -867,9 +871,10 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
             title = { Text("Add games") },
             text = {
                 Column {
-                    ImportMethodRow(
+                    MenuOptionCard(
                         title = "Add game EXE",
                         subtitle = "Pick one game's .exe file",
+                        icon = Icons.Default.InsertDriveFile,
                     ) {
                         showImportMethodPicker = false
                         if (importUseSystemPicker) importFileLauncher.launch("*/*")
@@ -877,10 +882,10 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                             InAppFilePicker.buildIntent(context, InAppFilePicker.SHORTCUT, "Select .exe / .desktop / .lnk")
                         )
                     }
-                    Spacer(Modifier.height(4.dp))
-                    ImportMethodRow(
+                    MenuOptionCard(
                         title = "Add games folder",
                         subtitle = "Pick the folder holding all your games — each one is scanned for its .exe",
+                        icon = Icons.Default.Folder,
                     ) {
                         showImportMethodPicker = false
                         importFolderLauncher.launch(
@@ -942,7 +947,8 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
             },
             text = {
                 LazyColumn(modifier = Modifier.heightIn(max = 420.dp)) {
-                    items(folderScanResults, key = { it.exe.absolutePath }) { candidate ->
+                    itemsIndexed(folderScanResults, key = { _, c -> c.exe.absolutePath }) { index, candidate ->
+                        if (index > 0) Divider(color = DividerColor)
                         ScannedGameRow(
                             candidate = candidate,
                             checked = candidate.exe.absolutePath in folderScanSelected,
@@ -1012,20 +1018,16 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                         Text("No containers found.", color = OnSurfaceVariant)
                     } else {
                         containers.forEachIndexed { index, c ->
-                            Text(
-                                text = c.name,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        showImportContainerPicker = false
-                                        pendingImportContainerIndex = index
-                                        // Ask HOW to add before asking WHAT to add: one exe, or a
-                                        // whole folder of game folders.
-                                        showImportMethodPicker = true
-                                    }
-                                    .padding(vertical = 12.dp),
-                                color = OnSurface,
-                            )
+                            MenuOptionCard(
+                                title = c.name,
+                                icon = Icons.Default.Folder,
+                            ) {
+                                showImportContainerPicker = false
+                                pendingImportContainerIndex = index
+                                // Ask HOW to add before asking WHAT to add: one exe, or a whole
+                                // folder of game folders.
+                                showImportMethodPicker = true
+                            }
                         }
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
                             Checkbox(checked = importUseSystemPicker, onCheckedChange = { importUseSystemPicker = it })
@@ -6064,17 +6066,47 @@ private fun exportShortcut(context: Context, shortcut: Shortcut) {
 }
 
 
-/** One choice in the "Add games" dialog: add a single exe, or scan a whole games folder. */
+/**
+ * A selectable option card, styled to match the File Manager's rows and the game cards behind the
+ * dialog — outlined rounded rectangle, optional leading icon, title over a dimmer subtitle — so the
+ * import menus read as part of the same surface rather than as bare dialog text.
+ */
 @Composable
-private fun ImportMethodRow(title: String, subtitle: String, onClick: () -> Unit) {
-    Column(
+private fun MenuOptionCard(
+    title: String,
+    subtitle: String? = null,
+    icon: ImageVector? = null,
+    onClick: () -> Unit,
+) {
+    Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 10.dp),
+            .padding(vertical = 3.dp)
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
     ) {
-        Text(title, color = OnSurface, style = MaterialTheme.typography.bodyLarge)
-        Text(subtitle, color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+        ) {
+            if (icon != null) {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(22.dp),
+                )
+                Spacer(Modifier.width(12.dp))
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, color = OnSurface, style = MaterialTheme.typography.bodyLarge)
+                if (subtitle != null) {
+                    Text(subtitle, color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
     }
 }
 
