@@ -130,6 +130,23 @@ enum class ConflictChoice { OVERWRITE, MERGE, KEEP_BOTH, SKIP }
  * Ordering for the file list. Folders always lead regardless of direction — a descending sort that
  * buries every folder under the files is never what someone means by "Z to A".
  */
+/**
+ * Shortens a path from the LEFT, keeping whole segments.
+ *
+ * Compose's TextOverflow can only ellipsise the tail, which for a path throws away the part that
+ * matters — `/storage/emulated/0/Winlator/Game…` tells you nothing about where you are.
+ */
+private fun elidePathStart(path: String, max: Int): String {
+    if (path.length <= max) return path
+    val parts = path.split('/').filter { it.isNotEmpty() }
+    val out = StringBuilder()
+    for (part in parts.asReversed()) {
+        if (out.length + part.length + 1 > max - 2) break
+        out.insert(0, "/$part")
+    }
+    return if (out.isEmpty()) "…" + path.takeLast(max - 1) else "…$out"
+}
+
 private fun comparatorFor(sortBy: String, desc: Boolean): Comparator<File> {
     val inner: Comparator<File> = when (sortBy) {
         "date" -> compareBy { it.lastModified() }
@@ -1053,10 +1070,14 @@ fun FileManagerScreen(
                     modifier = Modifier.weight(1f),
                 )
             } else {
+                // The CURRENT FOLDER, not the full path. A path ellipsised on the right hides its
+                // tail — which is the only part that says where you are ("…/Winlator/Game…").
+                // The full path moves to the line below, where it has room.
                 Text(
-                    text = currentDir.absolutePath,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 12.sp,
+                    text = currentDir.name.ifBlank { currentDir.absolutePath },
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
@@ -1128,13 +1149,29 @@ fun FileManagerScreen(
         val freeSpace = remember(currentDir.absolutePath, entries) {
             runCatching { currentDir.usableSpace }.getOrDefault(0L)
         }
-        if (!showFavorites && freeSpace > 0) {
-            Text(
-                "${StringUtils.formatBytes(freeSpace)} free",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 11.sp,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
-            )
+        if (!showFavorites) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+            ) {
+                Text(
+                    // Elided from the LEFT: the deepest part of a path is the informative part, so
+                    // when it doesn't fit we drop the /storage/emulated/0 prefix, not the tail.
+                    text = elidePathStart(currentDir.absolutePath, 52),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                if (freeSpace > 0) {
+                    Text(
+                        "  \u2022  ${StringUtils.formatBytes(freeSpace)} free",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                    )
+                }
+            }
         }
 
         HorizontalDivider(color = MaterialTheme.colorScheme.outline)
