@@ -16,6 +16,7 @@ import android.os.Handler;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.util.Log;
+import android.util.SparseArray;
 import android.util.SparseBooleanArray;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
@@ -113,8 +114,13 @@ public class InputControlsView extends View {
     private final Map<ExternalController, Set<Integer>> activeControllerKeys = new IdentityHashMap<>();
     private final Map<ExternalController, Set<Binding>> activeControllerBindings = new IdentityHashMap<>();
     private final Map<Binding, Integer> activeControllerBindingCounts = new EnumMap<>(Binding.class);
-    private final Map<ExternalController, Map<Integer, Binding>> activeControllerPulseSources = new IdentityHashMap<>();
+    private final Map<ExternalController, ControllerPulseState> controllerPulseStates = new IdentityHashMap<>();
     private final Map<ExternalController, Integer> controllerDeviceIds = new IdentityHashMap<>();
+
+    private static class ControllerPulseState {
+        SparseArray<Binding> previousSources = new SparseArray<>();
+        SparseArray<Binding> currentSources = new SparseArray<>();
+    }
 
     private static class VirtualStickState {
         final Binding binding;
@@ -696,7 +702,8 @@ public class InputControlsView extends View {
         };
 
         Map<Binding, Float> mappedAxes = new HashMap<>();
-        Map<Integer, Binding> activePulseSources = null;
+        ControllerPulseState pulseState = controllerPulseStates.get(controller);
+        if (pulseState != null) pulseState.currentSources.clear();
         for (int i = 0; i < axes.length; i++) {
             float value = values[i];
             byte activeSign = Math.abs(value) > ControlElement.STICK_DEAD_ZONE ? Mathf.sign(value) : 0;
@@ -707,8 +714,8 @@ public class InputControlsView extends View {
                     Binding binding = controllerBinding.getBinding();
                     boolean active = sign == activeSign;
                     mergeAxisBindingState(mappedAxes, binding, active, value);
-                    activePulseSources = addActiveControllerPulseSource(
-                            activePulseSources, keyCode, binding, active);
+                    pulseState = addActiveControllerPulseSource(
+                            pulseState, keyCode, binding, active);
                 }
             }
         }
@@ -717,15 +724,15 @@ public class InputControlsView extends View {
         if (triggerL != null) {
             boolean active = controller.state.triggerL > ControlElement.STICK_DEAD_ZONE;
             mergeAxisBindingState(mappedAxes, triggerL.getBinding(), active, controller.state.triggerL);
-            activePulseSources = addActiveControllerPulseSource(
-                    activePulseSources, triggerL.getKeyCode(), triggerL.getBinding(), active);
+            pulseState = addActiveControllerPulseSource(
+                    pulseState, triggerL.getKeyCode(), triggerL.getBinding(), active);
         }
         ExternalControllerBinding triggerR = controller.getControllerBinding(KeyEvent.KEYCODE_BUTTON_R2);
         if (triggerR != null) {
             boolean active = controller.state.triggerR > ControlElement.STICK_DEAD_ZONE;
             mergeAxisBindingState(mappedAxes, triggerR.getBinding(), active, controller.state.triggerR);
-            activePulseSources = addActiveControllerPulseSource(
-                    activePulseSources, triggerR.getKeyCode(), triggerR.getBinding(), active);
+            pulseState = addActiveControllerPulseSource(
+                    pulseState, triggerR.getKeyCode(), triggerR.getBinding(), active);
         }
 
         Set<Integer> activeKeys = activeControllerKeys.get(controller);
@@ -735,8 +742,8 @@ public class InputControlsView extends View {
             Binding binding = controllerBinding.getBinding();
             boolean active = activeKeys != null && activeKeys.contains(keyCode);
             mergeAxisBindingState(mappedAxes, binding, active, 1f);
-            activePulseSources = addActiveControllerPulseSource(
-                    activePulseSources, keyCode, binding, active);
+            pulseState = addActiveControllerPulseSource(
+                    pulseState, keyCode, binding, active);
         }
 
         applyMappedGamepadState(controller.remappedState, mappedAxes);
@@ -751,7 +758,7 @@ public class InputControlsView extends View {
                 controllerMouseMoveOffsets.put(controller, new PointF(controllerMouseX, controllerMouseY));
         }
         if (controllerMouseX != 0 || controllerMouseY != 0) createMouseMoveTimer();
-        updateControllerPulseState(controller, activePulseSources);
+        updateControllerPulseState(controller, pulseState);
         updateHeldControllerBindingState(controller, mappedAxes);
 
         WinHandler winHandler = xServer != null ? xServer.getWinHandler() : null;
@@ -760,30 +767,32 @@ public class InputControlsView extends View {
         }
     }
 
-    private static Map<Integer, Binding> addActiveControllerPulseSource(
-            Map<Integer, Binding> activeSources,
+    private static ControllerPulseState addActiveControllerPulseSource(
+            ControllerPulseState pulseState,
             int sourceKeyCode,
             Binding binding,
             boolean active) {
-        if (!active || !isPulseBinding(binding)) return activeSources;
-        if (activeSources == null) activeSources = new HashMap<>();
-        activeSources.put(sourceKeyCode, binding);
-        return activeSources;
+        if (!active || !isPulseBinding(binding)) return pulseState;
+        if (pulseState == null) pulseState = new ControllerPulseState();
+        pulseState.currentSources.put(sourceKeyCode, binding);
+        return pulseState;
     }
 
     private void updateControllerPulseState(
-            ExternalController controller, Map<Integer, Binding> currentSources) {
-        Map<Integer, Binding> previousSources = activeControllerPulseSources.get(controller);
-        if (currentSources == null) {
-            activeControllerPulseSources.remove(controller);
-            return;
-        }
-        for (Map.Entry<Integer, Binding> source : currentSources.entrySet()) {
-            if (isControllerPulseRisingEdge(previousSources, source.getKey(), source.getValue())) {
-                handleInputEvent(controller, source.getValue(), true, 0, false);
+            ExternalController controller, ControllerPulseState pulseState) {
+        if (pulseState == null) return;
+        for (int i = 0; i < pulseState.currentSources.size(); i++) {
+            int sourceKeyCode = pulseState.currentSources.keyAt(i);
+            Binding binding = pulseState.currentSources.valueAt(i);
+            if (isControllerPulseRisingEdge(pulseState.previousSources.get(sourceKeyCode), binding)) {
+                handleInputEvent(controller, binding, true, 0, false);
             }
         }
-        activeControllerPulseSources.put(controller, currentSources);
+        SparseArray<Binding> previousSources = pulseState.previousSources;
+        pulseState.previousSources = pulseState.currentSources;
+        pulseState.currentSources = previousSources;
+        pulseState.currentSources.clear();
+        controllerPulseStates.put(controller, pulseState);
     }
 
     private void updateHeldControllerBindingState(ExternalController controller, Map<Binding, Float> mappedInputs) {
@@ -824,7 +833,7 @@ public class InputControlsView extends View {
         previousCounts.putAll(activeControllerBindingCounts);
         activeControllerBindings.clear();
         activeControllerBindingCounts.clear();
-        activeControllerPulseSources.clear();
+        controllerPulseStates.clear();
         dispatchControllerBindingTransitions(
                 null,
                 calculateHeldBindingTransitions(previousCounts, activeControllerBindingCounts),
@@ -842,7 +851,7 @@ public class InputControlsView extends View {
                     calculateHeldBindingTransitions(previousCounts, activeControllerBindingCounts),
                     new EnumMap<>(Binding.class));
         }
-        activeControllerPulseSources.remove(controller);
+        controllerPulseStates.remove(controller);
         activeControllerKeys.remove(controller);
         controllerDeviceIds.remove(controller);
         synchronized (controllerMouseMoveOffsets) {
@@ -880,9 +889,8 @@ public class InputControlsView extends View {
     }
 
     public static boolean isControllerPulseRisingEdge(
-            Map<Integer, Binding> previousSources, int sourceKeyCode, Binding currentBinding) {
-        return isPulseBinding(currentBinding)
-                && (previousSources == null || previousSources.get(sourceKeyCode) != currentBinding);
+            Binding previousBinding, Binding currentBinding) {
+        return isPulseBinding(currentBinding) && previousBinding != currentBinding;
     }
 
     public static int getWheelPulseDelta(Binding binding, boolean isActionDown) {

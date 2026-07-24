@@ -546,7 +546,7 @@ class InputControlsFormatTest {
     fun controllerPulseSourceEdges_emitInitialPress() {
         assertTrue(
             InputControlsView.isControllerPulseRisingEdge(
-                emptyMap(), 96, Binding.MOUSE_SCROLL_UP,
+                null, Binding.MOUSE_SCROLL_UP,
             ),
         )
     }
@@ -559,12 +559,12 @@ class InputControlsFormatTest {
 
         assertFalse(
             InputControlsView.isControllerPulseRisingEdge(
-                previousSources, firstKeyCode, Binding.SHOW_ANDROID_KEYBOARD,
+                previousSources[firstKeyCode], Binding.SHOW_ANDROID_KEYBOARD,
             ),
         )
         assertTrue(
             InputControlsView.isControllerPulseRisingEdge(
-                previousSources, secondKeyCode, Binding.SHOW_ANDROID_KEYBOARD,
+                previousSources[secondKeyCode], Binding.SHOW_ANDROID_KEYBOARD,
             ),
         )
     }
@@ -577,12 +577,12 @@ class InputControlsFormatTest {
 
         assertFalse(
             InputControlsView.isControllerPulseRisingEdge(
-                firstControllerSources, sourceKeyCode, Binding.MOUSE_SCROLL_DOWN,
+                firstControllerSources[sourceKeyCode], Binding.MOUSE_SCROLL_DOWN,
             ),
         )
         assertTrue(
             InputControlsView.isControllerPulseRisingEdge(
-                secondControllerSources, sourceKeyCode, Binding.MOUSE_SCROLL_DOWN,
+                secondControllerSources[sourceKeyCode], Binding.MOUSE_SCROLL_DOWN,
             ),
         )
     }
