@@ -1,5 +1,19 @@
 # Star-Compose — Progress Log
 
+## 2026-07-24 — ✅ **Game-name mangling fixed + a never-passing test corrected** (merged to main)
+
+> **Bug:** `EXE_SUFFIX_RE` was unanchored, so `cleanName()` stripped `win64|shipping|client|launcher|game|x64|…` from ANYWHERE in a title, not just off the end. Device-proven on the real library: folder `Game Controller Test` resolved to **"Controller Test"** — the word "Game" eaten out of the middle. Only affects the fallback naming path (no Steam appid / GOG manifest / usable PE name), which is exactly what repacks and DRM-free copies take — and the new bulk folder import runs it across a whole library at once.
+>
+> **🔑 THE SECOND BUG, found ONLY by device-testing:** anchoring the regex fixed stripping but silently broke a *different* job the same regex was doing. `preferFolder = EXE_SUFFIX_RE.containsMatchIn(exeBase)` asks "does this exe name look like engine boilerplate, so trust the folder instead?" — that question wants **unanchored** matching. Anchoring it meant `GameConTest.exe` stopped preferring its folder and the game would have become **"GameConTest"**. The unit test passed and the diff read correctly; only a real folder on disk exposed it. **Split into two regexes sharing one word list: `EXE_NOISE_RE` (unanchored, boilerplate test) + `EXE_SUFFIX_RE` (anchored, stripping).**
+>
+> **Test 2:** `GameIdentifierTest` asserted `"The Witcher 3: Wild Hunt"` while `normalizeName():108` deliberately converts `:` to `" - "` (illegal in a Windows filename) — the code was right, the test had never passed. Expectation corrected.
+>
+> **✅ DEVICE-VERIFIED against 13 real games:** exactly one name changed (`Controller Test` → `Game Controller Test`), the other 12 byte-identical, same detection/flags/art. Installed APK sha verified as the fix build before testing.
+>
+> Both fixes originate with **arro000**, found buried in the merge commit of draft PR #156 where they were invisible to the diff and unreachable; the regex split is additional. vc stays 49.
+>
+> ⚠️ **NOT included, deliberately:** wiring `gradlew test` into CI. Doing so surfaced **4 pre-existing `ConfigExporterTest` failures** unrelated to this work, so it was pulled back out to keep this branch to the two fixes. Test wiring + those 4 failures are their own job. 🔑 Nothing has EVER run the unit tests in CI.
+
 ## 2026-07-24 — 🗂️✅ **File Manager overhaul MERGED to main** — multi-select · real moves · archive extract · search/sort · grid + compact views
 
 > Merged from `feat/fm-multiselect`. **vc stays 49, no release cut.** User confirmed on device: multi-select and bulk ops, instant same-volume moves, merge-on-conflict, zip/7z extraction, search/sort/hidden, cancel, and the path-bar rework ("everything works great", "the path bar works great"). ⚠️ **Grid view, compact rows and the pinned free-space figure shipped in the final build and had NO device pass** — worth a look post-merge.
