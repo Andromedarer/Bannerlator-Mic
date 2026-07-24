@@ -1,5 +1,37 @@
 # Star-Compose — Progress Log
 
+## 2026-07-24 — 🗂️ **Drive-letter exhaustion: one letter per VOLUME, not per game** (branch `fix/drive-letter-exhaustion` `df67a4dc`, CI GREEN, STAGED, ⬜ awaiting device test)
+
+> **Bug:** every game imported from SD/USB claimed its own drive letter, and the pool is ~24, so a large SD library eventually could not import at all. `resolveWindowsPath` mounted the exe's **own parent folder**, and `bestDriveMatch` only reuses a drive that is an **ancestor** of the new path — one game's folder is never an ancestor of the next game's sibling folder.
+>
+> **🔑 DEVICE-PROVEN SCOPE CORRECTION (2026-07-24, from user screenshots + live dumps): internal storage was NEVER affected, and the user's "it happens on internal too" report did not hold up.** Container-6 dump: `F:`→`/storage/emulated/0` shared by **five** internal games (GTA V, Titanfall 2, The Crew 2, FlatOut 2, God of War — every `Exec` line reads `F:\Winlator\Games\…`), with per-game drives existing **only** for the two SD games. God of War was added live mid-session as the test and correctly reused `F:`, creating nothing. Why it looked otherwise: Container-6 happens to show **5 games and 5 drive rows**, and the Drives tab truncates `G:` and `I:` to the same `…/Winlator/Games/` text, so it reads as one-per-game when it isn't.
+>
+> **🐞 NEW BUG FOUND IN THE SAME SCREENSHOTS (not in the original spec) — the component installer burns a letter per container.** Every container on the device had a drive pointing at `…/.wine/drive_c/windows/temp/bannerlator_components`. Cause: `drivesIterator()` does **not** include `C:`, so any path under `drive_c` misses every drive and allocates. `resolveAndroidPath` has always special-cased `C:` (`WinePath.kt:59-61`) — the two directions were asymmetric. Became **Part C**.
+>
+> **Part A — per-volume defaults for NEW containers** (`ContainerDetailViewModel`): `D:` Downloads, `E:` internal root, `F:` onward per mounted removable volume. **Seeded at the editor seam (`:533`), NOT by changing `Container.DEFAULT_DRIVES`** — that is a `static final` with no Context, and it initialises a field on *every* `Container` object including ones loaded from disk, where the value is immediately overwritten by saved JSON. Two hardening choices beyond the spec: internal/Downloads come from `Environment` (deterministic), and only **genuine volume roots** are pre-declared, because `StorageRoots` deliberately degrades an unreadable volume to the deepest listable dir and would otherwise point `E:`/`F:` at an `Android/data/…` subfolder.
+>
+> **Part B — mount the storage VOLUME ROOT on a miss** (`WinePath`): new pure `storageVolumeRootOf()` handling `/storage/emulated/<n>`, `/storage/<uuid>`, `/mnt/media_rw/<uuid>`; anything else returns null and keeps the old parent-folder behaviour. ⚠️ **Named deliberately unlike `StorageRoots.volumeRootOf` (`StorageRoots.kt:157`), which is a DIFFERENT function** — it walks up from an app-specific dir looking for an `Android` folder. Same name, different job; do not conflate them.
+>
+> **🔑 THE TRAP, handled:** the miss branch used to return `"$letter:\\$fileName"` — the bare filename, correct **only** because the mount was the file's own parent. With a volume-root mount the exe is many folders deep, so it now returns the full path relative to the mount. **This compiles clean and fails only at runtime**, which is why the device test below leads with launching a freshly-imported SD game.
+>
+> **Also:** drive-letter dropdown capped at `Z` (it counted `MAX_DRIVE_LETTERS`=26 steps up from `'D'`, running three past `Z` and offering selectable `"[:"`, `"\:"`, `"]:"`; `addDrive()`'s guard now uses the real option count). Exhaustion throws a typed `NoFreeDriveLetterException` with an actionable message at both call sites instead of a raw `IOException`.
+>
+> **No migration by design.** Existing per-game drives (`G:` DiRT 3, `I:` GTA IV, xuser-4's `J:` DiRT Showdown) stay and keep resolving — `bestDriveMatch` prefers the longest match. Growth stops; collapsing them would mean rewriting every existing shortcut's `Exec`, which is a separate job with its own device test.
+>
+> **Recon confirmed before building** (re-run against current `main`, since Smart Game Import had merged): still exactly **3 writers** (`ExeShortcutImporter:182`, `FileManagerScreen:327`, `ComponentExecInstaller:246`) and **3 readers** (`ShortcutsScreen:883/:4495/:4501`); **only 2 references to `DEFAULT_DRIVES`** in the tree; **zero hardcoded `"F:"`/`"E:"`/`"D:"` literals**, so moving internal to `E:` on new containers breaks nothing.
+>
+> **CI GREEN run `30083172711`** (3 flavors, headSha `df67a4dc` verified). **📲 STAGED `/sdcard/Download/bannerlator-drive-letters-df67a4d-standard.apk`, sha256 `877e7a1e2057b135…` host==device.** vc stays 49. ⚠️ `stage-apk` could not be used — it hardcodes the default `Bannerlator-1.0-test-<flavor>` artifact name and this run was dispatched with `release_number=drive-letters`; staged by hand.
+>
+> **⬜ DEVICE TEST (order matters; #1 is the only one that can really fail):**
+> 1. **Import an SD game and LAUNCH it** — must use a game **not already imported**, since DiRT 3/GTA IV would hit their existing per-game drives and prove nothing.
+> 2. Import a **second** SD game → **no new drive**, and it launches.
+> 3. Import an internal game → still no new drive (God of War is the control).
+> 4. Create a **new** container with the card in → Drives reads `D:` Downloads / `E:` `/storage/emulated/0` / `F:` `/storage/7B7F-E3AA`.
+> 5. Install a component → **no** new `bannerlator_components` drive (Part C).
+> 6. Drive-letter dropdown → last entry `Z:`, no `[:` `\:` `]:`.
+>
+> Logcat marker: `Auto-added drive <X>: -> <path>` — on an SD import it should fire **once** with the bare volume root, and **not at all** on the second SD game.
+
 ## 2026-07-22 — 🖥️ **In-game refresh rate unlocked** — RandR X-server extension + Max-refresh setting (branch `feat/randr-refresh-modes`, vc48→**49**)
 
 > **Every game that exposes a refresh toggle was locked to 60 Hz on a 144 Hz panel, and no client-side setting could change it — the cause was on our side.** The X server implemented BigReq, DRI3, MIT-SHM, Present and Sync but **no RandR at all**. RandR is how `winex11.drv` enumerates display modes; finding none it falls back to its NoRes settings handler (priority 1), whose `nores_get_modes()` returns exactly one mode with `dmDisplayFrequency` hardcoded to 60. That single synthetic mode is what reached the games.
