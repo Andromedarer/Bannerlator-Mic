@@ -114,13 +114,22 @@ object SteamStoreSearch {
             val releaseYear = data.optJSONObject("release_date")?.optString("date", "")
                 ?.let { Regex("""\b(?:19|20)\d{2}\b""").find(it)?.value }
             val metacritic = data.optJSONObject("metacritic")?.optInt("score", -1)?.takeIf { it in 1..100 }
-            val shortDesc = data.optString("short_description", "").takeIf { it.isNotBlank() }
+            // Steam's short_description carries HTML entities/tags (&amp;, &#39;, <br>) — decode to plain text.
+            val shortDesc = data.optString("short_description", "").takeIf { it.isNotBlank() }?.let(::decodeHtml)
             SteamGameDetails(appId, name, genres, releaseYear, metacritic, shortDesc)
         } catch (e: Exception) {
             Log.w(TAG, "fetchDetails failed for $appId: ${e.message}")
             null
         }
     }
+
+    /** Decode HTML entities/tags to plain text (Steam descriptions contain &amp;, &#39;, <br>, …). */
+    private fun decodeHtml(s: String): String =
+        try {
+            android.text.Html.fromHtml(s, android.text.Html.FROM_HTML_MODE_LEGACY).toString().trim()
+        } catch (_: Throwable) {
+            s
+        }
 
     /** GET [urlStr] as a UTF-8 string, or null on any non-2xx / failure. */
     private fun httpGet(urlStr: String): String? {
