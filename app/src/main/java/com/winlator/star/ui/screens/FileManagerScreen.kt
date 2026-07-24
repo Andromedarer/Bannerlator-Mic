@@ -39,7 +39,10 @@ import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SdStorage
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Unarchive
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Storage
@@ -97,6 +100,7 @@ import com.winlator.star.MainActivity
 import com.winlator.star.R
 import com.winlator.star.XServerDisplayActivity
 import com.winlator.star.container.Container
+import com.winlator.star.core.ArchiveExtractor
 import com.winlator.star.core.FileUtils
 import com.winlator.star.core.PeIconExtractor
 import com.winlator.star.core.StorageRoots
@@ -105,6 +109,7 @@ import com.winlator.star.core.GameIdentifier
 import com.winlator.star.core.WinePath
 import com.winlator.star.util.FavoritesStore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -120,6 +125,22 @@ import java.util.Locale
  * offered and the wording is chosen per item type (files overwrite, folders merge).
  */
 enum class ConflictChoice { OVERWRITE, MERGE, KEEP_BOTH, SKIP }
+
+/**
+ * Ordering for the file list. Folders always lead regardless of direction — a descending sort that
+ * buries every folder under the files is never what someone means by "Z to A".
+ */
+private fun comparatorFor(sortBy: String, desc: Boolean): Comparator<File> {
+    val inner: Comparator<File> = when (sortBy) {
+        "date" -> compareBy { it.lastModified() }
+        // Directory length() is meaningless, so folders sort by name within the size ordering
+        // instead of pretending to have one.
+        "size" -> compareBy { if (it.isDirectory) -1L else it.length() }
+        else -> compareBy { it.name.lowercase() }
+    }
+    val directed = if (desc) inner.reversed() else inner
+    return compareBy<File> { if (it.isDirectory) 0 else 1 }.then(directed)
+}
 
 private val FileTypeIcon: Map<String, ImageVector> = mapOf(
     "folder" to Icons.Filled.Folder,
@@ -241,6 +262,7 @@ fun FileManagerScreen(
     }
 
     val pickPrefs = remember { androidx.preference.PreferenceManager.getDefaultSharedPreferences(context) }
+    val browsePrefs = pickPrefs
     val rootDir = remember {
         if (pickMode) {
             val remembered = pickPrefs.getString("lastFilePickerDir", null)?.let { File(it) }?.takeIf { it.isDirectory }
@@ -271,6 +293,14 @@ fun FileManagerScreen(
     // Set while a copy/move runs so the progress UI can offer a cancel.
     var operationJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var pendingBulkDelete by remember { mutableStateOf<List<File>>(emptyList()) }
+    // Browse controls. Persisted so the list doesn't reset its order every time you open a folder.
+    var searchQuery by remember { mutableStateOf("") }
+    var showSearch by remember { mutableStateOf(false) }
+    var sortBy by remember { mutableStateOf(browsePrefs.getString("fmSortBy", "name") ?: "name") }
+    var sortDesc by remember { mutableStateOf(browsePrefs.getBoolean("fmSortDesc", false)) }
+    var showHidden by remember { mutableStateOf(browsePrefs.getBoolean("fmShowHidden", true)) }
+    var showSortMenu by remember { mutableStateOf(false) }
+    var pendingExtract by remember { mutableStateOf<File?>(null) }
     var showNewFolderDialog by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<File?>(null) }
     var pendingRun by remember { mutableStateOf<File?>(null) }
@@ -298,9 +328,10 @@ fun FileManagerScreen(
                 dir.listFiles()?.toList()
                     // Dir-pick mode: folders only. File-pick: folders + matching files. Else: all.
                     ?.filter { if (pickDirMode) it.isDirectory else !pickMode || it.isDirectory || matchesPickExt(it) }
-                    ?.sortedWith(
-                        compareBy<File> { if (it.isDirectory) 0 else 1 }.thenBy { it.name.lowercase() }
-                    ) ?: emptyList()
+                    // Dotfiles are noise in a storage root (.aya, .$recycle_bin$) but occasionally
+                    // the thing you came for, so it's a toggle rather than a permanent filter.
+                    ?.filter { showHidden || !it.name.startsWith(".") }
+                    ?.sortedWith(comparatorFor(sortBy, sortDesc)) ?: emptyList()
             }
             entries = list
             if (resetScroll) listState.scrollToItem(0)
@@ -556,6 +587,39 @@ fun FileManagerScreen(
         }
     }
 
+    fun performExtract(archive: File) {
+        // Always into a subfolder named after the archive, never "here": a zip with 400 loose
+        // entries would otherwise carpet the current folder with no way to undo it.
+        val target = uniqueDestination(archive.parentFile ?: currentDir, ArchiveExtractor.suggestedTargetName(archive))
+        operationJob = scope.launch {
+            operationProgress = 0f
+            operationDeterminate = true
+            operationLabel = "Extracting ${archive.name}"
+            isOperationRunning = true
+            var lastPct = -1
+            val ok = withContext(Dispatchers.IO) {
+                ArchiveExtractor.extract(
+                    archive, target,
+                    progress = { written, total ->
+                        val pct = if (total > 0) ((written * 100) / total).toInt() else 0
+                        if (pct != lastPct) { lastPct = pct; operationProgress = pct / 100f }
+                    },
+                    // Cancel button cancels the Job; isActive is how that reaches the IO loop.
+                    shouldContinue = { isActive },
+                )
+            }
+            isOperationRunning = false
+            operationDeterminate = false
+            operationJob = null
+            loadDirectory(currentDir, resetScroll = false)
+            Toast.makeText(
+                context,
+                if (ok) "Extracted to \"${target.name}\"" else "Extract failed",
+                Toast.LENGTH_SHORT,
+            ).show()
+        }
+    }
+
     fun performRename(file: File, newName: String) {
         val target = File(file.parentFile, newName)
         if (target.exists()) {
@@ -665,6 +729,20 @@ fun FileManagerScreen(
                 }) { Text("Delete") }
             },
             dismissButton = { TextButton(onClick = { selectedEntry = null }) { Text("Cancel") } },
+        )
+    }
+
+    pendingExtract?.let { archive ->
+        OutlinedAlertDialog(
+            onDismissRequest = { pendingExtract = null },
+            title = { Text("Extract archive") },
+            text = {
+                Text("Extract \"${archive.name}\" into a new folder \"${ArchiveExtractor.suggestedTargetName(archive)}\"?")
+            },
+            confirmButton = {
+                TextButton(onClick = { pendingExtract = null; performExtract(archive) }) { Text("Extract") }
+            },
+            dismissButton = { TextButton(onClick = { pendingExtract = null }) { Text("Cancel") } },
         )
     }
 
@@ -985,6 +1063,46 @@ fun FileManagerScreen(
                 )
             }
 
+            if (!showFavorites) {
+                IconButton(onClick = { showSearch = !showSearch; if (!showSearch) searchQuery = "" }) {
+                    Icon(Icons.Filled.Search, "Search", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Box {
+                    IconButton(onClick = { showSortMenu = true }) {
+                        Icon(Icons.Filled.Sort, "Sort", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    DropdownMenu(expanded = showSortMenu, onDismissRequest = { showSortMenu = false }) {
+                        listOf("name" to "Name", "date" to "Date modified", "size" to "Size")
+                            .forEach { (key, label) ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(if (sortBy == key) "$label  ${if (sortDesc) "↓" else "↑"}" else label)
+                                    },
+                                    onClick = {
+                                        // Tapping the active field flips direction; a different
+                                        // field switches to it ascending.
+                                        if (sortBy == key) sortDesc = !sortDesc else { sortBy = key; sortDesc = false }
+                                        browsePrefs.edit().putString("fmSortBy", sortBy)
+                                            .putBoolean("fmSortDesc", sortDesc).apply()
+                                        showSortMenu = false
+                                        loadDirectory(currentDir, resetScroll = false)
+                                    },
+                                )
+                            }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+                        DropdownMenuItem(
+                            text = { Text(if (showHidden) "Hide hidden files" else "Show hidden files") },
+                            onClick = {
+                                showHidden = !showHidden
+                                browsePrefs.edit().putBoolean("fmShowHidden", showHidden).apply()
+                                showSortMenu = false
+                                loadDirectory(currentDir, resetScroll = false)
+                            },
+                        )
+                    }
+                }
+            }
+
             // Star toggle: open/close the dedicated Favorites list.
             IconButton(onClick = { showFavorites = !showFavorites }) {
                 if (showFavorites) {
@@ -993,6 +1111,30 @@ fun FileManagerScreen(
                     Icon(Icons.Filled.StarBorder, "Show favorites", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
+        }
+
+        // ── Search field ── filters the current folder only; it is not a recursive search.
+        if (showSearch && !showFavorites) {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                singleLine = true,
+                placeholder = { Text("Filter this folder", fontSize = 13.sp) },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+            )
+        }
+
+        // Free space on the volume being browsed — worth knowing before starting a 60 GB copy.
+        val freeSpace = remember(currentDir.absolutePath, entries) {
+            runCatching { currentDir.usableSpace }.getOrDefault(0L)
+        }
+        if (!showFavorites && freeSpace > 0) {
+            Text(
+                "${StringUtils.formatBytes(freeSpace)} free",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
+            )
         }
 
         HorizontalDivider(color = MaterialTheme.colorScheme.outline)
@@ -1158,7 +1300,9 @@ fun FileManagerScreen(
                         }
                     }
                 } else {
-                    items(entries, key = { it.absolutePath }) { file ->
+                    val shown = if (searchQuery.isBlank()) entries
+                    else entries.filter { it.name.contains(searchQuery, ignoreCase = true) }
+                    items(shown, key = { it.absolutePath }) { file ->
                         val isFav = remember(file.absolutePath, favTick) {
                             FavoritesStore.isFavorite(context, file.absolutePath)
                         }
@@ -1199,6 +1343,12 @@ fun FileManagerScreen(
                             onCut = { clipboardFiles = listOf(file); isCutOperation = true; showMenuFor = null },
                             onDelete = { selectedEntry = file; showMenuFor = null },
                             onRename = { renameTarget = file; showMenuFor = null },
+                            onExtract = {
+                                showMenuFor = null
+                                if (ArchiveExtractor.isUnsupportedArchive(file)) {
+                                    Toast.makeText(context, "RAR isn't supported yet", Toast.LENGTH_SHORT).show()
+                                } else pendingExtract = file
+                            },
                             isFavorite = isFav,
                             onToggleFavorite = {
                                 val nowFav = FavoritesStore.toggle(context, file.absolutePath)
@@ -1267,6 +1417,7 @@ private fun FileItemRow(
     onCut: () -> Unit,
     onDelete: () -> Unit,
     onRename: () -> Unit,
+    onExtract: () -> Unit = {},
     isFavorite: Boolean = false,
     onToggleFavorite: () -> Unit = {},
 ) {
@@ -1411,6 +1562,14 @@ private fun FileItemRow(
                             text = { Text("Add to Shortcuts") },
                             leadingIcon = { Icon(Icons.Filled.Add, null, tint = MaterialTheme.colorScheme.primary) },
                             onClick = { onDismissMenu(); onAddToShortcuts() },
+                        )
+                        MenuItemDivider()
+                    }
+                    if (ArchiveExtractor.isArchive(file) || ArchiveExtractor.isUnsupportedArchive(file)) {
+                        DropdownMenuItem(
+                            text = { Text("Extract") },
+                            leadingIcon = { Icon(Icons.Filled.Unarchive, null, tint = MaterialTheme.colorScheme.primary) },
+                            onClick = { onDismissMenu(); onExtract() },
                         )
                         MenuItemDivider()
                     }
