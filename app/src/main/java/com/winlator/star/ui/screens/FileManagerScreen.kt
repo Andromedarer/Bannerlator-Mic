@@ -99,6 +99,7 @@ import com.winlator.star.core.FileUtils
 import com.winlator.star.core.PeIconExtractor
 import com.winlator.star.core.StorageRoots
 import com.winlator.star.core.StringUtils
+import com.winlator.star.core.GameIdentifier
 import com.winlator.star.core.WinePath
 import com.winlator.star.util.FavoritesStore
 import kotlinx.coroutines.Dispatchers
@@ -374,12 +375,22 @@ fun FileManagerScreen(
     // Create a PERMANENT Games/Shortcuts tile for [file] in [container] — same result as the
     // Games-tab "+" button (ExeShortcutImporter writes into the container's desktop dir, so it
     // shows up in the Shortcuts list and picks up cover art). Unlike runFile's throwaway desktop.
+    //
+    // Identify the game first, exactly as the "+" flow does. Passing the raw exe basename and no
+    // appId quietly cost most of the importer's work: without an appId it skips Steam's own 600x900
+    // portrait and the SGDB-by-appId lookup, and never applies Steam's authoritative name — leaving
+    // only an SGDB-by-name search running on a string like "dirt3_game", which finds nothing. Same
+    // importer, far worse result, purely because the call site under-fed it.
     fun addShortcutInContainer(file: File, container: Container) {
         scope.launch {
             val name = withContext(Dispatchers.IO) {
                 runCatching {
-                    ExeShortcutImporter.addToShortcuts(context, container, file, file.nameWithoutExtension)
-                        .nameWithoutExtension
+                    val identity = runCatching { GameIdentifier.identify(file) }.getOrNull()
+                    val displayName = identity?.name?.takeIf { it.isNotBlank() }
+                        ?: file.nameWithoutExtension
+                    ExeShortcutImporter.addToShortcuts(
+                        context, container, file, displayName, identity?.appId,
+                    ).nameWithoutExtension
                 }.getOrNull()
             }
             if (name == null) {
