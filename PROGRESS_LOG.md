@@ -1,5 +1,11 @@
 # Star-Compose — Progress Log
 
+## 2026-07-24 — 🎯 **New containers start with Motion Aim OFF** (branch `fix/gyro-default-off`, merged to main)
+
+> `Container.GYRO_ENABLED_DEFAULT` was `true`, so a freshly created container began feeding gyro motion input to games without anyone asking for it. Motion aim is a deliberate choice — defaulted off.
+>
+> 🔑 **Checked before flipping, because this constant is NOT only a creation-time default** — it's the fallback for `isGyroEnabled()` whenever the `gyroEnabled` extra is absent, so changing it could have silently switched gyro off for anyone relying on the default. It can't: `ContainerManager.migrateGyroPrefsToContainers()` (one-time, guarded by `gyro_migrated_to_container`) wrote an **explicit** `gyroEnabled` onto every container, verified on-device (xuser-4 `"0"`, xuser-5 `"1"`). So only genuinely new containers see the new default. vc stays 49.
+
 ## 2026-07-24 — 🛡️ **ASurfaceTransaction null-guard hardening** (`fix/asurface-transaction-null-guards`, off main `5f495eff`, vc stays 49)
 
 > **Defensive only — fixes no reported symptom.** Audit of every `ASurfaceTransaction_create` call site found the two host-renderer files inconsistent with themselves: some sites checked the result, most didn't. A null return (resource exhaustion) is passed straight into `ST_SETGEO`/`ST_SETBUF`/`ST_SETVIS` → native SIGSEGV, app dies and takes the running game with it. **10 sites fixed across 2 files.**
