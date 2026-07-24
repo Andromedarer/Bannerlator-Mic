@@ -1,5 +1,35 @@
 # Star-Compose — Progress Log
 
+## 2026-07-24 — 📁 **Games folder import: add a whole library in one pick** (same branch `fix/drive-letter-exhaustion` `78972029`, CI GREEN, STAGED, ⬜ awaiting device test)
+
+> **User ask:** the `+` button only ever added one game at a time. Most users keep every game under one parent folder (user's = `/storage/emulated/0/Winlator/Games`), so importing a library meant dozens of identical trips through the picker. After picking a container there is now a **choice of HOW to add**: *Add game EXE* (existing flow, untouched) or *Add games folder*.
+>
+> **Design decisions (user, via AskUserQuestion — all three "recommended"):** (1) the results screen is a **confirmation gate**, nothing is written until accepted; (2) on ambiguity **pick the best candidate but flag it** rather than skipping or prompting per game; (3) games already in the container are **detected and shown as "already added"**, not re-imported.
+>
+> **🔑 THE HARD PART — new `core/GameFolderScanner.kt`. `GameIdentifier` could not be reused for this: it takes an exe the user ALREADY chose and reasons upward. Here the exe is the unknown.** A real install folder holds installers, crash handlers, anti-cheat stubs and launchers beside the game, and the game may sit several levels down (`Game/Binaries/Win64/Game-Win64-Shipping.exe`). So candidates are collected with a **depth-bounded walk (≤4)** and **ranked**: exe named after its folder +100/+60 · `-Win64-Shipping` +70 · `Binaries/Win64` path +30 · launcher-name −40 · junk PE name −30 · depth −8/level · size bonus ≤+30. Skips `_CommonRedist`/`DirectX`/`EasyAntiCheat`/etc. dirs and `unins*`/`vcredist*`/`UnityCrashHandler*`/`dxsetup` names outright.
+>
+> **Confidence falls out of the ranking for free** — below a score threshold, or when the top two are within 15 points, the row is badged *"Check this one — <exe>"*. Deliberately badged, not hidden: the scanner still made its best pick, the user just gets told which are worth a second look.
+>
+> **Reuse, so bulk-added games are indistinguishable from hand-added ones:** naming via `GameIdentifier.identify`, importing via `ExeShortcutImporter.addToShortcuts` — same Steam-name upgrade, same cover-art chain. `isLauncherExe` → **`isLauncherExeName` (public)** so the scanner shares the launcher rules instead of growing a second copy that can drift.
+>
+> **🔑 Cover art on the confirm screen is a URL rendered by Coil, NOT a download.** `saveCoverArt` is coupled to an already-written shortcut, so resolving art pre-import would have meant temp files. Instead `SteamStoreSearch.coverUrl(appId)` gives a URL instantly and only confirmed games fetch/persist. Scanning 40 games pulls zero images into the container.
+>
+> **Duplicate detection** resolves each existing shortcut's `Exec` back through `WinePath.resolveAndroidPath` and compares canonical paths — dimmed, unticked, uncheckable, with "N already added" in the header.
+>
+> **Folder picker uses `InAppFilePicker.buildDirIntent`** (real absolute path, works on SD) — deliberately not SAF, which returns unusable `/mnt/media_rw/…`.
+>
+> **CI GREEN run `30088575796`** (3 flavors, headSha `78972029`). 📲 Staged `/sdcard/Download/bannerlator-folder-import-7897202-standard.apk`, sha256 `404840df…` host==device. vc stays 49. *(Built with the default `1.0-test` label so `stage-apk` works — see the drive-letter entry for why that matters.)*
+>
+> **⚠️ THE RANKING HEURISTIC IS UNPROVEN AND IS THE WHOLE FEATURE.** A green build says nothing about whether it picks the right exe. Only a real library answers that.
+>
+> **⬜ DEVICE TEST:**
+> 1. `+` → container → **Add games folder** → pick `/storage/emulated/0/Winlator/Games`. Every game should be listed, with the **right name and the right art**.
+> 2. **Check what it picked for each** — especially anything badged "Check this one". UE titles (Titanfall 2) and launcher-fronted ones (GTA V's `PlayGTAV.exe`, GTA IV) are the interesting cases.
+> 3. Already-imported games must appear **dimmed and unticked** (this container has 6 → expect all 6 skipped if scanning the same folder).
+> 4. Untick one, press **Add** → only the ticked ones appear, and they **launch**.
+> 5. Run it against the **SD** library too — that path exercises the drive-letter fix at the same time.
+> 6. *Add game EXE* must still behave exactly as before (regression check).
+
 ## 2026-07-24 — 🗂️✅ **Drive-letter exhaustion: one letter per VOLUME, not per game — DEVICE-VERIFIED** (branch `fix/drive-letter-exhaustion` `df67a4dc`, CI GREEN, ✅ all six checks pass, awaiting merge decision)
 
 > **✅ DEVICE TEST PASSED 2026-07-24 — user: *"everything is working as intended"*.** All six checks green, including the one that could only fail at runtime: **a freshly-imported SD game launches**, which is what proves Part B computes the path relative to the coarser volume-root mount correctly (the old code returned the bare filename). Second SD game reused the drive with no new letter; internal storage unregressed; new containers get `D:`/`E:`/`F:` per volume; no `bannerlator_components` drive (Part C); dropdown ends at `Z:`.
