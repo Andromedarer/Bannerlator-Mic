@@ -3,6 +3,7 @@ package com.winlator.star.ui.screens
 import android.app.Application
 import android.content.Context
 import android.graphics.Color
+import android.os.Environment
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -23,8 +24,10 @@ import com.winlator.star.core.DefaultVersion
 import com.winlator.star.core.EnvVars
 import com.winlator.star.core.GPUInformation
 import com.winlator.star.core.PreloaderState
+import com.winlator.star.core.StorageRoots
 import com.winlator.star.core.StringUtils
 import com.winlator.star.core.WineInfo
+import com.winlator.star.core.WinePath
 import com.winlator.star.core.WineRegistryEditor
 import com.winlator.star.core.WineThemeManager
 import com.winlator.star.contentdialog.GraphicsDriverConfigDialog
@@ -244,8 +247,11 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
 
     // ── Drives tab ────────────────────────────────────────────────────────────
     val drives = mutableStateListOf<DriveEntry>()
+    // D..Z, the letters a drive may actually use. Counting MAX_DRIVE_LETTERS (26) steps up from
+    // 'D' ran three past 'Z' and offered "[:", "\:" and "]:" at the bottom of the dropdown — all
+    // selectable, and saved as if they were drive letters.
     val driveLetterOptions: List<String> by lazy {
-        (0 until Container.MAX_DRIVE_LETTERS).map { ((it + 68).toChar()).toString() + ":" }
+        ('D'..'Z').map { "$it:" }
     }
 
     // ── Advanced tab ─────────────────────────────────────────────────────────
@@ -530,7 +536,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
 
         // Drives
         drives.clear()
-        for (entry in Container.drivesIterator(c?.drives ?: Container.DEFAULT_DRIVES)) {
+        for (entry in Container.drivesIterator(c?.drives ?: defaultDrivesForNewContainer())) {
             drives.add(DriveEntry(letter = entry[0], path = entry[1]))
         }
 
@@ -943,8 +949,51 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     val duplicateDriveLetters: Set<String>
         get() = drives.groupingBy { it.letter }.eachCount().filterValues { it > 1 }.keys
 
+    /**
+     * Default drives for a NEW container: one per storage volume, instead of internal-only.
+     *
+     * `Container.DEFAULT_DRIVES` covers internal storage and Downloads, so internal games all sit
+     * inside F: and share it. Nothing covered an SD card or a USB stick, so every game on one had
+     * to claim its own letter and ~24 of them exhausted the alphabet. Giving each mounted volume a
+     * drive up front means games on removable storage reuse one the same way internal games do.
+     *
+     * Deliberately computed here rather than in `Container.DEFAULT_DRIVES`: that is a static
+     * constant with no Context, and it initialises a field on EVERY Container object — including
+     * each one loaded from disk, where the value is immediately overwritten by saved JSON. This
+     * runs once, only when the editor opens with no container (i.e. creating one).
+     */
+    private fun defaultDrivesForNewContainer(): String {
+        // Internal and Downloads come from Environment, not StorageRoots: they are fixed, and
+        // StorageRoots deliberately degrades an unreadable volume to the deepest directory it can
+        // list, which would silently point E: at an app-specific subfolder.
+        val internal = Environment.getExternalStorageDirectory().absolutePath
+        val downloads = Environment
+            .getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).absolutePath
+
+        val sb = StringBuilder()
+        sb.append("D:").append(downloads)
+        sb.append("E:").append(internal)
+
+        // F: onward for removable volumes — an SD card and a USB stick can be mounted at once.
+        // Only genuine volume ROOTS are pre-declared; a degraded StorageRoots entry pointing part
+        // way down the volume would be worse than nothing, and Part B covers that case on import
+        // anyway. Z: is reserved (container filesystem root), so stop before it.
+        val removableRoots = runCatching { StorageRoots.list(context) }.getOrNull().orEmpty()
+            .filter { it.removable }
+            .map { it.dir.absolutePath }
+            .filter { WinePath.storageVolumeRootOf(it) == it }
+            .distinct()
+        var letter = 'F'
+        for (path in removableRoots) {
+            if (letter >= 'Z') break
+            sb.append(letter).append(':').append(path)
+            letter += 1
+        }
+        return sb.toString()
+    }
+
     fun addDrive() {
-        if (drives.size >= Container.MAX_DRIVE_LETTERS) return
+        if (drives.size >= driveLetterOptions.size) return
         // Take the first UNUSED letter. Indexing by drives.size hands out a letter that an existing
         // drive already holds whenever the assigned letters are not the first N in order.
         val used = drives.mapTo(HashSet()) { it.letter }

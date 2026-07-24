@@ -37,6 +37,7 @@ import com.winlator.star.container.ContainerManager
 import com.winlator.star.container.Shortcut
 import com.winlator.star.core.GPUInformation
 import com.winlator.star.core.GameIdentifier
+import com.winlator.star.core.WinePath
 import com.winlator.star.ui.screens.adrenodownload.DriverSources
 import com.winlator.star.ui.screens.adrenodownload.RemoteDriverRepository
 import kotlinx.coroutines.CompletableDeferred
@@ -933,6 +934,13 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
             )
             refresh()
             ImportResult.Success(shortcutFile.nameWithoutExtension, identity.appId)
+        } catch (e: WinePath.NoFreeDriveLetterException) {
+            Log.e(TAG, "No free drive letter for ${e.mountPath}", e)
+            ImportResult.Error(
+                "This container has no free drive letters left. Remove a drive you no longer " +
+                    "need in the container's Drives tab, or move the game somewhere an " +
+                    "existing drive already covers."
+            )
         } catch (e: IOException) {
             Log.e(TAG, "Failed to write EXE shortcut", e)
             ImportResult.Error("Failed to write shortcut: ${e.message ?: e.javaClass.simpleName}")
