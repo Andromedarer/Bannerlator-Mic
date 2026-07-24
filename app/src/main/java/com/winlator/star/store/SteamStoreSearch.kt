@@ -79,6 +79,49 @@ object SteamStoreSearch {
         }
     }
 
+    /** Full store details for the Game Details page. */
+    data class SteamGameDetails(
+        val appId: Int,
+        val name: String,
+        val genres: List<String>,
+        val releaseYear: String?,
+        val metacritic: Int?,          // 1..100, null if unavailable
+        val shortDescription: String?,
+    )
+
+    /**
+     * Full store details for [appId] (name, genres, release year, metacritic, short description) via
+     * the appdetails endpoint. null if unknown/delisted/failed. BLOCKING — call off the main thread.
+     * Ported from BannersComponentInjector's `SteamRepository.fetch`.
+     */
+    fun fetchDetails(appId: Int): SteamGameDetails? {
+        if (appId <= 0) return null
+        val json = httpGet(
+            "https://store.steampowered.com/api/appdetails?appids=$appId&filters=basic,genres,metacritic,release_date",
+        ) ?: return null
+        return try {
+            val entry = JSONObject(json).optJSONObject(appId.toString()) ?: return null
+            if (!entry.optBoolean("success", false)) return null
+            val data = entry.optJSONObject("data") ?: return null
+            val name = data.optString("name", "").takeIf { it.isNotBlank() } ?: return null
+            val genres = buildList {
+                data.optJSONArray("genres")?.let { arr ->
+                    for (i in 0 until arr.length()) {
+                        arr.optJSONObject(i)?.optString("description")?.takeIf { it.isNotBlank() }?.let { add(it) }
+                    }
+                }
+            }
+            val releaseYear = data.optJSONObject("release_date")?.optString("date", "")
+                ?.let { Regex("""\b(?:19|20)\d{2}\b""").find(it)?.value }
+            val metacritic = data.optJSONObject("metacritic")?.optInt("score", -1)?.takeIf { it in 1..100 }
+            val shortDesc = data.optString("short_description", "").takeIf { it.isNotBlank() }
+            SteamGameDetails(appId, name, genres, releaseYear, metacritic, shortDesc)
+        } catch (e: Exception) {
+            Log.w(TAG, "fetchDetails failed for $appId: ${e.message}")
+            null
+        }
+    }
+
     /** GET [urlStr] as a UTF-8 string, or null on any non-2xx / failure. */
     private fun httpGet(urlStr: String): String? {
         return try {

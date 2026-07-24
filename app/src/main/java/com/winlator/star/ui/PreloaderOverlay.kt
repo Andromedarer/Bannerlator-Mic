@@ -1,5 +1,6 @@
 package com.winlator.star.ui
 
+import android.graphics.Bitmap
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -15,15 +16,20 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
@@ -52,6 +58,7 @@ import androidx.compose.ui.unit.sp
 import com.winlator.star.R
 import com.winlator.star.core.Failure
 import com.winlator.star.core.Phase
+import com.winlator.star.core.PreloaderDetails
 import com.winlator.star.core.PreloaderState
 import com.winlator.star.ui.screens.SpecChipRows
 
@@ -120,6 +127,17 @@ fun PreloaderOverlay() {
         )
 
         val insets = Modifier.windowInsetsPadding(WindowInsets.safeDrawing)
+
+        // --- Right-side game details panel: cover + name + genres/year/metacritic + description.
+        // Shown only when the launched shortcut has accumulated details (graceful no-op otherwise) and
+        // never over the failure card. Anchored top-right so it clears the bottom-left hero text.
+        val details = ui.details
+        AnimatedVisibility(
+            visible = ui.phase != Phase.FAILED && details != null && details.hasAny,
+            modifier = insets.align(Alignment.TopEnd).padding(horizontal = 24.dp, vertical = 28.dp),
+        ) {
+            if (details != null) GameDetailsPanel(details, ui.title, ui.coverArt ?: ui.icon)
+        }
 
         // --- Hero content: game name + stepped progress, anchored low. ---
         Column(
@@ -323,6 +341,105 @@ private fun CenteredStatus(message: String) {
                     .clip(RoundedCornerShape(4.dp)),
             )
         }
+    }
+}
+
+/**
+ * Right-side details card for the launch hero: a crisp small cover, the game name, a genres line, a
+ * release-year + metacritic row, then the short description. Sits on a translucent dark surface so it
+ * reads over any cover art. Width-capped and height-scrollable so long descriptions never overflow.
+ */
+@Composable
+private fun GameDetailsPanel(details: PreloaderDetails, title: String, cover: Bitmap?) {
+    Surface(
+        color = Color.Black.copy(alpha = 0.42f),
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.14f)),
+    ) {
+        Column(
+            modifier = Modifier
+                .widthIn(max = 320.dp)
+                .fillMaxWidth(0.42f)
+                .heightIn(max = 360.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+        ) {
+            if (cover != null) {
+                Image(
+                    bitmap = cover.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(width = 92.dp, height = 138.dp)
+                        .clip(RoundedCornerShape(8.dp)),
+                )
+                Spacer(Modifier.height(12.dp))
+            }
+            if (title.isNotEmpty()) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = HeroText,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            // Release year · Metacritic pill.
+            if (!details.releaseYear.isNullOrEmpty() || details.metacritic != null) {
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (!details.releaseYear.isNullOrEmpty()) {
+                        Text(
+                            text = details.releaseYear,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = HeroTextDim,
+                        )
+                        if (details.metacritic != null) Spacer(Modifier.width(10.dp))
+                    }
+                    details.metacritic?.let { MetacriticPill(it) }
+                }
+            }
+            if (details.genres.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = details.genres.joinToString(" · "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = HeroAccent,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (!details.description.isNullOrBlank()) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = details.description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = HeroTextDim,
+                    maxLines = 8,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/** Small Metacritic score badge, coloured green/amber/red by the usual 75/50 thresholds. */
+@Composable
+private fun MetacriticPill(score: Int) {
+    val bg = when {
+        score >= 75 -> Color(0xFF6AB04C)
+        score >= 50 -> Color(0xFFE1A100)
+        else -> Color(0xFFEB4D4B)
+    }
+    Surface(color = bg, shape = RoundedCornerShape(4.dp)) {
+        Text(
+            text = score.toString(),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            color = Color.White,
+            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+        )
     }
 }
 
