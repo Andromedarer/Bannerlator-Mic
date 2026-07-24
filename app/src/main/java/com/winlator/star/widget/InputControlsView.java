@@ -84,8 +84,9 @@ public class InputControlsView extends View {
     private XServer xServer;
     private final Bitmap[] icons = new Bitmap[256];
     private final CustomIconManager customIconManager;
-    private Timer mouseMoveTimer;
-    private final PointF mouseMoveOffset = new PointF();
+    private volatile Timer mouseMoveTimer;
+    private volatile float virtualMouseMoveX;
+    private volatile float virtualMouseMoveY;
     private final Map<ExternalController, PointF> controllerMouseMoveOffsets = new IdentityHashMap<>();
     private boolean showTouchscreenControls = true;
 
@@ -111,6 +112,7 @@ public class InputControlsView extends View {
     private final Map<VirtualMouseBindingKey, Float> activeVirtualMouseBindings = new HashMap<>();
     private ControlElement expandedElement;
     private final SparseBooleanArray swallowedExpandablePointers = new SparseBooleanArray();
+    private final SparseBooleanArray touchpadPointers = new SparseBooleanArray();
     private final Map<ExternalController, Set<Integer>> activeControllerKeys = new IdentityHashMap<>();
     private final Map<ExternalController, Set<Binding>> activeControllerBindings = new IdentityHashMap<>();
     private final Map<Binding, Integer> activeControllerBindingCounts = new EnumMap<>(Binding.class);
@@ -474,7 +476,6 @@ public class InputControlsView extends View {
         }
         else this.profile = null;
         updateTouchscreenMouseButtons();
-        createMouseMoveTimer();
     }
 
     public synchronized void releaseActiveControls() {
@@ -488,10 +489,12 @@ public class InputControlsView extends View {
         activeVirtualMouseBindings.clear();
         expandedElement = null;
         swallowedExpandablePointers.clear();
-        mouseMoveOffset.set(0, 0);
+        virtualMouseMoveX = 0;
+        virtualMouseMoveY = 0;
         synchronized (controllerMouseMoveOffsets) {
             controllerMouseMoveOffsets.clear();
         }
+        stopMouseMoveTimer();
     }
 
     public synchronized void releaseAllInputs() {
@@ -636,7 +639,7 @@ public class InputControlsView extends View {
     public void setXServer(XServer xServer) {
         stopMouseMoveTimer();
         this.xServer = xServer;
-        createMouseMoveTimer();
+        updateMouseMoveTimer();
     }
 
     public int getMaxWidth() {
@@ -673,8 +676,8 @@ public class InputControlsView extends View {
                             controllerY += offset.y;
                         }
                     }
-                    float moveX = Mathf.clamp(mouseMoveOffset.x + controllerX, -1, 1);
-                    float moveY = Mathf.clamp(mouseMoveOffset.y + controllerY, -1, 1);
+                    float moveX = Mathf.clamp(virtualMouseMoveX + controllerX, -1, 1);
+                    float moveY = Mathf.clamp(virtualMouseMoveY + controllerY, -1, 1);
                     if (moveX != 0 || moveY != 0) {
                         if (xServer.isRelativeMouseMovement())
                             winHandler.mouseEvent(MouseEventFlags.MOVE, (int) (moveX * cursorSpeed * 10), (int) (moveY * cursorSpeed * 10), 0);
@@ -757,7 +760,7 @@ public class InputControlsView extends View {
             else
                 controllerMouseMoveOffsets.put(controller, new PointF(controllerMouseX, controllerMouseY));
         }
-        if (controllerMouseX != 0 || controllerMouseY != 0) createMouseMoveTimer();
+        updateMouseMoveTimer();
         updateControllerPulseState(controller, pulseState);
         updateHeldControllerBindingState(controller, mappedAxes);
 
@@ -857,6 +860,7 @@ public class InputControlsView extends View {
         synchronized (controllerMouseMoveOffsets) {
             controllerMouseMoveOffsets.remove(controller);
         }
+        updateMouseMoveTimer();
     }
 
     private void dispatchControllerBindingTransitions(
@@ -942,8 +946,8 @@ public class InputControlsView extends View {
         if (actionMasked == MotionEvent.ACTION_DOWN || actionMasked == MotionEvent.ACTION_POINTER_DOWN) {
             updateTouchscreenMouseButtons();
         }
-        if (!editMode && !showTouchscreenControls) {
-            if (touchpadView != null) touchpadView.onTouchEvent(event);
+        if (!editMode && (!showTouchscreenControls || profile == null)) {
+            routeDirectlyToTouchpad(event);
             return true;
         }
 
@@ -1036,6 +1040,9 @@ public class InputControlsView extends View {
                 case MotionEvent.ACTION_POINTER_DOWN: {
                     float x = event.getX(actionIndex);
                     float y = event.getY(actionIndex);
+                    touchpadPointers.delete(pointerId);
+                    swallowedExpandablePointers.delete(pointerId);
+                    boolean dismissedExpandable = false;
                     if (expandedElement != null) {
                         if (isElementHiddenByGroup(expandedElement)) {
                             expandedElement.setExpanded(false);
@@ -1056,8 +1063,7 @@ public class InputControlsView extends View {
                                 swallowActiveExpandablePointer();
                                 expandedElement.setExpanded(false);
                                 expandedElement = null;
-                                swallowedExpandablePointers.put(pointerId, true);
-                                handled = true;
+                                dismissedExpandable = true;
                             }
                         }
                     }
@@ -1086,11 +1092,15 @@ public class InputControlsView extends View {
                             }
                         }
                     }
-                    if (!handled && touchpadView != null) touchpadView.onTouchEvent(event);
+                    if (!handled && dismissedExpandable) {
+                        swallowedExpandablePointers.put(pointerId, true);
+                    } else if (!handled && touchpadView != null) {
+                        touchpadPointers.put(pointerId, true);
+                        touchpadView.onTouchEvent(event);
+                    }
                     break;
                 }
                 case MotionEvent.ACTION_MOVE: {
-                    boolean eventContainsSwallowedPointer = hasSwallowedExpandablePointer(event);
                     for (byte i = 0, count = (byte)event.getPointerCount(); i < count; i++) {
                         float x = event.getX(i);
                         float y = event.getY(i);
@@ -1108,16 +1118,17 @@ public class InputControlsView extends View {
                                 }
                             }
                         }
-                        if (!handled && !eventContainsSwallowedPointer && touchpadView != null) {
-                            touchpadView.onTouchEvent(event);
-                        }
                     }
+                    if (hasTouchpadPointer(event) && touchpadView != null) touchpadView.onTouchEvent(event);
                     break;
                 }
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_POINTER_UP:
-                    boolean eventContainsSwallowedPointer = hasSwallowedExpandablePointer(event);
-                    if (swallowedExpandablePointers.get(pointerId)) {
+                    if (touchpadPointers.get(pointerId)) {
+                        touchpadPointers.delete(pointerId);
+                        if (touchpadView != null) touchpadView.onTouchEvent(event);
+                        handled = true;
+                    } else if (swallowedExpandablePointers.get(pointerId)) {
                         swallowedExpandablePointers.delete(pointerId);
                         handled = true;
                     } else if (expandedElement != null) {
@@ -1132,13 +1143,11 @@ public class InputControlsView extends View {
                             }
                         }
                     }
-                    if (!handled && !eventContainsSwallowedPointer && touchpadView != null) {
-                        touchpadView.onTouchEvent(event);
-                    }
                     break;
                 case MotionEvent.ACTION_CANCEL:
                     releaseActiveControls();
                     if (touchpadView != null) touchpadView.onTouchEvent(event);
+                    touchpadPointers.clear();
                     break;
             }
         }
@@ -1180,11 +1189,27 @@ public class InputControlsView extends View {
         if (pointerId >= 0) swallowedExpandablePointers.put(pointerId, true);
     }
 
-    private boolean hasSwallowedExpandablePointer(MotionEvent event) {
+    private boolean hasTouchpadPointer(MotionEvent event) {
         for (int index = 0; index < event.getPointerCount(); index++) {
-            if (swallowedExpandablePointers.get(event.getPointerId(index))) return true;
+            if (touchpadPointers.get(event.getPointerId(index))) return true;
         }
         return false;
+    }
+
+    private void routeDirectlyToTouchpad(MotionEvent event) {
+        int action = event.getActionMasked();
+        int pointerId = event.getPointerId(event.getActionIndex());
+        if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN) {
+            touchpadPointers.delete(pointerId);
+            swallowedExpandablePointers.delete(pointerId);
+            touchpadPointers.put(pointerId, true);
+        }
+        if (touchpadView != null) touchpadView.onTouchEvent(event);
+        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_POINTER_UP) {
+            touchpadPointers.delete(pointerId);
+        } else if (action == MotionEvent.ACTION_CANCEL) {
+            touchpadPointers.clear();
+        }
     }
 
     @Override
@@ -1380,10 +1405,9 @@ public class InputControlsView extends View {
                 y += entry.getValue();
             }
         }
-        mouseMoveOffset.x = Mathf.clamp(x, -1, 1);
-        mouseMoveOffset.y = Mathf.clamp(y, -1, 1);
-        if (pressed) createMouseMoveTimer();
-        else if (activeVirtualMouseBindings.isEmpty() && !hasControllerMouseMovement()) stopMouseMoveTimer();
+        virtualMouseMoveX = Mathf.clamp(x, -1, 1);
+        virtualMouseMoveY = Mathf.clamp(y, -1, 1);
+        updateMouseMoveTimer();
     }
 
     private boolean hasControllerMouseMovement() {
@@ -1397,6 +1421,19 @@ public class InputControlsView extends View {
             mouseMoveTimer.cancel();
             mouseMoveTimer = null;
         }
+    }
+
+    private void updateMouseMoveTimer() {
+        if (shouldRunMouseMoveTimer(
+                virtualMouseMoveX, virtualMouseMoveY, hasControllerMouseMovement())) {
+            createMouseMoveTimer();
+        } else {
+            stopMouseMoveTimer();
+        }
+    }
+
+    static boolean shouldRunMouseMoveTimer(float virtualX, float virtualY, boolean controllerActive) {
+        return virtualX != 0 || virtualY != 0 || controllerActive;
     }
 
     /** Send a batched gamepad state update to Wine — call this ONCE after setting
@@ -1469,12 +1506,12 @@ public class InputControlsView extends View {
         }
         else {
             if (binding == Binding.MOUSE_MOVE_LEFT || binding == Binding.MOUSE_MOVE_RIGHT) {
-                mouseMoveOffset.x = isActionDown ? (offset != 0 ? offset : (binding == Binding.MOUSE_MOVE_LEFT ? -1 : 1)) : 0;
-                if (isActionDown) createMouseMoveTimer();
+                virtualMouseMoveX = isActionDown ? (offset != 0 ? offset : (binding == Binding.MOUSE_MOVE_LEFT ? -1 : 1)) : 0;
+                updateMouseMoveTimer();
             }
             else if (binding == Binding.MOUSE_MOVE_DOWN || binding == Binding.MOUSE_MOVE_UP) {
-                mouseMoveOffset.y = isActionDown ? (offset != 0 ? offset : (binding == Binding.MOUSE_MOVE_UP ? -1 : 1)) : 0;
-                if (isActionDown) createMouseMoveTimer();
+                virtualMouseMoveY = isActionDown ? (offset != 0 ? offset : (binding == Binding.MOUSE_MOVE_UP ? -1 : 1)) : 0;
+                updateMouseMoveTimer();
             }
             else {
                 Pointer.Button pointerButton = binding.getPointerButton();
