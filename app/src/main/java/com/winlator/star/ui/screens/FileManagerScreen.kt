@@ -7,7 +7,9 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -109,6 +111,15 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+/**
+ * What to do when a pasted item already exists at the destination.
+ *
+ * OVERWRITE and MERGE resolve to the same call — `copyWithProgress` recurses into an existing
+ * directory and truncates existing files — but they mean different things to the user, so both are
+ * offered and the wording is chosen per item type (files overwrite, folders merge).
+ */
+enum class ConflictChoice { OVERWRITE, MERGE, KEEP_BOTH, SKIP }
 
 private val FileTypeIcon: Map<String, ImageVector> = mapOf(
     "folder" to Icons.Filled.Folder,
@@ -245,8 +256,21 @@ fun FileManagerScreen(
     var entries by remember { mutableStateOf(listOf<File>()) }
     var selectedEntry by remember { mutableStateOf<File?>(null) }
     var showMenuFor by remember { mutableStateOf<File?>(null) }
-    var clipboardFile by remember { mutableStateOf<File?>(null) }
+    // Clipboard holds a LIST so one paste can carry a whole selection. Cut/copy semantics are a
+    // flag on the batch rather than per item — mixing the two in one clipboard has no sane meaning.
+    var clipboardFiles by remember { mutableStateOf<List<File>>(emptyList()) }
     var isCutOperation by remember { mutableStateOf(false) }
+    // Multi-select. Keyed by absolute path rather than File so a directory reload (which builds
+    // fresh File objects) doesn't silently drop the selection.
+    var selectionMode by remember { mutableStateOf(false) }
+    var selectedPaths by remember { mutableStateOf<Set<String>>(emptySet()) }
+    // Paste conflict resolution, surfaced from the IO coroutine and answered by the dialog.
+    var pendingConflict by remember { mutableStateOf<File?>(null) }
+    var conflictChoice by remember { mutableStateOf<ConflictChoice?>(null) }
+    var conflictApplyToAll by remember { mutableStateOf(false) }
+    // Set while a copy/move runs so the progress UI can offer a cancel.
+    var operationJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var pendingBulkDelete by remember { mutableStateOf<List<File>>(emptyList()) }
     var showNewFolderDialog by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<File?>(null) }
     var pendingRun by remember { mutableStateOf<File?>(null) }
@@ -437,51 +461,98 @@ fun FileManagerScreen(
         }
     }
 
+    /** Waits for the user to answer the conflict dialog for [file]; null if they cancelled it. */
+    suspend fun askConflict(file: File): ConflictChoice? {
+        pendingConflict = file
+        conflictChoice = null
+        // Poll rather than plumb a CompletableDeferred through Compose state — the dialog answers
+        // by setting conflictChoice, and this coroutine is already off the critical path.
+        while (pendingConflict != null && conflictChoice == null) kotlinx.coroutines.delay(50)
+        return conflictChoice
+    }
+
     fun performPaste() {
-        val src = clipboardFile ?: return
+        val sources = clipboardFiles
+        if (sources.isEmpty()) return
         val dstDir = currentDir
         val cut = isCutOperation
-        // Pasting a folder into itself or its own subtree would recurse forever — reject it.
-        if (src.isDirectory && isWithin(dstDir, src)) {
-            Toast.makeText(context, "Can't paste a folder into itself", Toast.LENGTH_SHORT).show()
-            clipboardFile = null
-            isCutOperation = false
-            return
-        }
-        val sameFolder = src.parentFile?.absolutePath == dstDir.absolutePath
-        // Moving into the same folder is a no-op; never copy a file onto itself.
-        if (sameFolder && cut) {
-            clipboardFile = null
-            isCutOperation = false
-            return
-        }
-        // Don't overwrite an existing entry (or self when copying in-place) — pick a free name.
-        val dst = uniqueDestination(dstDir, src.name)
-        scope.launch {
+
+        operationJob = scope.launch {
             operationProgress = 0f
             operationDeterminate = true
             operationLabel = if (cut) "Moving..." else "Copying..."
             isOperationRunning = true
-            // Throttle UI updates to whole-percent changes to avoid flooding recomposition.
-            var lastPct = -1
-            val onProgress = FileUtils.ProgressCallback { copied, total ->
-                val pct = if (total > 0) ((copied * 100) / total).toInt() else 100
-                if (pct != lastPct) {
-                    lastPct = pct
-                    operationProgress = pct / 100f
+
+            var applyToAll: ConflictChoice? = null
+            var failed = 0
+            var skipped = 0
+            var done = 0
+
+            for (src in sources) {
+                // Pasting a folder into itself or its own subtree would recurse forever.
+                if (src.isDirectory && isWithin(dstDir, src)) {
+                    failed++
+                    continue
                 }
+                // Moving into the folder it already sits in is a no-op.
+                if (cut && src.parentFile?.absolutePath == dstDir.absolutePath) {
+                    skipped++
+                    continue
+                }
+
+                var dst = File(dstDir, src.name)
+                if (dst.exists()) {
+                    val choice = applyToAll ?: askConflict(src)?.also {
+                        if (conflictApplyToAll) applyToAll = it
+                    } ?: run { skipped++; null } ?: continue
+                    when (choice) {
+                        // Overwrite and Merge both paste onto the real destination: copyWithProgress
+                        // recurses into an existing directory and truncates existing files, so the
+                        // two differ only in what the user expects, not in what we call.
+                        ConflictChoice.OVERWRITE, ConflictChoice.MERGE -> Unit
+                        ConflictChoice.KEEP_BOTH -> dst = uniqueDestination(dstDir, src.name)
+                        ConflictChoice.SKIP -> { skipped++; continue }
+                    }
+                }
+
+                // Progress is per item; with a batch the label carries the overall position.
+                operationLabel = buildString {
+                    append(if (cut) "Moving" else "Copying")
+                    if (sources.size > 1) append(" ${done + 1}/${sources.size}")
+                    append(" — ").append(src.name)
+                }
+                var lastPct = -1
+                val onProgress = FileUtils.ProgressCallback { copied, total ->
+                    val pct = if (total > 0) ((copied * 100) / total).toInt() else 100
+                    if (pct != lastPct) {
+                        lastPct = pct
+                        operationProgress = pct / 100f
+                    }
+                }
+                val target = dst
+                val ok = withContext(Dispatchers.IO) {
+                    if (cut) FileUtils.moveWithProgress(src, target, onProgress)
+                    else FileUtils.copyWithProgress(src, target, onProgress)
+                }
+                if (ok) done++ else failed++
             }
-            val ok = withContext(Dispatchers.IO) {
-                val copied = FileUtils.copyWithProgress(src, dst, onProgress)
-                if (copied && cut) FileUtils.delete(src)
-                copied
-            }
+
             isOperationRunning = false
             operationDeterminate = false
-            clipboardFile = null
+            operationJob = null
+            clipboardFiles = emptyList()
             isCutOperation = false
+            selectionMode = false
+            selectedPaths = emptySet()
             loadDirectory(currentDir, resetScroll = false)
-            if (!ok) Toast.makeText(context, "Paste failed", Toast.LENGTH_SHORT).show()
+
+            val message = when {
+                failed > 0 -> "$done done, $failed failed"
+                skipped > 0 -> "$done done, $skipped skipped"
+                sources.size > 1 -> "$done items ${if (cut) "moved" else "copied"}"
+                else -> null
+            }
+            if (message != null) Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -594,6 +665,100 @@ fun FileManagerScreen(
                 }) { Text("Delete") }
             },
             dismissButton = { TextButton(onClick = { selectedEntry = null }) { Text("Cancel") } },
+        )
+    }
+
+    if (pendingBulkDelete.isNotEmpty()) {
+        val victims = pendingBulkDelete
+        OutlinedAlertDialog(
+            onDismissRequest = { pendingBulkDelete = emptyList() },
+            title = { Text("Delete ${victims.size} item${if (victims.size == 1) "" else "s"}?") },
+            text = {
+                Column {
+                    Text("This can't be undone.")
+                    Spacer(Modifier.height(6.dp))
+                    // Name a few so an accidental Select-All is obvious before it's too late.
+                    victims.take(5).forEach {
+                        Text("• ${it.name}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                    }
+                    if (victims.size > 5) {
+                        Text(
+                            "…and ${victims.size - 5} more",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 12.sp,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingBulkDelete = emptyList()
+                    selectionMode = false
+                    selectedPaths = emptySet()
+                    operationJob = scope.launch {
+                        isOperationRunning = true
+                        var failed = 0
+                        victims.forEachIndexed { i, f ->
+                            operationLabel = "Deleting ${i + 1}/${victims.size} — ${f.name}"
+                            if (!withContext(Dispatchers.IO) { FileUtils.delete(f) }) failed++
+                        }
+                        isOperationRunning = false
+                        operationJob = null
+                        loadDirectory(currentDir, resetScroll = false)
+                        if (failed > 0) {
+                            Toast.makeText(context, "$failed couldn't be deleted", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { pendingBulkDelete = emptyList() }) { Text("Cancel") } },
+        )
+    }
+
+    // Paste conflict — one per colliding item, with "apply to all" for a long batch.
+    pendingConflict?.let { conflict ->
+        val isDir = conflict.isDirectory
+        OutlinedAlertDialog(
+            onDismissRequest = { pendingConflict = null },
+            title = { Text("\"${conflict.name}\" already exists") },
+            text = {
+                Column {
+                    Text(
+                        if (isDir) "Merge adds and replaces files inside the existing folder."
+                        else "Overwrite replaces the existing file.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 12.sp,
+                    )
+                    if (clipboardFiles.size > 1) {
+                        Spacer(Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            androidx.compose.material3.Checkbox(
+                                checked = conflictApplyToAll,
+                                onCheckedChange = { conflictApplyToAll = it },
+                            )
+                            Text("Apply to all conflicts", fontSize = 12.sp)
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    listOf(
+                        (if (isDir) ConflictChoice.MERGE else ConflictChoice.OVERWRITE) to
+                            (if (isDir) "Merge" else "Overwrite"),
+                        ConflictChoice.KEEP_BOTH to "Keep both",
+                        ConflictChoice.SKIP to "Skip",
+                    ).forEach { (choice, label) ->
+                        TextButton(
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = { conflictChoice = choice; pendingConflict = null },
+                        ) { Text(label, modifier = Modifier.fillMaxWidth()) }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { conflictChoice = ConflictChoice.SKIP; pendingConflict = null }) {
+                    Text("Cancel")
+                }
+            },
         )
     }
 
@@ -832,8 +997,55 @@ fun FileManagerScreen(
 
         HorizontalDivider(color = MaterialTheme.colorScheme.outline)
 
+        // ── Selection bar ── replaces the paste banner while picking items.
+        if (selectionMode) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+            ) {
+                Text(
+                    "${selectedPaths.size} selected",
+                    color = MaterialTheme.colorScheme.onBackground,
+                    fontSize = 13.sp,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = {
+                    selectedPaths = if (selectedPaths.size == entries.size) emptySet()
+                    else entries.map { it.absolutePath }.toSet()
+                }) { Text(if (selectedPaths.size == entries.size) "None" else "All", fontSize = 12.sp) }
+                TextButton(
+                    enabled = selectedPaths.isNotEmpty(),
+                    onClick = {
+                        clipboardFiles = entries.filter { it.absolutePath in selectedPaths }
+                        isCutOperation = false
+                        selectionMode = false
+                        selectedPaths = emptySet()
+                    },
+                ) { Text("Copy", fontSize = 12.sp) }
+                TextButton(
+                    enabled = selectedPaths.isNotEmpty(),
+                    onClick = {
+                        clipboardFiles = entries.filter { it.absolutePath in selectedPaths }
+                        isCutOperation = true
+                        selectionMode = false
+                        selectedPaths = emptySet()
+                    },
+                ) { Text("Cut", fontSize = 12.sp) }
+                TextButton(
+                    enabled = selectedPaths.isNotEmpty(),
+                    onClick = { pendingBulkDelete = entries.filter { it.absolutePath in selectedPaths } },
+                ) { Text("Delete", color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
+                TextButton(onClick = { selectionMode = false; selectedPaths = emptySet() }) {
+                    Text("Done", fontSize = 12.sp)
+                }
+            }
+        }
+
         // ── Paste banner ──
-        if (clipboardFile != null) {
+        if (clipboardFiles.isNotEmpty()) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
@@ -844,11 +1056,13 @@ fun FileManagerScreen(
             ) {
                 Icon(Icons.Filled.ContentPaste, "Paste", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
+                val what = if (clipboardFiles.size == 1) clipboardFiles.first().name
+                else "${clipboardFiles.size} items"
                 Text(
-                    "Paste ${clipboardFile?.name}${if (isCutOperation) " (move)" else ""} here",
+                    "Paste $what${if (isCutOperation) " (move)" else ""} here",
                     color = MaterialTheme.colorScheme.onBackground, fontSize = 13.sp, modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = { clipboardFile = null; isCutOperation = false }) {
+                TextButton(onClick = { clipboardFiles = emptyList(); isCutOperation = false }) {
                     Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                 }
             }
@@ -863,7 +1077,27 @@ fun FileManagerScreen(
                     .padding(horizontal = 16.dp, vertical = 8.dp),
             ) {
                 val pctText = if (operationDeterminate) "  ${(operationProgress * 100).toInt()}%" else ""
-                Text("$operationLabel$pctText", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "$operationLabel$pctText",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    // A multi-gigabyte copy onto a slow card is exactly when you discover you
+                    // picked the wrong folder; without this the only way out was killing the app.
+                    if (operationJob != null) {
+                        TextButton(onClick = {
+                            operationJob?.cancel()
+                            operationJob = null
+                            isOperationRunning = false
+                            operationDeterminate = false
+                            loadDirectory(currentDir, resetScroll = false)
+                        }) { Text("Cancel", fontSize = 12.sp) }
+                    }
+                }
                 Spacer(Modifier.height(4.dp))
                 if (operationDeterminate) {
                     LinearProgressIndicator(
@@ -931,6 +1165,21 @@ fun FileManagerScreen(
                         FileItemRow(
                             file = file,
                             showActions = !pickMode,
+                            selectionMode = selectionMode,
+                            selected = file.absolutePath in selectedPaths,
+                            onLongPress = {
+                                // Long-press is the only entry point into selection mode, matching
+                                // how every Android file manager behaves.
+                                if (!pickMode) {
+                                    selectionMode = true
+                                    selectedPaths = selectedPaths + file.absolutePath
+                                }
+                            },
+                            onToggleSelect = {
+                                selectedPaths = if (file.absolutePath in selectedPaths)
+                                    selectedPaths - file.absolutePath
+                                else selectedPaths + file.absolutePath
+                            },
                             onTap = {
                                 if (file.isDirectory) loadDirectory(file)
                                 else if (pickMode) {
@@ -946,8 +1195,8 @@ fun FileManagerScreen(
                             onDismissMenu = { showMenuFor = null },
                             onRun = { runFile(file) },
                             onAddToShortcuts = { addToShortcuts(file) },
-                            onCopy = { clipboardFile = file; isCutOperation = false; showMenuFor = null },
-                            onCut = { clipboardFile = file; isCutOperation = true; showMenuFor = null },
+                            onCopy = { clipboardFiles = listOf(file); isCutOperation = false; showMenuFor = null },
+                            onCut = { clipboardFiles = listOf(file); isCutOperation = true; showMenuFor = null },
                             onDelete = { selectedEntry = file; showMenuFor = null },
                             onRename = { renameTarget = file; showMenuFor = null },
                             isFavorite = isFav,
@@ -1000,9 +1249,14 @@ fun FileManagerScreen(
 }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 private fun FileItemRow(
     file: File,
     showActions: Boolean = true,
+    selectionMode: Boolean = false,
+    selected: Boolean = false,
+    onLongPress: () -> Unit = {},
+    onToggleSelect: () -> Unit = {},
     onTap: () -> Unit,
     onMenu: () -> Unit,
     menuExpanded: Boolean,
@@ -1037,15 +1291,30 @@ private fun FileItemRow(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 3.dp)
-            .clickable(onClick = onTap),
+            .combinedClickable(
+                // In selection mode a tap toggles instead of opening, so you can rattle through a
+                // folder without long-pressing every single row.
+                onClick = { if (selectionMode) onToggleSelect() else onTap() },
+                onLongClick = onLongPress,
+            ),
         shape = RoundedCornerShape(10.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        colors = CardDefaults.cardColors(
+            containerColor = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+            else MaterialTheme.colorScheme.surfaceContainer,
+        ),
+        border = BorderStroke(
+            1.dp,
+            if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+        ),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
+            if (selectionMode) {
+                androidx.compose.material3.Checkbox(checked = selected, onCheckedChange = { onToggleSelect() })
+                Spacer(Modifier.width(4.dp))
+            }
             when {
                 // Show the executable's own embedded icon when we managed to extract one.
                 exeIcon != null -> Image(
