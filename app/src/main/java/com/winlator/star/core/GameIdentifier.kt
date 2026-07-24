@@ -223,12 +223,26 @@ object GameIdentifier {
         // repack/site tags that show up in folder names
         "ankergames", "steamrip", "onlinefix", "online-fix", "gload", "fitgirlrepacks",
     )
-    // Anchored to the END and allowed to repeat. Unanchored, this stripped its words from ANYWHERE
-    // in a title — "Game of Thrones" came out as "of Thrones" and "Client Simulator" as
-    // "Simulator". Only the trailing run is noise: "Witcher3-Win64-Shipping" -> "Witcher3".
-    private val EXE_SUFFIX_RE = Regex(
-        """(?i)(?:[-_. ]*(?:win64|win32|shipping|wingdk|client|launcher|game|x64|x86|64bit|32bit))+$"""
-    )
+    private const val EXE_NOISE_WORDS =
+        """win64|win32|shipping|wingdk|client|launcher|game|x64|x86|64bit|32bit"""
+
+    /**
+     * Does this exe basename look like engine/arch boilerplate rather than a title? Deliberately
+     * UNANCHORED — "GameConTest" is boilerplate-ish wherever the giveaway sits, and the answer
+     * decides whether we trust the folder name instead of the exe name.
+     */
+    private val EXE_NOISE_RE = Regex("""(?i)[-_. ]*(?:$EXE_NOISE_WORDS)""")
+
+    /**
+     * Trailing noise to strip off a title. ANCHORED to the end and allowed to repeat, because these
+     * words are only junk as a suffix: "Witcher3-Win64-Shipping" -> "Witcher3", while
+     * "Game of Thrones" and "Client Simulator" must survive intact.
+     *
+     * 🔑 Kept separate from [EXE_NOISE_RE] on purpose. One regex used to serve both jobs, so
+     * anchoring it to fix stripping ALSO narrowed the boilerplate test — and a game in
+     * "Game Controller Test/GameConTest.exe" stopped preferring its folder and became "GameConTest".
+     */
+    private val EXE_SUFFIX_RE = Regex("""(?i)(?:[-_. ]*(?:$EXE_NOISE_WORDS))+$""")
     private val VERSION_TOKEN_RE = Regex("""(?i)\b(v?\d+([._]\d+)+|build[-_ ]?\d+|update[-_ ]?\d+)\b""")
 
     /**
@@ -272,7 +286,7 @@ object GameIdentifier {
      */
     private fun cleanedFallbackName(exeFile: File): String? {
         val exeBase = exeFile.nameWithoutExtension
-        val preferFolder = EXE_SUFFIX_RE.containsMatchIn(exeBase) ||
+        val preferFolder = EXE_NOISE_RE.containsMatchIn(exeBase) ||
             isLauncherExeName(exeBase) ||
             exeBase.equals("game", true) || exeBase.equals("start", true)
         val folder = exeFile.absoluteFile.parentFile?.name
