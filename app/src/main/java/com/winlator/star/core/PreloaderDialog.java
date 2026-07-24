@@ -32,6 +32,11 @@ public class PreloaderDialog {
         PreloaderState.show(text, icon, coverArt, spec);
     }
 
+    // Game launch with the component spec + accumulated game details (right-side launch panel).
+    public synchronized void show(String text, Bitmap icon, Bitmap coverArt, PreloaderSpec spec, PreloaderDetails details) {
+        PreloaderState.show(text, icon, coverArt, spec, details);
+    }
+
     public void showOnUiThread(final int textResId) {
         activity.runOnUiThread(() -> show(textResId));
     }

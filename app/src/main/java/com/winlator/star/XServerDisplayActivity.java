@@ -1151,7 +1151,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
             preloaderDialog.show(container.getName(), null, null);
         else {
             preloaderDialog.show(shortcut.name, shortcut.icon, shortcut.getCoverArt(),
-                com.winlator.star.ui.screens.LaunchSpecBuilderKt.buildLaunchSpec(shortcut, getResources()));
+                com.winlator.star.ui.screens.LaunchSpecBuilderKt.buildLaunchSpec(shortcut, getResources()),
+                com.winlator.star.ui.screens.LaunchSpecBuilderKt.buildLaunchDetails(shortcut));
         }
         preloaderDialog.step(1, "Preparing container…");
 

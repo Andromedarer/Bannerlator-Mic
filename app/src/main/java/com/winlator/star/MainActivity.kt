@@ -230,7 +230,11 @@ class MainActivity : AppCompatActivity() {
                     )
 
                     // Resume a mid-flight component installer (Phase 3b) after the app restarts.
-                    com.winlator.star.ui.screens.ComponentInstallResume()
+                    // On completion/discard it routes back to Games (via pendingRoute, same one-shot
+                    // channel the store deep-link uses) so the user isn't stranded on the resume dialog.
+                    com.winlator.star.ui.screens.ComponentInstallResume(
+                        onNavigateToGames = { pendingRoute.value = Screen.Games.route },
+                    )
 
                     if (isInstalling) {
                         SplashScreen(
