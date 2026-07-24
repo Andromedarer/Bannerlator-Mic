@@ -1,5 +1,22 @@
 # Star-Compose — Progress Log
 
+## 2026-07-24 — 🛡️ **ASurfaceTransaction null-guard hardening** (`fix/asurface-transaction-null-guards`, off main `5f495eff`, vc stays 49)
+
+> **Defensive only — fixes no reported symptom.** Audit of every `ASurfaceTransaction_create` call site found the two host-renderer files inconsistent with themselves: some sites checked the result, most didn't. A null return (resource exhaustion) is passed straight into `ST_SETGEO`/`ST_SETBUF`/`ST_SETVIS` → native SIGSEGV, app dies and takes the running game with it. **10 sites fixed across 2 files.**
+>
+> **Scope — NOT the default renderer.** `VulkanRendererContext.cpp` (default `renderer = "vulkan"`, `Container.java:101`) never touches these APIs: **zero** call sites, nothing to fix. Only `ASurfaceRendererContext.cpp` (the opt-in `"surfaceflinger"` renderer) and `scanout/ScanoutContext.cpp` (GL renderer with `rendererNative`, default **false**) were affected. Most users run neither.
+>
+> **🔑 Three sites needed more than a one-line guard:**
+> - `scanoutSetCursorImage` — the guard must land **BEFORE** `int fence = scanoutCursorFence; scanoutCursorFence = -1;`. That pair hands ownership of the `AHardwareBuffer_unlock` fence fd to the transaction. Guarding *after* it orphans the fd (one leaked fd per failure); guarding *before* leaves it owned by the object, closed on the next upload or teardown. The obvious placement is the wrong one.
+> - `applyCursorGeometry` — `scanoutSetCursorPos` records `lastRawCursorX/Y` as applied *before* calling it, and dedupes identical positions. A bare `return` would let the dedupe suppress the retry and strand the cursor at its old position. Guard invalidates the dedupe cache (`SHRT_MIN`) so the next motion event re-issues.
+> - `ScanoutContext` init paths ×2 — `scanoutGameTx`/`scanoutTx` are **paired persistent** transactions. If one succeeds and the other fails, a bare return leaks the survivor, and `scanoutActive` must not go true holding only one. Both paths now delete the survivor, release both SurfaceControls, and (sibling path) fall back to `initFromWindow()`.
+>
+> Also: `updateWindow`'s `currentTx ? currentTx : ST_CREATE()` ternary only ever guarded a null `currentTx`, never `ST_CREATE`'s own result — now guarded. `destroy()`'s best-effort hide is wrapped so teardown still runs (never early-return out of `destroy()`). Added explicit `#include <climits>` — `INT_MAX` at `:183` had been riding a transitive include.
+>
+> **Origin:** comparing against pipetto's `winlator_bionic` DisplayX work, where [`cc4ac7d`](https://github.com/Pipetto-crypto/winlator/commit/cc4ac7d0c5d6db25a5a0d7501ccabcbf4e4ec9e8) fixed the same bug class in his cursor path. His other three DisplayX fixes do **not** apply to us — our ASR has no rendering thread/state machine (his [`bcc5e80`](https://github.com/Pipetto-crypto/winlator/commit/bcc5e804c7b01cd64e79bddc3748217a7e407084), which he partly reverted a day later), our `computeWindowRect` + `adjustRectLT` already handle the fullscreen src/dst case he got backwards, and we `dlsym` the whole `ASurfaceTransaction_*` API at `minSdk 26` so his 284-line Android 10 compat scramble is moot. Our `retireSurfaceControl` already defers release to the transaction-complete callback, which is stronger than his thread hand-off.
+>
+> ⚠️ **COMPILE-VERIFIED ONLY — not device-proven, and not meaningfully device-testable:** transaction-creation failure can't be forced on demand. Treat as hardening, not a repair.
+
 ## 2026-07-24 — ✅ **Game-name mangling fixed + a never-passing test corrected** (merged to main)
 
 > **Bug:** `EXE_SUFFIX_RE` was unanchored, so `cleanName()` stripped `win64|shipping|client|launcher|game|x64|…` from ANYWHERE in a title, not just off the end. Device-proven on the real library: folder `Game Controller Test` resolved to **"Controller Test"** — the word "Game" eaten out of the middle. Only affects the fallback naming path (no Steam appid / GOG manifest / usable PE name), which is exactly what repacks and DRM-free copies take — and the new bulk folder import runs it across a whole library at once.
