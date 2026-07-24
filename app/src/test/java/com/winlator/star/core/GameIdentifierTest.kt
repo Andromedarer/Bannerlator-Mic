@@ -81,7 +81,10 @@ class GameIdentifierTest {
             """{"gameId":"1207658691","name":"The Witcher 3: Wild Hunt","version":1}"""
         )
         val id = GameIdentifier.identify(exeIn(dir))
-        assertEquals("The Witcher 3: Wild Hunt", id.name)
+        // normalizeName() deliberately converts ":" to " - " (a colon is illegal in a Windows
+        // filename), so the identified name never carries one. The test asserted the raw GOG
+        // string and had never passed.
+        assertEquals("The Witcher 3 - Wild Hunt", id.name)
         assertEquals("1207658691", id.gogId)
         assertNull(id.appId)
         assertEquals(GameIdentifier.Confidence.HIGH, id.confidence)
