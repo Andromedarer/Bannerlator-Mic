@@ -2317,7 +2317,7 @@ private fun compressAvatar(context: Context, uri: Uri): ByteArray? {
 //  - LOGGED IN: the avatar (tap or "Change picture" → system image picker → ≤512KB JPEG → upload) + the
 //    username, "Show my recovery key", "My uploads", and "Log out".
 @Composable
-private fun MyAccountDialog(
+internal fun MyAccountDialog(
     vm: ShortcutsViewModel,
     onDismiss: () -> Unit,
     onOpenMyUploads: () -> Unit,
@@ -3006,7 +3006,7 @@ private enum class CatalogSort { CONFIGS, NAME, DEVICES }
 // community index with search / device + store filters / sort; a tapped game opens its per-device
 // config list (user's-hardware first), and a device row starts the Phase 2 apply flow.
 @Composable
-private fun CommunityCatalogBrowser(
+internal fun CommunityCatalogBrowser(
     vm: ShortcutsViewModel,
     onDismiss: () -> Unit,
     onPick: (CommunityPick) -> Unit,
@@ -3276,7 +3276,7 @@ private fun CommunityCard(
 // What the chooser / detail / apply flow acts on when a config card is tapped. A [File] is a specific
 // uploaded config from the worker (with votes/downloads, applied exactly); a [Device] is the offline
 // fallback — a canonical device row whose best-matching file is resolved at apply time (no vote counts).
-private sealed class CommunityPick {
+internal sealed class CommunityPick {
     abstract val game: CanonicalGame
 
     data class File(

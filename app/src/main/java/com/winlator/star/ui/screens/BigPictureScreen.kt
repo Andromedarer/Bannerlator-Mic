@@ -50,6 +50,7 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
@@ -103,6 +104,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.navigation.NavController
 import androidx.preference.PreferenceManager
@@ -110,6 +112,7 @@ import com.winlator.star.R
 import com.winlator.star.XServerDisplayActivity
 import com.winlator.star.XrActivity
 import com.winlator.star.container.ContainerManager
+import com.winlator.star.communityconfigs.CommunityConfigApply
 import com.winlator.star.container.Shortcut
 import com.winlator.star.store.DownloadManagerActivity
 import com.winlator.star.store.StarLaunchBridge
@@ -146,6 +149,14 @@ fun BigPictureScreen(navController: NavController) {
     val manager = remember { ContainerManager(context) }
     var shortcuts by remember { mutableStateOf<List<Shortcut>>(manager.loadShortcuts()) }
     var selectedIndex by remember { mutableStateOf(0) }
+    // Community configs — reuses the phone UI's browser + account dialogs (now internal). Applies
+    // to the currently selected game; the smart missing-component install sub-flow stays on the
+    // phone UI for now, so the result dialog just surfaces the outcome message.
+    val communityVm: ShortcutsViewModel = viewModel()
+    var showCommunity by remember { mutableStateOf(false) }
+    var showBpAccount by remember { mutableStateOf(false) }
+    var communityApplyResult by remember { mutableStateOf<CommunityConfigApply.ConfigApplyResult?>(null) }
+    var communityApplying by remember { mutableStateOf(false) }
 
     // Decoded covers keyed by shortcut name; guarded by a plain in-flight set so we never re-fetch.
     val coverCache = remember { mutableStateMapOf<String, ImageBitmap>() }
@@ -154,7 +165,7 @@ fun BigPictureScreen(navController: NavController) {
     val listState = rememberLazyListState()
 
     var zone by remember { mutableStateOf(BpZone.CAROUSEL) }
-    var railIndex by remember { mutableStateOf(0) } // 0 = App Settings, 1 = Tools, 2 = Power
+    var railIndex by remember { mutableStateOf(0) } // 0 = Community, 1 = App Settings, 2 = Tools, 3 = Power
     var playIndex by remember { mutableStateOf(0) } // in the PLAY zone: 0 = Play, 1 = Game options
 
     var activeSheet by remember { mutableStateOf<BpSheet?>(null) }
@@ -237,6 +248,20 @@ fun BigPictureScreen(navController: NavController) {
             .focusable()
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                // Community overlays own Back first (they sit above sheets).
+                if (showCommunity || showBpAccount || communityApplyResult != null) {
+                    return@onPreviewKeyEvent when (event.key) {
+                        Key.ButtonB, Key.Back -> {
+                            when {
+                                communityApplyResult != null -> communityApplyResult = null
+                                showBpAccount -> showBpAccount = false
+                                else -> showCommunity = false
+                            }
+                            true
+                        }
+                        else -> false
+                    }
+                }
                 // While a sheet is up, only handle the close gesture; everything else is the sheet's.
                 if (activeSheet != null || editShortcut) {
                     return@onPreviewKeyEvent when (event.key) {
@@ -256,7 +281,7 @@ fun BigPictureScreen(navController: NavController) {
                     Key.DirectionRight -> {
                         when (zone) {
                             BpZone.CAROUSEL -> if (selectedIndex < shortcuts.lastIndex) selectedIndex++
-                            BpZone.RAIL     -> if (railIndex < 2) railIndex++
+                            BpZone.RAIL     -> if (railIndex < 3) railIndex++
                             BpZone.PLAY     -> playIndex = 1   // Game options
                         }
                         true
@@ -285,9 +310,10 @@ fun BigPictureScreen(navController: NavController) {
                             BpZone.PLAY -> if (playIndex == 0) onLaunch()
                                            else if (selected != null) activeSheet = BpSheet.GAME_OPTIONS
                             BpZone.RAIL -> when (railIndex) {
-                                0 -> navController.navigate(Screen.Settings.route)
-                                1 -> activeSheet = BpSheet.TOOLS
-                                2 -> activeSheet = BpSheet.POWER
+                                0 -> showCommunity = true
+                                1 -> navController.navigate(Screen.Settings.route)
+                                2 -> activeSheet = BpSheet.TOOLS
+                                3 -> activeSheet = BpSheet.POWER
                             }
                         }
                         true
@@ -355,24 +381,31 @@ fun BigPictureScreen(navController: NavController) {
                 horizontalArrangement = Arrangement.End,
             ) {
                 RailButton(
+                    icon = Icons.Filled.Public,
+                    label = "Community Configs",
+                    focused = zone == BpZone.RAIL && railIndex == 0,
+                    onClick = { zone = BpZone.RAIL; railIndex = 0; showCommunity = true },
+                )
+                Spacer(Modifier.width(12.dp))
+                RailButton(
                     icon = Icons.Filled.Settings,
                     label = "App Settings",
-                    focused = zone == BpZone.RAIL && railIndex == 0,
-                    onClick = { zone = BpZone.RAIL; railIndex = 0; navController.navigate(Screen.Settings.route) },
+                    focused = zone == BpZone.RAIL && railIndex == 1,
+                    onClick = { zone = BpZone.RAIL; railIndex = 1; navController.navigate(Screen.Settings.route) },
                 )
                 Spacer(Modifier.width(12.dp))
                 RailButton(
                     icon = Icons.Filled.Apps,
                     label = "Tools",
-                    focused = zone == BpZone.RAIL && railIndex == 1,
-                    onClick = { zone = BpZone.RAIL; railIndex = 1; activeSheet = BpSheet.TOOLS },
+                    focused = zone == BpZone.RAIL && railIndex == 2,
+                    onClick = { zone = BpZone.RAIL; railIndex = 2; activeSheet = BpSheet.TOOLS },
                 )
                 Spacer(Modifier.width(12.dp))
                 RailButton(
                     icon = Icons.Filled.PowerSettingsNew,
                     label = "Power",
-                    focused = zone == BpZone.RAIL && railIndex == 2,
-                    onClick = { zone = BpZone.RAIL; railIndex = 2; activeSheet = BpSheet.POWER },
+                    focused = zone == BpZone.RAIL && railIndex == 3,
+                    onClick = { zone = BpZone.RAIL; railIndex = 3; activeSheet = BpSheet.POWER },
                 )
             }
 
@@ -540,6 +573,13 @@ fun BigPictureScreen(navController: NavController) {
                     coverCache.remove(s.name)
                     inFlight.remove(s.name)
                 },
+                onCommunityConfigs = {
+                    // Selecting the game first, then opening the browser, so a config picked there
+                    // applies to this game. (Stage 2: the per-game match sheet directly.)
+                    selectedIndex = shortcuts.indexOfFirst { it.name == s.name }.coerceAtLeast(0)
+                    activeSheet = null
+                    showCommunity = true
+                },
             )
         }
         BpSheet.TOOLS -> ToolsSheet(
@@ -578,6 +618,55 @@ fun BigPictureScreen(navController: NavController) {
             onDismiss = {
                 editShortcut = false
                 shortcuts = manager.loadShortcuts()
+            },
+        )
+    }
+
+    // ── Community configs ──────────────────────────────────────────────────
+    if (showCommunity) {
+        CommunityCatalogBrowser(
+            vm = communityVm,
+            onDismiss = { showCommunity = false },
+            onPick = { pick ->
+                // Apply to the currently selected game. Big Picture always sits on one, so there is
+                // no separate target picker — unlike the phone browser's "Apply to game…" chooser.
+                val target = selected ?: return@CommunityCatalogBrowser
+                communityApplying = true
+                val onDone: (CommunityConfigApply.ConfigApplyResult) -> Unit = { res ->
+                    communityApplying = false
+                    communityApplyResult = res
+                    shortcuts = manager.loadShortcuts()
+                }
+                when (pick) {
+                    is CommunityPick.File -> communityVm.applyCommunityConfigFile(target, pick.ref, onDone)
+                    is CommunityPick.Device -> communityVm.applyCommunityConfig(target, pick.game, pick.device, onDone)
+                }
+            },
+            onMyAccount = { showBpAccount = true },
+        )
+    }
+
+    if (showBpAccount) {
+        MyAccountDialog(
+            vm = communityVm,
+            onDismiss = { showBpAccount = false },
+            onOpenMyUploads = { showBpAccount = false },  // Stage 2: dedicated My-uploads manager
+            onLoggedIn = {},
+        )
+    }
+
+    communityApplyResult?.let { res ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { communityApplyResult = null },
+            title = { Text(if (res.ok) "Config applied" else "Couldn't apply") },
+            text = {
+                Text(
+                    res.message + (if (res.ok) "\n\nApplied to \"${selected?.name.orEmpty()}\"." else ""),
+                    color = Color.White.copy(alpha = 0.85f),
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { communityApplyResult = null }) { Text("OK") }
             },
         )
     }
@@ -669,6 +758,7 @@ private fun GameOptionsSheet(
     onContainerSettings: () -> Unit,
     onChangeCover: (android.graphics.Bitmap) -> Unit,
     onRemoveCover: () -> Unit,
+    onCommunityConfigs: () -> Unit,
 ) {
     val context = LocalContext.current
     val coverPicker = rememberLauncherForActivityResult(
@@ -689,6 +779,7 @@ private fun GameOptionsSheet(
             SheetTitle(shortcut.name)
             SheetRow(Icons.Filled.Edit, "Edit shortcut", onEditShortcut)
             SheetRow(Icons.Filled.Tune, "Container settings", onContainerSettings)
+            SheetRow(Icons.Filled.Public, "Community configs", onCommunityConfigs)
             SheetRow(Icons.Filled.Image, "Change cover art") {
                 coverPicker.launch(
                     com.winlator.star.util.InAppFilePicker.buildIntent(
