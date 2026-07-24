@@ -89,6 +89,17 @@ object WinePath {
 
     private val RESERVED_STORAGE_NAMES = setOf("emulated", "self")
 
+    /**
+     * True when the game behind [winPath] lives on removable storage (SD card or USB) rather than
+     * internal, so the UI can badge it. Anything not on a recognised storage volume — app-private
+     * dirs, the container prefix — counts as not removable.
+     */
+    fun isOnRemovableStorage(container: Container, winPath: String): Boolean {
+        val android = runCatching { resolveAndroidPath(container, winPath) }.getOrNull() ?: return false
+        val root = storageVolumeRootOf(android.absolutePath) ?: return false
+        return !root.startsWith("/storage/emulated")
+    }
+
     /** Windows-style path of [path] relative to [mountPath]. */
     private fun relativeTo(mountPath: String, path: String): String =
         path.removePrefix(mountPath).removePrefix("/").replace("/", "\\")

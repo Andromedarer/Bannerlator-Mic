@@ -54,7 +54,6 @@ import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -87,6 +86,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.SdCard
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Upload
@@ -947,8 +947,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
             },
             text = {
                 LazyColumn(modifier = Modifier.heightIn(max = 420.dp)) {
-                    itemsIndexed(folderScanResults, key = { _, c -> c.exe.absolutePath }) { index, candidate ->
-                        if (index > 0) Divider(color = DividerColor)
+                    items(folderScanResults, key = { it.exe.absolutePath }) { candidate ->
                         ScannedGameRow(
                             candidate = candidate,
                             checked = candidate.exe.absolutePath in folderScanSelected,
@@ -3962,14 +3961,21 @@ private fun ShortcutItemLayoutL(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            if (subtitle.isNotEmpty()) {
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = OnSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (subtitle.isNotEmpty()) {
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = OnSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                }
+                if (remember(shortcut) { WinePath.isOnRemovableStorage(shortcut.container, shortcut.path) }) {
+                    Spacer(Modifier.width(6.dp))
+                    SdCardBadge()
+                }
             }
             // Component specs: bright primary chips (renderer · DXVK · frame-gen) then a
             // muted secondary dot-line (driver · VKD3D · backend). Shared with Containers.
@@ -4125,6 +4131,15 @@ private fun ShortcutGridItem(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(24.dp),
+            )
+        }
+
+        // Removable-storage marker, over the art's top corner so it never fights the title scrim.
+        if (remember(shortcut) { WinePath.isOnRemovableStorage(shortcut.container, shortcut.path) }) {
+            SdCardBadge(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(6.dp),
             )
         }
 
@@ -6067,6 +6082,36 @@ private fun exportShortcut(context: Context, shortcut: Shortcut) {
 
 
 /**
+ * Marks a game whose files live on removable storage (SD card / USB) rather than internal.
+ *
+ * Worth surfacing because it explains behaviour the user would otherwise have to guess at: a game
+ * on a card is slower to load, and it disappears entirely if the card is removed.
+ */
+@Composable
+private fun SdCardBadge(modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(Color.Black.copy(alpha = 0.55f))
+            .padding(horizontal = 5.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Default.SdCard,
+            contentDescription = "On SD card",
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(11.dp),
+        )
+        Spacer(Modifier.width(3.dp))
+        Text(
+            "SD",
+            color = Color.White,
+            style = MaterialTheme.typography.labelSmall,
+        )
+    }
+}
+
+/**
  * A selectable option card, styled to match the File Manager's rows and the game cards behind the
  * dialog — outlined rounded rectangle, optional leading icon, title over a dimmer subtitle — so the
  * import menus read as part of the same surface rather than as bare dialog text.
@@ -6127,11 +6172,19 @@ private fun ScannedGameRow(
     onChangeExe: () -> Unit,
 ) {
     val alpha = if (candidate.alreadyAdded) 0.45f else 1f
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp)
+            .clickable(enabled = enabled, onClick = onToggle),
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+    ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(enabled = enabled, onClick = onToggle)
-            .padding(vertical = 6.dp),
+            .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Checkbox(checked = checked, onCheckedChange = { onToggle() }, enabled = enabled)
@@ -6190,9 +6243,13 @@ private fun ScannedGameRow(
                     style = MaterialTheme.typography.labelSmall,
                 )
                 // Flagged rows name the exe, because that is what the user is being asked to judge.
+                // Capped at two lines: a long name like AIO-Graphics-Test-64bit.exe otherwise wraps
+                // to three and makes the cards uneven.
                 candidate.uncertain -> Text(
                     "Check this one — ${candidate.exe.name}",
                     color = MaterialTheme.colorScheme.tertiary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.labelSmall,
                 )
                 else -> Text(
@@ -6209,5 +6266,6 @@ private fun ScannedGameRow(
         if (!candidate.alreadyAdded) {
             TextButton(onClick = onChangeExe, enabled = enabled) { Text("Change") }
         }
+    }
     }
 }
