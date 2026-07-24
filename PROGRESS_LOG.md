@@ -1,5 +1,19 @@
 # Star-Compose — Progress Log
 
+## 2026-07-24 — 🗂️✅ **File Manager overhaul MERGED to main** — multi-select · real moves · archive extract · search/sort · grid + compact views
+
+> Merged from `feat/fm-multiselect`. **vc stays 49, no release cut.** User confirmed on device: multi-select and bulk ops, instant same-volume moves, merge-on-conflict, zip/7z extraction, search/sort/hidden, cancel, and the path-bar rework ("everything works great", "the path bar works great"). ⚠️ **Grid view, compact rows and the pinned free-space figure shipped in the final build and had NO device pass** — worth a look post-merge.
+>
+> **🔑 Cut was always copy-every-byte-then-delete.** No `renameTo` fast path existed, so moving a 60 GB folder *within* internal storage rewrote 60 GB the filesystem could have relinked instantly. `moveWithProgress` tries `renameTo` first — **its returning false IS the cross-filesystem signal, so it doubles as the check** — falling back to copy+delete. Only when the destination is free: renaming *onto* an existing directory doesn't merge.
+>
+> **🔑 Merge needed no new copy logic.** `copyWithProgress` already recurses into an existing directory and truncates existing files, so Overwrite and Merge resolve to the same call and differ only in wording (chosen per item type). Previously every paste auto-renamed, so dropping an updated game folder over an existing one gave `DiRT 3 (1)` beside the original.
+>
+> **🔑 Archive extract was wiring, not new capability** — `commons-compress`, `xz` and `zstd-jni` were already in the build. New `core/ArchiveExtractor.kt` (zip · 7z · tar+gz/xz/bz2/zst · bare compressors); `TarCompressorUtils` couldn't be reused (tar.xz/tar.zst only, asset/Uri-shaped). Always extracts to a **named subfolder** — a zip of 400 loose entries would otherwise carpet the folder irreversibly — and every entry goes through a **Zip Slip guard**, since an archive can carry `../../../` entries that a naive `File(dest, name)` writes outside the target. **RAR reported unsupported** rather than failing silently.
+>
+> **UI came from device screenshots, not guesswork:** the path bar ellipsised on the right, so it read `/storage/emulated/0/Winlator/Game…` — hiding the only part that says where you are. Folder name now sits in the bar; the path drops below and **elides from the LEFT** via `elidePathStart` (Compose's TextOverflow can only trim the tail). Free space is pinned right because it slid with path length. Sort keeps folders leading in **both** directions — a descending sort that buries folders isn't what "Z to A" means.
+>
+> **🐞 Self-inflicted build break worth remembering:** a global find-replace of `size(36.dp)` for the compact-row icon also rewrote `FavoriteCard`, which has no `compact` parameter → `Unresolved reference 'compact'`. **Scope find-replace to the function you mean, or verify every hit.**
+
 ## 2026-07-24 — 🗂️ **File Manager overhaul: multi-select, real moves, archive extract, search/sort** (branch `feat/fm-multiselect` `838fe876`, CI GREEN ×3, STAGED, ⬜ awaiting device test)
 
 > User asked for the lot after a survey of what the File Manager does and what it lacks. Built as one branch, one APK to test: `/sdcard/Download/bannerlator-fm-all-838fe87-standard.apk`, sha `553f3b52…` host==device. vc stays 49.
