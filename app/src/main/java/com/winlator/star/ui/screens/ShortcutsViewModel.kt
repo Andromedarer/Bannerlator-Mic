@@ -862,7 +862,7 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val shortlist = withContext(Dispatchers.IO) {
                 val repo = RemoteDriverRepository(getApplication())
-                val entries = DriverSources.ALL
+                val entries = DriverSources.allSources(getApplication())
                     .map { src -> async { repo.fetchEntries(src).getOrDefault(emptyList()) } }
                     .awaitAll()
                     .flatten()
