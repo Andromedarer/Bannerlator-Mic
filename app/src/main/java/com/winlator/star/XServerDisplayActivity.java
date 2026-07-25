@@ -2321,14 +2321,30 @@ public class XServerDisplayActivity extends AppCompatActivity {
         
         WineUtils.setJoystickRegistryKeys(container, dinputEnabled, exclusiveXInput);
 
-        if (shortcut != null)
+        String startupServices;
+        if (shortcut != null) {
             startupSelection = shortcut.getExtra("startupSelection", String.valueOf(container.getStartupSelection()));
-        else
+            startupServices = shortcut.getExtra("startupServices", container.getStartupServices());
+        }
+        else {
             startupSelection = String.valueOf(container.getStartupSelection());
+            startupServices = container.getStartupServices();
+        }
 
-        if (!startupSelection.equals(container.getExtra("startupSelection"))) {
-            WineUtils.changeServicesStatus(container, startupSelection);
-            container.putExtra("startupSelection", startupSelection);
+        // Cache signature: for the three presets it's just the selection (unchanged behaviour — the
+        // cached "startupSelection" extra keeps holding "0"/"1"/"2"). For Custom the signature also
+        // folds in the enabled-CSV, so two DIFFERENT custom sets (both selection "3") produce
+        // different signatures and a changed set actually re-applies instead of being skipped.
+        String startupSignature = startupSelection;
+        try {
+            if (Byte.parseByte(startupSelection) == Container.STARTUP_SELECTION_CUSTOM)
+                startupSignature = startupSelection + "|" + startupServices;
+        }
+        catch (NumberFormatException e) {}
+
+        if (!startupSignature.equals(container.getExtra("startupSelection"))) {
+            WineUtils.changeServicesStatus(container, startupSelection, startupServices);
+            container.putExtra("startupSelection", startupSignature);
             containerDataChanged = true;
         }
         if (containerDataChanged) container.saveData();

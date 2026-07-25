@@ -62,6 +62,7 @@ import com.winlator.star.util.InAppFilePicker
 import java.io.File
 import com.winlator.star.core.StringUtils
 import com.winlator.star.core.WineThemeManager
+import com.winlator.star.core.WineUtils
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.lazy.items
@@ -1581,6 +1582,18 @@ private fun AdvancedTab(
             onSelect = { opt -> viewModel.selectedStartupSelection = viewModel.startupSelectionEntries.indexOf(opt).coerceAtLeast(0) }
         )
 
+        // Custom per-service toggles — only shown when "Custom" (index 3) is selected.
+        if (viewModel.selectedStartupSelection == Container.STARTUP_SELECTION_CUSTOM.toInt()) {
+            StartupServicesToggleList(
+                enabled = viewModel.startupServicesEnabled,
+                onToggle = { raw, on ->
+                    viewModel.startupServicesEnabled =
+                        if (on) viewModel.startupServicesEnabled + raw
+                        else viewModel.startupServicesEnabled - raw
+                }
+            )
+        }
+
         // Processor Affinity
         SectionBox(title = stringResource(R.string.processor_affinity)) {
             Text(
@@ -1657,6 +1670,34 @@ private fun XRTab(viewModel: ContainerDetailViewModel) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared composables
 // ─────────────────────────────────────────────────────────────────────────────
+
+// Per-service on/off list for the "Custom" startup selection. Shared by the container editor and the
+// shortcut Advanced tab (both are in this package), so the service list, labels and ordering come
+// from the single WineUtils source of truth and can't drift between the two screens.
+@Composable
+internal fun StartupServicesToggleList(
+    enabled: Set<String>,
+    onToggle: (rawName: String, on: Boolean) -> Unit
+) {
+    SectionBox(title = "Custom Services") {
+        Text(
+            "Custom starts with every service off — turn on only what you need. " +
+                "Disabling Wine Bus/HID can break controllers.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(8.dp))
+        WineUtils.STARTUP_SERVICES.forEachIndexed { i, entry ->
+            val raw = WineUtils.startupServiceRawName(entry)
+            val label = WineUtils.STARTUP_SERVICE_LABELS.getOrElse(i) { raw }
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Text("$label ($raw)", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                Switch(checked = enabled.contains(raw), onCheckedChange = { onToggle(raw, it) })
+            }
+            if (i < WineUtils.STARTUP_SERVICES.lastIndex) Spacer(Modifier.height(4.dp))
+        }
+    }
+}
 
 @Composable
 internal fun SectionBox(
