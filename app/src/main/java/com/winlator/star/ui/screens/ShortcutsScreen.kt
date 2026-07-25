@@ -5762,7 +5762,10 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                             options = fgLabels,
                             selected = fgLabels[fgIdx],
                             onSelect = { frameGenEngine = fgEngines[fgLabels.indexOf(it)] },
-                            disabledOptions = if (lsfgDllAvailable) emptySet() else setOf(fgLabels[2])
+                            disabledOptions = buildSet {
+                                add(fgLabels[1])                          // bionic-fg — grayed out for now (WIP; re-enable once proven)
+                                if (!lsfgDllAvailable) add(fgLabels[2])   // lsfg-vk — needs an imported Lossless.dll
+                            }
                         )
                         if (!lsfgDllAvailable) {
                             Text(
