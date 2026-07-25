@@ -686,6 +686,315 @@ public class HudMetrics {
     }
 
     // =======================================================================
+    // Clock frequencies (best-effort, nullable)
+    // =======================================================================
+
+    /** Peak CPU core clock in MHz (max scaling_cur_freq across cores), or null when unreadable. */
+    public Integer getCpuClockMhz() {
+        int cores = Runtime.getRuntime().availableProcessors();
+        long maxKhz = 0;
+        for (int i = 0; i < cores; i++) {
+            Long cur = readLongFromLine("/sys/devices/system/cpu/cpu" + i + "/cpufreq/scaling_cur_freq");
+            if (cur != null && cur > maxKhz) maxKhz = cur;
+        }
+        if (maxKhz <= 0) return null;
+        return (int) (maxKhz / 1000L); // kHz → MHz
+    }
+
+    private List<String> gpuClockPathsCache = null;
+    private static final String[] GPU_CLOCK_PATHS = {
+        "/sys/class/kgsl/kgsl-3d0/gpuclk",             // Adreno, Hz
+        "/sys/class/kgsl/kgsl-3d0/devfreq/cur_freq",   // Adreno devfreq, Hz
+        "/sys/class/kgsl/kgsl-3d0/clock_mhz",          // some kernels, already MHz
+        "/sys/kernel/gpu/gpu_clock",                   // Mali vendor node, MHz
+        "/sys/class/devfreq/gpu/cur_freq",             // generic devfreq gpu, Hz
+    };
+
+    /** GPU clock in MHz (Adreno KGSL / devfreq / Mali nodes), or null when no source reports it. */
+    public Integer getGpuClockMhz() {
+        if (gpuClockPathsCache == null) {
+            ArrayList<String> found = new ArrayList<>();
+            for (String p : GPU_CLOCK_PATHS) if (new File(p).canRead()) found.add(p);
+            gpuClockPathsCache = found;
+        }
+        for (String p : gpuClockPathsCache) {
+            Long raw = readLongFromLine(p);
+            if (raw == null || raw <= 0) continue;
+            long mhz;
+            if (raw >= 1_000_000L) mhz = raw / 1_000_000L;      // Hz
+            else if (raw >= 10_000L) mhz = raw / 1_000L;        // kHz (defensive)
+            else mhz = raw;                                      // already MHz
+            if (mhz >= 1 && mhz <= 3000) return (int) mhz;
+        }
+        return null;
+    }
+
+    // =======================================================================
+    // VRAM (best-effort — Adreno KGSL sysfs only, Java-only, no native rebuild)
+    // =======================================================================
+    // TODO: VK_EXT_memory_budget for non-Adreno (Mali/others) — needs a native/Vulkan path, out of
+    // scope for the Java-only pass. Devices with no readable node return null and the HUD hides VRAM.
+    private List<String> vramUsedPathsCache = null;
+    private static final String[] VRAM_USED_PATHS = {
+        "/sys/class/kgsl/kgsl-3d0/gpumem_mapped",   // bytes currently mapped to the GPU
+        "/sys/class/kgsl/kgsl-3d0/page_alloc",      // bytes allocated to the KGSL page pool
+        "/sys/class/kgsl/kgsl-3d0/mapped",          // alt name on some kernels
+        "/sys/class/kgsl/kgsl-3d0/page_alloc_max",  // high-water fallback
+    };
+
+    /** Used GPU memory in bytes from Adreno KGSL sysfs, or null when this device exposes nothing readable. */
+    public Long getVramUsedBytes() {
+        if (vramUsedPathsCache == null) {
+            ArrayList<String> found = new ArrayList<>();
+            for (String p : VRAM_USED_PATHS) if (new File(p).canRead()) found.add(p);
+            vramUsedPathsCache = found;
+        }
+        for (String p : vramUsedPathsCache) {
+            Long b = sanitizeVramBytes(readLongFromLine(p));
+            if (b != null) return b;
+        }
+        return null;
+    }
+
+    private static Long sanitizeVramBytes(Long v) {
+        if (v == null) return null;
+        if (v < (1L << 20)) return null;             // < 1 MiB → idle-zero / not a byte count
+        if (v > 64L * (1L << 30)) return null;       // > 64 GiB → not bytes
+        return v;
+    }
+
+    /** Used GPU memory as "x.xGiB" (or "yMiB"), or null when no VRAM source is readable. */
+    public String getVramUsedText() {
+        Long b = getVramUsedBytes();
+        return b == null ? null : formatGiB(b);
+    }
+
+    private static String formatGiB(long bytes) {
+        double gib = bytes / (1024.0 * 1024.0 * 1024.0);
+        if (gib >= 0.1) return String.format(Locale.US, "%.1fGiB", gib);
+        return (bytes / (1024L * 1024L)) + "MiB";
+    }
+
+    // =======================================================================
+    // Single cached snapshot — read EVERYTHING once per HUD refresh
+    // =======================================================================
+
+    /**
+     * Immutable point-in-time reading of every metric the Fusion HUD draws. Collected in one pass by
+     * {@link #snapshot()} so the view never touches sysfs / BatteryManager during draw (the user's
+     * explicit ask: one collection pass, cached, so gameplay isn't strained). All numeric fields are
+     * raw (nullable when unreadable); the view formats + colours them.
+     */
+    public static final class Snapshot {
+        public final Integer cpuPercent;   // 0..100 or null
+        public final Integer gpuPercent;   // 0..100 or null
+        public final Integer cpuClockMhz;  // MHz or null
+        public final Integer gpuClockMhz;  // MHz or null
+        public final Integer cpuTempC;     // °C or null
+        public final Integer gpuTempC;     // °C or null
+        public final long ramUsedBytes;
+        public final long ramTotalBytes;
+        public final float ramPercent;     // 0..100
+        public final Long vramUsedBytes;   // bytes or null
+        public final Battery battery;      // never null
+        // ---- Mega-only extras ----
+        public final int[] perCorePercent;  // per-core 0..100, -1 unknown (never null; may be empty)
+        public final int[] perCoreClockMhz; // per-core MHz, 0 unknown (never null; may be empty)
+        public final Long swapUsedBytes;    // bytes or null (no swap)
+        public final Long swapTotalBytes;   // bytes or null
+        public final Long netDownBps;       // bytes/sec down, or null (first sample / unreadable)
+        public final Long netUpBps;         // bytes/sec up, or null
+
+        Snapshot(Integer cpuPercent, Integer gpuPercent, Integer cpuClockMhz, Integer gpuClockMhz,
+                 Integer cpuTempC, Integer gpuTempC, long ramUsedBytes, long ramTotalBytes,
+                 float ramPercent, Long vramUsedBytes, Battery battery,
+                 int[] perCorePercent, int[] perCoreClockMhz, Long swapUsedBytes, Long swapTotalBytes,
+                 Long netDownBps, Long netUpBps) {
+            this.cpuPercent = cpuPercent;
+            this.gpuPercent = gpuPercent;
+            this.cpuClockMhz = cpuClockMhz;
+            this.gpuClockMhz = gpuClockMhz;
+            this.cpuTempC = cpuTempC;
+            this.gpuTempC = gpuTempC;
+            this.ramUsedBytes = ramUsedBytes;
+            this.ramTotalBytes = ramTotalBytes;
+            this.ramPercent = ramPercent;
+            this.vramUsedBytes = vramUsedBytes;
+            this.battery = battery;
+            this.perCorePercent = perCorePercent != null ? perCorePercent : new int[0];
+            this.perCoreClockMhz = perCoreClockMhz != null ? perCoreClockMhz : new int[0];
+            this.swapUsedBytes = swapUsedBytes;
+            this.swapTotalBytes = swapTotalBytes;
+            this.netDownBps = netDownBps;
+            this.netUpBps = netUpBps;
+        }
+
+        public String ramUsedText() { return formatBytesGb(ramUsedBytes); }
+        public String ramTotalText() { return formatBytesGb(ramTotalBytes); }
+        public String vramText() { return vramUsedBytes == null ? null : formatGiB(vramUsedBytes); }
+        public String swapUsedText() { return swapUsedBytes == null ? null : formatBytesGb(swapUsedBytes); }
+        public String swapTotalText() { return swapTotalBytes == null ? null : formatBytesGb(swapTotalBytes); }
+
+        private static String formatBytesGb(long bytes) {
+            double gb = bytes / (1024.0 * 1024.0 * 1024.0);
+            if (gb >= 1.0) return String.format(Locale.US, "%.1fGiB", gb);
+            return (bytes / (1024L * 1024L)) + "MiB";
+        }
+    }
+
+    /** One collection pass over every metric. Call from the HUD's own ~1 s refresh thread, never draw. */
+    public Snapshot snapshot() {
+        Integer cpu = getCpuUsagePercent();
+        Integer gpu = getGpuUsagePercent();
+        Integer cpuClk = getCpuClockMhz();
+        Integer gpuClk = getGpuClockMhz();
+        Integer cpuTemp = getCpuTempC();
+        Integer gpuTemp = getGpuTempC();
+
+        long usedBytes = 0, totalBytes = 0;
+        float ramPct = 0f;
+        ActivityManager am = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+        if (am != null) {
+            ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo();
+            am.getMemoryInfo(mi);
+            totalBytes = Math.max(0L, mi.totalMem);
+            usedBytes = Math.max(0L, mi.totalMem - mi.availMem);
+            ramPct = totalBytes > 0 ? usedBytes * 100f / totalBytes : 0f;
+        }
+
+        Long vram = getVramUsedBytes();
+        Battery battery = collectBattery();
+
+        int[] perCorePct = readPerCorePercent();
+        int[] perCoreClk = getPerCoreClockMhz();
+        long[] swap = getSwapBytes();
+        long[] net = readNetRateBps();
+
+        return new Snapshot(cpu, gpu, cpuClk, gpuClk, cpuTemp, gpuTemp,
+            usedBytes, totalBytes, ramPct, vram, battery,
+            perCorePct, perCoreClk,
+            swap == null ? null : swap[0], swap == null ? null : swap[1],
+            net == null ? null : net[0], net == null ? null : net[1]);
+    }
+
+    // =======================================================================
+    // Mega-view extras: per-core CPU, swap, network (best-effort, nullable)
+    // =======================================================================
+
+    /** Per-core clock in MHz (each core's {@code scaling_cur_freq}); 0 for a core that can't be read. */
+    public int[] getPerCoreClockMhz() {
+        int cores = Runtime.getRuntime().availableProcessors();
+        int[] out = new int[Math.max(0, cores)];
+        for (int i = 0; i < out.length; i++) {
+            Long cur = readLongFromLine("/sys/devices/system/cpu/cpu" + i + "/cpufreq/scaling_cur_freq");
+            out[i] = (cur != null && cur > 0) ? (int) (cur / 1000L) : 0;
+        }
+        return out;
+    }
+
+    // Per-core /proc/stat deltas — one prev sample per core, seeded on the first read.
+    private long[] lastCoreTotal = null;
+    private long[] lastCoreIdle = null;
+
+    /** Per-core CPU usage 0..100 from the {@code cpuN} /proc/stat deltas; -1 for a core not yet sampled. */
+    public int[] readPerCorePercent() {
+        int cores = Runtime.getRuntime().availableProcessors();
+        int[] out = new int[Math.max(0, cores)];
+        java.util.Arrays.fill(out, -1);
+        if (lastCoreTotal == null || lastCoreTotal.length != cores) {
+            lastCoreTotal = new long[cores];
+            lastCoreIdle = new long[cores];
+            java.util.Arrays.fill(lastCoreTotal, -1L);
+        }
+        try (BufferedReader r = new BufferedReader(new FileReader("/proc/stat"))) {
+            String line;
+            while ((line = r.readLine()) != null) {
+                if (!line.startsWith("cpu")) break;      // cpu lines are first; stop at the block end
+                if (line.length() < 4 || !Character.isDigit(line.charAt(3))) continue; // skip aggregate "cpu "
+                String[] parts = line.trim().split("\\s+");
+                int core;
+                try { core = Integer.parseInt(parts[0].substring(3)); } catch (Exception e) { continue; }
+                if (core < 0 || core >= cores) continue;
+                long total = 0, idle = 0;
+                boolean ok = true;
+                for (int i = 1; i < parts.length; i++) {
+                    try {
+                        long v = Long.parseLong(parts[i]);
+                        total += v;
+                        if (i == 4) idle = v;          // idle
+                        else if (i == 5) idle += v;    // + iowait
+                    } catch (NumberFormatException e) { ok = false; break; }
+                }
+                if (!ok) continue;
+                long prevTotal = lastCoreTotal[core], prevIdle = lastCoreIdle[core];
+                lastCoreTotal[core] = total;
+                lastCoreIdle[core] = idle;
+                if (prevTotal >= 0) {
+                    long dTotal = total - prevTotal, dIdle = idle - prevIdle;
+                    if (dTotal > 0) out[core] = clampPercent((int) ((Math.max(0, dTotal - dIdle) * 100L) / dTotal));
+                }
+            }
+        } catch (Exception ignored) {}
+        return out;
+    }
+
+    /** Swap {used, total} in bytes from /proc/meminfo, or null when there is no swap. */
+    public long[] getSwapBytes() {
+        long totalKb = -1, freeKb = -1;
+        try (BufferedReader r = new BufferedReader(new FileReader("/proc/meminfo"))) {
+            String line;
+            while ((line = r.readLine()) != null && (totalKb < 0 || freeKb < 0)) {
+                if (line.startsWith("SwapTotal:")) totalKb = parseMeminfoKb(line);
+                else if (line.startsWith("SwapFree:")) freeKb = parseMeminfoKb(line);
+            }
+        } catch (Exception e) { return null; }
+        if (totalKb <= 0) return null;
+        long used = Math.max(0L, (totalKb - Math.max(0L, freeKb))) * 1024L;
+        return new long[]{used, totalKb * 1024L};
+    }
+
+    private static long parseMeminfoKb(String line) {
+        String[] parts = line.trim().split("\\s+");
+        if (parts.length < 2) return -1;
+        Long v = parseLong(parts[1]);
+        return v == null ? -1 : v;
+    }
+
+    // Net rate: cumulative rx/tx bytes + the wall-clock of the previous read → bytes/sec.
+    private long lastNetRx = -1, lastNetTx = -1, lastNetWallMs = 0;
+
+    /** Network {down, up} in bytes/sec (all interfaces except loopback), or null on the first/failed read. */
+    public long[] readNetRateBps() {
+        long rx = 0, tx = 0;
+        boolean any = false;
+        try (BufferedReader r = new BufferedReader(new FileReader("/proc/net/dev"))) {
+            String line;
+            while ((line = r.readLine()) != null) {
+                int colon = line.indexOf(':');
+                if (colon < 0) continue;
+                String iface = line.substring(0, colon).trim();
+                if (iface.equals("lo") || iface.isEmpty()) continue;
+                String[] f = line.substring(colon + 1).trim().split("\\s+");
+                if (f.length < 9) continue;
+                Long rxB = parseLong(f[0]);
+                Long txB = parseLong(f[8]);
+                if (rxB == null || txB == null) continue;
+                rx += rxB; tx += txB; any = true;
+            }
+        } catch (Exception e) { return null; }
+        if (!any) return null;
+        long now = SystemClock.elapsedRealtime();
+        long prevRx = lastNetRx, prevTx = lastNetTx, prevWall = lastNetWallMs;
+        lastNetRx = rx; lastNetTx = tx; lastNetWallMs = now;
+        if (prevRx < 0 || prevWall <= 0) return null;    // seed
+        long dt = now - prevWall;
+        if (dt <= 0) return null;
+        long down = Math.max(0L, (rx - prevRx) * 1000L / dt);
+        long up = Math.max(0L, (tx - prevTx) * 1000L / dt);
+        return new long[]{down, up};
+    }
+
+    // =======================================================================
     // Low-level helpers
     // =======================================================================
     private static int clampPercent(int v) { return v < 0 ? 0 : (v > 100 ? 100 : v); }
