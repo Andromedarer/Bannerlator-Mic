@@ -145,8 +145,12 @@ import com.winlator.star.ui.ComponentReturnBus
 import com.winlator.star.ui.LocalTopBarActions
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -3015,6 +3019,7 @@ private enum class CatalogSort { CONFIGS, NAME, DEVICES }
 // Full-catalog browser (Part A) — a catalog-first entry from the header. Lists every game in the
 // community index with search / device + store filters / sort; a tapped game opens its per-device
 // config list (user's-hardware first), and a device row starts the Phase 2 apply flow.
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun CommunityCatalogBrowser(
     vm: ShortcutsViewModel,
@@ -3055,6 +3060,11 @@ internal fun CommunityCatalogBrowser(
     var storeChipFocus by remember { mutableStateOf(storeFilter.ordinal) }
     var sortChipFocus by remember { mutableStateOf(sort.ordinal) }
     val browserFocus = remember { FocusRequester() }
+    // A on the search control hands focus to the field + pops the soft keyboard; B pulls it back down
+    // first (so the first B closes the keyboard, a second B closes/backs out of the browser).
+    val searchFocus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val imeVisible = WindowInsets.isImeVisible
     val gameListState = rememberLazyListState()
 
     LaunchedEffect(Unit) { vm.getCommunityCatalog { catalog = it; loading = false } }
@@ -3152,7 +3162,7 @@ internal fun CommunityCatalogBrowser(
                             when {
                                 drilled -> drilledPicks.getOrNull(configFocus)?.let(onPick)
                                 leftZone -> when (leftRow) {
-                                    0 -> {} // Search: text entry is touch / IME only
+                                    0 -> { searchFocus.requestFocus(); keyboard?.show() } // Search: pop the keyboard
                                     1 -> storeFilter = when (storeChipFocus) {
                                         0 -> CatalogStoreFilter.ALL
                                         1 -> CatalogStoreFilter.STEAM
@@ -3169,9 +3179,14 @@ internal fun CommunityCatalogBrowser(
                             }
                             true
                         }
-                        // B / Back: up a level when drilled, otherwise close the browser.
+                        // B / Back: first close the keyboard if it's up; else up a level when drilled,
+                        // otherwise close the browser.
                         Key.ButtonB, Key.Back -> {
-                            if (drilled) selectedIdentity = null else onDismiss()
+                            when {
+                                imeVisible -> keyboard?.hide()
+                                drilled -> selectedIdentity = null
+                                else -> onDismiss()
+                            }
                             true
                         }
                         else -> false
@@ -3205,7 +3220,7 @@ internal fun CommunityCatalogBrowser(
                             label = { Text("Search all games") },
                             leadingIcon = { Icon(Icons.Filled.Search, null) },
                             singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().focusRequester(searchFocus),
                         )
                     }
                     // Left-pane control 1 — store filter group (Left/Right cycles the focused chip).

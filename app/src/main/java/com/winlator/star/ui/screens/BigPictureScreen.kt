@@ -31,7 +31,9 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -103,6 +105,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
@@ -1131,6 +1134,11 @@ private fun GameCommunitySheet(
     var focusCol by remember { mutableStateOf(0) }
     val curCol = focusCol.coerceIn(0, colsOf(focusRow) - 1)
     val focusRequester = remember { FocusRequester() }
+    // A on the search row hands focus to the field + pops the soft keyboard; B pulls it back down before
+    // it dismisses the sheet (so the first B closes the keyboard, a second B closes the sheet).
+    val searchFocus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val imeVisible = WindowInsets.isImeVisible
     LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
     // Keep the row in range as the list grows/shrinks (match resolves, filter toggles, search opens).
     LaunchedEffect(rowCount) { if (focusRow > rowCount - 1) focusRow = (rowCount - 1).coerceAtLeast(0) }
@@ -1158,13 +1166,14 @@ private fun GameCommunitySheet(
                             when (focusRow) {
                                 0 -> if (col == 0) shareConfig() else onImport()
                                 rowUpload -> if (!uploading) uploadConfig()
-                                rowSearch -> { /* text entry is touch / IME only */ }
+                                rowSearch -> { searchFocus.requestFocus(); keyboard?.show() }
                                 closeRow -> onDismiss()
                                 else -> cards.getOrNull(focusRow - firstCardRow)?.let { onApply(it.pick) }
                             }
                             true
                         }
-                        Key.ButtonB, Key.Back -> { onDismiss(); true }
+                        // First B closes the keyboard if it's up; otherwise it dismisses the sheet.
+                        Key.ButtonB, Key.Back -> { if (imeVisible) keyboard?.hide() else onDismiss(); true }
                         else -> false
                     }
                 },
@@ -1220,7 +1229,7 @@ private fun GameCommunitySheet(
                     label = { Text("Search all games") },
                     leadingIcon = { Icon(Icons.Filled.Search, null) },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().focusRequester(searchFocus),
                 )
             }
             Spacer(Modifier.height(10.dp))
