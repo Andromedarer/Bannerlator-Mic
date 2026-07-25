@@ -885,7 +885,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             state.setIsMouseDisabled(isMouseDisabled);
             touchpadView.setMouseEnabled(!isMouseDisabled);
         };
-        String fpsCfg = container != null ? container.getFPSCounterConfig() : Container.DEFAULT_FPS_COUNTER_CONFIG;
+        String fpsCfg = resolvedFPSCounterConfig();
         state.setFpsConfig(fpsCfg);
         state.onFpsConfigApply = (newConfig) -> {
             if (newConfig == null) return;
@@ -930,10 +930,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     }
                 }
             });
-            if (container != null) {
-                container.setFPSCounterConfig(newConfig);
-                container.saveData();
-            }
+            persistFPSCounterConfig(newConfig);
         };
 
         if (inputControlsView != null) inputControlsView.setVisualStyle(VisualStyle.GAMEHUB);
@@ -2870,10 +2867,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // The early seed in setupUI runs before `container` is assigned, so it defaults
         // to classic; without this the drawer shows classic toggles even when the
         // container (and the live overlay below) are configured for the GameHub HUD.
-        if (container != null) XServerDrawerState.INSTANCE.setFpsConfig(container.getFPSCounterConfig());
+        if (container != null) XServerDrawerState.INSTANCE.setFpsConfig(resolvedFPSCounterConfig());
 
         if (container != null && container.isShowFPS()) {
-            String fpsConfigString = container.getFPSCounterConfig();
+            String fpsConfigString = resolvedFPSCounterConfig();
             com.winlator.star.core.KeyValueSet fpsConfig = new com.winlator.star.core.KeyValueSet(fpsConfigString);
             fpsHudHorizontal = fpsConfig.get("hudMode", "vertical").equals("horizontal");
             String hudStyle = fpsConfig.get("hudStyle", "classic");
@@ -3271,21 +3268,30 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // Per-container rumble mode/intensity: Container is the source of truth (persists across
             // sessions/editor); this is called AFTER `container` is assigned (setupUI, not onCreate),
             // so it's safe to read here — mirrors the ReShade/lsfg seed-after-container pattern.
-            int vibMode = container != null ? container.getVibrationMode() : Container.VIBRATION_MODE_DEFAULT;
-            int vibIntensity = container != null ? container.getVibrationIntensity() : Container.VIBRATION_INTENSITY_DEFAULT;
+            // Resolve per-game override (shortcut extra, e.g. an imported community config) else the
+            // container value; write live edits back to the same owner (shortcut only when it already
+            // owns the extra, else container — so per-container behavior is untouched otherwise).
+            int vibMode = resolvedVibrationMode();
+            int vibIntensity = resolvedVibrationIntensity();
             winHandler.setVibrationTuning(vibMode, vibIntensity);
             ds.setVibrationMode(vibMode);
             ds.setVibrationIntensity(vibIntensity);
             ds.onVibrationModeChanged = (mode) -> {
                 winHandler.setVibrationTuning(mode, winHandler.getVibrationIntensity());
-                if (container != null) {
+                if (shortcut != null && shortcut.hasExtra("vibrationMode")) {
+                    shortcut.putExtra("vibrationMode", String.valueOf(mode));
+                    shortcut.saveData();
+                } else if (container != null) {
                     container.setVibrationMode(mode);
                     container.saveData();
                 }
             };
             ds.onVibrationIntensityChanged = (pct) -> {
                 winHandler.setVibrationTuning(winHandler.getVibrationMode(), pct);
-                if (container != null) {
+                if (shortcut != null && shortcut.hasExtra("vibrationIntensity")) {
+                    shortcut.putExtra("vibrationIntensity", String.valueOf(pct));
+                    shortcut.saveData();
+                } else if (container != null) {
                     container.setVibrationIntensity(pct);
                     container.saveData();
                 }
@@ -4638,6 +4644,57 @@ return true;
         return shortcut != null ? shortcut.getExtra("frameGenEngine", container.getFrameGenEngine()) : container.getFrameGenEngine();
     }
 
+    // HUD config (fpsCounterConfig KeyValueSet) resolution. Container-scoped by default, but a shortcut
+    // may OWN it — e.g. a community config imported onto the shortcut writes the whole blob as an extra.
+    // When the shortcut carries the extra we honor it at launch AND route live in-game drawer edits back
+    // to the SAME owner (persistFPSCounterConfig), so an imported HUD theme applies and tweaks to it
+    // don't drift onto the container. The master FPS on/off (container.isShowFPS) stays container-scoped
+    // and still gates whether any HUD is built — importing a config themes the HUD, it does not force it on.
+    private boolean shortcutOwnsFpsConfig() {
+        return shortcut != null && shortcut.hasExtra("fpsCounterConfig");
+    }
+
+    private String resolvedFPSCounterConfig() {
+        if (shortcutOwnsFpsConfig()) return shortcut.getExtra("fpsCounterConfig");
+        return container != null ? container.getFPSCounterConfig() : Container.DEFAULT_FPS_COUNTER_CONFIG;
+    }
+
+    // Write a HUD config change to whichever owner the launch resolver reads from: the shortcut when it
+    // owns the blob (import), else the container (unchanged legacy behavior). Keeps read/write symmetric.
+    private void persistFPSCounterConfig(String cfg) {
+        if (shortcutOwnsFpsConfig()) {
+            shortcut.putExtra("fpsCounterConfig", cfg);
+            shortcut.saveData();
+        } else if (container != null) {
+            container.setFPSCounterConfig(cfg);
+            container.saveData();
+        }
+    }
+
+    // Vibration mode/intensity resolution — same discipline as resolvedFrameGenModel: per-game override
+    // (shortcut extra) else the container value. The in-game drawer edits route back to the shortcut only
+    // when it already owns the extra (import), else the container, so existing per-container behavior is
+    // untouched for games never carrying an imported vibration override.
+    private int resolvedVibrationMode() {
+        int fallback = container != null ? container.getVibrationMode() : Container.VIBRATION_MODE_DEFAULT;
+        if (shortcut == null) return fallback;
+        try {
+            return Integer.parseInt(shortcut.getExtra("vibrationMode", String.valueOf(fallback)));
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    private int resolvedVibrationIntensity() {
+        int fallback = container != null ? container.getVibrationIntensity() : Container.VIBRATION_INTENSITY_DEFAULT;
+        if (shortcut == null) return fallback;
+        try {
+            return Integer.parseInt(shortcut.getExtra("vibrationIntensity", String.valueOf(fallback)));
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
     // bionic-fg interpolation model for this launch: per-game override else the container value.
     // Same read-only resolver discipline as resolvedFrameGenEngine — never writes back.
     private int resolvedFrameGenModel() {
@@ -5272,14 +5329,11 @@ return true;
      * Mirrors the write-back in toggleFpsHudOrientation.
      */
     private void persistHudConfigKey(String key, String value) {
-        String cfgStr = container != null ? container.getFPSCounterConfig() : Container.DEFAULT_FPS_COUNTER_CONFIG;
+        String cfgStr = resolvedFPSCounterConfig();
         com.winlator.star.core.KeyValueSet cfg = new com.winlator.star.core.KeyValueSet(cfgStr);
         cfg.put(key, value);
         String updated = cfg.toString();
-        if (container != null) {
-            container.setFPSCounterConfig(updated);
-            container.saveData();
-        }
+        persistFPSCounterConfig(updated);
         // Keep the in-game drawer's HUD pane in sync with the live change.
         com.winlator.star.ui.XServerDrawerState.INSTANCE.setFpsConfig(updated);
     }
@@ -5313,12 +5367,11 @@ return true;
                 }
             }
         }
-        // Persist the chosen orientation to the container's FPS config.
+        // Persist the chosen orientation to the FPS config (shortcut when it owns the blob, else container).
         if (container != null) {
-            com.winlator.star.core.KeyValueSet cfg = new com.winlator.star.core.KeyValueSet(container.getFPSCounterConfig());
+            com.winlator.star.core.KeyValueSet cfg = new com.winlator.star.core.KeyValueSet(resolvedFPSCounterConfig());
             cfg.put("hudMode", fpsHudHorizontal ? "horizontal" : "vertical");
-            container.setFPSCounterConfig(cfg.toString());
-            container.saveData();
+            persistFPSCounterConfig(cfg.toString());
         }
     }
 
