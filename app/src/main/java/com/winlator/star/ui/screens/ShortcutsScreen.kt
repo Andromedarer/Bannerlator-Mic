@@ -139,6 +139,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.SideEffect
 import com.winlator.star.ui.AccountAvatar
 import com.winlator.star.ui.AccountUiBus
 import com.winlator.star.ui.ComponentReturnBus
@@ -163,6 +164,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.text.AnnotatedString
@@ -4727,9 +4729,189 @@ private fun GameDetailsSheet(
 // ─────────────────────────────────────────────────────────────────────────────
 // internal (not private) so the Big Picture screen can reuse the exact same shortcut editor dialog.
 @Composable
+// ─────────────────────────────────────────────────────────────────────────────
+// Controller / D-pad navigation for the Shortcut editor. Same MANUAL, single-root model as Big
+// Picture's GameCommunitySheet / CommunityCatalogBrowser: ONE focusable root owns the keys; a per-frame
+// ORDERED id list (`dpadIds`, rebuilt in the dialog body from current visibility so conditional rows
+// survive) drives Up/Down; each control publishes its A / Left / Right actions into [actions] via a
+// SideEffect so they always reflect current state (only the FOCUSED control's action is ever invoked,
+// and every control re-publishes whenever the focus id changes because it reads it). Inert for touch:
+// [focusedId] is null until the first D-pad key, and every control keeps its own onClick/onValueChange.
+private class ControlActions(
+    val activate: () -> Unit = {},
+    val onLeft: (() -> Unit)? = null,
+    val onRight: (() -> Unit)? = null,
+)
+
+private class SettingsDpad {
+    var focusedId by mutableStateOf<String?>(null)
+    var openId by mutableStateOf<String?>(null)      // the dropdown whose menu is open (sub-nav target)
+    var menuIndex by mutableStateOf(0)
+    var imeFieldId by mutableStateOf<String?>(null)  // a text field currently holding IME focus
+    var menuOptions: List<String> = emptyList()
+    var menuOnSelect: (String) -> Unit = {}
+    val actions = HashMap<String, ControlActions>()
+    val rootFocus = FocusRequester()
+
+    fun isFocused(id: String) = focusedId == id
+    fun openMenu(id: String, options: List<String>, selected: String, onSelect: (String) -> Unit) {
+        openId = id; menuOptions = options; menuOnSelect = onSelect
+        menuIndex = options.indexOf(selected).coerceAtLeast(0)
+    }
+    fun closeMenu() { openId = null }
+}
+
+// Root key handler for the whole editor window (placed on the dialog Surface). Consumes ONLY the
+// DPAD / A / B keys and returns false otherwise, so phone touch, scrolling and the soft keyboard are
+// unaffected. [ids] is a lambda so the handler always reads the freshest ordered id list.
+private fun Modifier.settingsDpad(dp: SettingsDpad, ids: () -> List<String>, onDismiss: () -> Unit): Modifier =
+    this
+        .focusRequester(dp.rootFocus)
+        .focusable()
+        .onPreviewKeyEvent { ev ->
+            if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+            // A focused text field owns the keys (its own on-field handler does B / close-keyboard).
+            if (dp.imeFieldId != null) return@onPreviewKeyEvent false
+            // Open dropdown → its options get Up/Down + A(select) + B(close JUST the menu).
+            if (dp.openId != null) {
+                return@onPreviewKeyEvent when (ev.key) {
+                    Key.DirectionUp -> { if (dp.menuIndex > 0) dp.menuIndex--; true }
+                    Key.DirectionDown -> { if (dp.menuIndex < dp.menuOptions.lastIndex) dp.menuIndex++; true }
+                    Key.ButtonA, Key.Enter, Key.DirectionCenter -> {
+                        dp.menuOptions.getOrNull(dp.menuIndex)?.let(dp.menuOnSelect); dp.closeMenu(); true
+                    }
+                    Key.ButtonB, Key.Back -> { dp.closeMenu(); true }
+                    Key.DirectionLeft, Key.DirectionRight -> true
+                    else -> false
+                }
+            }
+            val order = ids()
+            val idx = order.indexOf(dp.focusedId)
+            when (ev.key) {
+                Key.DirectionUp -> { dp.focusedId = if (idx <= 0) order.firstOrNull() else order[idx - 1]; true }
+                Key.DirectionDown -> { dp.focusedId = when { idx < 0 -> order.firstOrNull(); idx < order.lastIndex -> order[idx + 1]; else -> order.getOrNull(idx) }; true }
+                Key.DirectionLeft -> { dp.focusedId?.takeIf { it in order }?.let { dp.actions[it]?.onLeft?.invoke() }; true }
+                Key.DirectionRight -> { dp.focusedId?.takeIf { it in order }?.let { dp.actions[it]?.onRight?.invoke() }; true }
+                Key.ButtonA, Key.Enter, Key.DirectionCenter -> { dp.focusedId?.takeIf { it in order }?.let { dp.actions[it]?.activate?.invoke() }; true }
+                Key.ButtonB, Key.Back -> { onDismiss(); true }
+                else -> false
+            }
+        }
+
+// ── Per-control wrappers. Each publishes its action(s) via SideEffect and renders with the focus
+// highlight. `onLeftId`/`onRightId` move focus to a laterally-adjacent sibling (custom W|H, gfx
+// driver|wrapper button, Cancel|OK). ──
+@Composable
+private fun DpField(
+    dp: SettingsDpad, id: String, value: String, onValueChange: (String) -> Unit, label: String,
+    modifier: Modifier = Modifier, singleLine: Boolean = false, onLeftId: String? = null, onRightId: String? = null,
+) {
+    val fr = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    SideEffect {
+        dp.actions[id] = ControlActions(
+            activate = { runCatching { fr.requestFocus() }; keyboard?.show() },
+            onLeft = onLeftId?.let { target -> { dp.focusedId = target } },
+            onRight = onRightId?.let { target -> { dp.focusedId = target } },
+        )
+    }
+    OutlinedTextField(
+        value = value, onValueChange = onValueChange, label = { Text(label) }, singleLine = singleLine,
+        modifier = modifier
+            .focusRequester(fr)
+            .onFocusChanged { st -> if (st.isFocused) dp.imeFieldId = id else if (dp.imeFieldId == id) dp.imeFieldId = null }
+            .then(if (dp.isFocused(id)) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, MaterialTheme.shapes.extraSmall) else Modifier)
+            // On-field B fallback: first B closes the keyboard and hands focus back to the root.
+            .onPreviewKeyEvent { ev ->
+                if (ev.type == KeyEventType.KeyDown && (ev.key == Key.Back || ev.key == Key.ButtonB)) {
+                    keyboard?.hide(); runCatching { dp.rootFocus.requestFocus() }; dp.imeFieldId = null; true
+                } else false
+            },
+    )
+}
+
+@Composable
+private fun DpDrop(
+    dp: SettingsDpad, id: String, label: String, options: List<String>, selected: String, onSelect: (String) -> Unit,
+    enabled: Boolean = true, disabledOptions: Set<String> = emptySet(), modifier: Modifier = Modifier,
+    onLeftId: String? = null, onRightId: String? = null,
+) {
+    SideEffect {
+        dp.actions[id] = ControlActions(
+            activate = { if (enabled) dp.openMenu(id, options, selected, onSelect) },
+            onLeft = onLeftId?.let { target -> { dp.focusedId = target } },
+            onRight = onRightId?.let { target -> { dp.focusedId = target } },
+        )
+    }
+    LabeledDropdown(
+        label = label, options = options, selectedOption = selected, onSelect = onSelect,
+        enabled = enabled, disabledOptions = disabledOptions, modifier = modifier,
+        focused = dp.isFocused(id),
+        expandedOverride = dp.openId == id,
+        onExpandedChange = { want -> if (want) dp.openMenu(id, options, selected, onSelect) else dp.closeMenu() },
+        highlightedIndex = if (dp.openId == id) dp.menuIndex else -1,
+    )
+}
+
+@Composable
+private fun DpSwitch(dp: SettingsDpad, id: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit, enabled: Boolean = true) {
+    SideEffect { dp.actions[id] = ControlActions(activate = { if (enabled) onCheckedChange(!checked) }) }
+    DpadHighlight(focused = dp.isFocused(id)) { Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled) }
+}
+
+@Composable
+private fun DpCheck(dp: SettingsDpad, id: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    SideEffect { dp.actions[id] = ControlActions(activate = { onCheckedChange(!checked) }) }
+    DpadHighlight(focused = dp.isFocused(id)) { Checkbox(checked = checked, onCheckedChange = onCheckedChange) }
+}
+
+@Composable
+private fun DpSlider(
+    dp: SettingsDpad, id: String, value: Float, onValueChange: (Float) -> Unit,
+    valueRange: ClosedFloatingPointRange<Float>, step: Float, steps: Int = 0, modifier: Modifier = Modifier,
+) {
+    SideEffect {
+        dp.actions[id] = ControlActions(
+            onLeft = { onValueChange((value - step).coerceIn(valueRange.start, valueRange.endInclusive)) },
+            onRight = { onValueChange((value + step).coerceIn(valueRange.start, valueRange.endInclusive)) },
+        )
+    }
+    DpadHighlight(focused = dp.isFocused(id)) {
+        Slider(value = value, onValueChange = onValueChange, valueRange = valueRange, steps = steps, modifier = modifier)
+    }
+}
+
+@Composable
+private fun DpButton(
+    dp: SettingsDpad, id: String, onActivate: () -> Unit, modifier: Modifier = Modifier,
+    onLeftId: String? = null, onRightId: String? = null, content: @Composable () -> Unit,
+) {
+    SideEffect {
+        dp.actions[id] = ControlActions(
+            activate = onActivate,
+            onLeft = onLeftId?.let { target -> { dp.focusedId = target } },
+            onRight = onRightId?.let { target -> { dp.focusedId = target } },
+        )
+    }
+    DpadHighlight(focused = dp.isFocused(id), modifier = modifier) { content() }
+}
+
+@Composable
+private fun DpTabs(dp: SettingsDpad, id: String, selected: Int, count: Int, onSelect: (Int) -> Unit, content: @Composable () -> Unit) {
+    SideEffect {
+        dp.actions[id] = ControlActions(
+            onLeft = { if (selected > 0) onSelect(selected - 1) },
+            onRight = { if (selected < count - 1) onSelect(selected + 1) },
+        )
+    }
+    DpadHighlight(focused = dp.isFocused(id)) { content() }
+}
+
 internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val res = context.resources
+    // Controller / D-pad state for this editor (see the SettingsDpad model above).
+    val dp = remember { SettingsDpad() }
 
     // Async-loaded state
     var isArm64EC by remember { mutableStateOf(false) }
@@ -5229,12 +5411,50 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
         }
     }
 
+    // Panel refresh rates (drives whether the "In-game refresh rate" row exists) — hoisted so the D-pad
+    // order list below can account for that conditional row.
+    val panelRates = remember {
+        com.winlator.star.widget.XServerView.getSupportedRefreshRates(
+            if (android.os.Build.VERSION.SDK_INT >= 30) context.display
+            else (context.getSystemService(android.content.Context.WINDOW_SERVICE)
+                    as android.view.WindowManager).defaultDisplay)
+    }
+
+    // The ORDERED, currently-visible focusable ids (mirrors the render conditionals below). Rebuilt each
+    // recomposition so conditional rows (custom W/H, SF/Vulkan blocks, refresh, MIDI, gyro block) drop in
+    // and out of the D-pad order automatically. Tab content is touch-navigable (see report) — the tab ROW
+    // itself is here so Left/Right switches tabs and the whole top form + OK/Cancel are controller-driven.
+    val dpadIds = buildList {
+        add("titleX"); add("name"); add("execArgs"); add("screenSize")
+        if (selectedScreenSize == "Custom") { add("customW"); add("customH") }
+        add("selectIcon"); add("gfxDriver"); add("gfxWrapper"); add("gfxConfig")
+        add("dxWrapper"); add("dxConfig"); add("renderer")
+        if (selectedRenderer == "SurfaceFlinger") add("sfCompat")
+        if (selectedRenderer == "Vulkan") { add("vkNative"); add("vkColors"); add("vkPresent") }
+        add("renderScale")
+        if (panelRates.isNotEmpty()) add("refresh")
+        add("frameGen"); add("fpsLimiter"); add("audio"); add("emulator")
+        if (midiList.isNotEmpty()) add("midi")
+        add("lcAll"); add("fullscreen"); add("autoClose")
+        add("enableXInput"); add("enableDInput"); add("exclusiveXInput"); add("disableXInput"); add("simTouch"); add("numControllers")
+        add("gyroEnabled")
+        if (gyroEnabled) {
+            add("gyroMode"); add("gyroTarget"); add("gyroActivator")
+            if (gyroActivator != Container.GYRO_ACTIVATOR_ALWAYS) add("gyroActivationMode")
+            add("gyroSensitivity"); add("gyroInvertX"); add("gyroInvertY")
+        }
+        add("tabs"); add("cancel"); add("ok")
+    }
+    // Seed the root focus so the editor receives D-pad from the first frame (it's its own Dialog window).
+    LaunchedEffect(Unit) { runCatching { dp.rootFocus.requestFocus() } }
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Surface(
-            modifier = Modifier.fillMaxWidth(0.95f).fillMaxHeight(0.92f),
+            modifier = Modifier.fillMaxWidth(0.95f).fillMaxHeight(0.92f)
+                .settingsDpad(dp, { dpadIds }, onDismiss),
             shape = MaterialTheme.shapes.large,
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 6.dp
@@ -5246,8 +5466,10 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(shortcut.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, contentDescription = "Close")
+                    DpButton(dp, "titleX", onActivate = onDismiss) {
+                        IconButton(onClick = onDismiss) {
+                            Icon(Icons.Default.Close, contentDescription = "Close")
+                        }
                     }
                 }
                 Divider(color = DividerColor)
@@ -5258,44 +5480,51 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     // Name
-                    OutlinedTextField(
+                    DpField(
+                        dp, "name",
                         value = name,
                         onValueChange = { name = it },
-                        label = { Text(stringResource(R.string.name)) },
+                        label = stringResource(R.string.name),
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
                     )
 
                     // Exec Args
-                    OutlinedTextField(
+                    DpField(
+                        dp, "execArgs",
                         value = execArgs,
                         onValueChange = { execArgs = it },
-                        label = { Text(stringResource(R.string.exec_arguments)) },
+                        label = stringResource(R.string.exec_arguments),
                         modifier = Modifier.fillMaxWidth()
                     )
 
                     // Screen size
-                    LabeledDropdown(
+                    DpDrop(
+                        dp, "screenSize",
                         label = stringResource(R.string.screen_size),
                         options = screenSizeEntries,
-                        selectedOption = selectedScreenSize,
+                        selected = selectedScreenSize,
                         onSelect = { selectedScreenSize = it }
                     )
                     if (selectedScreenSize == "Custom") {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedTextField(
+                            DpField(
+                                dp, "customW",
                                 value = customWidth,
                                 onValueChange = { customWidth = it },
-                                label = { Text("Width") },
+                                label = "Width",
                                 modifier = Modifier.weight(1f),
-                                singleLine = true
+                                singleLine = true,
+                                onRightId = "customH"
                             )
-                            OutlinedTextField(
+                            DpField(
+                                dp, "customH",
                                 value = customHeight,
                                 onValueChange = { customHeight = it },
-                                label = { Text("Height") },
+                                label = "Height",
                                 modifier = Modifier.weight(1f),
-                                singleLine = true
+                                singleLine = true,
+                                onLeftId = "customW"
                             )
                         }
                     }
@@ -5310,8 +5539,10 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                             )
                         }
                         Box(modifier = Modifier.weight(1f)) {
-                            OutlinedButton(onClick = { showIconPickMenu = true }, modifier = Modifier.fillMaxWidth()) {
-                                Text("Select Icon")
+                            DpButton(dp, "selectIcon", onActivate = { showIconPickMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                                OutlinedButton(onClick = { showIconPickMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                                    Text("Select Icon")
+                                }
                             }
                             DropdownMenu(expanded = showIconPickMenu, onDismissRequest = { showIconPickMenu = false }) {
                                 DropdownMenuItem(text = { Text("Browse files") }, onClick = {
@@ -5329,47 +5560,61 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                     // Graphics Driver + wrapper manager (cloud)
                     var showWrapperManager by remember { mutableStateOf(false) }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        LabeledDropdown(
+                        DpDrop(
+                            dp, "gfxDriver",
                             label = stringResource(R.string.graphics_driver),
                             options = graphicsDriverEntries,
-                            selectedOption = selectedGfxDriver,
+                            selected = selectedGfxDriver,
                             onSelect = { selectedGfxDriver = it },
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.weight(1f),
+                            onRightId = "gfxWrapper"
                         )
-                        IconButton(onClick = { showWrapperManager = true }) {
-                            Icon(Icons.Default.CloudDownload, contentDescription = stringResource(R.string.wrapper_manager_open))
+                        DpButton(dp, "gfxWrapper", onActivate = { showWrapperManager = true }, onLeftId = "gfxDriver") {
+                            IconButton(onClick = { showWrapperManager = true }) {
+                                Icon(Icons.Default.CloudDownload, contentDescription = stringResource(R.string.wrapper_manager_open))
+                            }
                         }
                     }
                     if (showWrapperManager) WrapperManagerDialog(onDismiss = {
                         showWrapperManager = false
                         wrapperRefreshKey++ // pick up a just-imported/deleted wrapper
                     })
-                    OutlinedButton(onClick = { showGfxConfig = true }, modifier = Modifier.fillMaxWidth()) {
-                        Text("${stringResource(R.string.graphics_driver)}: ${GraphicsDriverConfigDialog.getVersion(graphicsDriverConfig)}")
+                    DpButton(dp, "gfxConfig", onActivate = { showGfxConfig = true }, modifier = Modifier.fillMaxWidth()) {
+                        OutlinedButton(onClick = { showGfxConfig = true }, modifier = Modifier.fillMaxWidth()) {
+                            Text("${stringResource(R.string.graphics_driver)}: ${GraphicsDriverConfigDialog.getVersion(graphicsDriverConfig)}")
+                        }
                     }
 
                     // DX Wrapper
-                    LabeledDropdown(
+                    DpDrop(
+                        dp, "dxWrapper",
                         label = stringResource(R.string.dxwrapper),
                         options = dxWrapperEntries,
-                        selectedOption = selectedDxWrapper,
+                        selected = selectedDxWrapper,
                         onSelect = { selectedDxWrapper = it }
                     )
-                    OutlinedButton(
-                        onClick = {
-                            val w = StringUtils.parseIdentifier(selectedDxWrapper)
-                            if (w.contains("dxvk") || w.contains("vegas")) showDxvkConfig = true
-                            else showWineD3DConfig = true
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text("DX Wrapper Config") }
+                    DpButton(dp, "dxConfig", onActivate = {
+                        val w = StringUtils.parseIdentifier(selectedDxWrapper)
+                        if (w.contains("dxvk") || w.contains("vegas")) showDxvkConfig = true
+                        else showWineD3DConfig = true
+                    }, modifier = Modifier.fillMaxWidth()) {
+                        OutlinedButton(
+                            onClick = {
+                                val w = StringUtils.parseIdentifier(selectedDxWrapper)
+                                if (w.contains("dxvk") || w.contains("vegas")) showDxvkConfig = true
+                                else showWineD3DConfig = true
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("DX Wrapper Config") }
+                    }
 
                     // Renderer (host) — per-game override of the container's OpenGL/Vulkan choice.
                     var showSfWarning by remember { mutableStateOf(false) }
-                    LabeledDropdown(
+                    DpDrop(
+                        dp, "renderer",
                         label = stringResource(R.string.renderer),
                         options = listOf("OpenGL", "Vulkan", "SurfaceFlinger"),
-                        selectedOption = selectedRenderer,
+                        selected = selectedRenderer,
                         onSelect = {
                             // SurfaceFlinger is experimental and can reboot some devices — require opt-in.
                             if (it == "SurfaceFlinger" && selectedRenderer != "SurfaceFlinger") showSfWarning = true
@@ -5395,7 +5640,7 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            Switch(checked = sfCompatMode, onCheckedChange = { sfCompatMode = it })
+                            DpSwitch(dp, "sfCompat", checked = sfCompatMode, onCheckedChange = { sfCompatMode = it })
                         }
                     }
 
@@ -5403,16 +5648,17 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                     if (selectedRenderer == "Vulkan") {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(stringResource(R.string.renderer_native), Modifier.weight(1f))
-                            Switch(checked = vkNative, onCheckedChange = { vkNative = it })
+                            DpSwitch(dp, "vkNative", checked = vkNative, onCheckedChange = { vkNative = it })
                         }
                         // Colors = the game buffer's channel order. BGRA (default) presents as-is; RGBA
                         // swaps R/B (routes through the compositor — native can't swap). Per-game so one
                         // game can differ from the container / its siblings.
                         val vkColorOrders = listOf("BGRA", "RGBA")
-                        LabeledDropdown(
+                        DpDrop(
+                            dp, "vkColors",
                             label = stringResource(R.string.renderer_colors),
                             options = vkColorOrders,
-                            selectedOption = if (vkSwapRB) "RGBA" else "BGRA",
+                            selected = if (vkSwapRB) "RGBA" else "BGRA",
                             onSelect = { vkSwapRB = (it == "RGBA") }
                         )
                         // Present mode is ignored under Native Rendering (direct scanout), so grey it out.
@@ -5423,10 +5669,11 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                             stringResource(R.string.renderer_present_mode_immediate)
                         )
                         val vkPmIdx = vkPmValues.indexOf(vkPresentMode).coerceAtLeast(0)
-                        LabeledDropdown(
+                        DpDrop(
+                            dp, "vkPresent",
                             label = stringResource(R.string.renderer_present_mode),
                             options = vkPmLabels,
-                            selectedOption = vkPmLabels[vkPmIdx],
+                            selected = vkPmLabels[vkPmIdx],
                             onSelect = { vkPresentMode = vkPmValues[vkPmLabels.indexOf(it)] },
                             enabled = !vkNative,
                             modifier = if (vkNative) Modifier.alpha(0.5f) else Modifier
@@ -5438,10 +5685,11 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                         val renderScaleValues = listOf("1.0", "1.25", "1.5", "2.0")
                         val renderScaleLabels = listOf("Off", "1.25x", "1.5x", "2x")
                         val rsIdx = renderScaleValues.indexOf(renderScale).coerceAtLeast(0)
-                        LabeledDropdown(
+                        DpDrop(
+                            dp, "renderScale",
                             label = "Render scale (supersampling)",
                             options = renderScaleLabels,
-                            selectedOption = renderScaleLabels[rsIdx],
+                            selected = renderScaleLabels[rsIdx],
                             onSelect = { renderScale = renderScaleValues[renderScaleLabels.indexOf(it)] }
                         )
                     }
@@ -5450,12 +5698,7 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                     // Use container default (inherit) / Locked (60) / <rate> Hz / Unlimited. Drives the
                     // two underlying extras (unlock + cap) together; empty = inherit.
                     run {
-                        val panelRates = remember {
-                            com.winlator.star.widget.XServerView.getSupportedRefreshRates(
-                                if (android.os.Build.VERSION.SDK_INT >= 30) context.display
-                                else (context.getSystemService(android.content.Context.WINDOW_SERVICE)
-                                        as android.view.WindowManager).defaultDisplay)
-                        }
+                        // panelRates is hoisted to the dialog body (so the D-pad order can see this row).
                         if (panelRates.isNotEmpty()) {
                             // Only rates ABOVE 60 are cap options — "Locked (60)" already covers 60.
                             val ratesAbove60 = panelRates.filter { it > 60 }
@@ -5473,10 +5716,11 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                                 else -> maxGameRefreshRate.ifEmpty { "0" }
                             }
                             val rrIdx = rrValues.indexOf(currentValue).coerceAtLeast(0)
-                            LabeledDropdown(
+                            DpDrop(
+                                dp, "refresh",
                                 label = stringResource(R.string.in_game_refresh_rate),
                                 options = rrLabels,
-                                selectedOption = rrLabels[rrIdx],
+                                selected = rrLabels[rrIdx],
                                 onSelect = {
                                     when (val v = rrValues[rrLabels.indexOf(it)]) {
                                         ""       -> { unlockGameRefreshRate = "";  maxGameRefreshRate = "" }
@@ -5496,10 +5740,11 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                             stringResource(R.string.frame_generation_lsfg)
                         )
                         val fgIdx = fgEngines.indexOf(frameGenEngine).coerceAtLeast(0)
-                        LabeledDropdown(
+                        DpDrop(
+                            dp, "frameGen",
                             label = stringResource(R.string.frame_generation),
                             options = fgLabels,
-                            selectedOption = fgLabels[fgIdx],
+                            selected = fgLabels[fgIdx],
                             onSelect = { frameGenEngine = fgEngines[fgLabels.indexOf(it)] },
                             disabledOptions = if (lsfgDllAvailable) emptySet() else setOf(fgLabels[2])
                         )
@@ -5514,24 +5759,26 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
 
                     // FPS limiter — per-game override.
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Switch(checked = fpsLimiterEnabled, onCheckedChange = { fpsLimiterEnabled = it })
+                        DpSwitch(dp, "fpsLimiter", checked = fpsLimiterEnabled, onCheckedChange = { fpsLimiterEnabled = it })
                         Spacer(Modifier.width(8.dp))
                         Text(stringResource(R.string.fps_limiter), modifier = Modifier.weight(1f))
                     }
 
                     // Audio driver
-                    LabeledDropdown(
+                    DpDrop(
+                        dp, "audio",
                         label = stringResource(R.string.audio_driver),
                         options = audioDriverEntries,
-                        selectedOption = selectedAudioDriver,
+                        selected = selectedAudioDriver,
                         onSelect = { selectedAudioDriver = it }
                     )
 
                     // Emulator
-                    LabeledDropdown(
+                    DpDrop(
+                        dp, "emulator",
                         label = "Emulator",
                         options = emulatorEntries,
-                        selectedOption = selectedEmulator,
+                        selected = selectedEmulator,
                         onSelect = { selectedEmulator = it },
                         enabled = isArm64EC
                     )
@@ -5539,19 +5786,21 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                     // MIDI
                     if (midiList.isNotEmpty()) {
                         val midiDisplay = midiList.firstOrNull { it == selectedMidi } ?: midiList.first()
-                        LabeledDropdown(
+                        DpDrop(
+                            dp, "midi",
                             label = "MIDI Sound Font",
                             options = midiList,
-                            selectedOption = midiDisplay,
+                            selected = midiDisplay,
                             onSelect = { selectedMidi = it }
                         )
                     }
 
                     // LC_ALL
-                    OutlinedTextField(
+                    DpField(
+                        dp, "lcAll",
                         value = lcAll,
                         onValueChange = { lcAll = it },
-                        label = { Text("LC_ALL") },
+                        label = "LC_ALL",
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
                     )
@@ -5568,10 +5817,11 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                     )
                     val fsOverrideIdx = if (fullscreenModeOverride < 0) 0 else (fullscreenModeOverride + 1)
                         .coerceIn(1, fsOverrideLabels.size - 1)
-                    LabeledDropdown(
+                    DpDrop(
+                        dp, "fullscreen",
                         label = stringResource(R.string.fullscreen_mode),
                         options = fsOverrideLabels,
-                        selectedOption = fsOverrideLabels[fsOverrideIdx],
+                        selected = fsOverrideLabels[fsOverrideIdx],
                         onSelect = { sel ->
                             val idx = fsOverrideLabels.indexOf(sel)
                             fullscreenModeOverride = if (idx <= 0) -1 else idx - 1
@@ -5580,14 +5830,15 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
 
                     // Close the session when this game exits (per-game override; container default is ON)
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(checked = autoCloseOnExit, onCheckedChange = { autoCloseOnExit = it })
+                        DpCheck(dp, "autoClose", checked = autoCloseOnExit, onCheckedChange = { autoCloseOnExit = it })
                         Text("Close when game exits")
                     }
 
                     // Input section
                     SectionBox(title = "Input") {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Switch(
+                            DpSwitch(
+                                dp, "enableXInput",
                                 checked = enableXInput,
                                 onCheckedChange = { enableXInput = it },
                                 enabled = exclusiveXInput
@@ -5596,7 +5847,8 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                             Text(stringResource(R.string.enable_xinput_for_wine_game), modifier = Modifier.weight(1f))
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Switch(
+                            DpSwitch(
+                                dp, "enableDInput",
                                 checked = enableDInput,
                                 onCheckedChange = { enableDInput = it },
                                 enabled = exclusiveXInput
@@ -5605,7 +5857,8 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                             Text(stringResource(R.string.enable_dinput_for_wine_game), modifier = Modifier.weight(1f))
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Switch(
+                            DpSwitch(
+                                dp, "exclusiveXInput",
                                 checked = exclusiveXInput,
                                 onCheckedChange = { checked ->
                                     exclusiveXInput = checked
@@ -5617,24 +5870,25 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                             Text("Exclusive Input", modifier = Modifier.weight(1f))
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(checked = disabledXInput, onCheckedChange = { disabledXInput = it })
+                            DpCheck(dp, "disableXInput", checked = disabledXInput, onCheckedChange = { disabledXInput = it })
                             Text("Disable XInput")
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(checked = simTouchScreen, onCheckedChange = { simTouchScreen = it })
+                            DpCheck(dp, "simTouch", checked = simTouchScreen, onCheckedChange = { simTouchScreen = it })
                             Text("Touchscreen Mode")
                         }
-                        LabeledDropdown(
+                        DpDrop(
+                            dp, "numControllers",
                             label = "Num Controllers",
                             options = numControllersEntries,
-                            selectedOption = selectedNumControllers,
+                            selected = selectedNumControllers,
                             onSelect = { selectedNumControllers = it }
                         )
 
                         // Gyro (motion aim) per-game override. Deadzone/smoothing are deliberately
                         // absent — those stay on the container (Container Settings -> Gyro).
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Switch(checked = gyroEnabled, onCheckedChange = { gyroEnabled = it })
+                            DpSwitch(dp, "gyroEnabled", checked = gyroEnabled, onCheckedChange = { gyroEnabled = it })
                             Spacer(Modifier.width(8.dp))
                             Text(stringResource(R.string.gyro_enabled), modifier = Modifier.weight(1f))
                         }
@@ -5646,10 +5900,11 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                                 stringResource(R.string.gyro_mode_rate),
                                 stringResource(R.string.gyro_mode_orientation),
                             )
-                            LabeledDropdown(
+                            DpDrop(
+                                dp, "gyroMode",
                                 label = stringResource(R.string.gyro_mode_label),
                                 options = gyroModeLabels,
-                                selectedOption = gyroModeLabels.getOrElse(gyroMode) {
+                                selected = gyroModeLabels.getOrElse(gyroMode) {
                                     gyroModeLabels[Container.GYRO_MODE_DEFAULT]
                                 },
                                 onSelect = { opt ->
@@ -5664,10 +5919,11 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                                 stringResource(R.string.gyro_target_left_stick),
                                 stringResource(R.string.gyro_target_mouse),
                             )
-                            LabeledDropdown(
+                            DpDrop(
+                                dp, "gyroTarget",
                                 label = stringResource(R.string.gyro_target_label),
                                 options = gyroTargetLabels,
-                                selectedOption = gyroTargetLabels.getOrElse(gyroTarget) {
+                                selected = gyroTargetLabels.getOrElse(gyroTarget) {
                                     gyroTargetLabels[Container.GYRO_TARGET_DEFAULT]
                                 },
                                 onSelect = { opt ->
@@ -5683,10 +5939,11 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                                 stringResource(R.string.gyro_activator_r3),
                                 stringResource(R.string.gyro_activator_always),
                             )
-                            LabeledDropdown(
+                            DpDrop(
+                                dp, "gyroActivator",
                                 label = stringResource(R.string.gyro_activator_label),
                                 options = gyroActivatorLabels,
-                                selectedOption = gyroActivatorLabels.getOrElse(gyroActivator) {
+                                selected = gyroActivatorLabels.getOrElse(gyroActivator) {
                                     gyroActivatorLabels[Container.GYRO_ACTIVATOR_DEFAULT]
                                 },
                                 onSelect = { opt -> gyroActivator = gyroActivatorLabels.indexOf(opt).coerceAtLeast(0) }
@@ -5698,10 +5955,11 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                                     stringResource(R.string.gyro_activation_hold),
                                     stringResource(R.string.gyro_activation_toggle),
                                 )
-                                LabeledDropdown(
+                                DpDrop(
+                                    dp, "gyroActivationMode",
                                     label = stringResource(R.string.gyro_activation_mode_label),
                                     options = gyroActivationModeLabels,
-                                    selectedOption = gyroActivationModeLabels.getOrElse(gyroActivationMode) {
+                                    selected = gyroActivationModeLabels.getOrElse(gyroActivationMode) {
                                         gyroActivationModeLabels[Container.GYRO_ACTIVATION_MODE_DEFAULT]
                                     },
                                     onSelect = { opt -> gyroActivationMode = gyroActivationModeLabels.indexOf(opt).coerceAtLeast(0) }
@@ -5711,32 +5969,38 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                                 "${stringResource(R.string.gyro_sensitivity_label)}: ${"%.1f".format(gyroSensitivity)}",
                                 style = MaterialTheme.typography.bodySmall
                             )
-                            Slider(
+                            DpSlider(
+                                dp, "gyroSensitivity",
                                 value = gyroSensitivity,
                                 onValueChange = { gyroSensitivity = it },
-                                valueRange = 0.1f..10f
+                                valueRange = 0.1f..10f,
+                                step = 0.5f,
+                                modifier = Modifier.fillMaxWidth()
                             )
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Switch(checked = gyroInvertX, onCheckedChange = { gyroInvertX = it })
+                                DpSwitch(dp, "gyroInvertX", checked = gyroInvertX, onCheckedChange = { gyroInvertX = it })
                                 Spacer(Modifier.width(8.dp))
                                 Text(stringResource(R.string.gyro_invert_x), modifier = Modifier.weight(1f))
                             }
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Switch(checked = gyroInvertY, onCheckedChange = { gyroInvertY = it })
+                                DpSwitch(dp, "gyroInvertY", checked = gyroInvertY, onCheckedChange = { gyroInvertY = it })
                                 Spacer(Modifier.width(8.dp))
                                 Text(stringResource(R.string.gyro_invert_y), modifier = Modifier.weight(1f))
                             }
                         }
                     }
 
-                    // Tabs
-                    TabRow(selectedTabIndex = selectedTab) {
-                        tabTitles.forEachIndexed { index, title ->
-                            Tab(
-                                selected = selectedTab == index,
-                                onClick = { selectedTab = index },
-                                text = { Text(title) }
-                            )
+                    // Tabs — the tab ROW is one focusable node; Left/Right (while it's focused) switches
+                    // tabs. Tab CONTENT below is touch-navigable (deferred — see report).
+                    DpTabs(dp, "tabs", selected = selectedTab, count = tabTitles.size, onSelect = { selectedTab = it }) {
+                        TabRow(selectedTabIndex = selectedTab) {
+                            tabTitles.forEachIndexed { index, title ->
+                                Tab(
+                                    selected = selectedTab == index,
+                                    onClick = { selectedTab = index },
+                                    text = { Text(title) }
+                                )
+                            }
                         }
                     }
                     Spacer(Modifier.height(4.dp))
@@ -5801,9 +6065,13 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                     modifier = Modifier.fillMaxWidth().padding(8.dp),
                     horizontalArrangement = Arrangement.End
                 ) {
-                    TextButton(onClick = onDismiss) { Text(stringResource(android.R.string.cancel)) }
+                    DpButton(dp, "cancel", onActivate = onDismiss, onRightId = "ok") {
+                        TextButton(onClick = onDismiss) { Text(stringResource(android.R.string.cancel)) }
+                    }
                     Spacer(Modifier.width(8.dp))
-                    TextButton(onClick = { save(); onDismiss() }) { Text(stringResource(android.R.string.ok)) }
+                    DpButton(dp, "ok", onActivate = { save(); onDismiss() }, onLeftId = "cancel") {
+                        TextButton(onClick = { save(); onDismiss() }) { Text(stringResource(android.R.string.ok)) }
+                    }
                 }
             }
         }
