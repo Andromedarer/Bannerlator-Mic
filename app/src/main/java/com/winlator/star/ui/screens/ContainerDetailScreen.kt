@@ -1688,12 +1688,30 @@ internal fun LabeledDropdown(
     onSelect: (String) -> Unit,
     enabled: Boolean = true,
     disabledOptions: Set<String> = emptySet(),
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // ── Controller / D-pad support (all defaulted, so every existing touch caller is unaffected) ──
+    // [focused] draws the focus border on the anchor when this dropdown is the highlighted control.
+    // [expandedOverride] (when non-null) lets a parent CONTROL the open state instead of the internal
+    // one — the shortcut editor's root D-pad handler opens/closes exactly one dropdown at a time this
+    // way. [onExpandedChange] fires on every open/close request (touch tap, item pick, outside dismiss)
+    // so the parent's open-tracker stays in sync. [highlightedIndex] tints the option the D-pad cursor
+    // is on. With all four at their defaults the box behaves exactly as before (own state, no highlight).
+    focused: Boolean = false,
+    expandedOverride: Boolean? = null,
+    onExpandedChange: ((Boolean) -> Unit)? = null,
+    highlightedIndex: Int = -1,
 ) {
-    var expanded by remember { mutableStateOf(false) }
+    var internalExpanded by remember { mutableStateOf(false) }
+    val expanded = expandedOverride ?: internalExpanded
+    val setExpanded: (Boolean) -> Unit = { want ->
+        if (enabled) {
+            onExpandedChange?.invoke(want)
+            if (expandedOverride == null) internalExpanded = want
+        }
+    }
     ExposedDropdownMenuBox(
         expanded = expanded,
-        onExpandedChange = { if (enabled) expanded = it },
+        onExpandedChange = { setExpanded(it) },
         modifier = modifier
     ) {
         OutlinedTextField(
@@ -1703,11 +1721,17 @@ internal fun LabeledDropdown(
             enabled = enabled,
             label = { Text(label) },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-            modifier = Modifier.menuAnchor().fillMaxWidth()
+            modifier = Modifier
+                .menuAnchor()
+                .fillMaxWidth()
+                .then(
+                    if (focused) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, MaterialTheme.shapes.extraSmall)
+                    else Modifier
+                )
         )
         ExposedDropdownMenu(
             expanded = expanded,
-            onDismissRequest = { expanded = false },
+            onDismissRequest = { setExpanded(false) },
             modifier = Modifier.outlinedMenuCard(),
         ) {
             options.forEachIndexed { idx, opt ->
@@ -1716,7 +1740,10 @@ internal fun LabeledDropdown(
                 DropdownMenuItem(
                     text = { Text(opt) },
                     enabled = optEnabled,
-                    onClick = { if (optEnabled) { onSelect(opt); expanded = false } }
+                    onClick = { if (optEnabled) { onSelect(opt); setExpanded(false) } },
+                    modifier = if (idx == highlightedIndex)
+                        Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.18f))
+                    else Modifier,
                 )
             }
         }

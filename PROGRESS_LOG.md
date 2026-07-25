@@ -1,5 +1,15 @@
 # Star-Compose — Progress Log
 
+## 2026-07-24 — 🎮 **Big Picture: per-game Community configs opened the WRONG (all-games) menu + BP menus were touch-only** (branch `feat/bigpicture-community-configs`, vc stays 49)
+
+> Reported on the current build (installed APK sha `fb51bde2…` == run `30135691692` @ `db1b1767`, standard flavor — verified). In Big Picture, a game's **Options → "Community configs"** opened the same **all-games** `CommunityCatalogBrowser` the top-rail globe opens (`onCommunityConfigs` just did `showCommunity = true`) instead of a menu scoped to the selected game. The top globe is correct and stays.
+>
+> **Fix:** new BP-local `GameCommunitySheet(vm, shortcut, onApply, onImport, onDismiss)` — the couch-mode counterpart of the phone Games screen's per-shortcut community dialog. Auto-matches the game (`vm.matchCommunityConfigs`), lists that game's uploaded configs (`vm.fetchGameConfigs`, device-ranked + "Matches my device" filter), applies a pick via BP's shared `applyCommunityPick` (so the missing-component/driver install + re-apply flow still fires). Share (`exportShortcutConfig`→FileProvider `${applicationId}.tileprovider`), Import (new BP JSON picker → `importConfigFile`), Upload (`uploadShortcutConfig` + replace-confirm) all reuse the phone VM one-shots. **DEFERRED:** "My uploads" manager (couch-mode TODO; still reachable via globe→account). Widened 6 phone composables `private`→`internal` for reuse (`CommunityConfigEntryCard`/`CommunityCard`/`CommunityStoreBadge`/`rememberGameConfigs`/`deviceHeaderLabel`/new `DpadHighlight`); phone dialog body untouched.
+>
+> **Controller/D-pad:** every BP menu is now navigable (Up/Down move highlight, A activate, B/Back close). Sheets are their OWN windows, so the root `onPreviewKeyEvent` can't see their keys — each sheet owns a single focus target (`bpSheetDpad`/`BpSheetScaffold` for the static Game options/Tools/Power sheets; a flat index model in `GameCommunitySheet`; game-list + drilled-config traversal in `CommunityCatalogBrowser`, gated to consume only D-pad/A/B so phone touch + soft-keyboard are unaffected).
+>
+> ⚠️ **NOT yet device-verified** — the load-bearing runtime assumption is that `ModalBottomSheet`/`Dialog` content can grab window focus for controller keys via `focusRequester`+`onPreviewKeyEvent` (mitigated with a first-frame `runCatching { requestFocus() }`). Couch smoke test pending: Game options → Community configs, D-pad moves highlight + A applies.
+
 ## 2026-07-24 — 🤝 **PR #96 (@clintOnSky) triaged & closed — fixes already on `main`, contributor credited**
 
 > Downstream fix-pack from **@clintOnSky** (first-time contributor). Verified each of its 7 commits against `main`; closed the PR (not merged) since the wins already landed individually.
