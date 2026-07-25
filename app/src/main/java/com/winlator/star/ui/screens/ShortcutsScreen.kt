@@ -3043,6 +3043,17 @@ internal fun CommunityCatalogBrowser(
     var gameFocus by remember { mutableStateOf(0) }
     var configFocus by remember { mutableStateOf(0) }
     var drilledPicks by remember { mutableStateOf<List<CommunityPick>>(emptyList()) }
+    // Two-pane zone model (only meaningful at the top level, i.e. NOT drilled into a game):
+    //   RIGHT (leftZone=false) = the game list — Up/Down walk it, A drills in, LEFT crosses to controls.
+    //   LEFT  (leftZone=true)  = the controls column, walked top-to-bottom by [leftRow]:
+    //        0 = Search field · 1 = store-filter group · 2 = Matches-my-device · 3 = sort group.
+    //   For the two chip GROUPS, Left/Right cycles the focused chip; a further RIGHT past the last chip
+    //   crosses to the list. On Search / Matches (single controls) RIGHT crosses to the list directly.
+    //   [storeChipFocus]/[sortChipFocus] seed from the current selection so focus starts on it.
+    var leftZone by remember { mutableStateOf(false) }
+    var leftRow by remember { mutableStateOf(0) }
+    var storeChipFocus by remember { mutableStateOf(storeFilter.ordinal) }
+    var sortChipFocus by remember { mutableStateOf(sort.ordinal) }
     val browserFocus = remember { FocusRequester() }
     val gameListState = rememberLazyListState()
 
@@ -3101,18 +3112,61 @@ internal fun CommunityCatalogBrowser(
                     val drilled = selectedGame != null
                     when (event.key) {
                         Key.DirectionUp -> {
-                            if (drilled) { if (configFocus > 0) configFocus-- }
-                            else { if (gameFocus > 0) gameFocus-- }
+                            when {
+                                drilled -> { if (configFocus > 0) configFocus-- }
+                                leftZone -> { if (leftRow > 0) leftRow-- }
+                                else -> { if (gameFocus > 0) gameFocus-- }
+                            }
                             true
                         }
                         Key.DirectionDown -> {
-                            if (drilled) { if (configFocus < drilledPicks.lastIndex) configFocus++ }
-                            else { if (gameFocus < visible.lastIndex) gameFocus++ }
+                            when {
+                                drilled -> { if (configFocus < drilledPicks.lastIndex) configFocus++ }
+                                leftZone -> { if (leftRow < 3) leftRow++ }
+                                else -> { if (gameFocus < visible.lastIndex) gameFocus++ }
+                            }
+                            true
+                        }
+                        Key.DirectionLeft -> {
+                            when {
+                                drilled -> {} // config list is single-column; nothing to the left
+                                !leftZone -> leftZone = true // cross from the game list to the controls
+                                leftRow == 1 -> { if (storeChipFocus > 0) storeChipFocus-- }
+                                leftRow == 3 -> { if (sortChipFocus > 0) sortChipFocus-- }
+                                else -> {} // Search / Matches: already at the left edge
+                            }
+                            true
+                        }
+                        Key.DirectionRight -> {
+                            when {
+                                drilled -> {}
+                                !leftZone -> {} // already on the game list (rightmost)
+                                // Chip groups: step right through the chips, then cross to the list.
+                                leftRow == 1 -> { if (storeChipFocus < 2) storeChipFocus++ else leftZone = false }
+                                leftRow == 3 -> { if (sortChipFocus < 2) sortChipFocus++ else leftZone = false }
+                                else -> leftZone = false // Search / Matches: cross straight to the list
+                            }
                             true
                         }
                         Key.ButtonA, Key.Enter, Key.DirectionCenter -> {
-                            if (drilled) drilledPicks.getOrNull(configFocus)?.let(onPick)
-                            else visible.getOrNull(gameFocus)?.let { selectedIdentity = it.identity }
+                            when {
+                                drilled -> drilledPicks.getOrNull(configFocus)?.let(onPick)
+                                leftZone -> when (leftRow) {
+                                    0 -> {} // Search: text entry is touch / IME only
+                                    1 -> storeFilter = when (storeChipFocus) {
+                                        0 -> CatalogStoreFilter.ALL
+                                        1 -> CatalogStoreFilter.STEAM
+                                        else -> CatalogStoreFilter.TITLE
+                                    }
+                                    2 -> matchesMyDevice = !matchesMyDevice
+                                    3 -> sort = when (sortChipFocus) {
+                                        0 -> CatalogSort.CONFIGS
+                                        1 -> CatalogSort.NAME
+                                        else -> CatalogSort.DEVICES
+                                    }
+                                }
+                                else -> visible.getOrNull(gameFocus)?.let { selectedIdentity = it.identity }
+                            }
                             true
                         }
                         // B / Back: up a level when drilled, otherwise close the browser.
@@ -3143,32 +3197,50 @@ internal fun CommunityCatalogBrowser(
                         style = MaterialTheme.typography.bodySmall,
                         color = OnSurfaceVariant,
                     )
-                    OutlinedTextField(
-                        value = query,
-                        onValueChange = { query = it },
-                        label = { Text("Search all games") },
-                        leadingIcon = { Icon(Icons.Filled.Search, null) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    // Store filter + "matches my device".
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        FilterChip(selected = storeFilter == CatalogStoreFilter.ALL, onClick = { storeFilter = CatalogStoreFilter.ALL }, label = { Text("All") })
-                        FilterChip(selected = storeFilter == CatalogStoreFilter.STEAM, onClick = { storeFilter = CatalogStoreFilter.STEAM }, label = { Text("Steam") })
-                        FilterChip(selected = storeFilter == CatalogStoreFilter.TITLE, onClick = { storeFilter = CatalogStoreFilter.TITLE }, label = { Text("Title") })
+                    // Left-pane control 0 — Search (D-pad highlight-reachable; text entry stays touch/IME).
+                    DpadHighlight(focused = leftZone && leftRow == 0) {
+                        OutlinedTextField(
+                            value = query,
+                            onValueChange = { query = it },
+                            label = { Text("Search all games") },
+                            leadingIcon = { Icon(Icons.Filled.Search, null) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
                     }
-                    FilterChip(
-                        selected = matchesMyDevice,
-                        onClick = { matchesMyDevice = !matchesMyDevice },
-                        label = { Text("Matches my device") },
-                        enabled = userSoc != null || userGpu != null,
-                    )
-                    // Sort.
+                    // Left-pane control 1 — store filter group (Left/Right cycles the focused chip).
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        DpadHighlight(focused = leftZone && leftRow == 1 && storeChipFocus == 0) {
+                            FilterChip(selected = storeFilter == CatalogStoreFilter.ALL, onClick = { storeFilter = CatalogStoreFilter.ALL; leftZone = true; leftRow = 1; storeChipFocus = 0 }, label = { Text("All") })
+                        }
+                        DpadHighlight(focused = leftZone && leftRow == 1 && storeChipFocus == 1) {
+                            FilterChip(selected = storeFilter == CatalogStoreFilter.STEAM, onClick = { storeFilter = CatalogStoreFilter.STEAM; leftZone = true; leftRow = 1; storeChipFocus = 1 }, label = { Text("Steam") })
+                        }
+                        DpadHighlight(focused = leftZone && leftRow == 1 && storeChipFocus == 2) {
+                            FilterChip(selected = storeFilter == CatalogStoreFilter.TITLE, onClick = { storeFilter = CatalogStoreFilter.TITLE; leftZone = true; leftRow = 1; storeChipFocus = 2 }, label = { Text("Title") })
+                        }
+                    }
+                    // Left-pane control 2 — Matches my device.
+                    DpadHighlight(focused = leftZone && leftRow == 2) {
+                        FilterChip(
+                            selected = matchesMyDevice,
+                            onClick = { matchesMyDevice = !matchesMyDevice; leftZone = true; leftRow = 2 },
+                            label = { Text("Matches my device") },
+                            enabled = userSoc != null || userGpu != null,
+                        )
+                    }
+                    // Left-pane control 3 — sort group (Left/Right cycles the focused chip).
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("Sort:", style = MaterialTheme.typography.labelMedium, color = OnSurfaceVariant)
-                        FilterChip(selected = sort == CatalogSort.CONFIGS, onClick = { sort = CatalogSort.CONFIGS }, label = { Text("Configs") })
-                        FilterChip(selected = sort == CatalogSort.NAME, onClick = { sort = CatalogSort.NAME }, label = { Text("Name") })
-                        FilterChip(selected = sort == CatalogSort.DEVICES, onClick = { sort = CatalogSort.DEVICES }, label = { Text("Devices") })
+                        DpadHighlight(focused = leftZone && leftRow == 3 && sortChipFocus == 0) {
+                            FilterChip(selected = sort == CatalogSort.CONFIGS, onClick = { sort = CatalogSort.CONFIGS; leftZone = true; leftRow = 3; sortChipFocus = 0 }, label = { Text("Configs") })
+                        }
+                        DpadHighlight(focused = leftZone && leftRow == 3 && sortChipFocus == 1) {
+                            FilterChip(selected = sort == CatalogSort.NAME, onClick = { sort = CatalogSort.NAME; leftZone = true; leftRow = 3; sortChipFocus = 1 }, label = { Text("Name") })
+                        }
+                        DpadHighlight(focused = leftZone && leftRow == 3 && sortChipFocus == 2) {
+                            FilterChip(selected = sort == CatalogSort.DEVICES, onClick = { sort = CatalogSort.DEVICES; leftZone = true; leftRow = 3; sortChipFocus = 2 }, label = { Text("Devices") })
+                        }
                     }
                     Text(
                         "${visible.size} game${if (visible.size == 1) "" else "s"}",
@@ -3195,9 +3267,11 @@ internal fun CommunityCatalogBrowser(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         itemsIndexed(visible, key = { _, g -> g.identity }) { index, g ->
-                            // The D-pad highlight border wraps the row; touch users see nothing extra.
-                            DpadHighlight(focused = index == gameFocus) {
-                                CommunityGameRow(game = g, onClick = { gameFocus = index; selectedIdentity = g.identity })
+                            // The D-pad highlight border wraps the row; touch users see nothing extra. Only
+                            // shown while the RIGHT (list) zone is active, so focus reads as being in one
+                            // place at a time. A tap also snaps the cursor back to the list.
+                            DpadHighlight(focused = !leftZone && index == gameFocus) {
+                                CommunityGameRow(game = g, onClick = { leftZone = false; gameFocus = index; selectedIdentity = g.identity })
                             }
                         }
                     }

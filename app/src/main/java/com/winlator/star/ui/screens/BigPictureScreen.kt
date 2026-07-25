@@ -1112,19 +1112,28 @@ private fun GameCommunitySheet(
         )
     }
 
-    // Flat D-pad index space: [0]=Share [1]=Import [2]=Upload [3]=Search field, then one index per config
-    // card, then Close last. The search field is highlightable but text entry stays touch/IME (A is a
-    // no-op there), so D-pad can skip straight past it to the list.
-    val actionCount = 3
-    val searchIndex = actionCount
-    val firstCardIndex = actionCount + 1
-    val closeIndex = firstCardIndex + cards.size
-    val total = closeIndex + 1
-    var focusIndex by remember { mutableStateOf(0) }
+    // 2D D-pad model — the sheet is an ordered list of ROWS; a row has 1 or 2 columns:
+    //   row 0        = [Share, Import]          (2 cols)
+    //   row 1        = [Upload to community]     (1 col)
+    //   row 2        = [Search field]            (1 col)   — highlight-reachable, A is a no-op (text = IME)
+    //   rows 3..N    = one config card each      (1 col)
+    //   row last     = [Close]                   (1 col)
+    // Up/Down move rows (clamped); Left/Right move columns WITHIN a row (no-op on 1-col rows). focusCol is
+    // the DESIRED column and is clamped per-row on read, which gives the "remember last column" nicety for
+    // free (drop to Upload from Import, come back up, and you land on Import again).
+    val rowUpload = 1
+    val rowSearch = 2
+    val firstCardRow = 3
+    val closeRow = firstCardRow + cards.size
+    val rowCount = closeRow + 1
+    val colsOf: (Int) -> Int = { r -> if (r == 0) 2 else 1 }
+    var focusRow by remember { mutableStateOf(0) }
+    var focusCol by remember { mutableStateOf(0) }
+    val curCol = focusCol.coerceIn(0, colsOf(focusRow) - 1)
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
-    // Keep the index in range as the list grows/shrinks (match resolves, filter toggles, search opens).
-    LaunchedEffect(total) { if (focusIndex > total - 1) focusIndex = (total - 1).coerceAtLeast(0) }
+    // Keep the row in range as the list grows/shrinks (match resolves, filter toggles, search opens).
+    LaunchedEffect(rowCount) { if (focusRow > rowCount - 1) focusRow = (rowCount - 1).coerceAtLeast(0) }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(
@@ -1138,17 +1147,20 @@ private fun GameCommunitySheet(
                 .focusable()
                 .onPreviewKeyEvent { event ->
                     if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                    // Effective column for the CURRENT row (focusCol is the remembered desire).
+                    val col = focusCol.coerceIn(0, colsOf(focusRow) - 1)
                     when (event.key) {
-                        Key.DirectionUp -> { if (focusIndex > 0) focusIndex--; true }
-                        Key.DirectionDown -> { if (focusIndex < total - 1) focusIndex++; true }
+                        Key.DirectionUp -> { if (focusRow > 0) focusRow--; true }
+                        Key.DirectionDown -> { if (focusRow < rowCount - 1) focusRow++; true }
+                        Key.DirectionLeft -> { if (col > 0) focusCol = col - 1; true }
+                        Key.DirectionRight -> { if (col < colsOf(focusRow) - 1) focusCol = col + 1; true }
                         Key.ButtonA, Key.Enter, Key.DirectionCenter -> {
-                            when (focusIndex) {
-                                0 -> shareConfig()
-                                1 -> onImport()
-                                2 -> if (!uploading) uploadConfig()
-                                searchIndex -> { /* text entry is touch / IME only */ }
-                                closeIndex -> onDismiss()
-                                else -> cards.getOrNull(focusIndex - firstCardIndex)?.let { onApply(it.pick) }
+                            when (focusRow) {
+                                0 -> if (col == 0) shareConfig() else onImport()
+                                rowUpload -> if (!uploading) uploadConfig()
+                                rowSearch -> { /* text entry is touch / IME only */ }
+                                closeRow -> onDismiss()
+                                else -> cards.getOrNull(focusRow - firstCardRow)?.let { onApply(it.pick) }
                             }
                             true
                         }
@@ -1167,14 +1179,14 @@ private fun GameCommunitySheet(
             Spacer(Modifier.height(12.dp))
             // Actions row: Share + Import; Upload full-width below.
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                DpadHighlight(focused = focusIndex == 0, modifier = Modifier.weight(1f)) {
+                DpadHighlight(focused = focusRow == 0 && curCol == 0, modifier = Modifier.weight(1f)) {
                     OutlinedButton(onClick = shareConfig, modifier = Modifier.fillMaxWidth()) {
                         Icon(Icons.Filled.Share, null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
                         Text("Share")
                     }
                 }
-                DpadHighlight(focused = focusIndex == 1, modifier = Modifier.weight(1f)) {
+                DpadHighlight(focused = focusRow == 0 && curCol == 1, modifier = Modifier.weight(1f)) {
                     OutlinedButton(onClick = onImport, modifier = Modifier.fillMaxWidth()) {
                         Icon(Icons.Filled.FileUpload, null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
@@ -1183,7 +1195,7 @@ private fun GameCommunitySheet(
                 }
             }
             Spacer(Modifier.height(8.dp))
-            DpadHighlight(focused = focusIndex == 2) {
+            DpadHighlight(focused = focusRow == rowUpload) {
                 OutlinedButton(onClick = { if (!uploading) uploadConfig() }, enabled = !uploading, modifier = Modifier.fillMaxWidth()) {
                     if (uploading) {
                         CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
@@ -1197,7 +1209,7 @@ private fun GameCommunitySheet(
                 }
             }
             Spacer(Modifier.height(12.dp))
-            DpadHighlight(focused = focusIndex == searchIndex) {
+            DpadHighlight(focused = focusRow == rowSearch) {
                 OutlinedTextField(
                     value = search,
                     onValueChange = { q ->
@@ -1271,7 +1283,7 @@ private fun GameCommunitySheet(
                         )
                     } else {
                         cards.forEachIndexed { i, c ->
-                            DpadHighlight(focused = focusIndex == firstCardIndex + i) {
+                            DpadHighlight(focused = focusRow == firstCardRow + i) {
                                 val entry = c.entry
                                 val device = c.device
                                 if (entry != null) {
@@ -1297,7 +1309,7 @@ private fun GameCommunitySheet(
                 }
             }
             Spacer(Modifier.height(8.dp))
-            DpadHighlight(focused = focusIndex == closeIndex) {
+            DpadHighlight(focused = focusRow == closeRow) {
                 OutlinedButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("Close") }
             }
         }
