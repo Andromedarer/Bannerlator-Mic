@@ -378,14 +378,18 @@ class FusionHudView(
     }
 
     /** A subtle, low-emphasis time-of-day tucked into the bottom-right of any size. Grows contentH slightly. */
-    private fun addSubtleClock(pad: Float) {
+    private fun addSubtleClock(pad: Float, centerX: Float? = null) {
         if (!showClockTime) return
         val px = sp(9.5f)
         val t = clockTimeString()
         val w = measure(t, px)
         val footerTop = contentH - pad            // reuse the bottom padding band as the footer line
         val baseline = footerTop - ascent(px)
-        glyphs.add(Glyph((contentW - pad - w).coerceAtLeast(pad), baseline, t, blend(colDim), px))
+        // Default: right-aligned footer. When [centerX] is given (the pill) the clock centres on it —
+        // placed under the FPS / slightly left of the pill's centre — clamped inside the panel.
+        val x = if (centerX != null) (centerX - w / 2f).coerceIn(pad, (contentW - pad - w).coerceAtLeast(pad))
+                else (contentW - pad - w).coerceAtLeast(pad)
+        glyphs.add(Glyph(x, baseline, t, blend(colDim), px))
         contentH = footerTop + lineH(px) + pad * 0.5f
         contentW = max(contentW, pad + w + pad)
     }
@@ -590,7 +594,7 @@ class FusionHudView(
             placeRun(pad + leftW + midGap, sy - ascent(stkPx), l)
             sy += stkH + stkLineGap
         }
-        addSubtleClock(pad)
+        addSubtleClock(pad, pad + leftW / 2f)   // clock centred under the FPS (left of the pill centre)
         // Capsule border captured AFTER the footer clock so the pill encloses it too.
         pillBorder = RectF(0f, 0f, contentW, contentH)
     }
