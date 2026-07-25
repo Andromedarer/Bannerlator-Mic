@@ -2720,11 +2720,16 @@ internal fun FpsCounterConfigDialog(
     val gameNative = hudStyle == "gamenative"
     val fusion = hudStyle == "fusion"
     val rich = gameHub || gameNative || fusion   // opacity + FPS graph + GPU model + color/outline
-    // Fusion size mode (Full/Tiles/Pill/Minimal); also live-cycled by tapping the Fusion HUD in-game.
-    val fusionSizes = listOf("full", "tiles", "pill", "minimal")
+    // Fusion size mode (Full/Tiles/Pill/Minimal/Mega); also live-cycled by tapping the Fusion HUD in-game.
+    val fusionSizes = listOf("full", "tiles", "pill", "minimal", "mega")
     var fusionSize by remember { mutableStateOf(cfg.getOrDefault("hudSize", "full")) }
+    // The chips this Fusion size actually renders (single source of truth in FusionSize) — used below to
+    // show only the relevant metric chips for the selected view/size.
+    val fusionChips = com.winlator.star.widget.fusionhud.FusionSize.from(fusionSize).supportedChips()
     // GPU model defaults ON for Fusion (its spec), OFF for the others — matching each view's default.
     val gpuModelDefault = if (cfg.getOrDefault("hudStyle", "classic") == "fusion") "1" else "0"
+    // Clock defaults ON for Fusion (subtle corner readout), OFF elsewhere.
+    val clockDefault = if (cfg.getOrDefault("hudStyle", "classic") == "fusion") "1" else "0"
 
     // Unified metric toggles (emitted under both classic + gamehub key names so either HUD honors them).
     var showFPS      by remember { mutableStateOf(bool("showFPS", "showFPS", "1")) }
@@ -2741,7 +2746,7 @@ internal fun FpsCounterConfigDialog(
     var showGpuTemp  by remember { mutableStateOf(bool("showGpuTemp", "showGpuTemp", "0")) }
     var showBattery  by remember { mutableStateOf(bool("showBattery", "showBattery", "0")) }
     var showRuntime  by remember { mutableStateOf(bool("showRuntime", "showRuntime", "0")) }
-    var showClock    by remember { mutableStateOf(bool("showClock", "showClock", "0")) }
+    var showClock    by remember { mutableStateOf(bool("showClock", "showClock", clockDefault)) }
     var showCpuGraph by remember { mutableStateOf(bool("showCPUGraph", "showCPUGraph", "0")) }
     var showGpuGraph by remember { mutableStateOf(bool("showGPUGraph", "showGPUGraph", "0")) }
     // Fusion extra metrics + global lock (defaults match Container.DEFAULT_FPS_COUNTER_CONFIG).
@@ -2749,6 +2754,15 @@ internal fun FpsCounterConfigDialog(
     var showLow001   by remember { mutableStateOf(bool("showLow001", "showLow001", "1")) }
     var fpsDecimal   by remember { mutableStateOf(bool("fpsDecimal", "fpsDecimal", "1")) }
     var hudLocked    by remember { mutableStateOf(bool("hudLocked", "hudLocked", "0")) }
+    // Fusion Mega-only metrics (defaults match Container.DEFAULT_FPS_COUNTER_CONFIG).
+    var showPerCore  by remember { mutableStateOf(bool("showPerCore", "showPerCore", "1")) }
+    var showSwap     by remember { mutableStateOf(bool("showSwap", "showSwap", "1")) }
+    var showNet      by remember { mutableStateOf(bool("showNet", "showNet", "1")) }
+    var showResolution by remember { mutableStateOf(bool("showResolution", "showResolution", "1")) }
+    var showProton   by remember { mutableStateOf(bool("showProton", "showProton", "1")) }
+    var showWrapper  by remember { mutableStateOf(bool("showWrapper", "showWrapper", "1")) }
+    var showDxVer    by remember { mutableStateOf(bool("showDxVer", "showDxVer", "1")) }
+    var showSession  by remember { mutableStateOf(bool("showSession", "showSession", "1")) }
     // Temperature display — same keys as the in-game drawer pane, so the two stay interchangeable.
     var tempUnitF  by remember { mutableStateOf(cfg.getOrDefault("tempUnit", "c").equals("f", true)) }
     var tempBands  by remember { mutableStateOf(cfg.getOrDefault("tempBands", "1") != "0") }
@@ -2777,6 +2791,14 @@ internal fun FpsCounterConfigDialog(
         "showVram=${i(showVram)}",
         "showLow001=${i(showLow001)}",
         "fpsDecimal=${i(fpsDecimal)}",
+        "showPerCore=${i(showPerCore)}",
+        "showSwap=${i(showSwap)}",
+        "showNet=${i(showNet)}",
+        "showResolution=${i(showResolution)}",
+        "showProton=${i(showProton)}",
+        "showWrapper=${i(showWrapper)}",
+        "showDxVer=${i(showDxVer)}",
+        "showSession=${i(showSession)}",
         "hudMode=$hudMode",
         "showFPS=${i(showFPS)}",
         "showFPSGraph=${i(showGraph)}",
@@ -2830,7 +2852,7 @@ internal fun FpsCounterConfigDialog(
                     when (hudStyle) {
                         "gamehub" -> "Rich overlay: skins, colored fields, live FPS graph."
                         "gamenative" -> "GameNative-style overlay: compact pill or stacked list with live graphs."
-                        "fusion" -> "Fusion overlay: one color-coded look in 4 sizes (Full/Tiles/Pill/Minimal) with percentile lows + VRAM."
+                        "fusion" -> "Fusion overlay: one color-coded look in 5 sizes (Full/Tiles/Pill/Minimal/Mega) with percentile lows, VRAM + a Mega everything-view."
                         else -> "Classic Bannerlator overlay."
                     },
                     style = MaterialTheme.typography.bodySmall
@@ -2839,7 +2861,7 @@ internal fun FpsCounterConfigDialog(
                     Spacer(Modifier.height(8.dp))
                     HudThreeStop(
                         "Size",
-                        listOf("Full", "Tiles", "Pill", "Minimal"),
+                        listOf("Full", "Tiles", "Pill", "Minimal", "Mega"),
                         fusionSizes.indexOf(fusionSize).coerceAtLeast(0)
                     ) { fusionSize = fusionSizes[it] }
                 }
@@ -2857,33 +2879,41 @@ internal fun FpsCounterConfigDialog(
                 // Build the currently-VISIBLE chips first (respecting per-style gating), then chunk
                 // into an aligned 3-wide grid — so hidden chips never leave holes. Each stays an
                 // independent toggle writing the same state as before.
+                // For Fusion, show only the chips the SELECTED SIZE draws (single source of truth in
+                // FusionSize.supportedChips()). For the other styles, keep the existing style gating.
+                // Hiding a chip is UI-only — buildConfig() still emits every key (strip-invariant).
+                fun show(label: String, styleOk: Boolean): Boolean = if (fusion) label in fusionChips else styleOk
                 val metricChips = buildList<Triple<String, Boolean, () -> Unit>> {
-                    add(Triple("FPS", showFPS) { showFPS = !showFPS })
-                    if (rich) add(Triple("FPS graph", showGraph) { showGraph = !showGraph })
-                    add(Triple("CPU", showCPU) { showCPU = !showCPU })
-                    if (gameNative) add(Triple("CPU graph", showCpuGraph) { showCpuGraph = !showCpuGraph })
-                    add(Triple("GPU", showGPU) { showGPU = !showGPU })
-                    if (gameNative) add(Triple("GPU graph", showGpuGraph) { showGpuGraph = !showGpuGraph })
-                    if (fusion) add(Triple("VRAM", showVram) { showVram = !showVram })
-                    add(Triple("RAM", showRAM) { showRAM = !showRAM })
-                    add(Triple("Power", showPower) { showPower = !showPower })
-                    add(Triple("Temp", showTemp) { showTemp = !showTemp })
-                    if (gameNative || fusion) {
-                        add(Triple("GPU temp", showGpuTemp) { showGpuTemp = !showGpuTemp })
-                        add(Triple("Battery", showBattery) { showBattery = !showBattery })
-                    }
-                    if (gameNative) {
-                        add(Triple("Runtime", showRuntime) { showRuntime = !showRuntime })
-                        add(Triple("Clock", showClock) { showClock = !showClock })
-                    }
-                    if (fusion) {
-                        add(Triple("0.01% low", showLow001) { showLow001 = !showLow001 })
-                        add(Triple("FPS .1", fpsDecimal) { fpsDecimal = !fpsDecimal })
-                    }
-                    add(Triple("Engine", showEngine) { showEngine = !showEngine })
-                    if (rich) add(Triple("GPU model", showGpuModel) { showGpuModel = !showGpuModel })
-                    if (gameHub) add(Triple("Dual battery", dualBattery) { dualBattery = !dualBattery })
-                    // Global: freeze the HUD position (long-press the HUD also toggles this in-game).
+                    if (show("FPS", true)) add(Triple("FPS", showFPS) { showFPS = !showFPS })
+                    if (show("FPS graph", rich)) add(Triple("FPS graph", showGraph) { showGraph = !showGraph })
+                    if (show("CPU", true)) add(Triple("CPU", showCPU) { showCPU = !showCPU })
+                    if (!fusion && gameNative) add(Triple("CPU graph", showCpuGraph) { showCpuGraph = !showCpuGraph })
+                    if (show("GPU", true)) add(Triple("GPU", showGPU) { showGPU = !showGPU })
+                    if (!fusion && gameNative) add(Triple("GPU graph", showGpuGraph) { showGpuGraph = !showGpuGraph })
+                    if (show("VRAM", false)) add(Triple("VRAM", showVram) { showVram = !showVram })
+                    if (show("RAM", true)) add(Triple("RAM", showRAM) { showRAM = !showRAM })
+                    if (show("Power", true)) add(Triple("Power", showPower) { showPower = !showPower })
+                    if (show("Temp", true)) add(Triple("Temp", showTemp) { showTemp = !showTemp })
+                    if (show("GPU temp", gameNative)) add(Triple("GPU temp", showGpuTemp) { showGpuTemp = !showGpuTemp })
+                    if (show("Battery", gameNative)) add(Triple("Battery", showBattery) { showBattery = !showBattery })
+                    if (!fusion && gameNative) add(Triple("Runtime", showRuntime) { showRuntime = !showRuntime })
+                    if (show("0.01% low", false)) add(Triple("0.01% low", showLow001) { showLow001 = !showLow001 })
+                    if (show("FPS .1", false)) add(Triple("FPS .1", fpsDecimal) { fpsDecimal = !fpsDecimal })
+                    // Fusion Mega-only metrics
+                    if (show("Per-core", false)) add(Triple("Per-core", showPerCore) { showPerCore = !showPerCore })
+                    if (show("Swap", false)) add(Triple("Swap", showSwap) { showSwap = !showSwap })
+                    if (show("Network", false)) add(Triple("Network", showNet) { showNet = !showNet })
+                    if (show("Resolution", false)) add(Triple("Resolution", showResolution) { showResolution = !showResolution })
+                    if (show("Proton", false)) add(Triple("Proton", showProton) { showProton = !showProton })
+                    if (show("Wrapper", false)) add(Triple("Wrapper", showWrapper) { showWrapper = !showWrapper })
+                    if (show("DX ver", false)) add(Triple("DX ver", showDxVer) { showDxVer = !showDxVer })
+                    if (show("Session", false)) add(Triple("Session", showSession) { showSession = !showSession })
+                    // Clock: gamenative's own chip, and every Fusion size (subtle corner readout)
+                    if (show("Clock", gameNative)) add(Triple("Clock", showClock) { showClock = !showClock })
+                    if (show("Engine", true)) add(Triple("Engine", showEngine) { showEngine = !showEngine })
+                    if (show("GPU model", rich)) add(Triple("GPU model", showGpuModel) { showGpuModel = !showGpuModel })
+                    if (!fusion && gameHub) add(Triple("Dual battery", dualBattery) { dualBattery = !dualBattery })
+                    // Global appearance control, shown for every style/size.
                     add(Triple("Lock in place", hudLocked) { hudLocked = !hudLocked })
                 }
                 ModeChipGrid(metricChips, perRow = 3)

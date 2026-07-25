@@ -797,10 +797,19 @@ public class HudMetrics {
         public final float ramPercent;     // 0..100
         public final Long vramUsedBytes;   // bytes or null
         public final Battery battery;      // never null
+        // ---- Mega-only extras ----
+        public final int[] perCorePercent;  // per-core 0..100, -1 unknown (never null; may be empty)
+        public final int[] perCoreClockMhz; // per-core MHz, 0 unknown (never null; may be empty)
+        public final Long swapUsedBytes;    // bytes or null (no swap)
+        public final Long swapTotalBytes;   // bytes or null
+        public final Long netDownBps;       // bytes/sec down, or null (first sample / unreadable)
+        public final Long netUpBps;         // bytes/sec up, or null
 
         Snapshot(Integer cpuPercent, Integer gpuPercent, Integer cpuClockMhz, Integer gpuClockMhz,
                  Integer cpuTempC, Integer gpuTempC, long ramUsedBytes, long ramTotalBytes,
-                 float ramPercent, Long vramUsedBytes, Battery battery) {
+                 float ramPercent, Long vramUsedBytes, Battery battery,
+                 int[] perCorePercent, int[] perCoreClockMhz, Long swapUsedBytes, Long swapTotalBytes,
+                 Long netDownBps, Long netUpBps) {
             this.cpuPercent = cpuPercent;
             this.gpuPercent = gpuPercent;
             this.cpuClockMhz = cpuClockMhz;
@@ -812,11 +821,19 @@ public class HudMetrics {
             this.ramPercent = ramPercent;
             this.vramUsedBytes = vramUsedBytes;
             this.battery = battery;
+            this.perCorePercent = perCorePercent != null ? perCorePercent : new int[0];
+            this.perCoreClockMhz = perCoreClockMhz != null ? perCoreClockMhz : new int[0];
+            this.swapUsedBytes = swapUsedBytes;
+            this.swapTotalBytes = swapTotalBytes;
+            this.netDownBps = netDownBps;
+            this.netUpBps = netUpBps;
         }
 
         public String ramUsedText() { return formatBytesGb(ramUsedBytes); }
         public String ramTotalText() { return formatBytesGb(ramTotalBytes); }
         public String vramText() { return vramUsedBytes == null ? null : formatGiB(vramUsedBytes); }
+        public String swapUsedText() { return swapUsedBytes == null ? null : formatBytesGb(swapUsedBytes); }
+        public String swapTotalText() { return swapTotalBytes == null ? null : formatBytesGb(swapTotalBytes); }
 
         private static String formatBytesGb(long bytes) {
             double gb = bytes / (1024.0 * 1024.0 * 1024.0);
@@ -847,8 +864,134 @@ public class HudMetrics {
 
         Long vram = getVramUsedBytes();
         Battery battery = collectBattery();
+
+        int[] perCorePct = readPerCorePercent();
+        int[] perCoreClk = getPerCoreClockMhz();
+        long[] swap = getSwapBytes();
+        long[] net = readNetRateBps();
+
         return new Snapshot(cpu, gpu, cpuClk, gpuClk, cpuTemp, gpuTemp,
-            usedBytes, totalBytes, ramPct, vram, battery);
+            usedBytes, totalBytes, ramPct, vram, battery,
+            perCorePct, perCoreClk,
+            swap == null ? null : swap[0], swap == null ? null : swap[1],
+            net == null ? null : net[0], net == null ? null : net[1]);
+    }
+
+    // =======================================================================
+    // Mega-view extras: per-core CPU, swap, network (best-effort, nullable)
+    // =======================================================================
+
+    /** Per-core clock in MHz (each core's {@code scaling_cur_freq}); 0 for a core that can't be read. */
+    public int[] getPerCoreClockMhz() {
+        int cores = Runtime.getRuntime().availableProcessors();
+        int[] out = new int[Math.max(0, cores)];
+        for (int i = 0; i < out.length; i++) {
+            Long cur = readLongFromLine("/sys/devices/system/cpu/cpu" + i + "/cpufreq/scaling_cur_freq");
+            out[i] = (cur != null && cur > 0) ? (int) (cur / 1000L) : 0;
+        }
+        return out;
+    }
+
+    // Per-core /proc/stat deltas — one prev sample per core, seeded on the first read.
+    private long[] lastCoreTotal = null;
+    private long[] lastCoreIdle = null;
+
+    /** Per-core CPU usage 0..100 from the {@code cpuN} /proc/stat deltas; -1 for a core not yet sampled. */
+    public int[] readPerCorePercent() {
+        int cores = Runtime.getRuntime().availableProcessors();
+        int[] out = new int[Math.max(0, cores)];
+        java.util.Arrays.fill(out, -1);
+        if (lastCoreTotal == null || lastCoreTotal.length != cores) {
+            lastCoreTotal = new long[cores];
+            lastCoreIdle = new long[cores];
+            java.util.Arrays.fill(lastCoreTotal, -1L);
+        }
+        try (BufferedReader r = new BufferedReader(new FileReader("/proc/stat"))) {
+            String line;
+            while ((line = r.readLine()) != null) {
+                if (!line.startsWith("cpu")) break;      // cpu lines are first; stop at the block end
+                if (line.length() < 4 || !Character.isDigit(line.charAt(3))) continue; // skip aggregate "cpu "
+                String[] parts = line.trim().split("\\s+");
+                int core;
+                try { core = Integer.parseInt(parts[0].substring(3)); } catch (Exception e) { continue; }
+                if (core < 0 || core >= cores) continue;
+                long total = 0, idle = 0;
+                boolean ok = true;
+                for (int i = 1; i < parts.length; i++) {
+                    try {
+                        long v = Long.parseLong(parts[i]);
+                        total += v;
+                        if (i == 4) idle = v;          // idle
+                        else if (i == 5) idle += v;    // + iowait
+                    } catch (NumberFormatException e) { ok = false; break; }
+                }
+                if (!ok) continue;
+                long prevTotal = lastCoreTotal[core], prevIdle = lastCoreIdle[core];
+                lastCoreTotal[core] = total;
+                lastCoreIdle[core] = idle;
+                if (prevTotal >= 0) {
+                    long dTotal = total - prevTotal, dIdle = idle - prevIdle;
+                    if (dTotal > 0) out[core] = clampPercent((int) ((Math.max(0, dTotal - dIdle) * 100L) / dTotal));
+                }
+            }
+        } catch (Exception ignored) {}
+        return out;
+    }
+
+    /** Swap {used, total} in bytes from /proc/meminfo, or null when there is no swap. */
+    public long[] getSwapBytes() {
+        long totalKb = -1, freeKb = -1;
+        try (BufferedReader r = new BufferedReader(new FileReader("/proc/meminfo"))) {
+            String line;
+            while ((line = r.readLine()) != null && (totalKb < 0 || freeKb < 0)) {
+                if (line.startsWith("SwapTotal:")) totalKb = parseMeminfoKb(line);
+                else if (line.startsWith("SwapFree:")) freeKb = parseMeminfoKb(line);
+            }
+        } catch (Exception e) { return null; }
+        if (totalKb <= 0) return null;
+        long used = Math.max(0L, (totalKb - Math.max(0L, freeKb))) * 1024L;
+        return new long[]{used, totalKb * 1024L};
+    }
+
+    private static long parseMeminfoKb(String line) {
+        String[] parts = line.trim().split("\\s+");
+        if (parts.length < 2) return -1;
+        Long v = parseLong(parts[1]);
+        return v == null ? -1 : v;
+    }
+
+    // Net rate: cumulative rx/tx bytes + the wall-clock of the previous read → bytes/sec.
+    private long lastNetRx = -1, lastNetTx = -1, lastNetWallMs = 0;
+
+    /** Network {down, up} in bytes/sec (all interfaces except loopback), or null on the first/failed read. */
+    public long[] readNetRateBps() {
+        long rx = 0, tx = 0;
+        boolean any = false;
+        try (BufferedReader r = new BufferedReader(new FileReader("/proc/net/dev"))) {
+            String line;
+            while ((line = r.readLine()) != null) {
+                int colon = line.indexOf(':');
+                if (colon < 0) continue;
+                String iface = line.substring(0, colon).trim();
+                if (iface.equals("lo") || iface.isEmpty()) continue;
+                String[] f = line.substring(colon + 1).trim().split("\\s+");
+                if (f.length < 9) continue;
+                Long rxB = parseLong(f[0]);
+                Long txB = parseLong(f[8]);
+                if (rxB == null || txB == null) continue;
+                rx += rxB; tx += txB; any = true;
+            }
+        } catch (Exception e) { return null; }
+        if (!any) return null;
+        long now = SystemClock.elapsedRealtime();
+        long prevRx = lastNetRx, prevTx = lastNetTx, prevWall = lastNetWallMs;
+        lastNetRx = rx; lastNetTx = tx; lastNetWallMs = now;
+        if (prevRx < 0 || prevWall <= 0) return null;    // seed
+        long dt = now - prevWall;
+        if (dt <= 0) return null;
+        long down = Math.max(0L, (rx - prevRx) * 1000L / dt);
+        long up = Math.max(0L, (tx - prevTx) * 1000L / dt);
+        return new long[]{down, up};
     }
 
     // =======================================================================

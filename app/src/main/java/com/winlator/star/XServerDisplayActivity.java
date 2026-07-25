@@ -5162,6 +5162,10 @@ return true;
         fusionHud.applyConfig(fpsConfigString);
         if (hudEngineShort != null) fusionHud.setEngineLabel(hudEngineShort);
         if (hudGpuName != null) fusionHud.setGpuModel(hudGpuName);
+        // Mega stack-layer versions: Proton/Wine, the graphics-driver wrapper package, and DX wrapper.
+        if (wineInfo != null) fusionHud.setWineVersion(wineInfo.toString());
+        fusionHud.setGraphicsWrapper(friendlyGraphicsWrapper());
+        if (dxwrapperConfig != null) fusionHud.setDxWrapper(dxwrapperConfig.get("version"), dxwrapperConfig.get("vkd3dVersion"));
         // Fusion: a tap cycles the size (persist to hudSize), long-press toggles the lock.
         fusionHud.setOnSizeCycledListener((token) -> persistHudConfigKey("hudSize", token));
         fusionHud.setOnLockChangedListener((locked) -> persistHudConfigKey("hudLocked", locked ? "1" : "0"));
@@ -5177,6 +5181,42 @@ return true;
             rootView.removeView(fusionHud);
             fusionHud = null;
         }
+    }
+
+    /**
+     * Short friendly name (+ bundled build date) for the selected graphics-driver WRAPPER package, for
+     * the Fusion Mega "Wrapper" row — the same package the graphics-driver picker names
+     * (GameNative / bcn_layer / comp / …). Name from {@code graphicsDriver}; version best-effort from
+     * the bundled-wrapper catalog ({@link com.winlator.star.contents.WrapperManager#listSlots}).
+     */
+    private String friendlyGraphicsWrapper() {
+        String gd = graphicsDriver == null ? "" : graphicsDriver;
+        if (gd.isEmpty()) return null;
+        String name;
+        String slotFile = null;
+        if (gd.startsWith("wrapper-gamenative"))      { name = "GameNative"; slotFile = "wrapper-gamenative.tzst"; }
+        else if (gd.startsWith("wrapper-compat-bcn")) { name = "comp"; }
+        else if (gd.startsWith("wrapper-bcn_layer")
+                 || gd.startsWith("leegao_bcn"))       { name = "bcn_layer"; slotFile = "leegao_bcn.tzst"; }
+        else if (gd.startsWith("wrapper-leegao"))      { name = "leegao"; slotFile = "wrapper-leegao.tzst"; }
+        else if (gd.startsWith("wrapper-legacy"))      { name = "Bionic"; slotFile = "wrapper-legacy.tzst"; }
+        else if (gd.startsWith("wrapper-original"))    { name = "Winlator"; slotFile = "wrapper-original.tzst"; }
+        else if (gd.startsWith("turnip"))             { name = "Turnip"; }
+        else if (gd.startsWith("wrapper"))            { name = "Wrapper"; slotFile = "wrapper.tzst"; }
+        else                                          { name = gd; }
+        if (slotFile != null) {
+            try {
+                for (com.winlator.star.contents.WrapperManager.WrapperSlot slot :
+                        new com.winlator.star.contents.WrapperManager(this).listSlots()) {
+                    if (slotFile.equals(slot.fileName) && slot.version != null) {
+                        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\d{6,8})").matcher(slot.version);
+                        if (m.find()) name = name + " " + m.group(1);
+                        break;
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+        return name;
     }
 
     /**

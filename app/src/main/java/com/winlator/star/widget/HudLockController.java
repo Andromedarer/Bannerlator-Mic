@@ -69,7 +69,6 @@ public class HudLockController {
     private long holdMs = HOLD_TOGGLE_MS;
     private boolean fadeShowLocked = false;
 
-    private final Paint bgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint iconFill = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint iconStroke = new Paint(Paint.ANTI_ALIAS_FLAG);
 
@@ -179,6 +178,10 @@ public class HudLockController {
     /**
      * Draw the padlock badge in the top-right of the panel if a fade is in progress. Call from the
      * host's onDraw (plain View) or dispatchDraw (ViewGroup), after the content.
+     *
+     * <p>No background box: the glyph is drawn twice — a slightly expanded, thicker semi-transparent
+     * black "halo" pass for legibility on any game frame, then the white glyph on top — so it reads as
+     * a floating icon, not an opaque tile.
      */
     public void drawBadge(Canvas canvas) {
         float a = currentAlpha();
@@ -189,47 +192,57 @@ public class HudLockController {
         float right = view.getWidth() - margin;
         float left = right - size;
         float top = margin;
-        float bottom = top + size;
-
-        // Rounded translucent backing so the glyph reads on any game frame.
-        bgPaint.setColor(Color.argb(Math.round(160 * a), 0, 0, 0));
-        canvas.drawRoundRect(left - 3f * d, top - 3f * d, right + 3f * d, bottom + 3f * d,
-            4f * d, 4f * d, bgPaint);
-
-        int glyph = withAlpha(0xFFFFFFFF, a);
-        iconFill.setColor(glyph);
-        iconStroke.setColor(glyph);
-        iconStroke.setStrokeWidth(1.7f * d);
 
         float cx = (left + right) / 2f;
+        float bottom = top + size;
         float bodyTop = top + size * 0.46f;
         float bodyLeft = left + size * 0.14f;
         float bodyRight = right - size * 0.14f;
-        // Body
-        canvas.drawRoundRect(bodyLeft, bodyTop, bodyRight, bottom, 2.4f * d, 2.4f * d, iconFill);
-        // Keyhole
-        iconFill.setColor(Color.argb(Math.round(160 * a), 0, 0, 0));
-        float kh = (bodyTop + bottom) / 2f;
-        canvas.drawCircle(cx, kh, 1.6f * d, iconFill);
-        iconFill.setColor(glyph);
-
-        // Shackle
         float r = size * 0.2f;
         float shackleTop = top + size * 0.08f;
+
+        // Pass 1: dark halo (expanded body, thicker shackle) for contrast; Pass 2: white glyph.
+        drawLock(canvas, cx, bodyTop, bodyLeft, bodyRight, bottom, r, shackleTop, d,
+            Color.argb(Math.round(150 * a), 0, 0, 0), 3.0f * d, 0.9f * d, false);
+        drawLock(canvas, cx, bodyTop, bodyLeft, bodyRight, bottom, r, shackleTop, d,
+            withAlpha(0xFFFFFFFF, a), 1.7f * d, 0f, true);
+    }
+
+    /** One padlock pass. {@code halo} inflates the body/shackle in dark; the white pass punches the keyhole. */
+    private void drawLock(Canvas canvas, float cx, float bodyTop, float bodyLeft, float bodyRight,
+                          float bottom, float r, float shackleTop, float d,
+                          int color, float strokeW, float expand, boolean punchKeyhole) {
+        iconFill.setColor(color);
+        iconStroke.setColor(color);
+        iconStroke.setStrokeWidth(strokeW);
+
+        // Body
+        canvas.drawRoundRect(bodyLeft - expand, bodyTop - expand, bodyRight + expand, bottom + expand,
+            2.4f * d, 2.4f * d, iconFill);
+        if (punchKeyhole) {
+            int prev = iconFill.getColor();
+            iconFill.setColor(Color.argb(Color.alpha(color), 0, 0, 0));
+            canvas.drawCircle(cx, (bodyTop + bottom) / 2f, 1.6f * d, iconFill);
+            iconFill.setColor(prev);
+        }
+
         RectF arc = new RectF(cx - r, shackleTop, cx + r, shackleTop + 2f * r);
-        Path p = new Path();
-        p.addArc(arc, 180f, 180f);                 // top ∩
         if (fadeShowLocked) {
-            // Closed: both legs reach the body.
+            // Closed: both legs run straight down into the body.
+            Path p = new Path();
+            p.addArc(arc, 180f, 180f);
             p.moveTo(cx - r, shackleTop + r); p.lineTo(cx - r, bodyTop);
             p.moveTo(cx + r, shackleTop + r); p.lineTo(cx + r, bodyTop);
             canvas.drawPath(p, iconStroke);
         } else {
-            // Open: hinge the whole shackle up-right off the right leg so the left side lifts away.
-            p.moveTo(cx - r, shackleTop + r); p.lineTo(cx - r, bodyTop - size * 0.05f);
-            p.moveTo(cx + r, shackleTop + r); p.lineTo(cx + r, bodyTop);
+            // Open, clearly to the LEFT: the RIGHT leg stays seated in the body; the arc + LEFT leg
+            // hinge up-and-left off the right attachment so the left leg lifts well clear of the body.
+            canvas.drawLine(cx + r, shackleTop + r, cx + r, bodyTop, iconStroke); // fixed right leg
+            Path p = new Path();
+            p.addArc(arc, 180f, 180f);
+            p.moveTo(cx - r, shackleTop + r); p.lineTo(cx - r, bodyTop); // full-length left leg
             canvas.save();
-            canvas.rotate(-26f, cx + r, bodyTop);
+            canvas.rotate(-42f, cx + r, shackleTop + r);
             canvas.drawPath(p, iconStroke);
             canvas.restore();
         }

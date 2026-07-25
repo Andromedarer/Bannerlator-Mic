@@ -7,6 +7,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
+import android.text.format.DateFormat
 import android.view.MotionEvent
 import android.view.View
 import com.winlator.star.container.Container
@@ -16,6 +17,7 @@ import com.winlator.star.widget.FpsCounter
 import com.winlator.star.widget.HudLockController
 import com.winlator.star.widget.HudMetrics
 import java.util.ArrayDeque
+import java.util.Date
 import java.util.Locale
 import java.util.function.BiConsumer
 import java.util.function.Consumer
@@ -85,9 +87,24 @@ class FusionHudView(
     private var showGraph = false
     private var showLow001 = true
     private var fpsDecimal = true
+    private var showClockTime = true   // subtle corner/footer clock, available in EVERY size
+    // Mega-only rows
+    private var showPerCore = true
+    private var showSwap = true
+    private var showNet = true
+    private var showResolution = true
+    private var showProton = true
+    private var showWrapper = true
+    private var showDxVer = true
+    private var showSession = true
 
     private var engineLabel = ""
     private var gpuModel = ""
+    // Stack-layer version strings (Mega bottom band + DX version on the engine row); fed by the host.
+    private var wineVersion = ""       // "Proton 10.0-4"
+    private var graphicsWrapper = ""   // graphics-driver wrapper package, e.g. "GameNative", "bcn_layer 20260719"
+    private var dxvkVersion = ""       // DXVK version, appended to a DXVK engine row
+    private var vkd3dVersion = ""      // VKD3D version, appended to a VKD3D engine row
 
     // ---- Live data (updated on the refresh coroutine, read on draw) --------
     private var snap: HudMetrics.Snapshot? = null
@@ -150,6 +167,11 @@ class FusionHudView(
     // ---- Public surface (symmetric with the other overlays) ---------------
     fun setEngineLabel(s: String?) { engineLabel = s ?: ""; post { rebuildAndInvalidate() } }
     fun setGpuModel(s: String?) { gpuModel = s ?: ""; post { rebuildAndInvalidate() } }
+    fun setWineVersion(s: String?) { wineVersion = s ?: ""; post { rebuildAndInvalidate() } }
+    fun setGraphicsWrapper(s: String?) { graphicsWrapper = s ?: ""; post { rebuildAndInvalidate() } }
+    fun setDxWrapper(dxvk: String?, vkd3d: String?) {
+        dxvkVersion = dxvk ?: ""; vkd3dVersion = vkd3d ?: ""; post { rebuildAndInvalidate() }
+    }
 
     /** Fusion has no orientation (tap cycles size instead); kept for a symmetric host surface. */
     fun setVertical(vertical: Boolean) { /* no-op */ }
@@ -181,6 +203,15 @@ class FusionHudView(
         showGraph = cfg.get("showFPSGraph", "0") == "1"
         showLow001 = cfg.get("showLow001", "1") == "1"
         fpsDecimal = cfg.get("fpsDecimal", "1") == "1"
+        showClockTime = cfg.get("showClock", "1") == "1"   // Fusion clock defaults ON
+        showPerCore = cfg.get("showPerCore", "1") == "1"
+        showSwap = cfg.get("showSwap", "1") == "1"
+        showNet = cfg.get("showNet", "1") == "1"
+        showResolution = cfg.get("showResolution", "1") == "1"
+        showProton = cfg.get("showProton", "1") == "1"
+        showWrapper = cfg.get("showWrapper", "1") == "1"
+        showDxVer = cfg.get("showDxVer", "1") == "1"
+        showSession = cfg.get("showSession", "1") == "1"
         tempDisplay = HudMetrics.TempDisplay.from(cfg)
         lockController.setLocked(cfg.get("hudLocked", "0") == "1")
 
@@ -312,7 +343,51 @@ class FusionHudView(
             FusionSize.TILES -> buildTiles(s)
             FusionSize.PILL -> buildPill(s)
             FusionSize.MINIMAL -> buildMinimal(s)
+            FusionSize.MEGA -> buildMega(s)
         }
+    }
+
+    // ---- Shared small-info helpers ----------------------------------------
+    private fun clockTimeString(): String = DateFormat.getTimeFormat(context).format(Date())
+
+    private fun elapsedString(): String {
+        val sec = (fpsCounter?.sessionLengthSec ?: 0f).toInt().coerceAtLeast(0)
+        val h = sec / 3600; val m = (sec % 3600) / 60; val s = sec % 60
+        return if (h > 0) String.format(Locale.US, "%d:%02d:%02d", h, m, s)
+        else String.format(Locale.US, "%02d:%02d", m, s)
+    }
+
+    /** Engine label with the matching DX-wrapper version appended (e.g. "DXVK 2.4.1"), when enabled. */
+    private fun engineLabelWithDx(appendVer: Boolean): String {
+        val base = if (showEngine && engineLabel.isNotBlank()) engineLabel else "FPS"
+        if (!appendVer) return base
+        val ver = when {
+            engineLabel.contains("VKD3D", true) -> vkd3dVersion
+            engineLabel.contains("DXVK", true) -> dxvkVersion
+            else -> ""
+        }
+        return if (ver.isNotBlank()) "$base $ver" else base
+    }
+
+    /** Resolution + refresh, e.g. "1280x720 @ 120Hz". Read from the current display (Main thread). */
+    private fun resolutionString(): String {
+        val dm = resources.displayMetrics
+        val hz = (display?.refreshRate ?: 0f)
+        val base = "${dm.widthPixels}x${dm.heightPixels}"
+        return if (hz >= 1f) "$base @ ${hz.roundToInt()}Hz" else base
+    }
+
+    /** A subtle, low-emphasis time-of-day tucked into the bottom-right of any size. Grows contentH slightly. */
+    private fun addSubtleClock(pad: Float) {
+        if (!showClockTime) return
+        val px = sp(9.5f)
+        val t = clockTimeString()
+        val w = measure(t, px)
+        val footerTop = contentH - pad            // reuse the bottom padding band as the footer line
+        val baseline = footerTop - ascent(px)
+        glyphs.add(Glyph((contentW - pad - w).coerceAtLeast(pad), baseline, t, blend(colDim), px))
+        contentH = footerTop + lineH(px) + pad * 0.5f
+        contentW = max(contentW, pad + w + pad)
     }
 
     private fun buildFull(s: HudMetrics.Snapshot) {
@@ -396,6 +471,7 @@ class FusionHudView(
 
         contentW = maxRight + pad
         contentH = y + pad
+        addSubtleClock(pad)
     }
 
     private fun buildTiles(s: HudMetrics.Snapshot) {
@@ -464,6 +540,7 @@ class FusionHudView(
         if (col != 0) y += tileH + tileGap
         contentW = pad + fullW + pad
         contentH = y + (pad - tileGap)
+        addSubtleClock(pad)
     }
 
     private fun buildPill(s: HudMetrics.Snapshot) {
@@ -504,7 +581,6 @@ class FusionHudView(
         contentW = pad + leftW + midGap + stackW + pad
         contentH = pad + innerH + pad
 
-        pillBorder = RectF(0f, 0f, contentW, contentH)
         // left big, vertically centered
         val leftBaseline = pad + (innerH - leftH) / 2f - ascent(bigPx)
         placeRun(pad, leftBaseline, left)
@@ -514,6 +590,9 @@ class FusionHudView(
             placeRun(pad + leftW + midGap, sy - ascent(stkPx), l)
             sy += stkH + stkLineGap
         }
+        addSubtleClock(pad)
+        // Capsule border captured AFTER the footer clock so the pill encloses it too.
+        pillBorder = RectF(0f, 0f, contentW, contentH)
     }
 
     private fun buildMinimal(s: HudMetrics.Snapshot) {
@@ -524,11 +603,14 @@ class FusionHudView(
         val sub = ArrayList<Span>()
         sub += Span("1% ", colDim, subPx); sub += Span(lowText(lows.low1Fps) ?: "—", colFps, subPx)
         sub += Span("  ·  0.1% ", colDim, subPx); sub += Span(lowText(lows.low01Fps) ?: "—", colFps, subPx)
+        if (showLow001) {
+            sub += Span("  ·  0.01% ", colDim, subPx); sub += Span(lowText(lows.low001Fps) ?: "—", colFps, subPx)
+        }
 
         val bigW = runWidth(big); val bigH = lineH(bigPx)
         val subW = runWidth(sub); val subH = lineH(subPx)
         val gw = sp(120f); val gh = sp(22f)
-        val inner = max(max(bigW, subW), gw)
+        val inner = max(max(bigW, subW), if (showGraph) gw else 0f)
         contentW = inner + pad * 2
         var y = pad
         // big (centered)
@@ -537,10 +619,164 @@ class FusionHudView(
         // sub (centered)
         placeRun(pad + (inner - subW) / 2f, y - ascent(subPx), sub)
         y += subH + lineGap
-        // graph (centered)
-        graphRect = RectF(pad + (inner - gw) / 2f, y, pad + (inner - gw) / 2f + gw, y + gh)
-        y += gh
+        // graph (centered) — toggled by the FPS-graph chip
+        if (showGraph) {
+            graphRect = RectF(pad + (inner - gw) / 2f, y, pad + (inner - gw) / 2f + gw, y + gh)
+            y += gh
+        }
         contentH = y + pad
+        addSubtleClock(pad)
+    }
+
+    /** Places a column of "label + value" rows; returns (bottomY, rightX). Appends glyphs. */
+    private fun layoutColumn(rows: List<Pair<Span, List<Span>>>, x: Float, y0: Float,
+                             rowPx: Float, lineGap: Float, lvGap: Float): Pair<Float, Float> {
+        if (rows.isEmpty()) return Pair(y0, x)
+        var labelCol = 0f
+        for ((lab, _) in rows) labelCol = max(labelCol, measure(lab.text, rowPx))
+        val h = lineH(rowPx); val asc = ascent(rowPx)
+        var y = y0; var right = x
+        for ((lab, vals) in rows) {
+            val baseline = y - asc
+            placeRun(x, baseline, listOf(lab))
+            val end = placeRun(x + labelCol + lvGap, baseline, vals)
+            right = max(right, end)
+            y += h + lineGap
+        }
+        return Pair(y - lineGap, right)
+    }
+
+    /** Places wrapping " · "-separated info fragments within maxWidth; returns (bottomY, rightX). */
+    private fun layoutWrap(fragments: List<List<Span>>, x: Float, y0: Float, maxWidth: Float,
+                           px: Float, lineGap: Float): Pair<Float, Float> {
+        if (fragments.isEmpty()) return Pair(y0, x)
+        val h = lineH(px); val asc = ascent(px)
+        val sepW = measure(" · ", px)
+        var cx = x; var y = y0; var right = x; var firstOnLine = true
+        for (frag in fragments) {
+            val w = runWidth(frag)
+            if (!firstOnLine && (cx + sepW + w - x) > maxWidth) { y += h + lineGap; cx = x; firstOnLine = true }
+            if (!firstOnLine) { placeRun(cx, y - asc, listOf(Span(" · ", colDim, px))); cx += sepW }
+            val end = placeRun(cx, y - asc, frag)
+            cx = end; right = max(right, end); firstOnLine = false
+        }
+        return Pair(y + h, right)
+    }
+
+    private fun buildMega(s: HudMetrics.Snapshot) {
+        val rowPx = sp(11.5f); val unitPx = rowPx * 0.62f; val bandPx = sp(9.5f)
+        val pad = sp(10f); val lineGap = sp(3.5f); val lvGap = sp(7f); val gutter = sp(16f)
+
+        // ---- LEFT column: GPU, aggregate CPU, then per-core rows ----
+        val left = ArrayList<Pair<Span, List<Span>>>()
+        if (showGpuModel && gpuModel.isNotBlank())
+            left.add(Span("GPU", colGpu, rowPx) to listOf(Span(gpuModel, colValue, rowPx)))
+        if (showGPU) {
+            val v = ArrayList<Span>()
+            v += numUnit(s.gpuPercent?.toString(), "%", rowPx, unitPx)
+            if (showGpuTemp) tempSpans(s.gpuTempC, HudMetrics.TempSensor.GPU, rowPx, unitPx)
+                .let { if (it.isNotEmpty()) { v += gap(unitPx); v += it } }
+            v += gap(unitPx); v += numUnit(s.gpuClockMhz?.toString(), "MHz", rowPx, unitPx)
+            left.add(Span("GPU", colGpu, rowPx) to v)
+        }
+        if (showCPU) {
+            val v = ArrayList<Span>()
+            v += numUnit(s.cpuPercent?.toString(), "%", rowPx, unitPx)
+            if (showCpuTemp) tempSpans(s.cpuTempC, HudMetrics.TempSensor.CPU, rowPx, unitPx)
+                .let { if (it.isNotEmpty()) { v += gap(unitPx); v += it } }
+            v += gap(unitPx); v += numUnit(s.cpuClockMhz?.toString(), "MHz", rowPx, unitPx)
+            left.add(Span("CPU", colCpu, rowPx) to v)
+        }
+        if (showPerCore) {
+            val pct = s.perCorePercent; val clk = s.perCoreClockMhz
+            val n = max(pct.size, clk.size)
+            for (i in 0 until n) {
+                val v = ArrayList<Span>()
+                v += numUnit(if (i < pct.size && pct[i] >= 0) pct[i].toString() else null, "%", rowPx, unitPx)
+                v += gap(unitPx)
+                v += numUnit(if (i < clk.size && clk[i] > 0) clk[i].toString() else null, "MHz", rowPx, unitPx)
+                left.add(Span("C$i", colCpu, rowPx) to v)
+            }
+        }
+
+        // ---- RIGHT column: VRAM, RAM, SWP, NET, BAT, engine, lows ----
+        val right = ArrayList<Pair<Span, List<Span>>>()
+        if (showVram && s.vramText() != null)
+            right.add(Span("VRAM", colVram, rowPx) to valueUnit(s.vramText()!!, rowPx, unitPx))
+        if (showRAM) {
+            val v = ArrayList<Span>()
+            v += valueUnit(s.ramUsedText(), rowPx, unitPx)
+            v += Span("/", colDim, unitPx); v += valueUnit(s.ramTotalText(), rowPx, unitPx)
+            v += gap(unitPx); v += numUnit(s.ramPercent.roundToInt().toString(), "%", rowPx, unitPx)
+            right.add(Span("RAM", colRam, rowPx) to v)
+        }
+        if (showSwap && s.swapUsedText() != null) {
+            val v = ArrayList<Span>()
+            v += valueUnit(s.swapUsedText()!!, rowPx, unitPx)
+            s.swapTotalText()?.let { v += Span("/", colDim, unitPx); v += valueUnit(it, rowPx, unitPx) }
+            right.add(Span("SWP", colRam, rowPx) to v)
+        }
+        if (showNet && s.netDownBps != null) {
+            val d = (s.netDownBps ?: 0L) / 1024L
+            val u = (s.netUpBps ?: 0L) / 1024L
+            val v = ArrayList<Span>()
+            v += Span("↓", colDim, unitPx); v += Span(d.toString(), colValue, rowPx)
+            v += Span(" ↑", colDim, unitPx); v += Span(u.toString(), colValue, rowPx)
+            v += Span("KB/s", colDim, unitPx)
+            right.add(Span("NET", colFps, rowPx) to v)
+        }
+        if (showBattery || showPower || showBatteryTemp) {
+            val v = ArrayList<Span>(); var any = false
+            if (showBattery && s.battery.percent != null) { v += numUnit(s.battery.percent.toString(), "%", rowPx, unitPx); any = true }
+            if (showBatteryTemp) tempSpans(s.battery.tempC, HudMetrics.TempSensor.BATTERY, rowPx, unitPx)
+                .let { if (it.isNotEmpty()) { if (any) v += gap(unitPx); v += it; any = true } }
+            if (showPower && s.battery.watts > 0f) { if (any) v += gap(unitPx); v += numUnit(fmt1(s.battery.watts), "W", rowPx, unitPx); any = true }
+            if (any) right.add(Span("BAT", colBat, rowPx) to v)
+        }
+        if (showFPS) {
+            val v = ArrayList<Span>()
+            v += numUnit(fpsText(fpsNow), "FPS", rowPx, unitPx)
+            v += gap(unitPx); v += numUnit(fmt1(1000f / max(fpsNow, 1f)), "ms", rowPx, unitPx)
+            right.add(Span(engineLabelWithDx(showDxVer), colFps, rowPx) to v)
+            right.add(Span("AVG", colLo, rowPx) to numUnit(fmt1(fpsAvg), "FPS", rowPx, unitPx))
+            right.add(Span("1%", colLo, rowPx) to numUnit(lowText(lows.low1Fps), "FPS", rowPx, unitPx))
+            right.add(Span("0.1%", colLo, rowPx) to numUnit(lowText(lows.low01Fps), "FPS", rowPx, unitPx))
+            if (showLow001)
+                right.add(Span("0.01%", colLo, rowPx) to numUnit(lowText(lows.low001Fps), "FPS", rowPx, unitPx))
+        }
+
+        // ---- Two columns side by side (each reflows independently) ----
+        val (leftBottom, leftRight) = layoutColumn(left, pad, pad, rowPx, lineGap, lvGap)
+        val rightX = (if (left.isEmpty()) pad else leftRight + gutter)
+        val (rightBottom, rightRight) = layoutColumn(right, rightX, pad, rowPx, lineGap, lvGap)
+        var y = max(leftBottom, rightBottom)
+        var maxRight = max(leftRight, rightRight)
+
+        // ---- Bottom band spanning both columns: res · Proton · wrapper · elapsed ----
+        val band = ArrayList<List<Span>>()
+        if (showResolution) band.add(listOf(Span("RES ", colDim, bandPx), Span(resolutionString(), colValue, bandPx)))
+        if (showProton && wineVersion.isNotBlank()) band.add(listOf(Span(wineVersion, colVram, bandPx)))
+        if (showWrapper && graphicsWrapper.isNotBlank()) band.add(listOf(Span(graphicsWrapper, colGpu, bandPx)))
+        if (showSession) band.add(listOf(Span("elapsed ", colDim, bandPx), Span(elapsedString(), colValue, bandPx)))
+        if (band.isNotEmpty()) {
+            y += sp(4f)
+            val (bBottom, bRight) = layoutWrap(band, pad, y, max(maxRight - pad, sp(180f)), bandPx, lineGap)
+            y = bBottom; maxRight = max(maxRight, bRight)
+        }
+
+        // ---- Full-width frametime graph ----
+        if (showGraph) {
+            y += sp(3f)
+            val gh = sp(22f)
+            val gr = max(maxRight, pad + sp(220f))
+            graphRect = RectF(pad, y, gr, y + gh)
+            maxRight = max(maxRight, gr)
+            y += gh
+        }
+
+        contentW = maxRight + pad
+        contentH = y + pad
+        addSubtleClock(pad)   // subtle time-of-day, consistent with the other sizes
     }
 
     // ---- Measure / draw ---------------------------------------------------
@@ -561,19 +797,16 @@ class FusionHudView(
         bgPaint.color = Color.argb((bgOpacity.coerceIn(0f, 1f) * 255f).roundToInt(), 0, 0, 0)
         canvas.drawRoundRect(0f, 0f, width.toFloat(), height.toFloat(), radius, radius, bgPaint)
 
-        // Accent outline: always on for the Pill (its identity is a bordered pill), else per slider.
-        val strokeW = when {
-            pill != null -> sp(1.4f)
-            outlineIntensity > 0f -> outlineIntensity * sp(3.5f)
-            else -> 0f
-        }
+        // Outline follows the settings for EVERY size (incl. the Pill): width from the outline slider
+        // (0 = none), colour = accent or grey per the "Outline color" toggle. The Pill only differs in
+        // its capsule radius (height/2), which is baked into `radius` above.
+        val strokeW = if (outlineIntensity > 0f) outlineIntensity * sp(3.5f) else 0f
         if (strokeW > 0f) {
             strokePaint.strokeWidth = strokeW
-            strokePaint.color = if (outlineFollowAccent || pill != null) AppThemeState.getCurrentAccentArgb()
+            strokePaint.color = if (outlineFollowAccent) AppThemeState.getCurrentAccentArgb()
                                 else Color.rgb(200, 200, 200)
-            val r = if (pill != null) height / 2f else radius
             val h = strokeW / 2f
-            canvas.drawRoundRect(h, h, width - h, height - h, r, r, strokePaint)
+            canvas.drawRoundRect(h, h, width - h, height - h, radius, radius, strokePaint)
         }
 
         // Tile backings
