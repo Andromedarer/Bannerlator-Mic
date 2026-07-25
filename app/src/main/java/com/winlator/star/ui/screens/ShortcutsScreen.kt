@@ -4728,7 +4728,6 @@ private fun GameDetailsSheet(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // internal (not private) so the Big Picture screen can reuse the exact same shortcut editor dialog.
-@Composable
 // ─────────────────────────────────────────────────────────────────────────────
 // Controller / D-pad navigation for the Shortcut editor. Same MANUAL, single-root model as Big
 // Picture's GameCommunitySheet / CommunityCatalogBrowser: ONE focusable root owns the keys; a per-frame
@@ -4907,6 +4906,7 @@ private fun DpTabs(dp: SettingsDpad, id: String, selected: Int, count: Int, onSe
     DpadHighlight(focused = dp.isFocused(id)) { content() }
 }
 
+@Composable
 internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val res = context.resources
