@@ -31,9 +31,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -93,6 +91,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -1138,7 +1137,10 @@ private fun GameCommunitySheet(
     // it dismisses the sheet (so the first B closes the keyboard, a second B closes the sheet).
     val searchFocus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
-    val imeVisible = WindowInsets.isImeVisible
+    // Tracks whether the search field actually holds focus — a reliable "keyboard is up" signal that,
+    // unlike WindowInsets.isImeVisible, works inside the sheet's own window. B uses it to close the
+    // keyboard first (and hand focus back to the sheet) before a later B closes the sheet.
+    var searchFieldFocused by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
     // Keep the row in range as the list grows/shrinks (match resolves, filter toggles, search opens).
     LaunchedEffect(rowCount) { if (focusRow > rowCount - 1) focusRow = (rowCount - 1).coerceAtLeast(0) }
@@ -1172,8 +1174,12 @@ private fun GameCommunitySheet(
                             }
                             true
                         }
-                        // First B closes the keyboard if it's up; otherwise it dismisses the sheet.
-                        Key.ButtonB, Key.Back -> { if (imeVisible) keyboard?.hide() else onDismiss(); true }
+                        // First B closes the keyboard (and returns focus to the sheet for D-pad nav);
+                        // once the field no longer holds focus, B dismisses the sheet.
+                        Key.ButtonB, Key.Back -> {
+                            if (searchFieldFocused) { keyboard?.hide(); focusRequester.requestFocus() } else onDismiss()
+                            true
+                        }
                         else -> false
                     }
                 },
@@ -1229,7 +1235,16 @@ private fun GameCommunitySheet(
                     label = { Text("Search all games") },
                     leadingIcon = { Icon(Icons.Filled.Search, null) },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth().focusRequester(searchFocus),
+                    modifier = Modifier.fillMaxWidth()
+                        .focusRequester(searchFocus)
+                        .onFocusChanged { searchFieldFocused = it.isFocused }
+                        // Guaranteed B handling while the field holds focus (in case the parent's preview
+                        // doesn't fire): close the keyboard and hand focus back to the sheet.
+                        .onPreviewKeyEvent { e ->
+                            if (e.type == KeyEventType.KeyDown && (e.key == Key.ButtonB || e.key == Key.Back)) {
+                                keyboard?.hide(); focusRequester.requestFocus(); true
+                            } else false
+                        },
                 )
             }
             Spacer(Modifier.height(10.dp))

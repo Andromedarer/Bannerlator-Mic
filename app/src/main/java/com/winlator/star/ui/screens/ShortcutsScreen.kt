@@ -145,11 +145,9 @@ import com.winlator.star.ui.ComponentReturnBus
 import com.winlator.star.ui.LocalTopBarActions
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -3019,7 +3017,6 @@ private enum class CatalogSort { CONFIGS, NAME, DEVICES }
 // Full-catalog browser (Part A) — a catalog-first entry from the header. Lists every game in the
 // community index with search / device + store filters / sort; a tapped game opens its per-device
 // config list (user's-hardware first), and a device row starts the Phase 2 apply flow.
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun CommunityCatalogBrowser(
     vm: ShortcutsViewModel,
@@ -3064,7 +3061,9 @@ internal fun CommunityCatalogBrowser(
     // first (so the first B closes the keyboard, a second B closes/backs out of the browser).
     val searchFocus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
-    val imeVisible = WindowInsets.isImeVisible
+    // Reliable "keyboard is up" signal (WindowInsets.isImeVisible is unreliable in this dialog's window):
+    // true while the search field holds focus. B closes the keyboard first, then closes the browser.
+    var searchFieldFocused by remember { mutableStateOf(false) }
     val gameListState = rememberLazyListState()
 
     LaunchedEffect(Unit) { vm.getCommunityCatalog { catalog = it; loading = false } }
@@ -3183,7 +3182,7 @@ internal fun CommunityCatalogBrowser(
                         // otherwise close the browser.
                         Key.ButtonB, Key.Back -> {
                             when {
-                                imeVisible -> keyboard?.hide()
+                                searchFieldFocused -> { keyboard?.hide(); browserFocus.requestFocus() }
                                 drilled -> selectedIdentity = null
                                 else -> onDismiss()
                             }
@@ -3220,7 +3219,16 @@ internal fun CommunityCatalogBrowser(
                             label = { Text("Search all games") },
                             leadingIcon = { Icon(Icons.Filled.Search, null) },
                             singleLine = true,
-                            modifier = Modifier.fillMaxWidth().focusRequester(searchFocus),
+                            modifier = Modifier.fillMaxWidth()
+                                .focusRequester(searchFocus)
+                                .onFocusChanged { searchFieldFocused = it.isFocused }
+                                // Guaranteed B handling while the field holds focus: close the keyboard
+                                // and hand focus back to the browser for D-pad nav.
+                                .onPreviewKeyEvent { e ->
+                                    if (e.type == KeyEventType.KeyDown && (e.key == Key.ButtonB || e.key == Key.Back)) {
+                                        keyboard?.hide(); browserFocus.requestFocus(); true
+                                    } else false
+                                },
                         )
                     }
                     // Left-pane control 1 — store filter group (Left/Right cycles the focused chip).
