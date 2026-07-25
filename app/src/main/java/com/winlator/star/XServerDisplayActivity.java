@@ -178,6 +178,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private FrameRatingHorizontal frameRatingHorizontal = null;
     private PerfHudView perfHud = null;          // GameHub-style HUD (used when hudStyle=gamehub instead of the two above)
     private com.winlator.star.widget.perfhud.PerformanceHudView gameNativeHud = null; // GameNative-style HUD (hudStyle=gamenative)
+    private com.winlator.star.widget.fusionhud.FusionHudView fusionHud = null; // Fusion HUD (hudStyle=fusion)
     // Single authoritative FPS source: ticked once per present, read by every overlay so they all
     // show the identical number (there is one place per renderer to feed).
     private final FpsCounter fpsCounter = new FpsCounter();
@@ -439,6 +440,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                         if (frameRating != null) frameRating.setRenderer(label);
                         if (perfHud != null) perfHud.setEngineLabel(api);
                         if (gameNativeHud != null) gameNativeHud.setEngineLabel(api);
+                        if (fusionHud != null) fusionHud.setEngineLabel(api);
                     });
                     return;
                 }
@@ -847,16 +849,19 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     .get("hudStyle", "classic");
                 String haveStyle = perfHud != null ? "gamehub"
                     : gameNativeHud != null ? "gamenative"
+                    : fusionHud != null ? "fusion"
                     : (frameRating != null || frameRatingHorizontal != null) ? "classic" : null;
-                // Live style swap: build the requested HUD and tear down the other two, but only if a
+                // Live style swap: build the requested HUD and tear down the others, but only if a
                 // HUD is already on screen (FPS was enabled for this launch). View mutation is safe
                 // here — this callback runs on the UI thread.
                 if (haveStyle != null && !wantStyle.equals(haveStyle)) {
                     removePerfHud();
                     removeClassicHud();
                     removeGameNativeHud();
+                    removeFusionHud();
                     if (wantStyle.equals("gamehub")) buildPerfHud(newConfig);
                     else if (wantStyle.equals("gamenative")) buildGameNativeHud(newConfig);
+                    else if (wantStyle.equals("fusion")) buildFusionHud(newConfig);
                     else buildClassicHud(newConfig);
                 } else {
                     // Same style (or no HUD built): just push the new config to whatever exists.
@@ -864,6 +869,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     if (frameRatingHorizontal != null) frameRatingHorizontal.applyConfig(newConfig);
                     if (perfHud != null) perfHud.applyConfig(newConfig);
                     if (gameNativeHud != null) gameNativeHud.applyConfig(newConfig);
+                    if (fusionHud != null) fusionHud.applyConfig(newConfig);
                     // Classic HUD: applyConfig()->updateParentVisibility() re-shows BOTH orientation
                     // views whenever they have visible rows, clobbering the active-orientation choice
                     // (toggling a metric made the inactive orientation pop in alongside the active one).
@@ -2838,6 +2844,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // buildGameNativeHud).
             if (hudStyle.equals("gamehub")) buildPerfHud(fpsConfigString);
             else if (hudStyle.equals("gamenative")) buildGameNativeHud(fpsConfigString);
+            else if (hudStyle.equals("fusion")) buildFusionHud(fpsConfigString);
             else buildClassicHud(fpsConfigString);
 
             // The label above is the configured D3D9/10/11 wrapper; probe what the game actually
@@ -5036,6 +5043,7 @@ return true;
         if (hudGpuName != null) perfHud.setGpuModel(hudGpuName);
         perfHud.setVertical(!fpsHudHorizontal);
         perfHud.setOnMovedListener((x, y) -> persistHudPosition("hudPosGH", x, y));
+        perfHud.setOnLockChangedListener((locked) -> persistHudConfigKey("hudLocked", locked ? "1" : "0"));
         restoreHudPosition(perfHud, "hudPosGH");
         // Visible immediately if the game window is already mapped (live swap); otherwise it is
         // revealed by changeFrameRatingVisibility once the window appears (launch path).
@@ -5064,6 +5072,7 @@ return true;
         // event without performClick(). Use the widget's own tap callback instead.
         frameRatingHorizontal.setOnTapListener(this::toggleFpsHudOrientation);
         frameRatingHorizontal.setOnMovedListener((x, y) -> persistHudPosition("hudPosCH", x, y));
+        frameRatingHorizontal.setOnLockChangedListener((locked) -> persistHudConfigKey("hudLocked", locked ? "1" : "0"));
         restoreHudPosition(frameRatingHorizontal, "hudPosCH");
         frameRatingHorizontal.setVisibility(shown && fpsHudHorizontal ? View.VISIBLE : View.GONE);
         rootView.addView(frameRatingHorizontal);
@@ -5082,6 +5091,7 @@ return true;
         frameRating.applyConfig(fpsConfigString);
         frameRating.setOnTapListener(this::toggleFpsHudOrientation);
         frameRating.setOnMovedListener((x, y) -> persistHudPosition("hudPosCV", x, y));
+        frameRating.setOnLockChangedListener((locked) -> persistHudConfigKey("hudLocked", locked ? "1" : "0"));
         restoreHudPosition(frameRating, "hudPosCV");
         frameRating.setVisibility(shown && !fpsHudHorizontal ? View.VISIBLE : View.GONE);
         rootView.addView(frameRating);
@@ -5120,6 +5130,7 @@ return true;
         if (hudGpuName != null) gameNativeHud.setGpuModel(hudGpuName);
         gameNativeHud.setVertical(!fpsHudHorizontal);
         gameNativeHud.setOnMovedListener((x, y) -> persistHudPosition("hudPosGN", x, y));
+        gameNativeHud.setOnLockChangedListener((locked) -> persistHudConfigKey("hudLocked", locked ? "1" : "0"));
         restoreHudPosition(gameNativeHud, "hudPosGN");
         // Visible immediately if the game window is already mapped (live swap); otherwise it is
         // revealed by changeFrameRatingVisibility once the window appears (launch path).
@@ -5135,6 +5146,57 @@ return true;
         }
     }
 
+    /** Build the Fusion HUD and add it. Safe to call live (UI thread). */
+    private void buildFusionHud(String fpsConfigString) {
+        FrameLayout rootView = findViewById(R.id.FLXServerDisplay);
+        fusionHud = new com.winlator.star.widget.fusionhud.FusionHudView(this);
+        fusionHud.setFpsCounter(fpsCounter);
+        FrameLayout.LayoutParams plp = new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            android.view.Gravity.TOP | android.view.Gravity.START
+        );
+        plp.topMargin = 10;
+        plp.leftMargin = 10;
+        fusionHud.setLayoutParams(plp);
+        fusionHud.applyConfig(fpsConfigString);
+        if (hudEngineShort != null) fusionHud.setEngineLabel(hudEngineShort);
+        if (hudGpuName != null) fusionHud.setGpuModel(hudGpuName);
+        // Fusion: a tap cycles the size (persist to hudSize), long-press toggles the lock.
+        fusionHud.setOnSizeCycledListener((token) -> persistHudConfigKey("hudSize", token));
+        fusionHud.setOnLockChangedListener((locked) -> persistHudConfigKey("hudLocked", locked ? "1" : "0"));
+        fusionHud.setOnMovedListener((x, y) -> persistHudPosition("hudPosFusion", x, y));
+        restoreHudPosition(fusionHud, "hudPosFusion");
+        fusionHud.setVisibility(frameRatingWindowId != -1 ? View.VISIBLE : View.GONE);
+        rootView.addView(fusionHud);
+    }
+
+    private void removeFusionHud() {
+        if (fusionHud != null) {
+            FrameLayout rootView = findViewById(R.id.FLXServerDisplay);
+            rootView.removeView(fusionHud);
+            fusionHud = null;
+        }
+    }
+
+    /**
+     * Merge a single HUD config key into the container/shortcut's saved FPS config and persist it, so
+     * an in-place change (Fusion tap→size, long-press→lock) survives relaunch and the menus reflect it.
+     * Mirrors the write-back in toggleFpsHudOrientation.
+     */
+    private void persistHudConfigKey(String key, String value) {
+        String cfgStr = container != null ? container.getFPSCounterConfig() : Container.DEFAULT_FPS_COUNTER_CONFIG;
+        com.winlator.star.core.KeyValueSet cfg = new com.winlator.star.core.KeyValueSet(cfgStr);
+        cfg.put(key, value);
+        String updated = cfg.toString();
+        if (container != null) {
+            container.setFPSCounterConfig(updated);
+            container.saveData();
+        }
+        // Keep the in-game drawer's HUD pane in sync with the live change.
+        com.winlator.star.ui.XServerDrawerState.INSTANCE.setFpsConfig(updated);
+    }
+
     private void removeClassicHud() {
         FrameLayout rootView = findViewById(R.id.FLXServerDisplay);
         if (frameRating != null) { rootView.removeView(frameRating); frameRating = null; }
@@ -5142,7 +5204,7 @@ return true;
     }
 
     private void toggleFpsHudOrientation() {
-        if (perfHud == null && gameNativeHud == null && frameRating == null && frameRatingHorizontal == null) return;
+        if (perfHud == null && gameNativeHud == null && fusionHud == null && frameRating == null && frameRatingHorizontal == null) return;
         fpsHudHorizontal = !fpsHudHorizontal;
         if (perfHud != null) {
             // One view draws both layouts; vertical = !horizontal.
@@ -5174,7 +5236,7 @@ return true;
     }
 
     private void changeFrameRatingVisibility(Window window, Property property) {
-        if (perfHud == null && gameNativeHud == null && frameRating == null && frameRatingHorizontal == null) return;
+        if (perfHud == null && gameNativeHud == null && fusionHud == null && frameRating == null && frameRatingHorizontal == null) return;
 
         if (property != null) {
             if (property.nameAsString().contains("_MESA_DRV")) mesaDrvWindowIds.add(window.id);
@@ -5186,6 +5248,7 @@ return true;
                     // Show only the active orientation (both widgets exist for tap-toggle).
                     if (perfHud != null) perfHud.setVisibility(View.VISIBLE);
                     if (gameNativeHud != null) gameNativeHud.setVisibility(View.VISIBLE);
+                    if (fusionHud != null) fusionHud.setVisibility(View.VISIBLE);
                     if (fpsHudHorizontal) {
                         if (frameRatingHorizontal != null) frameRatingHorizontal.setVisibility(View.VISIBLE);
                     } else {
@@ -5205,6 +5268,7 @@ return true;
                     if (frameRating != null) frameRating.setGpuName(hudGpuName);
                     if (perfHud != null) perfHud.setGpuModel(hudGpuName);
                     if (gameNativeHud != null) gameNativeHud.setGpuModel(hudGpuName);
+                    if (fusionHud != null) fusionHud.setGpuModel(hudGpuName);
                 });
             }
         }
@@ -5234,6 +5298,7 @@ return true;
                         }
                         if (perfHud != null) perfHud.setVisibility(View.GONE);
                         if (gameNativeHud != null) gameNativeHud.setVisibility(View.GONE);
+                        if (fusionHud != null) fusionHud.setVisibility(View.GONE);
                     });
                 }
             }

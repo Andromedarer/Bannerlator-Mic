@@ -2713,12 +2713,18 @@ internal fun FpsCounterConfigDialog(
 
     // Orientation (vertical/horizontal) is toggled live by tapping the HUD in-game; preserve it.
     val hudMode = remember { cfg.getOrDefault("hudMode", "vertical") }
-    // 3-way HUD style: classic | gamehub | gamenative.
-    val styles = listOf("classic", "gamehub", "gamenative")
+    // 4-way HUD style: classic | gamehub | gamenative | fusion.
+    val styles = listOf("classic", "gamehub", "gamenative", "fusion")
     var hudStyle by remember { mutableStateOf(cfg.getOrDefault("hudStyle", "classic")) }
     val gameHub = hudStyle == "gamehub"
     val gameNative = hudStyle == "gamenative"
-    val rich = gameHub || gameNative   // both styles share opacity + FPS graph + GPU model + color/outline
+    val fusion = hudStyle == "fusion"
+    val rich = gameHub || gameNative || fusion   // opacity + FPS graph + GPU model + color/outline
+    // Fusion size mode (Full/Tiles/Pill/Minimal); also live-cycled by tapping the Fusion HUD in-game.
+    val fusionSizes = listOf("full", "tiles", "pill", "minimal")
+    var fusionSize by remember { mutableStateOf(cfg.getOrDefault("hudSize", "full")) }
+    // GPU model defaults ON for Fusion (its spec), OFF for the others — matching each view's default.
+    val gpuModelDefault = if (cfg.getOrDefault("hudStyle", "classic") == "fusion") "1" else "0"
 
     // Unified metric toggles (emitted under both classic + gamehub key names so either HUD honors them).
     var showFPS      by remember { mutableStateOf(bool("showFPS", "showFPS", "1")) }
@@ -2729,7 +2735,7 @@ internal fun FpsCounterConfigDialog(
     var showPower    by remember { mutableStateOf(bool("showPower", "showPower", "1")) }
     var showTemp     by remember { mutableStateOf(bool("showTemp", "showBatteryTemp", "1")) }
     var showEngine   by remember { mutableStateOf(bool("showEngine", "showRenderer", "1")) }
-    var showGpuModel by remember { mutableStateOf(bool("showGpuModel", "showGpuModel", "0")) }
+    var showGpuModel by remember { mutableStateOf(bool("showGpuModel", "showGpuModel", gpuModelDefault)) }
     var dualBattery  by remember { mutableStateOf(bool("hudDualBattery", "hudDualBattery", "0")) }
     // GameNative-only extra metrics (absent = off is the intended default).
     var showGpuTemp  by remember { mutableStateOf(bool("showGpuTemp", "showGpuTemp", "0")) }
@@ -2738,6 +2744,11 @@ internal fun FpsCounterConfigDialog(
     var showClock    by remember { mutableStateOf(bool("showClock", "showClock", "0")) }
     var showCpuGraph by remember { mutableStateOf(bool("showCPUGraph", "showCPUGraph", "0")) }
     var showGpuGraph by remember { mutableStateOf(bool("showGPUGraph", "showGPUGraph", "0")) }
+    // Fusion extra metrics + global lock (defaults match Container.DEFAULT_FPS_COUNTER_CONFIG).
+    var showVram     by remember { mutableStateOf(bool("showVram", "showVram", "1")) }
+    var showLow001   by remember { mutableStateOf(bool("showLow001", "showLow001", "1")) }
+    var fpsDecimal   by remember { mutableStateOf(bool("fpsDecimal", "fpsDecimal", "1")) }
+    var hudLocked    by remember { mutableStateOf(bool("hudLocked", "hudLocked", "0")) }
     // Temperature display — same keys as the in-game drawer pane, so the two stay interchangeable.
     var tempUnitF  by remember { mutableStateOf(cfg.getOrDefault("tempUnit", "c").equals("f", true)) }
     var tempBands  by remember { mutableStateOf(cfg.getOrDefault("tempBands", "1") != "0") }
@@ -2761,6 +2772,11 @@ internal fun FpsCounterConfigDialog(
     fun i(v: Boolean) = if (v) "1" else "0"
     fun buildConfig(): String = listOf(
         "hudStyle=$hudStyle",
+        "hudSize=$fusionSize",
+        "hudLocked=${i(hudLocked)}",
+        "showVram=${i(showVram)}",
+        "showLow001=${i(showLow001)}",
+        "fpsDecimal=${i(fpsDecimal)}",
         "hudMode=$hudMode",
         "showFPS=${i(showFPS)}",
         "showFPSGraph=${i(showGraph)}",
@@ -2807,17 +2823,26 @@ internal fun FpsCounterConfigDialog(
             ) {
                 HudThreeStop(
                     "HUD style",
-                    listOf("Classic", "GameHub", "GameNative"),
+                    listOf("Classic", "GameHub", "GameNative", "Fusion"),
                     styles.indexOf(hudStyle).coerceAtLeast(0)
                 ) { hudStyle = styles[it] }
                 Text(
                     when (hudStyle) {
                         "gamehub" -> "Rich overlay: skins, colored fields, live FPS graph."
                         "gamenative" -> "GameNative-style overlay: compact pill or stacked list with live graphs."
+                        "fusion" -> "Fusion overlay: one color-coded look in 4 sizes (Full/Tiles/Pill/Minimal) with percentile lows + VRAM."
                         else -> "Classic Bannerlator overlay."
                     },
                     style = MaterialTheme.typography.bodySmall
                 )
+                if (fusion) {
+                    Spacer(Modifier.height(8.dp))
+                    HudThreeStop(
+                        "Size",
+                        listOf("Full", "Tiles", "Pill", "Minimal"),
+                        fusionSizes.indexOf(fusionSize).coerceAtLeast(0)
+                    ) { fusionSize = fusionSizes[it] }
+                }
                 Spacer(Modifier.height(4.dp))
                 Text(
                     "Tip: tap the HUD in-game to switch vertical/horizontal layout.",
@@ -2839,23 +2864,32 @@ internal fun FpsCounterConfigDialog(
                     if (gameNative) add(Triple("CPU graph", showCpuGraph) { showCpuGraph = !showCpuGraph })
                     add(Triple("GPU", showGPU) { showGPU = !showGPU })
                     if (gameNative) add(Triple("GPU graph", showGpuGraph) { showGpuGraph = !showGpuGraph })
+                    if (fusion) add(Triple("VRAM", showVram) { showVram = !showVram })
                     add(Triple("RAM", showRAM) { showRAM = !showRAM })
                     add(Triple("Power", showPower) { showPower = !showPower })
                     add(Triple("Temp", showTemp) { showTemp = !showTemp })
-                    if (gameNative) {
+                    if (gameNative || fusion) {
                         add(Triple("GPU temp", showGpuTemp) { showGpuTemp = !showGpuTemp })
                         add(Triple("Battery", showBattery) { showBattery = !showBattery })
+                    }
+                    if (gameNative) {
                         add(Triple("Runtime", showRuntime) { showRuntime = !showRuntime })
                         add(Triple("Clock", showClock) { showClock = !showClock })
+                    }
+                    if (fusion) {
+                        add(Triple("0.01% low", showLow001) { showLow001 = !showLow001 })
+                        add(Triple("FPS .1", fpsDecimal) { fpsDecimal = !fpsDecimal })
                     }
                     add(Triple("Engine", showEngine) { showEngine = !showEngine })
                     if (rich) add(Triple("GPU model", showGpuModel) { showGpuModel = !showGpuModel })
                     if (gameHub) add(Triple("Dual battery", dualBattery) { dualBattery = !dualBattery })
+                    // Global: freeze the HUD position (long-press the HUD also toggles this in-game).
+                    add(Triple("Lock in place", hudLocked) { hudLocked = !hudLocked })
                 }
                 ModeChipGrid(metricChips, perRow = 3)
 
                 // ── Temperature display ── only meaningful when a temperature is on screen.
-                if (showTemp || (gameNative && (showGpuTemp || showBattery))) {
+                if (showTemp || ((gameNative || fusion) && (showGpuTemp || showBattery))) {
                     Spacer(Modifier.height(12.dp))
                     HudThreeStop("Temp unit", listOf("\u00B0C", "\u00B0F"), if (tempUnitF) 1 else 0) {
                         tempUnitF = it == 1
@@ -2885,7 +2919,7 @@ internal fun FpsCounterConfigDialog(
                             onValueChange = { tempRedCpu = it.toInt() },
                             valueRange = 50f..110f, steps = 59
                         )
-                        if (gameNative && showGpuTemp) {
+                        if ((gameNative || fusion) && showGpuTemp) {
                             Text("GPU red at: $tempRedGpu\u00B0C", style = MaterialTheme.typography.bodySmall)
                             Slider(
                                 value = tempRedGpu.toFloat(),

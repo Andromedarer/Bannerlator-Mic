@@ -4,6 +4,7 @@ import android.app.ActivityManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.graphics.Canvas;
 import android.os.BatteryManager;
 import android.os.SystemClock;
 import android.util.AttributeSet;
@@ -67,6 +68,11 @@ public class FrameRatingHorizontal extends FrameLayout implements Runnable {
     private java.util.function.BiConsumer<Float, Float> onMovedListener = null;
     public void setOnMovedListener(java.util.function.BiConsumer<Float, Float> l) { this.onMovedListener = l; }
 
+    // Shared lock / tap / drag behaviour (long-press toggles the position lock).
+    private HudLockController lockController;
+    private java.util.function.Consumer<Boolean> onLockChangedListener = null;
+    public void setOnLockChangedListener(java.util.function.Consumer<Boolean> l) { this.onLockChangedListener = l; }
+
     public FrameRatingHorizontal(Context context) {
         this(context, null);
     }
@@ -111,6 +117,12 @@ public class FrameRatingHorizontal extends FrameLayout implements Runnable {
         ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo();
         am.getMemoryInfo(mi);
         totalRAM = StringUtils.formatBytes(mi.totalMem, false);
+
+        lockController = new HudLockController(context, this, new HudLockController.Callbacks() {
+            @Override public void onTap() { if (onTapListener != null) onTapListener.run(); }
+            @Override public void onMoved(float x, float y) { if (onMovedListener != null) onMovedListener.accept(x, y); }
+            @Override public void onLockChanged(boolean locked) { if (onLockChangedListener != null) onLockChangedListener.accept(locked); }
+        });
     }
 
     public void setRenderer(String renderer) {
@@ -134,6 +146,7 @@ public class FrameRatingHorizontal extends FrameLayout implements Runnable {
         setGroupVisible(groupBatteryVoltage, config.get("showBatteryVoltage", "0").equals("1"));
         setGroupVisible(groupBatteryTemp, config.get("showBatteryTemp", "0").equals("1"));
         tempDisplay = HudMetrics.TempDisplay.from(config);
+        if (lockController != null) lockController.setLocked(config.get("hudLocked", "0").equals("1"));
         setGroupVisible(groupFPS, config.get("showFPS", "1").equals("1"));
 
         updateSeparators();
@@ -216,36 +229,13 @@ public class FrameRatingHorizontal extends FrameLayout implements Runnable {
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        switch (event.getAction()) {
-            case MotionEvent.ACTION_DOWN:
-                lastX = event.getRawX();
-                lastY = event.getRawY();
-                offsetX = getX();
-                offsetY = getY();
-                downTime = event.getEventTime();
-                moved = false;
-                return true;
+        return lockController.onTouchEvent(event);
+    }
 
-            case MotionEvent.ACTION_MOVE:
-                float deltaX = event.getRawX() - lastX;
-                float deltaY = event.getRawY() - lastY;
-                int slop = ViewConfiguration.get(context).getScaledTouchSlop();
-                if (Math.abs(deltaX) > slop || Math.abs(deltaY) > slop) moved = true;
-                setX(offsetX + deltaX);
-                setY(offsetY + deltaY);
-                return true;
-
-            case MotionEvent.ACTION_UP:
-                if (!moved
-                        && (event.getEventTime() - downTime) <= ViewConfiguration.getLongPressTimeout()
-                        && onTapListener != null) {
-                    onTapListener.run();
-                } else if (moved && onMovedListener != null) {
-                    onMovedListener.accept(getX(), getY());
-                }
-                return true;
-        }
-        return super.onTouchEvent(event);
+    @Override
+    protected void dispatchDraw(Canvas canvas) {
+        super.dispatchDraw(canvas);
+        if (lockController != null) lockController.drawBadge(canvas);
     }
 
     /** Writes a temperature in the user's unit and colours the row by danger band. */

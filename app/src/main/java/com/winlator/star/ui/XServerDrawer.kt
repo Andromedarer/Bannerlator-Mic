@@ -1946,12 +1946,17 @@ private fun HudContent(state: XServerDrawerState) {
     // Orientation is flipped by tapping the HUD in-game; preserve it on write-back.
     val hudMode = remember(cfg) { cfg.getOrDefault("hudMode", "vertical") }
 
-    // 3-way HUD style: classic | gamehub | gamenative.
-    val styles = listOf("classic", "gamehub", "gamenative")
+    // 4-way HUD style: classic | gamehub | gamenative | fusion.
+    val styles = listOf("classic", "gamehub", "gamenative", "fusion")
     var hudStyle by remember(cfg) { mutableStateOf(cfg.getOrDefault("hudStyle", "classic")) }
     val gameHub = hudStyle == "gamehub"
     val gameNative = hudStyle == "gamenative"
-    val rich = gameHub || gameNative   // both styles share opacity + FPS graph + GPU model + color/outline
+    val fusion = hudStyle == "fusion"
+    val rich = gameHub || gameNative || fusion   // opacity + FPS graph + GPU model + color/outline
+    // Fusion size mode (also live-cycled by tapping the Fusion HUD in-game).
+    val fusionSizes = listOf("full", "tiles", "pill", "minimal")
+    var fusionSize by remember(cfg) { mutableStateOf(cfg.getOrDefault("hudSize", "full")) }
+    val gpuModelDefault = if (cfg.getOrDefault("hudStyle", "classic") == "fusion") "1" else "0"
     var showFPS by remember(cfg) { mutableStateOf(b("showFPS", "showFPS", "1")) }
     var showGraph by remember(cfg) { mutableStateOf(b("showFPSGraph", "showFPSGraph", "0")) }
     var showCPU by remember(cfg) { mutableStateOf(b("showCPUUsage", "showCPULoad", "1")) }
@@ -1960,7 +1965,7 @@ private fun HudContent(state: XServerDrawerState) {
     var showPower by remember(cfg) { mutableStateOf(b("showPower", "showPower", "1")) }
     var showTemp by remember(cfg) { mutableStateOf(b("showTemp", "showBatteryTemp", "1")) }
     var showEngine by remember(cfg) { mutableStateOf(b("showEngine", "showRenderer", "1")) }
-    var showGpuModel by remember(cfg) { mutableStateOf(b("showGpuModel", "showGpuModel", "0")) }
+    var showGpuModel by remember(cfg) { mutableStateOf(b("showGpuModel", "showGpuModel", gpuModelDefault)) }
     var dualBattery by remember(cfg) { mutableStateOf(b("hudDualBattery", "hudDualBattery", "0")) }
     // GameNative-only extra metrics (absent = off is the intended default).
     var showGpuTemp by remember(cfg) { mutableStateOf(b("showGpuTemp", "showGpuTemp", "0")) }
@@ -1969,6 +1974,11 @@ private fun HudContent(state: XServerDrawerState) {
     var showClock by remember(cfg) { mutableStateOf(b("showClock", "showClock", "0")) }
     var showCpuGraph by remember(cfg) { mutableStateOf(b("showCPUGraph", "showCPUGraph", "0")) }
     var showGpuGraph by remember(cfg) { mutableStateOf(b("showGPUGraph", "showGPUGraph", "0")) }
+    // Fusion extra metrics + global lock (defaults match Container.DEFAULT_FPS_COUNTER_CONFIG).
+    var showVram by remember(cfg) { mutableStateOf(b("showVram", "showVram", "1")) }
+    var showLow001 by remember(cfg) { mutableStateOf(b("showLow001", "showLow001", "1")) }
+    var fpsDecimal by remember(cfg) { mutableStateOf(b("fpsDecimal", "fpsDecimal", "1")) }
+    var hudLocked by remember(cfg) { mutableStateOf(b("hudLocked", "hudLocked", "0")) }
     // Temperature display: unit, plus danger bands as a single 3-way (Off / Auto / Manual) rather
     // than two toggles — "banding on but auto off" and "banding off but auto on" aren't distinct
     // states worth exposing. Auto reads the device's own thermal trip points.
@@ -1996,6 +2006,11 @@ private fun HudContent(state: XServerDrawerState) {
     // so the in-game drawer and the pre-launch dialog stay fully interchangeable.
     fun buildConfig(): String = listOf(
         "hudStyle=$hudStyle",
+        "hudSize=$fusionSize",
+        "hudLocked=${i(hudLocked)}",
+        "showVram=${i(showVram)}",
+        "showLow001=${i(showLow001)}",
+        "fpsDecimal=${i(fpsDecimal)}",
         "hudMode=$hudMode",
         "showFPS=${i(showFPS)}",
         "showFPSGraph=${i(showGraph)}",
@@ -2033,16 +2048,20 @@ private fun HudContent(state: XServerDrawerState) {
 
     fun apply() { state.onFpsConfigApply?.invoke(buildConfig()) }
 
-    HudChipRow("HUD style", listOf("Classic", "GameHub", "GameNative"), styles.indexOf(hudStyle).coerceAtLeast(0)) { hudStyle = styles[it]; apply() }
+    HudChipRow("HUD style", listOf("Classic", "GameHub", "GameNative", "Fusion"), styles.indexOf(hudStyle).coerceAtLeast(0)) { hudStyle = styles[it]; apply() }
     Text(
         when (hudStyle) {
             "gamehub" -> "Rich overlay: skins, colored fields, live FPS graph. Style change applies on next launch."
             "gamenative" -> "GameNative-style overlay: compact pill or stacked list with live graphs. Style change applies on next launch."
+            "fusion" -> "Fusion overlay: one color-coded look in 4 sizes with percentile lows + VRAM. Tap the HUD to cycle size."
             else -> "Classic Bannerlator overlay."
         },
         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), fontSize = 11.sp,
         modifier = Modifier.padding(start = 4.dp, top = 2.dp, bottom = 4.dp)
     )
+    if (fusion) {
+        HudChipRow("Size", listOf("Full", "Tiles", "Pill", "Minimal"), fusionSizes.indexOf(fusionSize).coerceAtLeast(0)) { fusionSize = fusionSizes[it]; apply() }
+    }
 
     HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
 
@@ -2066,23 +2085,32 @@ private fun HudContent(state: XServerDrawerState) {
         if (gameNative) add(Triple("CPU graph", showCpuGraph) { showCpuGraph = !showCpuGraph; apply() })
         add(Triple("GPU", showGPU) { showGPU = !showGPU; apply() })
         if (gameNative) add(Triple("GPU graph", showGpuGraph) { showGpuGraph = !showGpuGraph; apply() })
+        if (fusion) add(Triple("VRAM", showVram) { showVram = !showVram; apply() })
         add(Triple("RAM", showRAM) { showRAM = !showRAM; apply() })
         add(Triple("Power", showPower) { showPower = !showPower; apply() })
         add(Triple("Temp", showTemp) { showTemp = !showTemp; apply() })
-        if (gameNative) {
+        if (gameNative || fusion) {
             add(Triple("GPU temp", showGpuTemp) { showGpuTemp = !showGpuTemp; apply() })
             add(Triple("Battery", showBattery) { showBattery = !showBattery; apply() })
+        }
+        if (gameNative) {
             add(Triple("Runtime", showRuntime) { showRuntime = !showRuntime; apply() })
             add(Triple("Clock", showClock) { showClock = !showClock; apply() })
+        }
+        if (fusion) {
+            add(Triple("0.01% low", showLow001) { showLow001 = !showLow001; apply() })
+            add(Triple("FPS .1", fpsDecimal) { fpsDecimal = !fpsDecimal; apply() })
         }
         add(Triple("Engine", showEngine) { showEngine = !showEngine; apply() })
         if (rich) add(Triple("GPU model", showGpuModel) { showGpuModel = !showGpuModel; apply() })
         if (gameHub) add(Triple("Dual battery", dualBattery) { dualBattery = !dualBattery; apply() })
+        // Global: freeze the HUD position (long-press the HUD also toggles this in-game).
+        add(Triple("Lock in place", hudLocked) { hudLocked = !hudLocked; apply() })
     }
     ModeChipGrid(metricChips, perRow = 3)
 
     // ── Temperature display ── only worth showing when a temperature is actually on screen.
-    if (showTemp || (gameNative && (showGpuTemp || showBattery))) {
+    if (showTemp || ((gameNative || fusion) && (showGpuTemp || showBattery))) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
         HudChipRow("Temp unit", listOf("°C", "°F"), if (tempUnitF) 1 else 0) {
             tempUnitF = it == 1; apply()
@@ -2106,7 +2134,7 @@ private fun HudContent(state: XServerDrawerState) {
             // Only the red point is exposed; amber is derived. Nobody knows their preferred amber
             // in the abstract, and three sliders beat six. Values are always °C.
             LabeledSlider("CPU red at", tempRedCpu, 50f..110f, { tempRedCpu = it }, { apply() }, format = { "${it.toInt()}°C" })
-            if (gameNative && showGpuTemp)
+            if ((gameNative || fusion) && showGpuTemp)
                 LabeledSlider("GPU red at", tempRedGpu, 50f..110f, { tempRedGpu = it }, { apply() }, format = { "${it.toInt()}°C" })
             LabeledSlider("Battery red at", tempRedBat, 35f..60f, { tempRedBat = it }, { apply() }, format = { "${it.toInt()}°C" })
         }
@@ -2118,7 +2146,7 @@ private fun HudContent(state: XServerDrawerState) {
         HudChipRow("HUD color", listOf("Soft", "Mid", "Vivid"), colors.indexOf(color)) { color = colors[it]; apply() }
         LabeledSlider("HUD outline", outlineValue, 0f..100f, { outlineValue = it }, { apply() }, format = { "${it.toInt()}" })
         HudChipRow("Outline color", listOf("Gray", "Accent"), if (outlineAccent) 1 else 0) { outlineAccent = it == 1; apply() }
-    } else if (gameNative) {
+    } else if (gameNative || fusion) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
         HudChipRow("HUD color", listOf("Soft", "Mid", "Vivid"), colors.indexOf(color)) { color = colors[it]; apply() }
         LabeledSlider("HUD outline", outlineValue, 0f..100f, { outlineValue = it }, { apply() }, format = { "${it.toInt()}" })
