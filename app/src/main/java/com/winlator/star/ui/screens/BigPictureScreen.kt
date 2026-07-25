@@ -31,9 +31,12 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -51,18 +54,26 @@ import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -96,10 +107,13 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.widget.Toast
+import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -113,6 +127,13 @@ import com.winlator.star.XServerDisplayActivity
 import com.winlator.star.XrActivity
 import com.winlator.star.container.ContainerManager
 import com.winlator.star.communityconfigs.CommunityConfigApply
+import com.winlator.star.communityconfigs.CommunityConfigRef
+import com.winlator.star.communityconfigs.CanonicalDevice
+import com.winlator.star.communityconfigs.CanonicalGame
+import com.winlator.star.communityconfigs.DeviceIdentity
+import com.winlator.star.communityconfigs.GameMatcher
+import com.winlator.star.communityconfigs.UploadedConfigsStore.UploadedConfig
+import com.winlator.star.communityconfigs.WorkerConfigEntry
 import com.winlator.star.ui.screens.adrenodownload.AdrenoDriverDownloadSheet
 import com.winlator.star.container.Shortcut
 import com.winlator.star.store.DownloadManagerActivity
@@ -155,6 +176,12 @@ fun BigPictureScreen(navController: NavController) {
     // phone UI for now, so the result dialog just surfaces the outcome message.
     val communityVm: ShortcutsViewModel = viewModel()
     var showCommunity by remember { mutableStateOf(false) }
+    // Per-game community sheet (Options → "Community configs"): scoped to the selected game, unlike the
+    // top-rail globe which opens the all-games CommunityCatalogBrowser.
+    var showGameCommunity by remember { mutableStateOf(false) }
+    // The shortcut a config-import file picker will apply to (set when the picker is launched from the
+    // per-game sheet; read back in the launcher callback).
+    var communityImportTarget by remember { mutableStateOf<Shortcut?>(null) }
     var showBpAccount by remember { mutableStateOf(false) }
     var communityApplyResult by remember { mutableStateOf<CommunityConfigApply.ConfigApplyResult?>(null) }
     var communityApplying by remember { mutableStateOf(false) }
@@ -167,6 +194,36 @@ fun BigPictureScreen(navController: NavController) {
     // Decoded covers keyed by shortcut name; guarded by a plain in-flight set so we never re-fetch.
     val coverCache = remember { mutableStateMapOf<String, ImageBitmap>() }
     val inFlight = remember { HashSet<String>() }
+
+    // Config-import picker for the per-game community sheet's "Import" action. Applies the picked `.json`
+    // straight to the stashed target shortcut; the outcome surfaces through the shared apply-result dialog.
+    val communityImportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            com.winlator.star.util.InAppFilePicker.pickedUri(result.data)?.let { uri ->
+                communityImportTarget?.let { target ->
+                    // An imported file is a one-off (no CommunityPick), so clear any stale pick that the
+                    // missing-component re-apply flow would otherwise pick up.
+                    lastCommunityPick = null
+                    communityApplying = true
+                    communityVm.importConfigFile(uri, target) { res ->
+                        communityApplying = false
+                        communityApplyResult = res
+                        shortcuts = manager.loadShortcuts()
+                    }
+                }
+            }
+        }
+    }
+    val launchConfigImport: (Shortcut) -> Unit = { target ->
+        communityImportTarget = target
+        communityImportLauncher.launch(
+            com.winlator.star.util.InAppFilePicker.buildIntent(
+                context, com.winlator.star.util.InAppFilePicker.JSON, "Select a config .json"
+            )
+        )
+    }
 
     val listState = rememberLazyListState()
 
@@ -254,8 +311,11 @@ fun BigPictureScreen(navController: NavController) {
             .focusable()
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                // Community overlays own Back first (they sit above sheets).
-                if (showCommunity || showBpAccount || communityApplyResult != null
+                // Community overlays own Back first (they sit above sheets). Each of these is its own
+                // window (Dialog / ModalBottomSheet) that handles its OWN D-pad internally, so here we
+                // only need the safety-net Back handling in case the root ever receives it — everything
+                // else stays with the overlay.
+                if (showCommunity || showGameCommunity || showBpAccount || communityApplyResult != null
                         || bpInstallFor != null || bpDriverFor != null) {
                     return@onPreviewKeyEvent when (event.key) {
                         Key.ButtonB, Key.Back -> {
@@ -264,6 +324,7 @@ fun BigPictureScreen(navController: NavController) {
                                 bpDriverFor != null -> bpDriverFor = null
                                 communityApplyResult != null -> communityApplyResult = null
                                 showBpAccount -> showBpAccount = false
+                                showGameCommunity -> showGameCommunity = false
                                 else -> showCommunity = false
                             }
                             true
@@ -583,11 +644,11 @@ fun BigPictureScreen(navController: NavController) {
                     inFlight.remove(s.name)
                 },
                 onCommunityConfigs = {
-                    // Selecting the game first, then opening the browser, so a config picked there
-                    // applies to this game. (Stage 2: the per-game match sheet directly.)
+                    // Open the GAME-SCOPED community sheet for this shortcut (auto-match + this game's
+                    // configs), not the all-games browser (that stays on the top-rail globe).
                     selectedIndex = shortcuts.indexOfFirst { it.name == s.name }.coerceAtLeast(0)
                     activeSheet = null
-                    showCommunity = true
+                    showGameCommunity = true
                 },
             )
         }
@@ -655,6 +716,26 @@ fun BigPictureScreen(navController: NavController) {
             onPick = { pick -> lastCommunityPick = pick; applyCommunityPick(pick) },
             onMyAccount = { showBpAccount = true },
         )
+    }
+
+    // Per-game community sheet (Options → "Community configs"). Applies a picked config to the SELECTED
+    // game via the same applyCommunityPick pipeline as the browser, so the missing-component / driver
+    // install + re-apply flow (and the apply-result dialog) is shared. The sheet closes on apply so the
+    // result dialog reads clearly over the couch UI.
+    if (showGameCommunity) {
+        selected?.let { s ->
+            GameCommunitySheet(
+                vm = communityVm,
+                shortcut = s,
+                onApply = { pick ->
+                    lastCommunityPick = pick
+                    showGameCommunity = false
+                    applyCommunityPick(pick)
+                },
+                onImport = { launchConfigImport(s) },
+                onDismiss = { showGameCommunity = false },
+            )
+        } ?: run { showGameCommunity = false }
     }
 
     if (showBpAccount) {
@@ -833,24 +914,24 @@ private fun GameOptionsSheet(
             }
         }
     }
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Column(modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
-            SheetTitle(shortcut.name)
-            SheetRow(Icons.Filled.Edit, "Edit shortcut", onEditShortcut)
-            SheetRow(Icons.Filled.Tune, "Container settings", onContainerSettings)
-            SheetRow(Icons.Filled.Public, "Community configs", onCommunityConfigs)
-            SheetRow(Icons.Filled.Image, "Change cover art") {
-                coverPicker.launch(
-                    com.winlator.star.util.InAppFilePicker.buildIntent(
-                        context, com.winlator.star.util.InAppFilePicker.IMAGES, "Select cover art"
-                    )
+    // Rows built inline (not remembered) so the passed-in callbacks never go stale. The Change-cover row
+    // captures the launcher; the Remove-cover row only appears when there's a custom cover to remove.
+    val rows = buildList {
+        add(BpRow(Icons.Filled.Edit, "Edit shortcut", onEditShortcut))
+        add(BpRow(Icons.Filled.Tune, "Container settings", onContainerSettings))
+        add(BpRow(Icons.Filled.Public, "Community configs", onCommunityConfigs))
+        add(BpRow(Icons.Filled.Image, "Change cover art") {
+            coverPicker.launch(
+                com.winlator.star.util.InAppFilePicker.buildIntent(
+                    context, com.winlator.star.util.InAppFilePicker.IMAGES, "Select cover art"
                 )
-            }
-            if (!shortcut.customCoverArtPath.isNullOrEmpty()) {
-                SheetRow(Icons.Filled.Delete, "Remove cover art") { onRemoveCover(); onDismiss() }
-            }
+            )
+        })
+        if (!shortcut.customCoverArtPath.isNullOrEmpty()) {
+            add(BpRow(Icons.Filled.Delete, "Remove cover art") { onRemoveCover(); onDismiss() })
         }
     }
+    BpSheetScaffold(title = shortcut.name, rows = rows, onDismiss = onDismiss)
 }
 
 @Composable
@@ -860,14 +941,15 @@ private fun ToolsSheet(
     onWrappers: () -> Unit,
     onDownloads: () -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Column(modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
-            SheetTitle("Tools")
-            SheetRow(Icons.Filled.FolderOpen, "File Manager", onFileManager)
-            SheetRow(Icons.Filled.Layers, "Manage Wrappers", onWrappers)
-            SheetRow(Icons.Filled.Download, "Downloads", onDownloads)
-        }
-    }
+    BpSheetScaffold(
+        title = "Tools",
+        rows = listOf(
+            BpRow(Icons.Filled.FolderOpen, "File Manager", onFileManager),
+            BpRow(Icons.Filled.Layers, "Manage Wrappers", onWrappers),
+            BpRow(Icons.Filled.Download, "Downloads", onDownloads),
+        ),
+        onDismiss = onDismiss,
+    )
 }
 
 @Composable
@@ -877,13 +959,366 @@ private fun PowerSheet(
     onTurnOff: () -> Unit,
     onQuit: () -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Column(modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
-            SheetTitle("Power")
-            SheetRow(Icons.Filled.ExitToApp, "Exit Big Picture", onExit)
-            SheetRow(Icons.Filled.PowerSettingsNew, "Turn off Big Picture mode", onTurnOff)
-            SheetRow(Icons.Filled.Close, "Quit", onQuit)
+    BpSheetScaffold(
+        title = "Power",
+        rows = listOf(
+            BpRow(Icons.Filled.ExitToApp, "Exit Big Picture", onExit),
+            BpRow(Icons.Filled.PowerSettingsNew, "Turn off Big Picture mode", onTurnOff),
+            BpRow(Icons.Filled.Close, "Quit", onQuit),
+        ),
+        onDismiss = onDismiss,
+    )
+}
+
+// A single config card in the Big Picture community sheet: the pick to apply plus the data to render it
+// (a worker [entry] OR an offline [device] row).
+private data class BpCommunityCard(
+    val pick: CommunityPick,
+    val entry: WorkerConfigEntry?,
+    val device: CanonicalDevice?,
+    val isMatch: Boolean,
+)
+
+// Game-scoped community configs for Big Picture — the couch-mode counterpart of the phone Games screen's
+// per-shortcut "Community configs" dialog. Unlike the top-rail globe (which opens the ALL-GAMES
+// CommunityCatalogBrowser), this is scoped to ONE shortcut: auto-matches the game, lists that game's
+// uploaded configs (device-ranked, with a "Matches my device" filter) and applies a picked one straight
+// to this shortcut through [onApply] — which routes back to Big Picture's shared applyCommunityPick, so
+// the missing-component / driver install + re-apply flow still fires. Share + Upload reuse the same VM
+// one-shots the phone dialog uses; Import re-uses Big Picture's config-import launcher via [onImport].
+// Fully controller-navigable with the same single-focus, index-based model the rest of Big Picture uses.
+//
+// DEFERRED (couch-mode TODO): the "My uploads" manager isn't wired here — it needs the full uploads-list
+// UI that only lives on the phone screen; it stays reachable from the top globe → My account entry point.
+@Composable
+private fun GameCommunitySheet(
+    vm: ShortcutsViewModel,
+    shortcut: Shortcut,
+    onApply: (CommunityPick) -> Unit,
+    onImport: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    // Offline-first auto-match for THIS shortcut, then its uploaded configs fetched directly off the VM
+    // (so the whole list is plain state the D-pad handler can index) — the same fetch the phone's
+    // rememberGameConfigs uses, including this shortcut's own sanitized folder so the user's OWN upload
+    // shows up before it lands in the canonical index.
+    var match by remember(shortcut) { mutableStateOf<CommunityMatchResult?>(null) }
+    var matchLoading by remember(shortcut) { mutableStateOf(true) }
+    var entries by remember(shortcut) { mutableStateOf<List<Pair<String, WorkerConfigEntry>>>(emptyList()) }
+    var matchesMine by remember(shortcut) { mutableStateOf(false) }
+    var search by remember(shortcut) { mutableStateOf("") }
+    var searchResults by remember(shortcut) { mutableStateOf<List<CanonicalGame>>(emptyList()) }
+
+    LaunchedEffect(shortcut) {
+        matchLoading = true
+        vm.matchCommunityConfigs(shortcut) { match = it; matchLoading = false }
+    }
+    LaunchedEffect(match?.match) {
+        val g = match?.match
+        if (g != null) {
+            val myFolder = shortcut.name.replace(Regex("[^a-zA-Z0-9_\\-]"), "_")
+            vm.fetchGameConfigs(g, listOf(myFolder)) { entries = it }
+        } else entries = emptyList()
+    }
+
+    // Upload busy-state + replace-confirm (identical flow to the phone dialog).
+    var uploading by remember { mutableStateOf(false) }
+    var uploadStarted by remember { mutableStateOf(false) }
+    var replacePrompt by remember { mutableStateOf<Triple<UploadedConfig, () -> Unit, () -> Unit>?>(null) }
+
+    val game = match?.match
+    val uSoc = match?.userSoc
+    val uGpu = match?.userGpu
+    val hwEnabled = uSoc != null || uGpu != null
+    val searching = search.trim().length >= 2
+
+    // The flat, in-render-order config list. Worker entries when we have them (filtered by the match chip),
+    // else the offline per-device fallback. Empty while searching (the results list replaces it).
+    val cards: List<BpCommunityCard> = remember(match, entries, matchesMine, searching) {
+        val g = game
+        when {
+            searching || g == null -> emptyList()
+            entries.isNotEmpty() -> {
+                val shown = if (!matchesMine) entries
+                    else entries.filter { GameMatcher.hardwareMatchesUser(uSoc, uGpu, listOf(it.second.device, it.second.soc)) }
+                shown.map { (folder, e) ->
+                    val isMatch = hwEnabled && GameMatcher.hardwareMatchesUser(uSoc, uGpu, listOf(e.device, e.soc))
+                    BpCommunityCard(
+                        pick = CommunityPick.File(
+                            g,
+                            CommunityConfigRef(g, folder, e.filename, e.sha.ifBlank { null }, ns = if (e.appSource == "bannerlator") "bannerlator" else ""),
+                            e,
+                        ),
+                        entry = e,
+                        device = null,
+                        isMatch = isMatch,
+                    )
+                }
+            }
+            else -> {
+                val devs = if (!matchesMine) match?.rankedDevices.orEmpty()
+                    else match?.rankedDevices.orEmpty().filter { GameMatcher.deviceMatchesUser(it, uSoc, uGpu) }
+                devs.map { d ->
+                    val isMatch = hwEnabled && GameMatcher.deviceMatchesUser(d, uSoc, uGpu)
+                    BpCommunityCard(CommunityPick.Device(g, d), entry = null, device = d, isMatch = isMatch)
+                }
+            }
         }
+    }
+
+    // Share this shortcut's effective config: export off-main, then hand the file to the system share
+    // sheet via the app's existing FileProvider authority (the same one the updater / save-share use).
+    val shareConfig: () -> Unit = {
+        vm.exportShortcutConfig(shortcut) { res ->
+            scope.launch(Dispatchers.IO) {
+                val dir = File(context.cacheDir, "community_configs/export").apply { mkdirs() }
+                val file = File(dir, res.fileName)
+                file.writeText(res.json)
+                withContext(Dispatchers.Main) {
+                    try {
+                        val authority = context.packageName + ".tileprovider"
+                        val uri = FileProvider.getUriForFile(context, authority, file)
+                        val send = Intent(Intent.ACTION_SEND).apply {
+                            type = "application/json"
+                            putExtra(Intent.EXTRA_STREAM, uri)
+                            putExtra(Intent.EXTRA_SUBJECT, res.game)
+                            putExtra(Intent.EXTRA_TEXT, "Bannerlator config for ${res.game}")
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        context.startActivity(Intent.createChooser(send, "Share config"))
+                    } catch (e: Exception) {
+                        Toast.makeText(context, "Couldn't share the config.", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+    }
+    val uploadConfig: () -> Unit = {
+        uploading = true
+        uploadStarted = false
+        vm.uploadShortcutConfig(
+            shortcut,
+            onExisting = { existing, proceed, cancel -> replacePrompt = Triple(existing, proceed, cancel) },
+            onStart = { uploadStarted = true },
+            onResult = { _, msg ->
+                uploading = false
+                uploadStarted = false
+                replacePrompt = null
+                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+            },
+        )
+    }
+
+    // Flat D-pad index space: [0]=Share [1]=Import [2]=Upload [3]=Search field, then one index per config
+    // card, then Close last. The search field is highlightable but text entry stays touch/IME (A is a
+    // no-op there), so D-pad can skip straight past it to the list.
+    val actionCount = 3
+    val searchIndex = actionCount
+    val firstCardIndex = actionCount + 1
+    val closeIndex = firstCardIndex + cards.size
+    val total = closeIndex + 1
+    var focusIndex by remember { mutableStateOf(0) }
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
+    // Keep the index in range as the list grows/shrinks (match resolves, filter toggles, search opens).
+    LaunchedEffect(total) { if (focusIndex > total - 1) focusIndex = (total - 1).coerceAtLeast(0) }
+
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 560.dp)
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp)
+                .verticalScroll(rememberScrollState())
+                .focusRequester(focusRequester)
+                .focusable()
+                .onPreviewKeyEvent { event ->
+                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                    when (event.key) {
+                        Key.DirectionUp -> { if (focusIndex > 0) focusIndex--; true }
+                        Key.DirectionDown -> { if (focusIndex < total - 1) focusIndex++; true }
+                        Key.ButtonA, Key.Enter, Key.DirectionCenter -> {
+                            when (focusIndex) {
+                                0 -> shareConfig()
+                                1 -> onImport()
+                                2 -> if (!uploading) uploadConfig()
+                                searchIndex -> { /* text entry is touch / IME only */ }
+                                closeIndex -> onDismiss()
+                                else -> cards.getOrNull(focusIndex - firstCardIndex)?.let { onApply(it.pick) }
+                            }
+                            true
+                        }
+                        Key.ButtonB, Key.Back -> { onDismiss(); true }
+                        else -> false
+                    }
+                },
+        ) {
+            SheetTitle("Community configs")
+            Text(
+                shortcut.name,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 13.sp,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
+            Spacer(Modifier.height(12.dp))
+            // Actions row: Share + Import; Upload full-width below.
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                DpadHighlight(focused = focusIndex == 0, modifier = Modifier.weight(1f)) {
+                    OutlinedButton(onClick = shareConfig, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Filled.Share, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Share")
+                    }
+                }
+                DpadHighlight(focused = focusIndex == 1, modifier = Modifier.weight(1f)) {
+                    OutlinedButton(onClick = onImport, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Filled.FileUpload, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Import")
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            DpadHighlight(focused = focusIndex == 2) {
+                OutlinedButton(onClick = { if (!uploading) uploadConfig() }, enabled = !uploading, modifier = Modifier.fillMaxWidth()) {
+                    if (uploading) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(6.dp))
+                        Text(if (uploadStarted) "Uploading…" else "Preparing…")
+                    } else {
+                        Icon(Icons.Filled.CloudUpload, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Upload to community")
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            DpadHighlight(focused = focusIndex == searchIndex) {
+                OutlinedTextField(
+                    value = search,
+                    onValueChange = { q ->
+                        search = q
+                        if (q.trim().length >= 2) vm.searchCommunityGames(q) { searchResults = it }
+                        else searchResults = emptyList()
+                    },
+                    label = { Text("Search all games") },
+                    leadingIcon = { Icon(Icons.Filled.Search, null) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+            when {
+                // Search results (touch-select) replace the match list while a query is active.
+                searching -> {
+                    if (searchResults.isEmpty()) {
+                        Text("No games match \"$search\".", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else {
+                        searchResults.forEach { cg ->
+                            CommunityCard(onClick = {
+                                vm.selectCommunityGame(cg) { match = it }
+                                search = ""
+                                searchResults = emptyList()
+                            }) {
+                                Text(
+                                    cg.name,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                CommunityStoreBadge(isSteam = cg.isSteam)
+                            }
+                            Spacer(Modifier.height(8.dp))
+                        }
+                    }
+                }
+                matchLoading -> Text("Matching \"${shortcut.name}\"…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                game == null -> Text("No auto-match for \"${shortcut.name}\" — search above to pick one.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                else -> {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            game.name,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        CommunityStoreBadge(isSteam = game.isSteam)
+                    }
+                    val devWord = if (game.devices.size == 1) "device" else "devices"
+                    val cfgWord = if (game.configCount == 1) "config" else "configs"
+                    Text("${game.configCount} $cfgWord · ${game.devices.size} $devWord", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                    Text("Your device: ${deviceHeaderLabel(DeviceIdentity.deviceModel(), match?.userHardwareLabel)}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                    Spacer(Modifier.height(6.dp))
+                    FilterChip(
+                        selected = matchesMine,
+                        onClick = { matchesMine = !matchesMine },
+                        label = { Text("Matches my device") },
+                        enabled = hwEnabled,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    if (cards.isEmpty()) {
+                        Text(
+                            if (matchesMine) "No uploaded configs match your device." else "No configs listed.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        cards.forEachIndexed { i, c ->
+                            DpadHighlight(focused = focusIndex == firstCardIndex + i) {
+                                val entry = c.entry
+                                val device = c.device
+                                if (entry != null) {
+                                    CommunityConfigEntryCard(entry = entry, isMatch = c.isMatch) { onApply(c.pick) }
+                                } else if (device != null) {
+                                    CommunityCard(onClick = { onApply(c.pick) }) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                device.model.ifBlank { "Unknown device" },
+                                                color = if (c.isMatch) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                            val sub = listOf(device.gpu, device.soc).filter { it.isNotBlank() }.joinToString(" · ")
+                                            if (sub.isNotEmpty()) Text(sub, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        }
+                                    }
+                                }
+                            }
+                            Spacer(Modifier.height(8.dp))
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            DpadHighlight(focused = focusIndex == closeIndex) {
+                OutlinedButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("Close") }
+            }
+        }
+    }
+
+    // Replace-confirm before overwriting an existing upload (mirrors the phone flow: Replace resumes the
+    // parked upload coroutine, Cancel unwinds it cleanly so the button doesn't stay stuck busy).
+    replacePrompt?.let { (existing, proceed, cancel) ->
+        val dismissReplace = {
+            replacePrompt = null
+            uploading = false
+            uploadStarted = false
+            cancel()
+        }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = dismissReplace,
+            title = { Text("Replace your shared config?") },
+            text = { Text("You've already shared a config for \"${existing.game}\". Replace it with this one?") },
+            confirmButton = { TextButton(onClick = { replacePrompt = null; proceed() }) { Text("Replace") } },
+            dismissButton = { TextButton(onClick = dismissReplace) { Text("Cancel") } },
+        )
     }
 }
 
@@ -899,10 +1334,21 @@ private fun SheetTitle(text: String) {
 }
 
 @Composable
-private fun SheetRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
+private fun SheetRow(
+    icon: ImageVector,
+    label: String,
+    focused: Boolean = false,
+    onClick: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            // Our own D-pad highlight (a translucent primary fill), drawn UNDER the clickable so touch
+            // still works exactly as before. Same focus idiom as the hero buttons / RailButton.
+            .then(
+                if (focused) Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.18f))
+                else Modifier
+            )
             .clickable(onClick = onClick)
             .padding(horizontal = 24.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -910,6 +1356,63 @@ private fun SheetRow(icon: androidx.compose.ui.graphics.vector.ImageVector, labe
         Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.width(16.dp))
         Text(label, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
+    }
+}
+
+// One selectable row in a static Big Picture sheet (Game options / Tools / Power).
+private data class BpRow(val icon: ImageVector, val label: String, val onClick: () -> Unit)
+
+// Index-based D-pad wiring for a static bottom-sheet row list. A bottom sheet is its OWN window, so the
+// root screen's onPreviewKeyEvent never receives its keys — the sheet therefore owns a single focus
+// target of its own (same "one focus target, no per-item FocusRequester" philosophy the root uses).
+// Up/Down move the highlight, A/Enter/Center activate the highlighted row, B/Back dismiss. Touch stays
+// live because every SheetRow keeps its own clickable.
+private fun Modifier.bpSheetDpad(
+    focusRequester: FocusRequester,
+    index: Int,
+    count: Int,
+    onMove: (Int) -> Unit,
+    onActivate: () -> Unit,
+    onDismiss: () -> Unit,
+): Modifier = this
+    .focusRequester(focusRequester)
+    .focusable()
+    .onPreviewKeyEvent { event ->
+        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+        when (event.key) {
+            Key.DirectionUp -> { if (index > 0) onMove(index - 1); true }
+            Key.DirectionDown -> { if (index < count - 1) onMove(index + 1); true }
+            Key.ButtonA, Key.Enter, Key.DirectionCenter -> { onActivate(); true }
+            Key.ButtonB, Key.Back -> { onDismiss(); true }
+            else -> false
+        }
+    }
+
+// A static Big Picture sheet: a title + a list of selectable rows, fully D-pad + touch navigable.
+@Composable
+private fun BpSheetScaffold(title: String, rows: List<BpRow>, onDismiss: () -> Unit) {
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        var focusIndex by remember { mutableStateOf(0) }
+        val focusRequester = remember { FocusRequester() }
+        LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 24.dp)
+                .bpSheetDpad(
+                    focusRequester = focusRequester,
+                    index = focusIndex,
+                    count = rows.size,
+                    onMove = { focusIndex = it },
+                    onActivate = { rows.getOrNull(focusIndex)?.onClick?.invoke() },
+                    onDismiss = onDismiss,
+                ),
+        ) {
+            SheetTitle(title)
+            rows.forEachIndexed { i, r ->
+                SheetRow(icon = r.icon, label = r.label, focused = i == focusIndex, onClick = r.onClick)
+            }
+        }
     }
 }
 

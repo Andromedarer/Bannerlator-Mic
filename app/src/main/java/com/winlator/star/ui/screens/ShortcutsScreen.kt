@@ -25,6 +25,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -54,6 +55,8 @@ import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -142,6 +145,13 @@ import com.winlator.star.ui.ComponentReturnBus
 import com.winlator.star.ui.LocalTopBarActions
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -2246,7 +2256,7 @@ private fun BannerlatorSourceBadge() {
 
 // Small Steam / Title provenance badge for the community-config sheet header.
 @Composable
-private fun CommunityStoreBadge(isSteam: Boolean) {
+internal fun CommunityStoreBadge(isSteam: Boolean) {
     val bg = if (isSteam) MaterialTheme.colorScheme.primary else SurfaceVariantColor
     val fg = if (isSteam) MaterialTheme.colorScheme.onPrimary else OnSurfaceVariant
     Box(
@@ -3025,7 +3035,24 @@ internal fun CommunityCatalogBrowser(
     var sort by rememberSaveable { mutableStateOf(CatalogSort.CONFIGS) }
     var selectedIdentity by rememberSaveable { mutableStateOf<String?>(null) }
 
+    // Controller D-pad model — index-based with a SINGLE focus target on the panel (the same philosophy
+    // Big Picture uses). gameFocus walks the visible game list; configFocus walks the drilled game's
+    // published picks; drilledPicks is that in-render-order list the device panel hands up so A can apply
+    // picks[configFocus]. Everything here is inert for touch/phone users: the handler consumes ONLY the
+    // D-pad/A/B keys and returns false otherwise, so taps + the soft keyboard are unaffected.
+    var gameFocus by remember { mutableStateOf(0) }
+    var configFocus by remember { mutableStateOf(0) }
+    var drilledPicks by remember { mutableStateOf<List<CommunityPick>>(emptyList()) }
+    val browserFocus = remember { FocusRequester() }
+    val gameListState = rememberLazyListState()
+
     LaunchedEffect(Unit) { vm.getCommunityCatalog { catalog = it; loading = false } }
+    // Seed focus so the panel receives D-pad from the first frame (it's its own Dialog window, so the
+    // Big Picture root handler never sees these keys).
+    LaunchedEffect(Unit) { runCatching { browserFocus.requestFocus() } }
+    // Reset the drilled cursor AND drop the previous game's picks the instant we drill in/out, so A can't
+    // apply a stale pick in the frame before the new device panel republishes its list.
+    LaunchedEffect(selectedIdentity) { configFocus = 0; drilledPicks = emptyList() }
 
     val userSoc = catalog?.userSoc
     val userGpu = catalog?.userGpu
@@ -3055,9 +3082,47 @@ internal fun CommunityCatalogBrowser(
         }
     }
 
+    // Keep the game-list cursor in range as filters change, and keep the highlighted game on-screen.
+    LaunchedEffect(visible.size) { if (gameFocus > visible.lastIndex) gameFocus = visible.lastIndex.coerceAtLeast(0) }
+    LaunchedEffect(gameFocus, selectedGame, visible.size) {
+        if (selectedGame == null && visible.isNotEmpty())
+            runCatching { gameListState.animateScrollToItem(gameFocus.coerceIn(0, visible.lastIndex)) }
+    }
+
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
-            modifier = Modifier.fillMaxWidth(0.95f).fillMaxHeight(0.92f),
+            modifier = Modifier
+                .fillMaxWidth(0.95f)
+                .fillMaxHeight(0.92f)
+                .focusRequester(browserFocus)
+                .focusable()
+                .onPreviewKeyEvent { event ->
+                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                    val drilled = selectedGame != null
+                    when (event.key) {
+                        Key.DirectionUp -> {
+                            if (drilled) { if (configFocus > 0) configFocus-- }
+                            else { if (gameFocus > 0) gameFocus-- }
+                            true
+                        }
+                        Key.DirectionDown -> {
+                            if (drilled) { if (configFocus < drilledPicks.lastIndex) configFocus++ }
+                            else { if (gameFocus < visible.lastIndex) gameFocus++ }
+                            true
+                        }
+                        Key.ButtonA, Key.Enter, Key.DirectionCenter -> {
+                            if (drilled) drilledPicks.getOrNull(configFocus)?.let(onPick)
+                            else visible.getOrNull(gameFocus)?.let { selectedIdentity = it.identity }
+                            true
+                        }
+                        // B / Back: up a level when drilled, otherwise close the browser.
+                        Key.ButtonB, Key.Back -> {
+                            if (drilled) selectedIdentity = null else onDismiss()
+                            true
+                        }
+                        else -> false
+                    }
+                },
             shape = MaterialTheme.shapes.large,
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 6.dp,
@@ -3124,12 +3189,16 @@ internal fun CommunityCatalogBrowser(
                     )
                 } else {
                     LazyColumn(
+                        state = gameListState,
                         modifier = modifier,
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        items(visible, key = { it.identity }) { g ->
-                            CommunityGameRow(game = g, onClick = { selectedIdentity = g.identity })
+                        itemsIndexed(visible, key = { _, g -> g.identity }) { index, g ->
+                            // The D-pad highlight border wraps the row; touch users see nothing extra.
+                            DpadHighlight(focused = index == gameFocus) {
+                                CommunityGameRow(game = g, onClick = { gameFocus = index; selectedIdentity = g.identity })
+                            }
                         }
                     }
                 }
@@ -3219,6 +3288,8 @@ internal fun CommunityCatalogBrowser(
                             deviceModel = catalog?.deviceModel,
                             onPick = onPick,
                             wide = wide,
+                            focusedIndex = configFocus,
+                            onPicks = { drilledPicks = it },
                         )
                         games.isEmpty() -> Text(
                             "No community configs available yet (offline, or the index hasn't been fetched).",
@@ -3249,11 +3320,25 @@ internal fun CommunityCatalogBrowser(
     }
 }
 
+// Draws the app's controller-focus border (primary, rounded to the card shape) around a game/config
+// card when it's the D-pad-highlighted item, otherwise a plain passthrough. Kept as a wrapper (rather
+// than a `focused` param on each card) so the touch/phone path renders byte-identically when nothing
+// is focused. Same visual idiom as Big Picture's RailButton/CoverCard focus border.
+@Composable
+internal fun DpadHighlight(focused: Boolean, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    Box(
+        modifier = modifier.then(
+            if (focused) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(10.dp))
+            else Modifier
+        ),
+    ) { content() }
+}
+
 // Shared thin outlined card for the community browser's game + config rows. Matches the app's
 // FileManager/Containers card idiom (surfaceContainer fill, 1dp outline, rounded 10dp) but with a
 // tighter vertical rhythm so the rows read as a compact list. The whole card is the tap target.
 @Composable
-private fun CommunityCard(
+internal fun CommunityCard(
     onClick: () -> Unit,
     content: @Composable RowScope.() -> Unit,
 ) {
@@ -3304,7 +3389,7 @@ private data class GameConfigsState(
 // (the per-shortcut sheet passes the shortcut's own sanitized folder name) is queried in the bannerlator
 // namespace ONLY, so a user's own upload is surfaced even before it lands in the canonical index.
 @Composable
-private fun rememberGameConfigs(
+internal fun rememberGameConfigs(
     vm: ShortcutsViewModel,
     game: CanonicalGame,
     extraBannerlatorFolders: List<String> = emptyList(),
@@ -3325,7 +3410,7 @@ private fun rememberGameConfigs(
 // sub-line = soc · date, and a `★ votes  ↓ downloads` stats row (same iconography as the detail page).
 // The primary line is emphasized in the theme's primary colour when this config matches your hardware.
 @Composable
-private fun CommunityConfigEntryCard(entry: WorkerConfigEntry, isMatch: Boolean, onClick: () -> Unit) {
+internal fun CommunityConfigEntryCard(entry: WorkerConfigEntry, isMatch: Boolean, onClick: () -> Unit) {
     CommunityCard(onClick = onClick) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
@@ -3377,7 +3462,7 @@ private fun CommunityGameRow(game: CanonicalGame, onClick: () -> Unit) {
 // value was found and which wasn't. The both-missing case collapses to a single "Unresolved" (never
 // "Unresolved · Unresolved"). Display-only; the caller decides which values to pass and this never
 // affects device matching.
-private fun deviceHeaderLabel(model: String?, hardware: String?): String {
+internal fun deviceHeaderLabel(model: String?, hardware: String?): String {
     val m = model?.takeIf { it.isNotBlank() }
     val hw = hardware?.takeIf { it.isNotBlank() }
     return when {
@@ -3403,6 +3488,11 @@ private fun CommunityDevicePanel(
     deviceModel: String?,
     onPick: (CommunityPick) -> Unit,
     wide: Boolean,
+    // Controller D-pad support (defaulted so the phone caller stays untouched): [focusedIndex] draws a
+    // highlight border on the config card at that position, and [onPicks] publishes the CURRENT visible
+    // config list — in render order — up to the browser so A can apply the highlighted one by index.
+    focusedIndex: Int = -1,
+    onPicks: (List<CommunityPick>) -> Unit = {},
 ) {
     val cfg = rememberGameConfigs(vm, game)
     val fallback = remember(game, userSoc, userGpu) { GameMatcher.rankDevices(game.devices, userSoc, userGpu) }
@@ -3413,6 +3503,23 @@ private fun CommunityDevicePanel(
         if (!matchesMyDevice) cfg.entries
         else cfg.entries.filter { GameMatcher.hardwareMatchesUser(userSoc, userGpu, listOf(it.second.device, it.second.soc)) }
     }
+    // The offline per-device fallback list, filtered the same way the render below does — hoisted so the
+    // published picks match exactly what ConfigList draws.
+    val shownDevs = remember(fallback, matchesMyDevice, userSoc, userGpu) {
+        if (!matchesMyDevice) fallback else fallback.filter { GameMatcher.deviceMatchesUser(it, userSoc, userGpu) }
+    }
+    // The flat, in-render-order list of picks the config list currently shows: worker entries when we have
+    // them, else the device fallback. Published to the browser so its D-pad handler can apply picks[index].
+    val orderedPicks = remember(shownEntries, shownDevs, cfg.entries, game) {
+        if (cfg.entries.isNotEmpty()) shownEntries.map { (folder, e) ->
+            CommunityPick.File(
+                game,
+                CommunityConfigRef(game, folder, e.filename, e.sha.ifBlank { null }, ns = if (e.appSource == "bannerlator") "bannerlator" else ""),
+                e,
+            )
+        } else shownDevs.map { CommunityPick.Device(game, it) }
+    }
+    LaunchedEffect(orderedPicks) { onPicks(orderedPicks) }
 
     // Header (counts + store badge + your-device + the "Matches my device" toggle). Sits on top in
     // portrait, in the left column in landscape.
@@ -3457,17 +3564,19 @@ private fun CommunityDevicePanel(
                     if (shownEntries.isEmpty()) {
                         Text("No uploaded configs match your device.", color = OnSurfaceVariant)
                     } else {
-                        shownEntries.forEach { (folder, e) ->
+                        shownEntries.forEachIndexed { idx, (folder, e) ->
                             val isMatch = hwEnabled &&
                                 GameMatcher.hardwareMatchesUser(userSoc, userGpu, listOf(e.device, e.soc))
-                            CommunityConfigEntryCard(entry = e, isMatch = isMatch) {
-                                onPick(
-                                    CommunityPick.File(
-                                        game,
-                                        CommunityConfigRef(game, folder, e.filename, e.sha.ifBlank { null }, ns = if (e.appSource == "bannerlator") "bannerlator" else ""),
-                                        e,
+                            DpadHighlight(focused = idx == focusedIndex) {
+                                CommunityConfigEntryCard(entry = e, isMatch = isMatch) {
+                                    onPick(
+                                        CommunityPick.File(
+                                            game,
+                                            CommunityConfigRef(game, folder, e.filename, e.sha.ifBlank { null }, ns = if (e.appSource == "bannerlator") "bannerlator" else ""),
+                                            e,
+                                        )
                                     )
-                                )
+                                }
                             }
                         }
                     }
@@ -3481,25 +3590,25 @@ private fun CommunityDevicePanel(
                         color = OnSurfaceVariant,
                     )
                     val hw = hardwareLabel?.lowercase()
-                    val devs = if (!matchesMyDevice) fallback
-                        else fallback.filter { GameMatcher.deviceMatchesUser(it, userSoc, userGpu) }
-                    devs.forEach { d ->
+                    shownDevs.forEachIndexed { idx, d ->
                         val isMatch = hw != null && (
                             (d.soc.isNotBlank() && (hw.contains(d.soc.lowercase()) || d.soc.lowercase().contains(hw))) ||
                             (d.gpu.isNotBlank() && (hw.contains(d.gpu.lowercase()) || d.gpu.lowercase().contains(hw)))
                         )
-                        CommunityCard(onClick = { onPick(CommunityPick.Device(game, d)) }) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = d.model.ifBlank { "Unknown device" },
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = if (isMatch) MaterialTheme.colorScheme.primary else OnSurface,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                val sub = listOf(d.gpu, d.soc).filter { it.isNotBlank() }.joinToString(" · ")
-                                if (sub.isNotEmpty()) {
-                                    Text(sub, style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        DpadHighlight(focused = idx == focusedIndex) {
+                            CommunityCard(onClick = { onPick(CommunityPick.Device(game, d)) }) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = d.model.ifBlank { "Unknown device" },
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = if (isMatch) MaterialTheme.colorScheme.primary else OnSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    val sub = listOf(d.gpu, d.soc).filter { it.isNotBlank() }.joinToString(" · ")
+                                    if (sub.isNotEmpty()) {
+                                        Text(sub, style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
                                 }
                             }
                         }
