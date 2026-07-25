@@ -554,12 +554,14 @@ class FusionHudView(
     override fun onDraw(canvas: Canvas) {
         if (contentW <= 0f || contentH <= 0f) { lockController.drawBadge(canvas); return }
 
-        val radius = sp(8f)
+        // The Pill is a capsule — its background must use the SAME height/2 radius as the outline, or the
+        // boxier 8sp background corners poke out past the accent border (the "bg larger than outline" bug).
+        val pill = pillBorder
+        val radius = if (pill != null) height / 2f else sp(8f)
         bgPaint.color = Color.argb((bgOpacity.coerceIn(0f, 1f) * 255f).roundToInt(), 0, 0, 0)
         canvas.drawRoundRect(0f, 0f, width.toFloat(), height.toFloat(), radius, radius, bgPaint)
 
         // Accent outline: always on for the Pill (its identity is a bordered pill), else per slider.
-        val pill = pillBorder
         val strokeW = when {
             pill != null -> sp(1.4f)
             outlineIntensity > 0f -> outlineIntensity * sp(3.5f)
