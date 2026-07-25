@@ -3389,7 +3389,7 @@ private data class GameConfigsState(
 // (the per-shortcut sheet passes the shortcut's own sanitized folder name) is queried in the bannerlator
 // namespace ONLY, so a user's own upload is surfaced even before it lands in the canonical index.
 @Composable
-internal fun rememberGameConfigs(
+private fun rememberGameConfigs(
     vm: ShortcutsViewModel,
     game: CanonicalGame,
     extraBannerlatorFolders: List<String> = emptyList(),
