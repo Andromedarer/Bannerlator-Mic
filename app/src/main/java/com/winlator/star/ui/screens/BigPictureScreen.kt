@@ -113,6 +113,7 @@ import com.winlator.star.XServerDisplayActivity
 import com.winlator.star.XrActivity
 import com.winlator.star.container.ContainerManager
 import com.winlator.star.communityconfigs.CommunityConfigApply
+import com.winlator.star.ui.screens.adrenodownload.AdrenoDriverDownloadSheet
 import com.winlator.star.container.Shortcut
 import com.winlator.star.store.DownloadManagerActivity
 import com.winlator.star.store.StarLaunchBridge
@@ -157,6 +158,11 @@ fun BigPictureScreen(navController: NavController) {
     var showBpAccount by remember { mutableStateOf(false) }
     var communityApplyResult by remember { mutableStateOf<CommunityConfigApply.ConfigApplyResult?>(null) }
     var communityApplying by remember { mutableStateOf(false) }
+    // Stage 2 smart install: the pick to re-apply after a missing component/driver is installed,
+    // and which install sheet is open.
+    var lastCommunityPick by remember { mutableStateOf<CommunityPick?>(null) }
+    var bpInstallFor by remember { mutableStateOf<CommunityConfigApply.MissingComponent?>(null) }
+    var bpDriverFor by remember { mutableStateOf<CommunityConfigApply.MissingDriver?>(null) }
 
     // Decoded covers keyed by shortcut name; guarded by a plain in-flight set so we never re-fetch.
     val coverCache = remember { mutableStateMapOf<String, ImageBitmap>() }
@@ -249,10 +255,13 @@ fun BigPictureScreen(navController: NavController) {
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 // Community overlays own Back first (they sit above sheets).
-                if (showCommunity || showBpAccount || communityApplyResult != null) {
+                if (showCommunity || showBpAccount || communityApplyResult != null
+                        || bpInstallFor != null || bpDriverFor != null) {
                     return@onPreviewKeyEvent when (event.key) {
                         Key.ButtonB, Key.Back -> {
                             when {
+                                bpInstallFor != null -> bpInstallFor = null
+                                bpDriverFor != null -> bpDriverFor = null
                                 communityApplyResult != null -> communityApplyResult = null
                                 showBpAccount -> showBpAccount = false
                                 else -> showCommunity = false
@@ -622,26 +631,28 @@ fun BigPictureScreen(navController: NavController) {
         )
     }
 
+    // Applies a picked config to the selected game; a re-apply after installing a missing piece
+    // reuses this, re-resolving against what's now on disk.
+    fun applyCommunityPick(pick: CommunityPick) {
+        val target = selected ?: return
+        communityApplying = true
+        val onDone: (CommunityConfigApply.ConfigApplyResult) -> Unit = { res ->
+            communityApplying = false
+            communityApplyResult = res
+            shortcuts = manager.loadShortcuts()
+        }
+        when (pick) {
+            is CommunityPick.File -> communityVm.applyCommunityConfigFile(target, pick.ref, onDone)
+            is CommunityPick.Device -> communityVm.applyCommunityConfig(target, pick.game, pick.device, onDone)
+        }
+    }
+
     // ── Community configs ──────────────────────────────────────────────────
     if (showCommunity) {
         CommunityCatalogBrowser(
             vm = communityVm,
             onDismiss = { showCommunity = false },
-            onPick = { pick ->
-                // Apply to the currently selected game. Big Picture always sits on one, so there is
-                // no separate target picker — unlike the phone browser's "Apply to game…" chooser.
-                val target = selected ?: return@CommunityCatalogBrowser
-                communityApplying = true
-                val onDone: (CommunityConfigApply.ConfigApplyResult) -> Unit = { res ->
-                    communityApplying = false
-                    communityApplyResult = res
-                    shortcuts = manager.loadShortcuts()
-                }
-                when (pick) {
-                    is CommunityPick.File -> communityVm.applyCommunityConfigFile(target, pick.ref, onDone)
-                    is CommunityPick.Device -> communityVm.applyCommunityConfig(target, pick.game, pick.device, onDone)
-                }
-            },
+            onPick = { pick -> lastCommunityPick = pick; applyCommunityPick(pick) },
             onMyAccount = { showBpAccount = true },
         )
     }
@@ -660,13 +671,61 @@ fun BigPictureScreen(navController: NavController) {
             onDismissRequest = { communityApplyResult = null },
             title = { Text(if (res.ok) "Config applied" else "Couldn't apply") },
             text = {
-                Text(
-                    res.message + (if (res.ok) "\n\nApplied to \"${selected?.name.orEmpty()}\"." else ""),
-                    color = Color.White.copy(alpha = 0.85f),
-                )
+                Column {
+                    Text(res.message, color = Color.White.copy(alpha = 0.85f))
+                    if (res.ok) Text(
+                        "Applied to \"${selected?.name.orEmpty()}\".",
+                        color = Color.White.copy(alpha = 0.55f),
+                        fontSize = 12.sp,
+                    )
+                    // Missing components — one tap opens the normal download sheet for that type;
+                    // on install we re-apply the same pick, which re-resolves against what's now on
+                    // disk and picks the component up.
+                    res.missingComponents.forEach { mc ->
+                        Spacer(Modifier.height(6.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "Needs ${mc.label}${mc.wanted.ifBlank { "" }.let { if (it.isBlank()) "" else " ($it)" }}",
+                                color = Color.White, fontSize = 13.sp, modifier = Modifier.weight(1f),
+                            )
+                            androidx.compose.material3.TextButton(onClick = { bpInstallFor = mc }) { Text("Install") }
+                        }
+                    }
+                    res.missingDrivers.forEach { md ->
+                        Spacer(Modifier.height(6.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "Needs GPU driver ${md.wanted}",
+                                color = Color.White, fontSize = 13.sp, modifier = Modifier.weight(1f),
+                            )
+                            androidx.compose.material3.TextButton(onClick = { bpDriverFor = md }) { Text("Install") }
+                        }
+                    }
+                    res.advisories.forEach { Text("• $it", color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp) }
+                }
             },
             confirmButton = {
-                androidx.compose.material3.TextButton(onClick = { communityApplyResult = null }) { Text("OK") }
+                androidx.compose.material3.TextButton(onClick = { communityApplyResult = null }) { Text("Done") }
+            },
+        )
+    }
+
+    // Install a missing component, then re-apply the pick so the version is written back.
+    bpInstallFor?.let { mc ->
+        ContentDownloadSheet(
+            contentType = mc.type,
+            onDismiss = { bpInstallFor = null },
+            onContentChanged = { lastCommunityPick?.let { applyCommunityPick(it) } },
+        )
+    }
+
+    // Full adrenotools driver browser for a missing GPU driver; re-apply on install.
+    bpDriverFor?.let { _ ->
+        AdrenoDriverDownloadSheet(
+            onDismiss = { bpDriverFor = null },
+            onDriverInstalled = {
+                bpDriverFor = null
+                lastCommunityPick?.let { applyCommunityPick(it) }
             },
         )
     }
