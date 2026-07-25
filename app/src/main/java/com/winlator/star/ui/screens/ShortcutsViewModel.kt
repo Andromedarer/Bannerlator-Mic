@@ -202,11 +202,23 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
                 val remembered = rememberedId.takeIf { it.isNotBlank() }
                     ?.let { id -> games.firstOrNull { it.identity == id } }
 
-                val best = remembered ?: ranked.firstOrNull()?.game
+                // Then an AUTHORITATIVE Steam appId, when the shortcut carries one. Steam-identified
+                // games persist their appid in the `steamAppId` extra (via the cover-art flow; it
+                // rides the .desktop through renames), and the canonical index is keyed BY appid
+                // (CanonicalGame.identity), so this is an exact, unambiguous match that beats fuzzy
+                // name matching and needs no "Which game is this?" picker. Non-Steam titles or a
+                // not-yet-resolved appid simply fall through to the name match below. A user's
+                // remembered pick still wins over the appid (explicit override).
+                val appId = shortcut.getExtra("steamAppId", "").takeIf { it.isNotBlank() }
+                val byAppId = if (remembered != null) null
+                    else appId?.let { id -> games.firstOrNull { it.steamAppId == id } }
+
+                val best = remembered ?: byAppId ?: ranked.firstOrNull()?.game
                 // Surface genuine ties as alternatives: candidates whose score sits within a tiny
                 // epsilon of the top score, top-first (top match included), capped. size <= 1 → no
-                // ambiguity, so no picker. Suppressed entirely once a pick has been remembered.
-                val alternatives = if (remembered != null) emptyList() else {
+                // ambiguity, so no picker. Suppressed entirely once we have a DEFINITIVE identity —
+                // a remembered pick or an exact appId match.
+                val alternatives = if (remembered != null || byAppId != null) emptyList() else {
                     val top = ranked.firstOrNull()?.score
                     if (top == null) emptyList()
                     else ranked.filter { top - it.score <= TIE_EPSILON }
