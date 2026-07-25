@@ -86,6 +86,10 @@ data class CommunityMatchResult(
     // the "Matches my device" filter (which matches SoC/GPU against each config's device/soc strings).
     val userSoc: String? = null,
     val userGpu: String? = null,
+    // Genuine ambiguity: the candidates that tied [match] on score (top-first, [match] included, capped).
+    // Empty when the top match is unambiguous OR the game was chosen/remembered — the UI only draws the
+    // "Which game is this?" picker when size > 1. (issue #167)
+    val alternatives: List<CanonicalGame> = emptyList(),
 )
 
 /**
@@ -190,7 +194,27 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
                 val games = communityRepo.getGames()
-                val best = GameMatcher.match(shortcut.name, games).firstOrNull()?.game
+                val ranked = GameMatcher.match(shortcut.name, games)
+
+                // Honor a remembered per-shortcut pick FIRST: once the user has told us which game a
+                // generic name (e.g. "Dragon Age") refers to, resolve straight to it with no picker.
+                val rememberedId = shortcut.getExtra("communityGameIdentity", "")
+                val remembered = rememberedId.takeIf { it.isNotBlank() }
+                    ?.let { id -> games.firstOrNull { it.identity == id } }
+
+                val best = remembered ?: ranked.firstOrNull()?.game
+                // Surface genuine ties as alternatives: candidates whose score sits within a tiny
+                // epsilon of the top score, top-first (top match included), capped. size <= 1 → no
+                // ambiguity, so no picker. Suppressed entirely once a pick has been remembered.
+                val alternatives = if (remembered != null) emptyList() else {
+                    val top = ranked.firstOrNull()?.score
+                    if (top == null) emptyList()
+                    else ranked.filter { top - it.score <= TIE_EPSILON }
+                        .map { it.game }
+                        .take(MAX_TIE_ALTERNATIVES)
+                        .let { if (it.size <= 1) emptyList() else it }
+                }
+
                 val userSoc = DeviceIdentity.soc()
                 val userGpu = DeviceIdentity.gpu(getApplication())
                 val devices = best?.let { GameMatcher.rankDevices(it.devices, userSoc, userGpu) } ?: emptyList()
@@ -201,9 +225,23 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
                     userHardwareLabel = userSoc ?: userGpu,
                     userSoc = userSoc,
                     userGpu = userGpu,
+                    alternatives = alternatives,
                 )
             }
             onResult(result)
+        }
+    }
+
+    /**
+     * Remember, per shortcut, which canonical game a (possibly ambiguous) name maps to — so the
+     * "Which game is this?" picker (and a manual search-pick) only has to be answered once. Persists
+     * onto the shortcut's own extra data via [Shortcut.saveData]; [matchCommunityConfigs] reads it back
+     * on the next open. Off the main thread. (issue #167)
+     */
+    fun rememberCommunityGame(shortcut: Shortcut, game: CanonicalGame) {
+        viewModelScope.launch(Dispatchers.IO) {
+            shortcut.putExtra("communityGameIdentity", game.identity)
+            shortcut.saveData()
         }
     }
 
@@ -1122,6 +1160,12 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
 
     companion object {
         private const val TAG = "ShortcutsImport"
+
+        // A shortcut name genuinely ties several canonical games when their match scores sit within
+        // this epsilon of the top score → the "Which game is this?" picker (issue #167). Capped so a
+        // very generic name can't spill a huge list into the sheet.
+        private const val TIE_EPSILON = 1e-6
+        private const val MAX_TIE_ALTERNATIVES = 6
 
         fun disableOnScreen(context: Context, shortcut: Shortcut) {
             try {

@@ -1507,6 +1507,9 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clickable {
+                                            // Manually correcting the game via search also sticks for
+                                            // next time (issue #167), same as tapping a tie alternative.
+                                            vm.rememberCommunityGame(s, cg)
                                             vm.selectCommunityGame(cg) { communityResult = it }
                                             communitySearch = ""
                                             communitySearchResults = emptyList()
@@ -1541,6 +1544,41 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                 .verticalScroll(rememberScrollState()),
                             verticalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
+                            // Genuine tie (e.g. "Dragon Age" → Inquisition vs Veilguard): let the user
+                            // pick the right game rather than silently trusting the top candidate. The
+                            // choice is remembered per shortcut, so this only asks once. (issue #167)
+                            val tieOptions = result?.alternatives.orEmpty()
+                            if (tieOptions.size > 1) {
+                                Text(
+                                    text = "Which game is this?",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = OnSurface,
+                                )
+                                tieOptions.forEach { alt ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                vm.rememberCommunityGame(s, alt)
+                                                vm.selectCommunityGame(alt) { communityResult = it }
+                                            }
+                                            .padding(vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        Text(
+                                            text = alt.name,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = OnSurface,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        CommunityStoreBadge(isSteam = alt.isSteam)
+                                    }
+                                }
+                                Divider(color = DividerColor)
+                            }
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),

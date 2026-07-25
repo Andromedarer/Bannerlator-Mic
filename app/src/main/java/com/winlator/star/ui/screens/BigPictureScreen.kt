@@ -1256,6 +1256,8 @@ private fun GameCommunitySheet(
                     } else {
                         searchResults.forEach { cg ->
                             CommunityCard(onClick = {
+                                // Manually correcting the game also sticks for next time (issue #167).
+                                vm.rememberCommunityGame(shortcut, cg)
                                 vm.selectCommunityGame(cg) { match = it }
                                 search = ""
                                 searchResults = emptyList()
@@ -1276,6 +1278,36 @@ private fun GameCommunitySheet(
                 matchLoading -> Text("Matching \"${shortcut.name}\"…", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 game == null -> Text("No auto-match for \"${shortcut.name}\" — search above to pick one.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 else -> {
+                    // Genuine tie (e.g. "Dragon Age" → Inquisition vs Veilguard): offer the alternatives
+                    // so the user picks the right game instead of silently trusting the top candidate.
+                    // Touch-select (not wired into the D-pad row model — kept simple); the choice is
+                    // remembered per shortcut so it only asks once. (issue #167)
+                    val tieOptions = match?.alternatives.orEmpty()
+                    if (tieOptions.size > 1) {
+                        Text(
+                            "Which game is this?",
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        tieOptions.forEach { alt ->
+                            CommunityCard(onClick = {
+                                vm.rememberCommunityGame(shortcut, alt)
+                                vm.selectCommunityGame(alt) { match = it }
+                            }) {
+                                Text(
+                                    alt.name,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                CommunityStoreBadge(isSteam = alt.isSteam)
+                            }
+                            Spacer(Modifier.height(8.dp))
+                        }
+                    }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
                             game.name,
