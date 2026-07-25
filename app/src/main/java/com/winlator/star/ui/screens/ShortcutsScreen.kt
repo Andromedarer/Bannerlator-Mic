@@ -24,6 +24,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.material3.Card
@@ -4797,6 +4799,19 @@ private fun Modifier.settingsDpad(dp: SettingsDpad, ids: () -> List<String>, onD
             }
         }
 
+// Scrolls the focused control into view as the D-pad cursor moves down/up past the fold. The editor's
+// body is one verticalScroll Column, which acts as the bring-into-view responder, so requesting it on the
+// focused control makes the Column follow the highlight. Keyed on this control's own focused state so it
+// only fires on the frame it gains focus.
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun Modifier.dpadBringIntoView(dp: SettingsDpad, id: String): Modifier {
+    val requester = remember { BringIntoViewRequester() }
+    val focused = dp.focusedId == id
+    LaunchedEffect(focused) { if (focused) runCatching { requester.bringIntoView() } }
+    return this.bringIntoViewRequester(requester)
+}
+
 // ── Per-control wrappers. Each publishes its action(s) via SideEffect and renders with the focus
 // highlight. `onLeftId`/`onRightId` move focus to a laterally-adjacent sibling (custom W|H, gfx
 // driver|wrapper button, Cancel|OK). ──
@@ -4817,6 +4832,7 @@ private fun DpField(
     OutlinedTextField(
         value = value, onValueChange = onValueChange, label = { Text(label) }, singleLine = singleLine,
         modifier = modifier
+            .dpadBringIntoView(dp, id)
             .focusRequester(fr)
             .onFocusChanged { st -> if (st.isFocused) dp.imeFieldId = id else if (dp.imeFieldId == id) dp.imeFieldId = null }
             .then(if (dp.isFocused(id)) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, MaterialTheme.shapes.extraSmall) else Modifier)
@@ -4844,7 +4860,7 @@ private fun DpDrop(
     }
     LabeledDropdown(
         label = label, options = options, selectedOption = selected, onSelect = onSelect,
-        enabled = enabled, disabledOptions = disabledOptions, modifier = modifier,
+        enabled = enabled, disabledOptions = disabledOptions, modifier = modifier.dpadBringIntoView(dp, id),
         focused = dp.isFocused(id),
         expandedOverride = dp.openId == id,
         onExpandedChange = { want -> if (want) dp.openMenu(id, options, selected, onSelect) else dp.closeMenu() },
@@ -4855,13 +4871,13 @@ private fun DpDrop(
 @Composable
 private fun DpSwitch(dp: SettingsDpad, id: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit, enabled: Boolean = true) {
     SideEffect { dp.actions[id] = ControlActions(activate = { if (enabled) onCheckedChange(!checked) }) }
-    DpadHighlight(focused = dp.isFocused(id)) { Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled) }
+    DpadHighlight(focused = dp.isFocused(id), modifier = Modifier.dpadBringIntoView(dp, id)) { Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled) }
 }
 
 @Composable
 private fun DpCheck(dp: SettingsDpad, id: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
     SideEffect { dp.actions[id] = ControlActions(activate = { onCheckedChange(!checked) }) }
-    DpadHighlight(focused = dp.isFocused(id)) { Checkbox(checked = checked, onCheckedChange = onCheckedChange) }
+    DpadHighlight(focused = dp.isFocused(id), modifier = Modifier.dpadBringIntoView(dp, id)) { Checkbox(checked = checked, onCheckedChange = onCheckedChange) }
 }
 
 @Composable
@@ -4875,7 +4891,7 @@ private fun DpSlider(
             onRight = { onValueChange((value + step).coerceIn(valueRange.start, valueRange.endInclusive)) },
         )
     }
-    DpadHighlight(focused = dp.isFocused(id)) {
+    DpadHighlight(focused = dp.isFocused(id), modifier = Modifier.dpadBringIntoView(dp, id)) {
         Slider(value = value, onValueChange = onValueChange, valueRange = valueRange, steps = steps, modifier = modifier)
     }
 }
@@ -4892,7 +4908,7 @@ private fun DpButton(
             onRight = onRightId?.let { target -> { dp.focusedId = target } },
         )
     }
-    DpadHighlight(focused = dp.isFocused(id), modifier = modifier) { content() }
+    DpadHighlight(focused = dp.isFocused(id), modifier = modifier.dpadBringIntoView(dp, id)) { content() }
 }
 
 @Composable
@@ -4903,7 +4919,7 @@ private fun DpTabs(dp: SettingsDpad, id: String, selected: Int, count: Int, onSe
             onRight = { if (selected < count - 1) onSelect(selected + 1) },
         )
     }
-    DpadHighlight(focused = dp.isFocused(id)) { content() }
+    DpadHighlight(focused = dp.isFocused(id), modifier = Modifier.dpadBringIntoView(dp, id)) { content() }
 }
 
 @Composable
