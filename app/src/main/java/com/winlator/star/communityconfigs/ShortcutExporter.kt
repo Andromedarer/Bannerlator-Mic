@@ -105,6 +105,7 @@ object ShortcutExporter {
             uploadToken = newUploadToken(),
             uploaderName = account?.username,
             uploaderAvatarUrl = account?.avatarUrl,
+            steamAppId = shortcut.getExtra("steamAppId").takeIf { it.isNotBlank() },
         )
 
         val json = ConfigExporter.export(effective, meta)

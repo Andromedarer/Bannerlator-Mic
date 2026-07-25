@@ -70,6 +70,11 @@ object ConfigExporter {
         val uploadToken: String,
         val uploaderName: String? = null,
         val uploaderAvatarUrl: String? = null,
+        // Authoritative Steam appid for the game, when the shortcut carries one (its `steamAppId`
+        // extra). Stamped into meta.steam_appid so the backend can aggregate this upload under the
+        // correct appid-keyed canonical game instead of guessing from the (renameable) name slug —
+        // the export-side counterpart to the appid-first import match. Null for non-Steam titles.
+        val steamAppId: String? = null,
     )
 
     /**
@@ -146,6 +151,7 @@ object ConfigExporter {
         meta.device.nonBlank()?.let { metaObj.put("device", it) }
         meta.soc.nonBlank()?.let { metaObj.put("soc", it) }
         meta.version.nonBlank()?.let { metaObj.put("bh_version", it) }
+        meta.steamAppId.nonBlank()?.let { metaObj.put("steam_appid", it) }
         // Optional signed-in attribution (Phase 2). Only written when logged in; the config-detail page
         // reads it back to show "by <username>", falling back to "Anonymous user" when it's absent.
         meta.uploaderName.nonBlank()?.let { name ->
