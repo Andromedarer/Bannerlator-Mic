@@ -699,7 +699,10 @@ private fun TopLevelFields(
             stringResource(R.string.frame_generation_lsfg)
         )
         val lsfgDllAvailable = remember { java.io.File(context.filesDir, "lsfg-vk/Lossless.dll").isFile }
-        val fgDisabledOpts = if (lsfgDllAvailable) emptySet() else setOf(fgEngineLabels[2])
+        val fgDisabledOpts = buildSet {
+            add(fgEngineLabels[1])                          // bionic-fg — grayed out for now (WIP; re-enable once proven)
+            if (!lsfgDllAvailable) add(fgEngineLabels[2])   // lsfg-vk — needs an imported Lossless.dll
+        }
         val fgSelIdx = fgEngines.indexOf(viewModel.frameGenEngine).coerceAtLeast(0)
         LabeledDropdown(
             label = stringResource(R.string.frame_generation),
