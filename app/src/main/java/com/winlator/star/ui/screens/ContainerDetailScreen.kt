@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Help
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -74,6 +75,7 @@ import org.json.JSONArray
 import java.util.concurrent.Executors
 import com.winlator.star.container.Container
 import com.winlator.star.widget.perfhud.parseHudOutline
+import com.winlator.star.widget.exportHudDiagnostics
 import com.winlator.star.widget.ColorPickerView
 import com.winlator.star.widget.CPUListView
 import com.winlator.star.ui.components.EnvVarsEditor
@@ -2708,6 +2710,7 @@ internal fun FpsCounterConfigDialog(
     }
 
     val cfg = remember(initialConfig) { parseConfig(initialConfig) }
+    val diagContext = LocalContext.current
     fun bool(k: String, fallbackKey: String, d: String) =
         cfg.getOrDefault(k, cfg.getOrDefault(fallbackKey, d)) == "1"
 
@@ -3004,6 +3007,22 @@ internal fun FpsCounterConfigDialog(
                         valueRange = 0f..50f, steps = 49
                     )
                 }
+
+                // General HUD action (not gated to a style): dump every sensor path + value to a
+                // shareable text file so a device owner can report which nodes their SoC exposes.
+                Spacer(Modifier.height(16.dp))
+                OutlinedButton(
+                    onClick = { exportHudDiagnostics(diagContext) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Filled.Share, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Export HUD diagnostics")
+                }
+                Text(
+                    "Saves a sensor report (CPU/GPU/temp/VRAM…) straight to your Downloads folder.",
+                    style = MaterialTheme.typography.bodySmall
+                )
             }
         },
         confirmButton = {

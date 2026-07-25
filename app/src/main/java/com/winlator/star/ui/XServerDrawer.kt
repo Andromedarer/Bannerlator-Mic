@@ -86,6 +86,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -104,6 +105,7 @@ import com.winlator.star.ui.screens.outlinedMenuCard
 import com.winlator.star.ui.theme.LocalAccentDim
 import com.winlator.star.ui.theme.WinlatorTheme
 import com.winlator.star.widget.perfhud.parseHudOutline
+import com.winlator.star.widget.exportHudDiagnostics
 
 // Accent colors route to the live MaterialTheme.colorScheme (primary/surface) so the drawer
 // follows the user's theme preset / custom accent. The dim accent (low-emphasis fills/borders/
@@ -2180,6 +2182,19 @@ private fun HudContent(state: XServerDrawerState) {
         LabeledSlider("HUD outline", outlineValue, 0f..100f, { outlineValue = it }, { apply() }, format = { "${it.toInt()}" })
         HudChipRow("Outline color", listOf("Gray", "Accent"), if (outlineAccent) 1 else 0) { outlineAccent = it == 1; apply() }
     }
+
+    // General HUD action (every style): export a device sensor report silently to Downloads, so
+    // an owner can report which sysfs nodes their SoC actually exposes for any metric showing "—".
+    HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
+    val diagContext = LocalContext.current
+    OutlinedButton(onClick = { exportHudDiagnostics(diagContext) }, modifier = Modifier.fillMaxWidth()) {
+        Text("Export HUD diagnostics")
+    }
+    Text(
+        "Saves a sensor report (CPU/GPU/temp/VRAM…) straight to your Downloads folder.",
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), fontSize = 11.sp,
+        modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+    )
 }
 
 // ───── 3-stop chip selector (skin / color / outline) ─────

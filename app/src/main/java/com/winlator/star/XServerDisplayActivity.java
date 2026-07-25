@@ -403,11 +403,27 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // processes are the only ones visible under our uid).
     private Thread dxApiThread;
 
-    /** "VKD3D" if a D3D12 game module is loaded, [fallback] if a D3D9/10/11 one is, else null. */
-    private String detectActiveDxApi(String fallback) {
+    /**
+     * Resolve the game's ACTUAL graphics API from the modules the guest wine processes have mapped,
+     * so the perf HUD's "engine" label reflects what the game really renders with — not just the
+     * configured DX wrapper. Both DX wrappers are always present in the prefix, so the only reliable
+     * tell is which module the game loaded (scanned once per PID; the app's own wine processes are
+     * the only ones visible under our uid).
+     *
+     * <p>Priority matters: D3D is checked FIRST, because a DXVK game ALSO maps vulkan-1.dll and a
+     * WineD3D game ALSO maps opengl32.dll — the underlying API would otherwise mask the D3D layer
+     * sitting on top of it. Only when NO d3d*.dll is mapped do we fall through to the native path.
+     *
+     * @param wrapper the configured D3D9/10/11 wrapper name (DXVK / VEGAS / WineD3D); used to tag the
+     *                D3D9/10/11 result. D3D12 always runs on VKD3D regardless of this.
+     * @return e.g. "D3D12 · VKD3D", "D3D11 · DXVK", "Vulkan", "Zink"/"OpenGL", or null if nothing
+     *         graphics-related is mapped yet (caller keeps polling).
+     */
+    private String detectActiveDxApi(String wrapper) {
         java.io.File[] pids = new java.io.File("/proc").listFiles();
         if (pids == null) return null;
-        boolean d3d11 = false;
+        boolean d3d12 = false, d3d11 = false, d3d10 = false, d3d9 = false;
+        boolean vulkan = false, opengl = false;
         for (java.io.File p : pids) {
             if (!p.isDirectory() || !android.text.TextUtils.isDigitsOnly(p.getName())) continue;
             try (java.io.BufferedReader r = new java.io.BufferedReader(
@@ -415,24 +431,54 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 String line;
                 while ((line = r.readLine()) != null) {
                     if (line.indexOf(".dll") < 0) continue;
-                    if (line.indexOf("d3d12core.dll") >= 0 || line.indexOf("d3d12.dll") >= 0)
-                        return "VKD3D";   // D3D12 wins if both are present
-                    if (line.indexOf("d3d11.dll") >= 0 || line.indexOf("d3d10.dll") >= 0
-                            || line.indexOf("d3d9.dll") >= 0) d3d11 = true;
+                    if (line.indexOf("d3d12core.dll") >= 0 || line.indexOf("d3d12.dll") >= 0) d3d12 = true;
+                    else if (line.indexOf("d3d11.dll") >= 0) d3d11 = true;
+                    else if (line.indexOf("d3d10.dll") >= 0) d3d10 = true;
+                    else if (line.indexOf("d3d9.dll") >= 0)  d3d9  = true;
+                    // Wine PE names: winevulkan.dll (the Wine Vulkan driver) and vulkan-1.dll (the
+                    // loader apps link against); opengl32.dll is Wine's GL. DXVK/VKD3D also pull in
+                    // vulkan-1.dll, hence the D3D-first ordering below.
+                    else if (line.indexOf("winevulkan.dll") >= 0 || line.indexOf("vulkan-1.dll") >= 0) vulkan = true;
+                    else if (line.indexOf("opengl32.dll") >= 0) opengl = true;
                 }
             } catch (Exception ignore) {}
         }
-        return d3d11 ? fallback : null;
+        final String SEP = " · ";                       // " · " (middle dot)
+        // 1. D3D wins over the API it is layered on (rank 12 > 11 > 10 > 9).
+        if (d3d12) return "D3D12" + SEP + "VKD3D";           // D3D12 always runs on VKD3D
+        if (d3d11) return "D3D11" + SEP + wrapper;
+        if (d3d10) return "D3D10" + SEP + wrapper;
+        if (d3d9)  return "D3D9"  + SEP + wrapper;
+        // 2. Native path — only reached when no D3D layer is mapped.
+        if (vulkan) return "Vulkan";
+        if (opengl) return guestGlIsZink() ? "Zink" : "OpenGL";
+        // 3. Nothing graphics-related mapped yet — keep polling (unchanged behaviour).
+        return null;
+    }
+
+    /**
+     * Whether guest OpenGL is served by Mesa's Zink (GL-on-Vulkan) gallium driver. This build routes
+     * the guest GL stack through Zink unconditionally (see {@link #extractGraphicsDriverFiles}, which
+     * sets GALLIUM_DRIVER=zink for the wrapper ICD), so we read the real env we hand the guest rather
+     * than hardcode "Zink" — if that routing is ever gated, the HUD label follows automatically.
+     */
+    private boolean guestGlIsZink() {
+        return "zink".equals(envVars.get("GALLIUM_DRIVER"))
+            || "zink".equals(envVars.get("MESA_LOADER_DRIVER_OVERRIDE"));
     }
 
     /** Poll for the active D3D API just after launch and update the overlay label once detected. */
-    private void startDxApiDetection(final String prefix, final String fallback) {
+    private void startDxApiDetection(final String rendererMode, final String fallback) {
         stopDxApiDetection();
         dxApiThread = new Thread(() -> {
             for (int i = 0; i < 40 && !Thread.currentThread().isInterrupted(); i++) {
                 String api = detectActiveDxApi(fallback);
                 if (api != null) {
-                    final String label = prefix + api;
+                    // Classic FrameRating renderer line = "<host renderer> | <api>". Skip the prefix
+                    // when the api string already IS the host renderer, so a native-Vulkan game on the
+                    // Vulkan compositor reads "Vulkan", not "Vulkan | Vulkan". D3D and Zink/OpenGL keep
+                    // the "<renderer> | <api>" form ("Vulkan | D3D11 · DXVK", "OpenGL | Zink").
+                    final String label = api.equals(rendererMode) ? api : rendererMode + " | " + api;
                     runOnUiThread(() -> {
                         hudRendererLabel = label;
                         hudEngineShort = api;
@@ -2848,8 +2894,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
             else buildClassicHud(fpsConfigString);
 
             // The label above is the configured D3D9/10/11 wrapper; probe what the game actually
-            // loads and upgrade it to VKD3D for D3D12 titles (or confirm the wrapper for D3D11).
-            startDxApiDetection(rendererMode + " | ", dxName);
+            // loads and upgrade it to the real API — "D3D12 · VKD3D" for D3D12 titles, "D3D11 · DXVK"
+            // etc. for the wrapped path, or "Vulkan"/"Zink"/"OpenGL" for native-API games.
+            startDxApiDetection(rendererMode, dxName);
         }
 
         // Resolve the fullscreen aspect-ratio mode (#71): a per-game shortcut override wins, else the
@@ -5200,7 +5247,7 @@ return true;
                  || gd.startsWith("leegao_bcn"))       { name = "bcn_layer"; slotFile = "leegao_bcn.tzst"; }
         else if (gd.startsWith("wrapper-leegao"))      { name = "leegao"; slotFile = "wrapper-leegao.tzst"; }
         else if (gd.startsWith("wrapper-legacy"))      { name = "Bionic"; slotFile = "wrapper-legacy.tzst"; }
-        else if (gd.startsWith("wrapper-original"))    { name = "Winlator"; slotFile = "wrapper-original.tzst"; }
+        else if (gd.startsWith("wrapper-original"))    { name = "Original"; slotFile = "wrapper-original.tzst"; }
         else if (gd.startsWith("turnip"))             { name = "Turnip"; }
         else if (gd.startsWith("wrapper"))            { name = "Wrapper"; slotFile = "wrapper.tzst"; }
         else                                          { name = gd; }
