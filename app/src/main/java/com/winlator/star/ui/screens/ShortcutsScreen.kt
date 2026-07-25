@@ -213,6 +213,7 @@ import com.winlator.star.core.KeyValueSet
 import com.winlator.star.core.StringUtils
 import com.winlator.star.core.WineInfo
 import com.winlator.star.core.WinePath
+import com.winlator.star.core.WineUtils
 import com.winlator.star.util.InAppFilePicker
 import com.winlator.star.fexcore.FEXCorePreset
 import com.winlator.star.fexcore.FEXCorePresetManager
@@ -5169,6 +5170,15 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
             .toIntOrNull() ?: 0).coerceIn(0, startupSelectionEntries.lastIndex)
         mutableStateOf(startupSelectionEntries.getOrElse(idx) { startupSelectionEntries.first() })
     }
+    // Custom-startup per-service enabled set (raw names). Inherits the container default when the
+    // shortcut has no override, same fallback pattern as startupSelection above.
+    var startupServicesEnabled by remember {
+        mutableStateOf(
+            WineUtils.parseStartupServicesCsv(
+                shortcut.getExtra("startupServices", shortcut.container.startupServices)
+            ).toSet()
+        )
+    }
 
     // Sharpness
     val sharpnessEffectEntries = remember { res.getStringArray(R.array.vkbasalt_sharpness_entries).toList() }
@@ -5413,6 +5423,9 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
             putExtra("fexcorePreset", fexPresetId)
             putExtra("controlsProfile", if (ctrlProfileId > 0) ctrlProfileId.toString() else null)
             putExtra("startupSelection", startupIdx.toString())
+            // Persist the Custom enabled set alongside the selection (launch reads it only when
+            // the selection is Custom). Written regardless so switching presets keeps the picks.
+            putExtra("startupServices", startupServicesEnabled.joinToString(","))
             putExtra("sharpnessEffect", selectedSharpnessEffect)
             putExtra("sharpnessLevel", sharpnessLevel.toString())
             putExtra("sharpnessDenoise", sharpnessDenoise.toString())
@@ -6056,6 +6069,11 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
             startupSelectionEntries = startupSelectionEntries,
             selectedStartupSelection = selectedStartupSelection,
             onStartupChange = { selectedStartupSelection = it },
+            startupServicesEnabled = startupServicesEnabled,
+            onStartupServiceToggle = { raw, on ->
+                startupServicesEnabled =
+                    if (on) startupServicesEnabled + raw else startupServicesEnabled - raw
+            },
             cpuListViewRef = cpuListViewRef,
             initialCpuList = shortcut.getExtra("cpuList", shortcut.container.getCPUList(true)),
             onCpuListSnapshot = { shortcut.putExtra("cpuList", it) },
@@ -6248,6 +6266,8 @@ private fun ScAdvancedTab(
     startupSelectionEntries: List<String>,
     selectedStartupSelection: String,
     onStartupChange: (String) -> Unit,
+    startupServicesEnabled: Set<String>,
+    onStartupServiceToggle: (String, Boolean) -> Unit,
     cpuListViewRef: MutableState<CPUListView?>,
     initialCpuList: String,
     onCpuListSnapshot: (String) -> Unit,
@@ -6353,6 +6373,15 @@ private fun ScAdvancedTab(
             selectedOption = selectedStartupSelection,
             onSelect = onStartupChange
         )
+
+        // Custom per-service toggles — only shown when "Custom" (index 3) is selected. Shares the
+        // container editor's list composable so the two screens can't drift.
+        if (startupSelectionEntries.indexOf(selectedStartupSelection) == Container.STARTUP_SELECTION_CUSTOM.toInt()) {
+            StartupServicesToggleList(
+                enabled = startupServicesEnabled,
+                onToggle = onStartupServiceToggle
+            )
+        }
 
         SectionBox(title = stringResource(R.string.processor_affinity)) {
             AndroidView(

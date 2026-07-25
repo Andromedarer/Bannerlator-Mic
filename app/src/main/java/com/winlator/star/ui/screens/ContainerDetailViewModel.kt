@@ -29,6 +29,7 @@ import com.winlator.star.core.StringUtils
 import com.winlator.star.core.WineInfo
 import com.winlator.star.core.WinePath
 import com.winlator.star.core.WineRegistryEditor
+import com.winlator.star.core.WineUtils
 import com.winlator.star.core.WineThemeManager
 import com.winlator.star.contentdialog.GraphicsDriverConfigDialog
 import com.winlator.star.fexcore.FEXCoreManager
@@ -229,6 +230,9 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     // ── Startup selection ─────────────────────────────────────────────────────
     var startupSelectionEntries by mutableStateOf(emptyList<String>()); private set
     var selectedStartupSelection by mutableStateOf(Container.STARTUP_SELECTION_ESSENTIAL.toInt())
+    // Custom-startup per-service enabled set (raw service names). Only consulted when the selection
+    // is Custom (index 3); the toggle list reassigns this set on each flip so recomposition fires.
+    var startupServicesEnabled by mutableStateOf(emptySet<String>())
 
     // ── Wine Config tab ───────────────────────────────────────────────────────
     var desktopThemeIndex by mutableStateOf(0)   // 0=LIGHT, 1=DARK
@@ -486,6 +490,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
 
         // Startup selection
         selectedStartupSelection = (c?.startupSelection ?: Container.STARTUP_SELECTION_ESSENTIAL).toInt()
+        startupServicesEnabled = WineUtils.parseStartupServicesCsv(c?.startupServices ?: "").toSet()
 
         // CPU lists
         cpuList      = c?.getCPUList(true) ?: Container.getFallbackCPUList()
@@ -766,6 +771,9 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             c.putExtra("autoCloseOnExit", if (autoCloseOnExit) null else "0")  // default ON
             c.setInputType(inputType)
             c.setStartupSelection(selectedStartupSelection.toByte())
+            // Persist the Custom enabled set regardless of the active selection, so toggling to another
+            // preset and back restores the picks. Launch only reads it when the selection is Custom.
+            c.setStartupServices(startupServicesEnabled.joinToString(","))
             c.setBox64Version(selectedBox64Version)
             c.setBox64Preset(box64Preset)
             c.setFEXCoreVersion(selectedFEXCoreVersion)
@@ -809,6 +817,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
                 put("inputType", inputType)
                 put("runAsAdmin", runAsAdmin)
                 put("startupSelection", selectedStartupSelection)
+                put("startupServices", startupServicesEnabled.joinToString(","))
                 put("box64Version", selectedBox64Version)
                 put("box64Preset", box64Preset)
                 put("fexcoreVersion", selectedFEXCoreVersion)
