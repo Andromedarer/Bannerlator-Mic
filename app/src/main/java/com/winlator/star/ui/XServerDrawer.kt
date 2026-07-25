@@ -2183,7 +2183,7 @@ private fun HudContent(state: XServerDrawerState) {
         HudChipRow("Outline color", listOf("Gray", "Accent"), if (outlineAccent) 1 else 0) { outlineAccent = it == 1; apply() }
     }
 
-    // General HUD action (every style): export a device sensor report to Downloads + share sheet, so
+    // General HUD action (every style): export a device sensor report silently to Downloads, so
     // an owner can report which sysfs nodes their SoC actually exposes for any metric showing "—".
     HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
     val diagContext = LocalContext.current
@@ -2191,7 +2191,7 @@ private fun HudContent(state: XServerDrawerState) {
         Text("Export HUD diagnostics")
     }
     Text(
-        "Saves a sensor report (CPU/GPU/temp/VRAM…) to Downloads and opens the share sheet.",
+        "Saves a sensor report (CPU/GPU/temp/VRAM…) straight to your Downloads folder.",
         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), fontSize = 11.sp,
         modifier = Modifier.padding(start = 4.dp, top = 2.dp)
     )

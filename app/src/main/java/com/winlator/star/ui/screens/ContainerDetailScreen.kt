@@ -3020,7 +3020,7 @@ internal fun FpsCounterConfigDialog(
                     Text("Export HUD diagnostics")
                 }
                 Text(
-                    "Saves a sensor report (CPU/GPU/temp/VRAM…) to Downloads and opens the share sheet.",
+                    "Saves a sensor report (CPU/GPU/temp/VRAM…) straight to your Downloads folder.",
                     style = MaterialTheme.typography.bodySmall
                 )
             }
