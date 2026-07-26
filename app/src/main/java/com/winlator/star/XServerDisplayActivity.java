@@ -450,9 +450,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (d3d11) return "D3D11" + SEP + wrapper;
         if (d3d10) return "D3D10" + SEP + wrapper;
         if (d3d9)  return "D3D9"  + SEP + wrapper;
-        // 2. Native path — only reached when no D3D layer is mapped.
-        if (vulkan) return "Vulkan";
+        // 2. Native path — only reached when no D3D layer is mapped. Check OpenGL BEFORE Vulkan:
+        //    a Zink-backed GL title maps BOTH opengl32.dll AND vulkan-1.dll (Zink renders GL through
+        //    Vulkan), so a vulkan-first order mislabels every OpenGL/Zink app as "Vulkan". A native
+        //    Vulkan app maps vulkan-1.dll but NOT opengl32.dll, so it still resolves to "Vulkan".
         if (opengl) return guestGlIsZink() ? "Zink" : "OpenGL";
+        if (vulkan) return "Vulkan";
         // 3. Nothing graphics-related mapped yet — keep polling (unchanged behaviour).
         return null;
     }

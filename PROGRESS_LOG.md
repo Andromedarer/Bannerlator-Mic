@@ -1,5 +1,11 @@
 # Star-Compose — Progress Log
 
+## 2026-07-26 — 🏷️ **HUD engine label: OpenGL/Zink games mislabeled "Vulkan" — check OpenGL before Vulkan** (branch `fix/hud-follow-active-window`, vc50)
+
+> User AIO-test sweep: every non-D3D GL path (OpenGL cube, DirectDraw) showed **"Vulkan"** instead of **"Zink"**. Root cause: `detectActiveDxApi` native path checked `vulkan` before `opengl`, but a **Zink-backed GL** app maps BOTH `opengl32.dll` (GL frontend) AND `vulkan-1.dll` (Zink's Vulkan backend) — so vulkan-first always won and the "Zink" branch was unreachable. **Fix:** swap the order — `if (opengl) return Zink/OpenGL; if (vulkan) return "Vulkan"`. A native-Vulkan app maps `vulkan-1.dll` but NOT `opengl32.dll`, so it still resolves to "Vulkan" (AIO Vulkan cube stays correct). D3D detection is unaffected (checked first). Fixes all HUDs. Verified from the sweep: Vulkan cube ✓, D3D8→D3D9·DXVK ✓, D3D11 ✓, D3D12·VKD3D ✓ — only the GL paths were wrong.
+>
+> ⏭️ NEXT: idle "stuck FPS" — the follow-active-window fix keeps the HUD bound to the static AIO menu after a cube closes, freezing the FPS at the last value (the menu never produces frames). Plus the HUD FPS reads wrong on the AIO cube windows themselves (their present path doesn't tick onUpdateWindowContent). Both are the same "fps counter fed by X content-updates" gap — separate fix.
+
 ## 2026-07-26 — 🪟 **HUD vanishes on the OpenGL cube (AIO test) — follow the focused window when no `_MESA_DRV` window remains** (branch `fix/hud-follow-active-window`, vc50)
 
 > User: the HUD flashes then disappears ONLY on the AIO Graphics Test's **OpenGL** cube — every other cube (Vulkan, D3D8–12, DirectDraw) keeps the HUD. So it's not a generic new-window issue.
