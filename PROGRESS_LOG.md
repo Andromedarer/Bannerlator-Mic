@@ -1,5 +1,15 @@
 # Star-Compose — Progress Log
 
+## 2026-07-26 — 🎛️ **Fusion HUD (Mega): DX version off the engine row, stacked below the graph with the wrapper** (branch `feat/hud-mega-version-below-graph`, vc stays 49)
+
+> User-driven layout tweak, **Mega size only** — Full/Tiles/Pill/Minimal untouched. On the shipped 2.8.1 Mega HUD the engine row read `D3D9 · DXVK 2.4.1-1-gplasync-pre-reg-0` (API value + long DX version) and the graphics wrapper (`Original`) was a lone dim line below the frametime graph. That long version string sat in the right column's shared label column and shoved every right-column value (RAM %, FPS, ms) to the far edge.
+>
+> **Change (`FusionHudView.buildMega`):** engine/FPS row now shows just `apiLabel()` (the API value, e.g. `D3D9 · DXVK`) — version stripped off. Below the graph there are now **two** subtle band-style lines, version first then wrapper: `DXVK 2.4.1-1-gplasync-pre-reg-0` (new `dxVersionLabeled()` helper = engine name + version, gated by the existing **DX ver** chip / `showDxVer`) then `Original` (gated by **Wrapper** / `showWrapper`, tight `sp(1f)` gap when both show). Replaced the now-unused `engineLabelWithDx()` with `dxVersionLabeled()`; `apiLabel()`/`dxVersion()` unchanged, other sizes unaffected (they never used `engineLabelWithDx`). `showDxVer` now gates the bottom version line instead of the engine-row suffix — same chip, moved target.
+>
+> Iterated against an HTML before/after preview the user reviewed (final: API value kept on engine row, labeled DX version + wrapper stacked at bottom, panel width left alone). +21/−17 one file.
+>
+> ⚠️ **NOT yet device-verified** — CI build pending, then on-device Mega HUD check on Adreno 750.
+
 ## 2026-07-24 — 🎮 **Big Picture: per-game Community configs opened the WRONG (all-games) menu + BP menus were touch-only** (branch `feat/bigpicture-community-configs`, vc stays 49)
 
 > Reported on the current build (installed APK sha `fb51bde2…` == run `30135691692` @ `db1b1767`, standard flavor — verified). In Big Picture, a game's **Options → "Community configs"** opened the same **all-games** `CommunityCatalogBrowser` the top-rail globe opens (`onCommunityConfigs` just did `showCommunity = true`) instead of a menu scoped to the selected game. The top globe is correct and stays.
