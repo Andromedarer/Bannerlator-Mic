@@ -1,5 +1,11 @@
 # Star-Compose — Progress Log
 
+## 2026-07-26 — ↩️ **REVERTED the Zink-label swap — DLL-mapping can't distinguish native-Vulkan from Zink-GL** (branch `fix/hud-follow-active-window`, vc50)
+
+> The opengl-before-vulkan swap (entry below) **regressed the native-Vulkan label**: device sweep showed the AIO **Vulkan cube reading "Zink"**. Root cause: `opengl32.dll` is resident **proactively** (Wine desktop / app startup, not only while GL renders), and Zink-GL *also* maps `vulkan-1.dll` — so BOTH APIs map BOTH DLLs and opengl-first paints everything non-D3D as "Zink". Reverted to **vulkan-first**: native Vulkan reads "Vulkan" (common case correct), OpenGL/Zink reads "Vulkan" too (underlying-accurate — Zink runs on Vulkan). The "Zink" label is effectively unreachable via module scanning and is left as-is. A truly correct GL-vs-Vulkan split would need an active-render signal (per-focused-window render API), not DLL presence — deferred. D3D detection unaffected throughout (Dragon Sword D3D12 etc. stay correct).
+>
+> Also confirmed from the sweep: the **FPS decay works** (no more frozen/stale value — idle reads 0), but the AIO cubes read **0.0 fps** because their present path doesn't tick the bound window's counter (the separate undercount issue). Real games tick fine.
+
 ## 2026-07-26 — ⏱️ **HUD FPS freezes on a stale value (idle menu / AIO cube switch) — decay to 0 when no present arrives** (branch `fix/hud-follow-active-window`, vc50)
 
 > User: FPS "stops reading" after changing API in the AIO test, and shows a "random stuck FPS" at the idle menu. Root cause: `FpsCounter.getCurrentFPS()` returns `lastFPS` forever once `tick()` stops — and every present tick (compositor copyArea + Vulkan-AHB + GL-native + ASR) is gated on `wid == frameRatingWindowId`, so when the bound window stops presenting (static menu — kept bound by the follow-active-window fix — or an AIO cube whose present path doesn't tick this window) the number just sits frozen. **Fix:** `getCurrentFPS()` returns **0** when no frame has been presented within `STALE_FPS_MS` (1.5 s) — `lastFrameTime` made `volatile` for the lock-free staleness check. Clears well below 1 fps yet never flickers at normal rates; recovers instantly when presents resume. Fixes all HUDs (shared `FpsCounter`).
