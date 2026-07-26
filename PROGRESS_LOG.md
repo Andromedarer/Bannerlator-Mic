@@ -1,5 +1,15 @@
 # Star-Compose — Progress Log
 
+## 2026-07-26 — 🪟 **HUD vanishes on the OpenGL cube (AIO test) — follow the focused window when no `_MESA_DRV` window remains** (branch `fix/hud-follow-active-window`, vc50)
+
+> User: the HUD flashes then disappears ONLY on the AIO Graphics Test's **OpenGL** cube — every other cube (Vulkan, D3D8–12, DirectDraw) keeps the HUD. So it's not a generic new-window issue.
+>
+> **Root cause:** all HUDs bind to one X window via `frameRatingWindowId`, set when a window gets the **`_MESA_DRV`** property (`changeFrameRatingVisibility`). `_MESA_DRV` rides the **Vulkan surface**, so D3D*/Vulkan render windows carry it and the HUD stays bound. A **GL/Zink** title (the OpenGL cube) recreates its render window for GLX; the initial window (with `_MESA_DRV`) **unmaps** → HUD unbinds → and the new GL drawable **never gets `_MESA_DRV`** → the existing rebind loop finds no `_MESA_DRV` window → `frameRatingWindowId = -1` → HUD hides, even though the live cube window is focused right there. (The green "OpenGL 345 FPS" still visible is the AIO test's OWN overlay, not ours.)
+>
+> **Fix (`changeFrameRatingVisibility`, unmap branch):** when the `_MESA_DRV` rebind yields nothing, fall back to `xServer.windowManager.getFocusedWindow()` if it's a mapped **application window** — so the HUD **follows the focused window** instead of vanishing. **Strictly additive** — only fires when the existing `_MESA_DRV` rebind already failed, so D3D*/Vulkan cubes and real games (which keep `_MESA_DRV`) are untouched. Fixes ALL HUDs (shared binding). One file, ~+9 lines.
+>
+> ⚠️ Not yet device-verified — needs the AIO OpenGL cube re-test.
+
 ## 2026-07-26 — 🎯 **HUD accuracy: live engine-API label (fixes "Zink" mislabel on D3D12 games) + per-core % frequency fallback** (branch `fix/hud-engine-label-live`, vc50)
 
 > Two user-reported HUD accuracy bugs, fixed centrally so ALL HUDs benefit (FrameRating h/v, PerfHud, GameNative HUD, Fusion HUD — they all read the one shared label).

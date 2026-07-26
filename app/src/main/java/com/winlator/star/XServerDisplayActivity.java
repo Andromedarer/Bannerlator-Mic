@@ -5434,6 +5434,18 @@ return true;
             // giving up — otherwise the HUD vanishes permanently when the intro window closes.
             if (frameRatingWindowId != -1 && window.id == frameRatingWindowId) {
                 Integer next = mesaDrvWindowIds.isEmpty() ? null : mesaDrvWindowIds.iterator().next();
+                // GLX/OpenGL fallback: _MESA_DRV rides the Vulkan surface, so a GL/Zink title that
+                // recreates its render window (e.g. the AIO test's OpenGL cube) leaves NO _MESA_DRV
+                // window to rebind to — the HUD would vanish even though a live game window is focused
+                // right there. This is why it works for every other API (D3D*/Vulkan keep _MESA_DRV) but
+                // breaks only on OpenGL. Follow the focused application window instead of giving up.
+                if (next == null) {
+                    try {
+                        Window focused = xServer.windowManager.getFocusedWindow();
+                        if (focused != null && focused.id != window.id && focused.isApplicationWindow())
+                            next = focused.id;
+                    } catch (Exception ignore) {}
+                }
                 if (next != null) {
                     frameRatingWindowId = next;   // keep the HUD visible, now tracking the new window
                     Log.d("XServerDisplayActivity", "Re-binding hud to Window id " + next);
