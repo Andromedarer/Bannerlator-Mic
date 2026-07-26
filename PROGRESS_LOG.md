@@ -1,5 +1,92 @@
 # Star-Compose — Progress Log
 
+## 2026-07-26 — 🔋 **Battery watts `0.0W` on HONOR was a CURRENT-UNIT bug, not voltage — auto-detect mA vs µA** (branch `fix/battery-watts-current-unit`, vc50)
+
+> The HONOR user's OTHER emulator (`squalle0nhart/winlator_ludashi_plus`, Ludashi-plus `WinlatorHUD.java`) shows `PWR 11.9W` where ours showed `0.0W`. Reading its source **corrected our earlier root-cause**: it uses `EXTRA_VOLTAGE` (so **voltage works fine** on that device — not blocked as we'd assumed) × current from `getBatteryCurrentAmps()`, which **auto-detects the current unit**: `raw < 20000 ? raw/1000 (mA→A) : raw/1000000 (µA→A)`. `BATTERY_PROPERTY_CURRENT_NOW` is *nominally* µA but many OEMs (this HONOR) report **mA** — a small number. Our watts assumed µA always → came out ~1000× too small → rounded to `0.0W`. Our runtime estimate still worked because it's a **ratio** (chargeCounter/current), unit-independent — which is why only watts broke and misled us.
+> **Fix (`HudMetrics`):** new `currentRawToAmps(raw)` (the `<20000 ⇒ mA` heuristic + `Long.MIN_VALUE`/0 guard) and `batteryCurrentAmps(bm)` (framework property → sysfs `current_now` fallback). `collectBattery` (Fusion) + legacy `getBattery` now compute watts = `voltage × amps` with unit detection; **`currentMicroAmps` left as-is for the runtime ratio** (no regression). +31/−3. Also keeps the earlier `voltage_now`/`power_now` fallbacks (harmless; fire only if voltage truly 0). Note: GPU is `N/A` on Ludashi-plus too → GPU stays a genuine device wall. ⚠️ NOT yet device-verified — needs the HONOR user to test. → [[project_bannerlator_hud_accuracy_20260726]]
+
+## 2026-07-26 — 📄 **GL/DirectDraw FPS vs benchmark — investigation closed + documented** (`docs/HUD_FPS_OPENGL_DIRECTDRAW.md`, main, vc50)
+
+> User noticed OpenGL/DirectDraw read a LOWER HUD FPS than the AIO benchmark's own counter (HUD ~90 vs "OpenGL 300 FPS"), while D3D/Vulkan match. **Root-caused definitively** with a throwaway `presentPixmap`/`copyArea`/`putImage` probe build (branch `tmp/present-rate-probe`, now deleted) run on-device with a GL cube rendering ~100s continuous: **PPRATE=0, CARATE=0, PIRATE=~8/s** (the benchmark's own FPS-text overlay, not the 3D frames). So **guest GL emits NO per-frame X present** — it renders into a shared GL texture/AHB that the host GLSurfaceView compositor samples at ~display rate; the true loop rate (~300) lives only in Wine's SwapBuffers. D3D/Vulkan present explicitly per-frame via `presentPixmap` (so they read correctly). **Not host-fixable** (would need guest-side Wine/Zink instrumentation; benefits only uncapped GL benchmarks) → **intentionally not pursued**. Committed a user-facing explanation doc; the same blurb is queued for the FusionHUD submodule README + the 2.9 release notes. All this session's HUD-accuracy branches merged to main (`7550ce42`) and their feature branches deleted. → [[project_bannerlator_hud_accuracy_20260726]]
+
+## 2026-07-26 — 🔗 **HUD FPS reads 0 on every AIO cube after the first — let a real render window reclaim the binding from the fallback** (branch `fix/hud-follow-active-window`, vc50)
+
+> Device sweep: the first AIO cube read a correct ~538 fps, every cube after it read 0.0. Cause was my own follow-active-window fix: the HUD binds to a render window only when it sees `_MESA_DRV` AND `frameRatingWindowId == -1`, but the fallback parks the binding on the static menu (never -1) after a cube closes — so the NEXT cube's `_MESA_DRV` never rebinds, and the FPS counter keeps ticking the non-presenting menu → 0. **Fix (`changeFrameRatingVisibility` property branch):** also **upgrade** the binding to a real `_MESA_DRV` render window when currently parked on a non-`_MESA_DRV` *fallback* window (`boundToFallback = frameRatingWindowId != -1 && !mesaDrvWindowIds.contains(frameRatingWindowId)`). Don't steal from another real render window, so single-window real games are unchanged. Restores FPS on the Vulkan + all D3D cubes. (Pure OpenGL/GLX cubes have no `_MESA_DRV` at all, so they stay on the focused-window fallback; their fps may still under-read — a GL-present-signal issue, separate.)
+
+## 2026-07-26 — ↩️ **REVERTED the Zink-label swap — DLL-mapping can't distinguish native-Vulkan from Zink-GL** (branch `fix/hud-follow-active-window`, vc50)
+
+> The opengl-before-vulkan swap (entry below) **regressed the native-Vulkan label**: device sweep showed the AIO **Vulkan cube reading "Zink"**. Root cause: `opengl32.dll` is resident **proactively** (Wine desktop / app startup, not only while GL renders), and Zink-GL *also* maps `vulkan-1.dll` — so BOTH APIs map BOTH DLLs and opengl-first paints everything non-D3D as "Zink". Reverted to **vulkan-first**: native Vulkan reads "Vulkan" (common case correct), OpenGL/Zink reads "Vulkan" too (underlying-accurate — Zink runs on Vulkan). The "Zink" label is effectively unreachable via module scanning and is left as-is. A truly correct GL-vs-Vulkan split would need an active-render signal (per-focused-window render API), not DLL presence — deferred. D3D detection unaffected throughout (Dragon Sword D3D12 etc. stay correct).
+>
+> Also confirmed from the sweep: the **FPS decay works** (no more frozen/stale value — idle reads 0), but the AIO cubes read **0.0 fps** because their present path doesn't tick the bound window's counter (the separate undercount issue). Real games tick fine.
+
+## 2026-07-26 — ⏱️ **HUD FPS freezes on a stale value (idle menu / AIO cube switch) — decay to 0 when no present arrives** (branch `fix/hud-follow-active-window`, vc50)
+
+> User: FPS "stops reading" after changing API in the AIO test, and shows a "random stuck FPS" at the idle menu. Root cause: `FpsCounter.getCurrentFPS()` returns `lastFPS` forever once `tick()` stops — and every present tick (compositor copyArea + Vulkan-AHB + GL-native + ASR) is gated on `wid == frameRatingWindowId`, so when the bound window stops presenting (static menu — kept bound by the follow-active-window fix — or an AIO cube whose present path doesn't tick this window) the number just sits frozen. **Fix:** `getCurrentFPS()` returns **0** when no frame has been presented within `STALE_FPS_MS` (1.5 s) — `lastFrameTime` made `volatile` for the lock-free staleness check. Clears well below 1 fps yet never flickers at normal rates; recovers instantly when presents resume. Fixes all HUDs (shared `FpsCounter`).
+>
+> Note: this makes the idle HUD honestly read 0 fps rather than a frozen value; the API label at the idle AIO menu still reads "Vulkan" because the menu app itself is a Vulkan client (correct, not stale). ⏭️ Undercounting of the AIO cubes' own fps (their present path barely ticks the bound window) is a deeper compositor-signal issue, separate.
+
+## 2026-07-26 — 🏷️ **HUD engine label: OpenGL/Zink games mislabeled "Vulkan" — check OpenGL before Vulkan** (branch `fix/hud-follow-active-window`, vc50)
+
+> User AIO-test sweep: every non-D3D GL path (OpenGL cube, DirectDraw) showed **"Vulkan"** instead of **"Zink"**. Root cause: `detectActiveDxApi` native path checked `vulkan` before `opengl`, but a **Zink-backed GL** app maps BOTH `opengl32.dll` (GL frontend) AND `vulkan-1.dll` (Zink's Vulkan backend) — so vulkan-first always won and the "Zink" branch was unreachable. **Fix:** swap the order — `if (opengl) return Zink/OpenGL; if (vulkan) return "Vulkan"`. A native-Vulkan app maps `vulkan-1.dll` but NOT `opengl32.dll`, so it still resolves to "Vulkan" (AIO Vulkan cube stays correct). D3D detection is unaffected (checked first). Fixes all HUDs. Verified from the sweep: Vulkan cube ✓, D3D8→D3D9·DXVK ✓, D3D11 ✓, D3D12·VKD3D ✓ — only the GL paths were wrong.
+>
+> ⏭️ NEXT: idle "stuck FPS" — the follow-active-window fix keeps the HUD bound to the static AIO menu after a cube closes, freezing the FPS at the last value (the menu never produces frames). Plus the HUD FPS reads wrong on the AIO cube windows themselves (their present path doesn't tick onUpdateWindowContent). Both are the same "fps counter fed by X content-updates" gap — separate fix.
+
+## 2026-07-26 — 🪟 **HUD vanishes on the OpenGL cube (AIO test) — follow the focused window when no `_MESA_DRV` window remains** (branch `fix/hud-follow-active-window`, vc50)
+
+> User: the HUD flashes then disappears ONLY on the AIO Graphics Test's **OpenGL** cube — every other cube (Vulkan, D3D8–12, DirectDraw) keeps the HUD. So it's not a generic new-window issue.
+>
+> **Root cause:** all HUDs bind to one X window via `frameRatingWindowId`, set when a window gets the **`_MESA_DRV`** property (`changeFrameRatingVisibility`). `_MESA_DRV` rides the **Vulkan surface**, so D3D*/Vulkan render windows carry it and the HUD stays bound. A **GL/Zink** title (the OpenGL cube) recreates its render window for GLX; the initial window (with `_MESA_DRV`) **unmaps** → HUD unbinds → and the new GL drawable **never gets `_MESA_DRV`** → the existing rebind loop finds no `_MESA_DRV` window → `frameRatingWindowId = -1` → HUD hides, even though the live cube window is focused right there. (The green "OpenGL 345 FPS" still visible is the AIO test's OWN overlay, not ours.)
+>
+> **Fix (`changeFrameRatingVisibility`, unmap branch):** when the `_MESA_DRV` rebind yields nothing, fall back to `xServer.windowManager.getFocusedWindow()` if it's a mapped **application window** — so the HUD **follows the focused window** instead of vanishing. **Strictly additive** — only fires when the existing `_MESA_DRV` rebind already failed, so D3D*/Vulkan cubes and real games (which keep `_MESA_DRV`) are untouched. Fixes ALL HUDs (shared binding). One file, ~+9 lines.
+>
+> ⚠️ Not yet device-verified — needs the AIO OpenGL cube re-test.
+
+## 2026-07-26 — 🎯 **HUD accuracy: live engine-API label (fixes "Zink" mislabel on D3D12 games) + per-core % frequency fallback** (branch `fix/hud-engine-label-live`, vc50)
+
+> Two user-reported HUD accuracy bugs, fixed centrally so ALL HUDs benefit (FrameRating h/v, PerfHud, GameNative HUD, Fusion HUD — they all read the one shared label).
+>
+> **1. Engine-API label mislabeled `Zink` on a D3D12 game.** Repro: "Dragon Sword Awakening" (`DSClient-Win64-Shipping.exe`, UE) showed `Zink` on every HUD. **Verified from the live process `/proc/5062/maps`: `d3d12.dll` + `d3d12core.dll` (VKD3D-Proton) mapped → it's really D3D12 · VKD3D.** Root cause: `startDxApiDetection` scanned once and **latched the first result, then stopped** (`return`). UE maps `opengl32.dll` early (GL probe) before `d3d12core.dll` loads, so the first scan returned `Zink` and froze. **Fix:** made detection a **continuous ~2s live loop** (background thread, off the render path) that re-pushes the label only when the API changes and never latches — so it upgrades past a transient GL to the real API. Added **early-exit** to `detectActiveDxApi` (`break` on the top-priority `d3d12` hit) so the /proc/maps scan of a multi-GB game stays cheap. Never downgrades (closed API DLLs stay resident) → the multi-API **AIO Graphics Test** shows the highest API loaded, a documented limit of module-scanning. Detection already fed all 5 HUD surfaces; `stopDxApiDetection` is called on stop+destroy so the forever-loop can't leak the Activity.
+>
+> **2. Per-core CPU % showed `—` (`?` in the diag).** Same HONOR/Android-16 firmware where `/proc/stat` is restricted (the aggregate CPU% already falls back to a scaling-freq estimate; per-core had NO fallback → `-1`). **Fix:** `readPerCorePercent()` now fills any core `/proc/stat` couldn't give from `scaling_cur_freq / cpuinfo_max_freq` (a load proxy, per-core clocks ARE readable) — mirrors the aggregate's fallback, also seeds the first sample. Cores with a real `/proc/stat` delta keep it → no regression.
+>
+> +35/−10, two files. Independent of the battery branch (`fix/hud-battery-watts-voltage-fallback`). vc50 / 2.8.1.
+
+## 2026-07-26 — 🔋 **Fusion HUD: battery watts stuck at 0.0W on HONOR (EXTRA_VOLTAGE=0) — voltage_now/power_now fallback + diag power_supply probe** (branch `fix/hud-battery-watts-voltage-fallback`, vc50)
+
+> User report (HONOR Magic 7 Pro, PTP-N49, SM8750 / Adreno 830, Android 16) via a HUD diagnostic export. HUD showed `BAT 23% 44°C 0.0W` — %, temp, current, runtime all populate but wattage was stuck at 0.
+>
+> **Root cause:** `HudMetrics` computes watts as `current × voltage`, gating on `voltageMv > 0`. On this HONOR firmware `BatteryManager.EXTRA_VOLTAGE` returns 0 (current comes from `BATTERY_PROPERTY_CURRENT_NOW`, which works — the runtime estimate proves it), so the guard zeroes watts. No voltage fallback existed.
+>
+> **Fix (`collectBattery` = Fusion path, + legacy `getBattery`):** when `voltageMv <= 0`, fall back to power_supply sysfs `voltage_now` (µV→mV) via new `VOLTAGE_CHANNELS`; `collectBattery` additionally uses `power_now` (µW) directly as a last resort via `POWER_CHANNELS` + shared `readLongFromChannels()` helper. **Strictly additive / no regression** — the fallback only fires where watts is already 0 today; devices with a working `EXTRA_VOLTAGE` never touch it. Pack-level nodes used (Magic 7 Pro is dual-cell ~8V, so `I×V` at the pack is correct).
+>
+> **Diagnostic (`buildDiagnosticsReport`):** added `appendPowerSupplyDump()` — the "Exists" section now lists each `/sys/class/power_supply/*` node's readable `voltage_now`/`current_now`/`power_now`. The prior report dumped thermal/kgsl/devfreq but NOT power_supply, so we couldn't confirm sysfs readability. A re-run from this user will show whether `voltage_now` is app-readable (→ fix lands) or SELinux-blocked like kgsl (→ battery also needs root).
+>
+> **GPU %/clock (`—`) NOT fixed — device limitation.** kgsl nodes (`gpubusy`/`gpu_busy_percentage`/`devfreq/gpu_load`/`clock_mhz`) exist but are SELinux-labeled `vendor_sysfs_kgsl`; the `untrusted_app` domain is denied, so every candidate path MISSes. Adding paths can't help (same blocked label). GPU **temp** works (thermal zones ARE app-readable). Also noticed **per-core % shows `—`** (per-core clocks work) — separate `/proc/stat` per-cpu gap, not addressed here.
+>
+> **GPU no-root recon (root toggle deferred — user's device likely NOT rooted).** Key asymmetry: `/dev/kgsl-3d0` is labeled `gpu_device` (`crw-rw-rw-`) and IS app-openable (rendering needs it) — only the `/sys/class/kgsl` *sysfs mirror* is blocked. So the real no-root path is reading GPU busy via **KGSL perf-counter ioctls on the device node** (not sysfs) — native/JNI, needs a proof-of-concept spike (perfcounters may be kernel-gated or conflict with Turnip/DXVK). Middle ground = Shizuku (shell can often read kgsl sysfs). Ruled out: DRM fdinfo (Adreno uses kgsl not `/dev/dri`), Vulkan (no busy% query), compositor-timing estimate (can't see guest GPU work). **Added `appendGpuNoRootProbes()` to the diagnostic** — probes (1) `Os.open(/dev/kgsl-3d0, O_RDWR/O_RDONLY)` reachability and (2) any app-readable `/sys/devices/platform/**/kgsl-3d0/devfreq/*` node — so the user's next export tells us if the ioctl route is viable BEFORE we write native code.
+>
+> +63 lines, one file. ⚠️ NOT verifiable on our Adreno-750 test device (different device) — needs the HONOR user to run the new build + re-export the diagnostic.
+
+## 2026-07-26 — 🎛️ **Fusion HUD (Mega): DX version off the engine row, stacked below the graph with the wrapper** (branch `feat/hud-mega-version-below-graph`, vc50)
+
+> User-driven layout tweak, **Mega size only** — Full/Tiles/Pill/Minimal untouched. On the shipped 2.8.1 Mega HUD the engine row read `D3D9 · DXVK 2.4.1-1-gplasync-pre-reg-0` (API value + long DX version) and the graphics wrapper (`Original`) was a lone dim line below the frametime graph. That long version string sat in the right column's shared label column and shoved every right-column value (RAM %, FPS, ms) to the far edge.
+>
+> **Change (`FusionHudView.buildMega`):** engine/FPS row now shows just `apiLabel()` (the API value, e.g. `D3D9 · DXVK`) — version stripped off. Below the graph there are now **two** subtle band-style lines, version first then wrapper: `DXVK 2.4.1-1-gplasync-pre-reg-0` (new `dxVersionLabeled()` helper = engine name + version, gated by the existing **DX ver** chip / `showDxVer`) then `Original` (gated by **Wrapper** / `showWrapper`, tight `sp(1f)` gap when both show). Replaced the now-unused `engineLabelWithDx()` with `dxVersionLabeled()`; `apiLabel()`/`dxVersion()` unchanged, other sizes unaffected (they never used `engineLabelWithDx`). `showDxVer` now gates the bottom version line instead of the engine-row suffix — same chip, moved target.
+>
+> Iterated against an HTML before/after preview the user reviewed (final: API value kept on engine row, labeled DX version + wrapper stacked at bottom, panel width left alone). +21/−17 one file.
+>
+> ⚠️ **NOT yet device-verified** — CI build pending, then on-device Mega HUD check on Adreno 750.
+
+## 2026-07-24 — 🎮 **Big Picture: per-game Community configs opened the WRONG (all-games) menu + BP menus were touch-only** (branch `feat/bigpicture-community-configs`, vc stays 49)
+
+> Reported on the current build (installed APK sha `fb51bde2…` == run `30135691692` @ `db1b1767`, standard flavor — verified). In Big Picture, a game's **Options → "Community configs"** opened the same **all-games** `CommunityCatalogBrowser` the top-rail globe opens (`onCommunityConfigs` just did `showCommunity = true`) instead of a menu scoped to the selected game. The top globe is correct and stays.
+>
+> **Fix:** new BP-local `GameCommunitySheet(vm, shortcut, onApply, onImport, onDismiss)` — the couch-mode counterpart of the phone Games screen's per-shortcut community dialog. Auto-matches the game (`vm.matchCommunityConfigs`), lists that game's uploaded configs (`vm.fetchGameConfigs`, device-ranked + "Matches my device" filter), applies a pick via BP's shared `applyCommunityPick` (so the missing-component/driver install + re-apply flow still fires). Share (`exportShortcutConfig`→FileProvider `${applicationId}.tileprovider`), Import (new BP JSON picker → `importConfigFile`), Upload (`uploadShortcutConfig` + replace-confirm) all reuse the phone VM one-shots. **DEFERRED:** "My uploads" manager (couch-mode TODO; still reachable via globe→account). Widened 6 phone composables `private`→`internal` for reuse (`CommunityConfigEntryCard`/`CommunityCard`/`CommunityStoreBadge`/`rememberGameConfigs`/`deviceHeaderLabel`/new `DpadHighlight`); phone dialog body untouched.
+>
+> **Controller/D-pad:** every BP menu is now navigable (Up/Down move highlight, A activate, B/Back close). Sheets are their OWN windows, so the root `onPreviewKeyEvent` can't see their keys — each sheet owns a single focus target (`bpSheetDpad`/`BpSheetScaffold` for the static Game options/Tools/Power sheets; a flat index model in `GameCommunitySheet`; game-list + drilled-config traversal in `CommunityCatalogBrowser`, gated to consume only D-pad/A/B so phone touch + soft-keyboard are unaffected).
+>
+> ⚠️ **NOT yet device-verified** — the load-bearing runtime assumption is that `ModalBottomSheet`/`Dialog` content can grab window focus for controller keys via `focusRequester`+`onPreviewKeyEvent` (mitigated with a first-frame `runCatching { requestFocus() }`). Couch smoke test pending: Game options → Community configs, D-pad moves highlight + A applies.
+
 ## 2026-07-24 — 🤝 **PR #96 (@clintOnSky) triaged & closed — fixes already on `main`, contributor credited**
 
 > Downstream fix-pack from **@clintOnSky** (first-time contributor). Verified each of its 7 commits against `main`; closed the PR (not merged) since the wins already landed individually.
@@ -4820,3 +4907,29 @@ A volume reported by *any* source is **always** emitted. When its root is unread
 **✅ CONFIRMED ON REAL HARDWARE by @Devaspe (HyperOS device): bionic-fg works, then lsfg-vk confirmed after.** Both layers load. This validates clintOnSky's entire diagnosis.
 
 **Credits (for the release notes):** **@clintOnSky** — diagnosis + fix, PR #96, code contributor (his PR also carries a native present-path fix, not yet landed). **@Shalaykin1** — issue **#40 "Fix framegeneration on HyperOS 3"** ("HyperOS 2 works normally, HyperOS 3 not working, works only in GameHub app" — GameHub ships its own imagefs, hence no symlink). **@Devaspe** — device confirmation on HyperOS. ⚠️ #40 is still CLOSED and its reporter has not been told it's fixed. Also possibly the same bug: **@EddyGameDev** #58 ("tried bionic and LSFG, neither want to work" = the exact both-layers signature, device unstated). **NOT this bug:** @132edsaz #43 (Galaxy A14 / Dimensity 700 — MediaTek/Mali, no libjpeg-hyper).
+
+
+---
+
+## 🏁 2026-07-26 — 2.8.2 HOTFIX CUT + Controller-overlay fix (pinned) + FusionHUD v1.0 first release
+
+**Context:** main had the whole HUD-accuracy pass + the HONOR/mA battery-watts fix merged but unreleased (main `6a14c4a2`, ahead of the 2.8.1 stable tag). This session: built a controller-overlay fix (device-proven, then pinned), then cut 2.8.2 to ship the pile-up.
+
+### 🎮 Controller-overlay fix — HUD renders BENEATH on-screen controls (✅ device-proven, PINNED, NOT in 2.8.2)
+Problem: the in-game perf HUD drew OVER the touchscreen control buttons, so a **locked** HUD on top of e.g. R2 ate the button press. **User rejected Solution A** (make the locked HUD touch-transparent) because it dropped long-press-unlock-while-locked: *"the long press to lock and unlock needs to stay in place."*
+**Solution B (shipped on branch `fix/hud-under-controls` @ `4427571d`, off main `6a14c4a2`):**
+- `XServerDisplayActivity.placeHudBelowControls(View)` drops each built HUD one z-slot BELOW `inputControlsView` (surgical `removeView`+`addView(hud, controlsIndex)` — leaves the DrawerLayout menu + `dialogHostView` ComposeView untouched). Called after all 5 `rootView.addView` HUD sites.
+- `InputControlsView` gains `setHudFallThroughViews(View...)` + `hudAt(x,y)` + `hudTarget`: a touch NOT grabbed by a control ELEMENT (buttons checked first → a button under the HUD wins) that lands on a VISIBLE HUD candidate is forwarded (whole gesture, latched on DOWN / reset on UP) to that HUD — so long-press/drag/tap still reach it. Candidate list = all 5 HUD views (nulls/GONE skipped → classic h/v pair auto-resolves). Controls-off path unchanged (HUD topmost, gets touches directly).
+- `HudLockController` untouched (still always-consumes → long-press intact).
+- **Build snag caught+fixed:** first CI run failed — my field block split an `@Override` from `onTouchEvent` (`error: annotation type not applicable`). Fixed by restoring `@Override` on the method. Green rebuild = run `30219099604` (all 3 flavors), standard APK sha256 `e060ba55…aa807`, staged to Downloads.
+- **User device-verified:** *"R2 works and long press still locks."* Then: *"put a pin in this"* → left UNMERGED, queued for 2.9.
+
+### 🚀 Stable 2.8.2 cut (vc51, tag `2.8.2` → `dc1a78d3`, run `30220212231`)
+HOTFIX over 2.8.1. Version bump on main (vc 50→51, vn 2.8.1→2.8.2, commit `dc1a78d3`), dispatched `release.yml --ref main` (JSON inputs via `gh workflow run --json` stdin — clean multi-line notes). **Verified live:** isPrerelease=false, draft=false, `releases/latest`→2.8.2, **tag→built commit** (release.yml default-branch quirk was harmless: main HEAD == built commit), `update.json` vc51/2.8.2 + all 3 APKs.
+- **Ships:** HONOR/mA battery-watts fix + HUD-accuracy pass (live engine-API label, per-core CPU%, FPS decay+binding-reclaim, follow-active-window) + GL-FPS doc.
+- **Description** (proper format, added post-cut via `gh release edit`): logo/badge header · hotfix framing + "What's fixed" list · Credits (Angel + winlator_ludashi_plus/squalle0nhart) · repeated ⚠️ 2.9-pre VC-Pro-loss warning · expandable `<details>` on OpenGL/DirectDraw-vs-benchmark FPS in the AIO Graphics Test · "🧩 Fusion HUD is open source" section linking the FusionHUD release + repo.
+
+### 🧩 FusionHUD v1.0 — first release of the standalone library
+The repo (`The412Banner/FusionHUD`) had NO releases. Cut **`v1.0`** at `d171774` (`--latest`), attaching `fusionhud-1.0-release.aar` (95 KB library) + `fusionhud-1.0-demo-debug.apk` (3.3 MB preview) from CI run `30217601607`. Notes: what-it-is / adopt-via-JitPack(`com.github.The412Banner:FusionHUD:v1.0`)-or-fork / GPL-3.0 §7(b) attribution. Linked from the 2.8.2 description for other projects to adopt. ⚠️ `gh release create --target` needs a FULL sha (12-char abbrev → HTTP 422).
+
+**▶️ NEXT: 2.9** = merge PR #156 (Virtual Controller Pro) + the pinned `fix/hud-under-controls` + newer work.

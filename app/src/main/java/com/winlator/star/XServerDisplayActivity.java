@@ -177,6 +177,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private FrameRatingHorizontal frameRatingHorizontal = null;
     private PerfHudView perfHud = null;          // GameHub-style HUD (used when hudStyle=gamehub instead of the two above)
     private com.winlator.star.widget.perfhud.PerformanceHudView gameNativeHud = null; // GameNative-style HUD (hudStyle=gamenative)
+    private com.winlator.star.widget.fusionhud.FusionHudView fusionHud = null; // Fusion HUD (hudStyle=fusion)
     // Single authoritative FPS source: ticked once per present, read by every overlay so they all
     // show the identical number (there is one place per renderer to feed).
     private final FpsCounter fpsCounter = new FpsCounter();
@@ -404,11 +405,27 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // processes are the only ones visible under our uid).
     private Thread dxApiThread;
 
-    /** "VKD3D" if a D3D12 game module is loaded, [fallback] if a D3D9/10/11 one is, else null. */
-    private String detectActiveDxApi(String fallback) {
+    /**
+     * Resolve the game's ACTUAL graphics API from the modules the guest wine processes have mapped,
+     * so the perf HUD's "engine" label reflects what the game really renders with — not just the
+     * configured DX wrapper. Both DX wrappers are always present in the prefix, so the only reliable
+     * tell is which module the game loaded (scanned once per PID; the app's own wine processes are
+     * the only ones visible under our uid).
+     *
+     * <p>Priority matters: D3D is checked FIRST, because a DXVK game ALSO maps vulkan-1.dll and a
+     * WineD3D game ALSO maps opengl32.dll — the underlying API would otherwise mask the D3D layer
+     * sitting on top of it. Only when NO d3d*.dll is mapped do we fall through to the native path.
+     *
+     * @param wrapper the configured D3D9/10/11 wrapper name (DXVK / VEGAS / WineD3D); used to tag the
+     *                D3D9/10/11 result. D3D12 always runs on VKD3D regardless of this.
+     * @return e.g. "D3D12 · VKD3D", "D3D11 · DXVK", "Vulkan", "Zink"/"OpenGL", or null if nothing
+     *         graphics-related is mapped yet (caller keeps polling).
+     */
+    private String detectActiveDxApi(String wrapper) {
         java.io.File[] pids = new java.io.File("/proc").listFiles();
         if (pids == null) return null;
-        boolean d3d11 = false;
+        boolean d3d12 = false, d3d11 = false, d3d10 = false, d3d9 = false;
+        boolean vulkan = false, opengl = false;
         for (java.io.File p : pids) {
             if (!p.isDirectory() || !android.text.TextUtils.isDigitsOnly(p.getName())) continue;
             try (java.io.BufferedReader r = new java.io.BufferedReader(
@@ -416,35 +433,86 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 String line;
                 while ((line = r.readLine()) != null) {
                     if (line.indexOf(".dll") < 0) continue;
-                    if (line.indexOf("d3d12core.dll") >= 0 || line.indexOf("d3d12.dll") >= 0)
-                        return "VKD3D";   // D3D12 wins if both are present
-                    if (line.indexOf("d3d11.dll") >= 0 || line.indexOf("d3d10.dll") >= 0
-                            || line.indexOf("d3d9.dll") >= 0) d3d11 = true;
+                    if (line.indexOf("d3d12core.dll") >= 0 || line.indexOf("d3d12.dll") >= 0) { d3d12 = true; break; }
+                    else if (line.indexOf("d3d11.dll") >= 0) d3d11 = true;
+                    else if (line.indexOf("d3d10.dll") >= 0) d3d10 = true;
+                    else if (line.indexOf("d3d9.dll") >= 0)  d3d9  = true;
+                    // Wine PE names: winevulkan.dll (the Wine Vulkan driver) and vulkan-1.dll (the
+                    // loader apps link against); opengl32.dll is Wine's GL. DXVK/VKD3D also pull in
+                    // vulkan-1.dll, hence the D3D-first ordering below.
+                    else if (line.indexOf("winevulkan.dll") >= 0 || line.indexOf("vulkan-1.dll") >= 0) vulkan = true;
+                    else if (line.indexOf("opengl32.dll") >= 0) opengl = true;
                 }
             } catch (Exception ignore) {}
+            if (d3d12) break;   // top priority — nothing outranks D3D12, so stop scanning early
         }
-        return d3d11 ? fallback : null;
+        final String SEP = " · ";                       // " · " (middle dot)
+        // 1. D3D wins over the API it is layered on (rank 12 > 11 > 10 > 9).
+        if (d3d12) return "D3D12" + SEP + "VKD3D";           // D3D12 always runs on VKD3D
+        if (d3d11) return "D3D11" + SEP + wrapper;
+        if (d3d10) return "D3D10" + SEP + wrapper;
+        if (d3d9)  return "D3D9"  + SEP + wrapper;
+        // 2. Native path — only reached when no D3D layer is mapped. Vulkan is checked BEFORE OpenGL
+        //    on purpose: DLL-mapping can't reliably tell native-Vulkan from Zink-backed GL apart —
+        //    opengl32.dll is loaded proactively (Wine desktop / app startup, not only when GL renders),
+        //    and Zink itself loads vulkan-1.dll, so both APIs map BOTH DLLs. Vulkan-first keeps the
+        //    common case correct (native Vulkan reads "Vulkan"); an OpenGL/Zink title then reads
+        //    "Vulkan" too, which is underlying-accurate since Zink runs GL on Vulkan. (Tried opengl-first
+        //    — it mislabeled the native Vulkan cube as "Zink" because opengl32 is always resident.)
+        if (vulkan) return "Vulkan";
+        if (opengl) return guestGlIsZink() ? "Zink" : "OpenGL";
+        // 3. Nothing graphics-related mapped yet — keep polling (unchanged behaviour).
+        return null;
     }
 
-    /** Poll for the active D3D API just after launch and update the overlay label once detected. */
-    private void startDxApiDetection(final String prefix, final String fallback) {
+    /**
+     * Whether guest OpenGL is served by Mesa's Zink (GL-on-Vulkan) gallium driver. This build routes
+     * the guest GL stack through Zink unconditionally (see {@link #extractGraphicsDriverFiles}, which
+     * sets GALLIUM_DRIVER=zink for the wrapper ICD), so we read the real env we hand the guest rather
+     * than hardcode "Zink" — if that routing is ever gated, the HUD label follows automatically.
+     */
+    private boolean guestGlIsZink() {
+        return "zink".equals(envVars.get("GALLIUM_DRIVER"))
+            || "zink".equals(envVars.get("MESA_LOADER_DRIVER_OVERRIDE"));
+    }
+
+    /**
+     * Continuously track the active graphics API and keep EVERY HUD's label live, like the other
+     * metrics. Runs on a background thread at a ~2s cadence (off the render path, so it never stalls a
+     * frame). We only push to the HUDs when the API actually CHANGES — the label is near-static — and
+     * {@link #detectActiveDxApi} early-exits its /proc/maps scan on the top-priority hit, so the cost
+     * is negligible even on weak devices.
+     *
+     * <p>Crucially it does NOT latch on the first result: a game that maps opengl32.dll early (UE probes
+     * GL before loading d3d12core.dll) used to freeze on "Zink"; now the label upgrades to the real API
+     * ("D3D12 · VKD3D") as soon as it loads. It never downgrades, because closed API DLLs stay resident
+     * (the multi-API AIO test therefore shows the highest API loaded — a known limit of module scanning).
+     */
+    private void startDxApiDetection(final String rendererMode, final String fallback) {
         stopDxApiDetection();
         dxApiThread = new Thread(() -> {
-            for (int i = 0; i < 40 && !Thread.currentThread().isInterrupted(); i++) {
+            String lastApi = null;
+            while (!Thread.currentThread().isInterrupted()) {
                 String api = detectActiveDxApi(fallback);
-                if (api != null) {
-                    final String label = prefix + api;
+                if (api != null && !api.equals(lastApi)) {
+                    lastApi = api;
+                    // Classic FrameRating renderer line = "<host renderer> | <api>". Skip the prefix
+                    // when the api string already IS the host renderer, so a native-Vulkan game on the
+                    // Vulkan compositor reads "Vulkan", not "Vulkan | Vulkan". D3D and Zink/OpenGL keep
+                    // the "<renderer> | <api>" form ("Vulkan | D3D11 · DXVK", "OpenGL | Zink").
+                    final String label = api.equals(rendererMode) ? api : rendererMode + " | " + api;
+                    final String apiFinal = api;
                     runOnUiThread(() -> {
                         hudRendererLabel = label;
-                        hudEngineShort = api;
+                        hudEngineShort = apiFinal;
                         if (frameRatingHorizontal != null) frameRatingHorizontal.setRenderer(label);
                         if (frameRating != null) frameRating.setRenderer(label);
-                        if (perfHud != null) perfHud.setEngineLabel(api);
-                        if (gameNativeHud != null) gameNativeHud.setEngineLabel(api);
+                        if (perfHud != null) perfHud.setEngineLabel(apiFinal);
+                        if (gameNativeHud != null) gameNativeHud.setEngineLabel(apiFinal);
+                        if (fusionHud != null) fusionHud.setEngineLabel(apiFinal);
                     });
-                    return;
                 }
-                try { Thread.sleep(3000); } catch (InterruptedException e) { return; }
+                try { Thread.sleep(2000); } catch (InterruptedException e) { return; }
             }
         }, "dx-api-detect");
         dxApiThread.start();
@@ -845,7 +913,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             state.setIsMouseDisabled(isMouseDisabled);
             touchpadView.setMouseEnabled(!isMouseDisabled);
         };
-        String fpsCfg = container != null ? container.getFPSCounterConfig() : Container.DEFAULT_FPS_COUNTER_CONFIG;
+        String fpsCfg = resolvedFPSCounterConfig();
         state.setFpsConfig(fpsCfg);
         state.onFpsConfigApply = (newConfig) -> {
             if (newConfig == null) return;
@@ -855,16 +923,19 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     .get("hudStyle", "classic");
                 String haveStyle = perfHud != null ? "gamehub"
                     : gameNativeHud != null ? "gamenative"
+                    : fusionHud != null ? "fusion"
                     : (frameRating != null || frameRatingHorizontal != null) ? "classic" : null;
-                // Live style swap: build the requested HUD and tear down the other two, but only if a
+                // Live style swap: build the requested HUD and tear down the others, but only if a
                 // HUD is already on screen (FPS was enabled for this launch). View mutation is safe
                 // here — this callback runs on the UI thread.
                 if (haveStyle != null && !wantStyle.equals(haveStyle)) {
                     removePerfHud();
                     removeClassicHud();
                     removeGameNativeHud();
+                    removeFusionHud();
                     if (wantStyle.equals("gamehub")) buildPerfHud(newConfig);
                     else if (wantStyle.equals("gamenative")) buildGameNativeHud(newConfig);
+                    else if (wantStyle.equals("fusion")) buildFusionHud(newConfig);
                     else buildClassicHud(newConfig);
                 } else {
                     // Same style (or no HUD built): just push the new config to whatever exists.
@@ -872,6 +943,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     if (frameRatingHorizontal != null) frameRatingHorizontal.applyConfig(newConfig);
                     if (perfHud != null) perfHud.applyConfig(newConfig);
                     if (gameNativeHud != null) gameNativeHud.applyConfig(newConfig);
+                    if (fusionHud != null) fusionHud.applyConfig(newConfig);
                     // Classic HUD: applyConfig()->updateParentVisibility() re-shows BOTH orientation
                     // views whenever they have visible rows, clobbering the active-orientation choice
                     // (toggling a metric made the inactive orientation pop in alongside the active one).
@@ -886,10 +958,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     }
                 }
             });
-            if (container != null) {
-                container.setFPSCounterConfig(newConfig);
-                container.saveData();
-            }
+            persistFPSCounterConfig(newConfig);
         };
 
         if (inputControlsView != null) inputControlsView.setVisualStyle(VisualStyle.GAMEHUB);
@@ -2336,14 +2405,30 @@ public class XServerDisplayActivity extends AppCompatActivity {
         
         WineUtils.setJoystickRegistryKeys(container, dinputEnabled, exclusiveXInput);
 
-        if (shortcut != null)
+        String startupServices;
+        if (shortcut != null) {
             startupSelection = shortcut.getExtra("startupSelection", String.valueOf(container.getStartupSelection()));
-        else
+            startupServices = shortcut.getExtra("startupServices", container.getStartupServices());
+        }
+        else {
             startupSelection = String.valueOf(container.getStartupSelection());
+            startupServices = container.getStartupServices();
+        }
 
-        if (!startupSelection.equals(container.getExtra("startupSelection"))) {
-            WineUtils.changeServicesStatus(container, startupSelection);
-            container.putExtra("startupSelection", startupSelection);
+        // Cache signature: for the three presets it's just the selection (unchanged behaviour — the
+        // cached "startupSelection" extra keeps holding "0"/"1"/"2"). For Custom the signature also
+        // folds in the enabled-CSV, so two DIFFERENT custom sets (both selection "3") produce
+        // different signatures and a changed set actually re-applies instead of being skipped.
+        String startupSignature = startupSelection;
+        try {
+            if (Byte.parseByte(startupSelection) == Container.STARTUP_SELECTION_CUSTOM)
+                startupSignature = startupSelection + "|" + startupServices;
+        }
+        catch (NumberFormatException e) {}
+
+        if (!startupSignature.equals(container.getExtra("startupSelection"))) {
+            WineUtils.changeServicesStatus(container, startupSelection, startupServices);
+            container.putExtra("startupSelection", startupSignature);
             containerDataChanged = true;
         }
         if (containerDataChanged) container.saveData();
@@ -2818,10 +2903,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // The early seed in setupUI runs before `container` is assigned, so it defaults
         // to classic; without this the drawer shows classic toggles even when the
         // container (and the live overlay below) are configured for the GameHub HUD.
-        if (container != null) XServerDrawerState.INSTANCE.setFpsConfig(container.getFPSCounterConfig());
+        if (container != null) XServerDrawerState.INSTANCE.setFpsConfig(resolvedFPSCounterConfig());
 
         if (container != null && container.isShowFPS()) {
-            String fpsConfigString = container.getFPSCounterConfig();
+            String fpsConfigString = resolvedFPSCounterConfig();
             com.winlator.star.core.KeyValueSet fpsConfig = new com.winlator.star.core.KeyValueSet(fpsConfigString);
             fpsHudHorizontal = fpsConfig.get("hudMode", "vertical").equals("horizontal");
             String hudStyle = fpsConfig.get("hudStyle", "classic");
@@ -2838,11 +2923,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // buildGameNativeHud).
             if (hudStyle.equals("gamehub")) buildPerfHud(fpsConfigString);
             else if (hudStyle.equals("gamenative")) buildGameNativeHud(fpsConfigString);
+            else if (hudStyle.equals("fusion")) buildFusionHud(fpsConfigString);
             else buildClassicHud(fpsConfigString);
 
             // The label above is the configured D3D9/10/11 wrapper; probe what the game actually
-            // loads and upgrade it to VKD3D for D3D12 titles (or confirm the wrapper for D3D11).
-            startDxApiDetection(rendererMode + " | ", dxName);
+            // loads and upgrade it to the real API — "D3D12 · VKD3D" for D3D12 titles, "D3D11 · DXVK"
+            // etc. for the wrapped path, or "Vulkan"/"Zink"/"OpenGL" for native-API games.
+            startDxApiDetection(rendererMode, dxName);
         }
 
         // Resolve the fullscreen aspect-ratio mode (#71): a per-game shortcut override wins, else the
@@ -3210,21 +3297,30 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // Per-container rumble mode/intensity: Container is the source of truth (persists across
             // sessions/editor); this is called AFTER `container` is assigned (setupUI, not onCreate),
             // so it's safe to read here — mirrors the ReShade/lsfg seed-after-container pattern.
-            int vibMode = container != null ? container.getVibrationMode() : Container.VIBRATION_MODE_DEFAULT;
-            int vibIntensity = container != null ? container.getVibrationIntensity() : Container.VIBRATION_INTENSITY_DEFAULT;
+            // Resolve per-game override (shortcut extra, e.g. an imported community config) else the
+            // container value; write live edits back to the same owner (shortcut only when it already
+            // owns the extra, else container — so per-container behavior is untouched otherwise).
+            int vibMode = resolvedVibrationMode();
+            int vibIntensity = resolvedVibrationIntensity();
             winHandler.setVibrationTuning(vibMode, vibIntensity);
             ds.setVibrationMode(vibMode);
             ds.setVibrationIntensity(vibIntensity);
             ds.onVibrationModeChanged = (mode) -> {
                 winHandler.setVibrationTuning(mode, winHandler.getVibrationIntensity());
-                if (container != null) {
+                if (shortcut != null && shortcut.hasExtra("vibrationMode")) {
+                    shortcut.putExtra("vibrationMode", String.valueOf(mode));
+                    shortcut.saveData();
+                } else if (container != null) {
                     container.setVibrationMode(mode);
                     container.saveData();
                 }
             };
             ds.onVibrationIntensityChanged = (pct) -> {
                 winHandler.setVibrationTuning(winHandler.getVibrationMode(), pct);
-                if (container != null) {
+                if (shortcut != null && shortcut.hasExtra("vibrationIntensity")) {
+                    shortcut.putExtra("vibrationIntensity", String.valueOf(pct));
+                    shortcut.saveData();
+                } else if (container != null) {
                     container.setVibrationIntensity(pct);
                     container.saveData();
                 }
@@ -4625,6 +4721,57 @@ return true;
         return shortcut != null ? shortcut.getExtra("frameGenEngine", container.getFrameGenEngine()) : container.getFrameGenEngine();
     }
 
+    // HUD config (fpsCounterConfig KeyValueSet) resolution. Container-scoped by default, but a shortcut
+    // may OWN it — e.g. a community config imported onto the shortcut writes the whole blob as an extra.
+    // When the shortcut carries the extra we honor it at launch AND route live in-game drawer edits back
+    // to the SAME owner (persistFPSCounterConfig), so an imported HUD theme applies and tweaks to it
+    // don't drift onto the container. The master FPS on/off (container.isShowFPS) stays container-scoped
+    // and still gates whether any HUD is built — importing a config themes the HUD, it does not force it on.
+    private boolean shortcutOwnsFpsConfig() {
+        return shortcut != null && shortcut.hasExtra("fpsCounterConfig");
+    }
+
+    private String resolvedFPSCounterConfig() {
+        if (shortcutOwnsFpsConfig()) return shortcut.getExtra("fpsCounterConfig");
+        return container != null ? container.getFPSCounterConfig() : Container.DEFAULT_FPS_COUNTER_CONFIG;
+    }
+
+    // Write a HUD config change to whichever owner the launch resolver reads from: the shortcut when it
+    // owns the blob (import), else the container (unchanged legacy behavior). Keeps read/write symmetric.
+    private void persistFPSCounterConfig(String cfg) {
+        if (shortcutOwnsFpsConfig()) {
+            shortcut.putExtra("fpsCounterConfig", cfg);
+            shortcut.saveData();
+        } else if (container != null) {
+            container.setFPSCounterConfig(cfg);
+            container.saveData();
+        }
+    }
+
+    // Vibration mode/intensity resolution — same discipline as resolvedFrameGenModel: per-game override
+    // (shortcut extra) else the container value. The in-game drawer edits route back to the shortcut only
+    // when it already owns the extra (import), else the container, so existing per-container behavior is
+    // untouched for games never carrying an imported vibration override.
+    private int resolvedVibrationMode() {
+        int fallback = container != null ? container.getVibrationMode() : Container.VIBRATION_MODE_DEFAULT;
+        if (shortcut == null) return fallback;
+        try {
+            return Integer.parseInt(shortcut.getExtra("vibrationMode", String.valueOf(fallback)));
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    private int resolvedVibrationIntensity() {
+        int fallback = container != null ? container.getVibrationIntensity() : Container.VIBRATION_INTENSITY_DEFAULT;
+        if (shortcut == null) return fallback;
+        try {
+            return Integer.parseInt(shortcut.getExtra("vibrationIntensity", String.valueOf(fallback)));
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
     // bionic-fg interpolation model for this launch: per-game override else the container value.
     // Same read-only resolver discipline as resolvedFrameGenEngine — never writes back.
     private int resolvedFrameGenModel() {
@@ -5077,6 +5224,7 @@ return true;
         if (hudGpuName != null) perfHud.setGpuModel(hudGpuName);
         perfHud.setVertical(!fpsHudHorizontal);
         perfHud.setOnMovedListener((x, y) -> persistHudPosition("hudPosGH", x, y));
+        perfHud.setOnLockChangedListener((locked) -> persistHudConfigKey("hudLocked", locked ? "1" : "0"));
         restoreHudPosition(perfHud, "hudPosGH");
         // Visible immediately if the game window is already mapped (live swap); otherwise it is
         // revealed by changeFrameRatingVisibility once the window appears (launch path).
@@ -5105,6 +5253,7 @@ return true;
         // event without performClick(). Use the widget's own tap callback instead.
         frameRatingHorizontal.setOnTapListener(this::toggleFpsHudOrientation);
         frameRatingHorizontal.setOnMovedListener((x, y) -> persistHudPosition("hudPosCH", x, y));
+        frameRatingHorizontal.setOnLockChangedListener((locked) -> persistHudConfigKey("hudLocked", locked ? "1" : "0"));
         restoreHudPosition(frameRatingHorizontal, "hudPosCH");
         frameRatingHorizontal.setVisibility(shown && fpsHudHorizontal ? View.VISIBLE : View.GONE);
         rootView.addView(frameRatingHorizontal);
@@ -5123,6 +5272,7 @@ return true;
         frameRating.applyConfig(fpsConfigString);
         frameRating.setOnTapListener(this::toggleFpsHudOrientation);
         frameRating.setOnMovedListener((x, y) -> persistHudPosition("hudPosCV", x, y));
+        frameRating.setOnLockChangedListener((locked) -> persistHudConfigKey("hudLocked", locked ? "1" : "0"));
         restoreHudPosition(frameRating, "hudPosCV");
         frameRating.setVisibility(shown && !fpsHudHorizontal ? View.VISIBLE : View.GONE);
         rootView.addView(frameRating);
@@ -5161,6 +5311,7 @@ return true;
         if (hudGpuName != null) gameNativeHud.setGpuModel(hudGpuName);
         gameNativeHud.setVertical(!fpsHudHorizontal);
         gameNativeHud.setOnMovedListener((x, y) -> persistHudPosition("hudPosGN", x, y));
+        gameNativeHud.setOnLockChangedListener((locked) -> persistHudConfigKey("hudLocked", locked ? "1" : "0"));
         restoreHudPosition(gameNativeHud, "hudPosGN");
         // Visible immediately if the game window is already mapped (live swap); otherwise it is
         // revealed by changeFrameRatingVisibility once the window appears (launch path).
@@ -5176,6 +5327,94 @@ return true;
         }
     }
 
+    /** Build the Fusion HUD and add it. Safe to call live (UI thread). */
+    private void buildFusionHud(String fpsConfigString) {
+        FrameLayout rootView = findViewById(R.id.FLXServerDisplay);
+        fusionHud = new com.winlator.star.widget.fusionhud.FusionHudView(this);
+        fusionHud.setFpsCounter(fpsCounter);
+        FrameLayout.LayoutParams plp = new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            android.view.Gravity.TOP | android.view.Gravity.START
+        );
+        plp.topMargin = 10;
+        plp.leftMargin = 10;
+        fusionHud.setLayoutParams(plp);
+        fusionHud.applyConfig(fpsConfigString);
+        if (hudEngineShort != null) fusionHud.setEngineLabel(hudEngineShort);
+        if (hudGpuName != null) fusionHud.setGpuModel(hudGpuName);
+        // Mega stack-layer versions: Proton/Wine, the graphics-driver wrapper package, and DX wrapper.
+        if (wineInfo != null) fusionHud.setWineVersion(wineInfo.toString());
+        fusionHud.setGraphicsWrapper(friendlyGraphicsWrapper());
+        if (dxwrapperConfig != null) fusionHud.setDxWrapper(dxwrapperConfig.get("version"), dxwrapperConfig.get("vkd3dVersion"));
+        // Fusion: a tap cycles the size (persist to hudSize), long-press toggles the lock.
+        fusionHud.setOnSizeCycledListener((token) -> persistHudConfigKey("hudSize", token));
+        fusionHud.setOnLockChangedListener((locked) -> persistHudConfigKey("hudLocked", locked ? "1" : "0"));
+        fusionHud.setOnMovedListener((x, y) -> persistHudPosition("hudPosFusion", x, y));
+        restoreHudPosition(fusionHud, "hudPosFusion");
+        fusionHud.setVisibility(frameRatingWindowId != -1 ? View.VISIBLE : View.GONE);
+        rootView.addView(fusionHud);
+    }
+
+    private void removeFusionHud() {
+        if (fusionHud != null) {
+            FrameLayout rootView = findViewById(R.id.FLXServerDisplay);
+            rootView.removeView(fusionHud);
+            fusionHud = null;
+        }
+    }
+
+    /**
+     * Short friendly name (+ bundled build date) for the selected graphics-driver WRAPPER package, for
+     * the Fusion Mega "Wrapper" row — the same package the graphics-driver picker names
+     * (GameNative / bcn_layer / comp / …). Name from {@code graphicsDriver}; version best-effort from
+     * the bundled-wrapper catalog ({@link com.winlator.star.contents.WrapperManager#listSlots}).
+     */
+    private String friendlyGraphicsWrapper() {
+        String gd = graphicsDriver == null ? "" : graphicsDriver;
+        if (gd.isEmpty()) return null;
+        String name;
+        String slotFile = null;
+        if (gd.startsWith("wrapper-gamenative"))      { name = "GameNative"; slotFile = "wrapper-gamenative.tzst"; }
+        else if (gd.startsWith("wrapper-compat-bcn")) { name = "comp"; }
+        else if (gd.startsWith("wrapper-bcn_layer")
+                 || gd.startsWith("leegao_bcn"))       { name = "bcn_layer"; slotFile = "leegao_bcn.tzst"; }
+        else if (gd.startsWith("wrapper-leegao"))      { name = "leegao"; slotFile = "wrapper-leegao.tzst"; }
+        else if (gd.startsWith("wrapper-legacy"))      { name = "Bionic"; slotFile = "wrapper-legacy.tzst"; }
+        else if (gd.startsWith("wrapper-original"))    { name = "Original"; slotFile = "wrapper-original.tzst"; }
+        else if (gd.startsWith("turnip"))             { name = "Turnip"; }
+        else if (gd.startsWith("wrapper"))            { name = "Wrapper"; slotFile = "wrapper.tzst"; }
+        else                                          { name = gd; }
+        if (slotFile != null) {
+            try {
+                for (com.winlator.star.contents.WrapperManager.WrapperSlot slot :
+                        new com.winlator.star.contents.WrapperManager(this).listSlots()) {
+                    if (slotFile.equals(slot.fileName) && slot.version != null) {
+                        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\d{6,8})").matcher(slot.version);
+                        if (m.find()) name = name + " " + m.group(1);
+                        break;
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+        return name;
+    }
+
+    /**
+     * Merge a single HUD config key into the container/shortcut's saved FPS config and persist it, so
+     * an in-place change (Fusion tap→size, long-press→lock) survives relaunch and the menus reflect it.
+     * Mirrors the write-back in toggleFpsHudOrientation.
+     */
+    private void persistHudConfigKey(String key, String value) {
+        String cfgStr = resolvedFPSCounterConfig();
+        com.winlator.star.core.KeyValueSet cfg = new com.winlator.star.core.KeyValueSet(cfgStr);
+        cfg.put(key, value);
+        String updated = cfg.toString();
+        persistFPSCounterConfig(updated);
+        // Keep the in-game drawer's HUD pane in sync with the live change.
+        com.winlator.star.ui.XServerDrawerState.INSTANCE.setFpsConfig(updated);
+    }
+
     private void removeClassicHud() {
         FrameLayout rootView = findViewById(R.id.FLXServerDisplay);
         if (frameRating != null) { rootView.removeView(frameRating); frameRating = null; }
@@ -5183,7 +5422,7 @@ return true;
     }
 
     private void toggleFpsHudOrientation() {
-        if (perfHud == null && gameNativeHud == null && frameRating == null && frameRatingHorizontal == null) return;
+        if (perfHud == null && gameNativeHud == null && fusionHud == null && frameRating == null && frameRatingHorizontal == null) return;
         fpsHudHorizontal = !fpsHudHorizontal;
         if (perfHud != null) {
             // One view draws both layouts; vertical = !horizontal.
@@ -5205,21 +5444,29 @@ return true;
                 }
             }
         }
-        // Persist the chosen orientation to the container's FPS config.
+        // Persist the chosen orientation to the FPS config (shortcut when it owns the blob, else container).
         if (container != null) {
-            com.winlator.star.core.KeyValueSet cfg = new com.winlator.star.core.KeyValueSet(container.getFPSCounterConfig());
+            com.winlator.star.core.KeyValueSet cfg = new com.winlator.star.core.KeyValueSet(resolvedFPSCounterConfig());
             cfg.put("hudMode", fpsHudHorizontal ? "horizontal" : "vertical");
-            container.setFPSCounterConfig(cfg.toString());
-            container.saveData();
+            persistFPSCounterConfig(cfg.toString());
         }
     }
 
     private void changeFrameRatingVisibility(Window window, Property property) {
-        if (perfHud == null && gameNativeHud == null && frameRating == null && frameRatingHorizontal == null) return;
+        if (perfHud == null && gameNativeHud == null && fusionHud == null && frameRating == null && frameRatingHorizontal == null) return;
 
         if (property != null) {
-            if (property.nameAsString().contains("_MESA_DRV")) mesaDrvWindowIds.add(window.id);
-            if (frameRatingWindowId == -1 && property.nameAsString().contains("_MESA_DRV")) {
+            boolean isMesaDrv = property.nameAsString().contains("_MESA_DRV");
+            if (isMesaDrv) mesaDrvWindowIds.add(window.id);
+            // Bind when unbound, OR UPGRADE off a non-_MESA_DRV *fallback* window (the focused-window
+            // fallback in the unmap branch — e.g. the static AIO menu the HUD parked on after a cube
+            // closed) to this real render window. Without the upgrade the binding stays pinned to the
+            // fallback and the FPS counter keeps ticking a window that isn't presenting, so every cube
+            // after the first reads 0. Don't steal from another real render window (real games keep
+            // their single window). NB mesaDrvWindowIds already includes window.id, so the contains()
+            // check tests the OLD bound id.
+            boolean boundToFallback = frameRatingWindowId != -1 && !mesaDrvWindowIds.contains(frameRatingWindowId);
+            if (isMesaDrv && (frameRatingWindowId == -1 || boundToFallback)) {
                 frameRatingWindowId = window.id;
                 Log.d("XServerDisplayActivity", "Showing hud for Window " + window.getName());
 
@@ -5227,6 +5474,7 @@ return true;
                     // Show only the active orientation (both widgets exist for tap-toggle).
                     if (perfHud != null) perfHud.setVisibility(View.VISIBLE);
                     if (gameNativeHud != null) gameNativeHud.setVisibility(View.VISIBLE);
+                    if (fusionHud != null) fusionHud.setVisibility(View.VISIBLE);
                     if (fpsHudHorizontal) {
                         if (frameRatingHorizontal != null) frameRatingHorizontal.setVisibility(View.VISIBLE);
                     } else {
@@ -5246,6 +5494,7 @@ return true;
                     if (frameRating != null) frameRating.setGpuName(hudGpuName);
                     if (perfHud != null) perfHud.setGpuModel(hudGpuName);
                     if (gameNativeHud != null) gameNativeHud.setGpuModel(hudGpuName);
+                    if (fusionHud != null) fusionHud.setGpuModel(hudGpuName);
                 });
             }
         }
@@ -5257,6 +5506,18 @@ return true;
             // giving up — otherwise the HUD vanishes permanently when the intro window closes.
             if (frameRatingWindowId != -1 && window.id == frameRatingWindowId) {
                 Integer next = mesaDrvWindowIds.isEmpty() ? null : mesaDrvWindowIds.iterator().next();
+                // GLX/OpenGL fallback: _MESA_DRV rides the Vulkan surface, so a GL/Zink title that
+                // recreates its render window (e.g. the AIO test's OpenGL cube) leaves NO _MESA_DRV
+                // window to rebind to — the HUD would vanish even though a live game window is focused
+                // right there. This is why it works for every other API (D3D*/Vulkan keep _MESA_DRV) but
+                // breaks only on OpenGL. Follow the focused application window instead of giving up.
+                if (next == null) {
+                    try {
+                        Window focused = xServer.windowManager.getFocusedWindow();
+                        if (focused != null && focused.id != window.id && focused.isApplicationWindow())
+                            next = focused.id;
+                    } catch (Exception ignore) {}
+                }
                 if (next != null) {
                     frameRatingWindowId = next;   // keep the HUD visible, now tracking the new window
                     Log.d("XServerDisplayActivity", "Re-binding hud to Window id " + next);
@@ -5275,6 +5536,7 @@ return true;
                         }
                         if (perfHud != null) perfHud.setVisibility(View.GONE);
                         if (gameNativeHud != null) gameNativeHud.setVisibility(View.GONE);
+                        if (fusionHud != null) fusionHud.setVisibility(View.GONE);
                     });
                 }
             }

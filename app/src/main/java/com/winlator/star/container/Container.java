@@ -44,13 +44,16 @@ public class Container {
      * overlay jumped size on the first metric toggle).
      */
     public static final int DEFAULT_HUD_SCALE = 100;
-    public static final String DEFAULT_FPS_COUNTER_CONFIG = "hudMode=horizontal,showFPS=1,showCPULoad=1,showGPULoad=1,showRAM=1,showRenderer=1,showBatteryTemp=1,hudScale=" + DEFAULT_HUD_SCALE;
+    public static final String DEFAULT_FPS_COUNTER_CONFIG = "hudMode=horizontal,showFPS=1,showCPULoad=1,showGPULoad=1,showRAM=1,showRenderer=1,showBatteryTemp=1,hudScale=" + DEFAULT_HUD_SCALE + ",hudSize=full,showVram=1,showLow001=1,fpsDecimal=1,hudLocked=0,showPerCore=1,showSwap=1,showNet=1,showResolution=1,showProton=1,showWrapper=1,showDxVer=1,showSession=1";
     public static final String DEFAULT_WINCOMPONENTS = "direct3d=1,directsound=0,directmusic=0,directshow=0,directplay=0,xaudio=0,vcrun2010=1";
     public static final String FALLBACK_WINCOMPONENTS = "direct3d=1,directsound=1,directmusic=1,directshow=1,directplay=1,xaudio=1,vcrun2010=1";
     public static final String DEFAULT_DRIVES = "F:"+Environment.getExternalStorageDirectory().getAbsolutePath()+"D:"+Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
     public static final byte STARTUP_SELECTION_NORMAL = 0;
     public static final byte STARTUP_SELECTION_ESSENTIAL = 1;
     public static final byte STARTUP_SELECTION_AGGRESSIVE = 2;
+    // Custom: per-service on/off. The enabled set is stored in startupServices (CSV of ENABLED
+    // service raw names); everything not listed is disabled. Custom starts all-off (empty CSV).
+    public static final byte STARTUP_SELECTION_CUSTOM = 3;
     public static final byte MAX_DRIVE_LETTERS = 26;
     public final int id;
     private String name;
@@ -83,6 +86,10 @@ public class Container {
     public static final int FULLSCREEN_INTEGER = 4;  // fullscreen-immersive, largest whole-number scale (pixel-perfect, centered)
     private int fullscreenMode = FULLSCREEN_OFF;
     private byte startupSelection = STARTUP_SELECTION_ESSENTIAL;
+    // CSV of ENABLED service raw names when startupSelection == CUSTOM. "" (default) = none enabled
+    // (Custom starts every service off). Ignored by the other three presets. Per-game shortcuts
+    // inherit this via the getExtra("startupServices", container default) fallback at launch.
+    private String startupServices = "";
     private String cpuList;
     private String cpuListWoW64;
     private String desktopTheme = WineThemeManager.DEFAULT_DESKTOP_THEME;
@@ -274,6 +281,14 @@ public class Container {
 
     public void setStartupSelection(byte startupSelection) {
         this.startupSelection = startupSelection;
+    }
+
+    public String getStartupServices() {
+        return startupServices;
+    }
+
+    public void setStartupServices(String startupServices) {
+        this.startupServices = startupServices != null ? startupServices : "";
     }
 
     public String getCPUList() {
@@ -938,6 +953,7 @@ public class Container {
             data.put("fullscreenMode", fullscreenMode);
             data.put("inputType", inputType);
             data.put("startupSelection", startupSelection);
+            data.put("startupServices", startupServices);
             data.put("box64Version", box64Version);
             data.put("fexcorePreset", fexcorePreset);
             data.put("fexcoreVersion", fexcoreVersion);
@@ -1029,6 +1045,9 @@ public class Container {
                     break;
                 case "startupSelection" :
                     setStartupSelection((byte)data.getInt(key));
+                    break;
+                case "startupServices" :
+                    setStartupServices(data.getString(key));
                     break;
                 case "extraData" : {
                     JSONObject extraData = data.getJSONObject(key);

@@ -94,35 +94,16 @@ jobs:
           > update.json
         echo "Generated update.json:"; cat update.json
 
-    - name: Generate changelog table
-      run: |
-        {
-          echo "## Changelog"
-          echo ""
-          echo "| Commit | Title |"
-          echo "|--------|--------|"
-          git log -n 10 --pretty=format:"| \`%h\` | %s |"
-        } > changelog.md
-
-        {
-          echo "CHANGELOG<<__CHANGELOG_EOF__"
-          cat changelog.md
-          echo ""
-          echo "__CHANGELOG_EOF__"
-        } >> "$GITHUB_ENV"
-
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ inputs.release_tag }}
         name: ${{ inputs.release_title }}
-        body: |
-          <img src="https://github.com/The412Banner/Bannerlator/blob/main/logo.jpg" width="1500" height="500" alt="Bannerlator" />
-          </p>
-
-          ${{ env.CHANGELOG }}
-
-          ${{ inputs.release_notes }}
+        # Body is EXACTLY the supplied release_notes — which already opens with the
+        # centered logo + badges. Do NOT prepend a second logo or a `git log`
+        # changelog table: that produced a duplicate logo + a raw commit listing
+        # stacked above the real notes at the top of every release.
+        body: ${{ inputs.release_notes }}
         files: |
           dist/Bannerlator-${{ inputs.release_number }}-standard.apk
           dist/Bannerlator-${{ inputs.release_number }}-ludashi.apk

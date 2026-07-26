@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Help
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -62,6 +63,7 @@ import com.winlator.star.util.InAppFilePicker
 import java.io.File
 import com.winlator.star.core.StringUtils
 import com.winlator.star.core.WineThemeManager
+import com.winlator.star.core.WineUtils
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.lazy.items
@@ -73,6 +75,7 @@ import org.json.JSONArray
 import java.util.concurrent.Executors
 import com.winlator.star.container.Container
 import com.winlator.star.widget.perfhud.parseHudOutline
+import com.winlator.star.widget.exportHudDiagnostics
 import com.winlator.star.widget.ColorPickerView
 import com.winlator.star.widget.CPUListView
 import com.winlator.star.ui.components.EnvVarsEditor
@@ -699,7 +702,10 @@ private fun TopLevelFields(
             stringResource(R.string.frame_generation_lsfg)
         )
         val lsfgDllAvailable = remember { java.io.File(context.filesDir, "lsfg-vk/Lossless.dll").isFile }
-        val fgDisabledOpts = if (lsfgDllAvailable) emptySet() else setOf(fgEngineLabels[2])
+        val fgDisabledOpts = buildSet {
+            add(fgEngineLabels[1])                          // bionic-fg — grayed out for now (WIP; re-enable once proven)
+            if (!lsfgDllAvailable) add(fgEngineLabels[2])   // lsfg-vk — needs an imported Lossless.dll
+        }
         val fgSelIdx = fgEngines.indexOf(viewModel.frameGenEngine).coerceAtLeast(0)
         LabeledDropdown(
             label = stringResource(R.string.frame_generation),
@@ -1578,6 +1584,18 @@ private fun AdvancedTab(
             onSelect = { opt -> viewModel.selectedStartupSelection = viewModel.startupSelectionEntries.indexOf(opt).coerceAtLeast(0) }
         )
 
+        // Custom per-service toggles — only shown when "Custom" (index 3) is selected.
+        if (viewModel.selectedStartupSelection == Container.STARTUP_SELECTION_CUSTOM.toInt()) {
+            StartupServicesToggleList(
+                enabled = viewModel.startupServicesEnabled,
+                onToggle = { raw, on ->
+                    viewModel.startupServicesEnabled =
+                        if (on) viewModel.startupServicesEnabled + raw
+                        else viewModel.startupServicesEnabled - raw
+                }
+            )
+        }
+
         // Processor Affinity
         SectionBox(title = stringResource(R.string.processor_affinity)) {
             Text(
@@ -1655,6 +1673,34 @@ private fun XRTab(viewModel: ContainerDetailViewModel) {
 // Shared composables
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Per-service on/off list for the "Custom" startup selection. Shared by the container editor and the
+// shortcut Advanced tab (both are in this package), so the service list, labels and ordering come
+// from the single WineUtils source of truth and can't drift between the two screens.
+@Composable
+internal fun StartupServicesToggleList(
+    enabled: Set<String>,
+    onToggle: (rawName: String, on: Boolean) -> Unit
+) {
+    SectionBox(title = "Custom Services") {
+        Text(
+            "Custom starts with every service off — turn on only what you need. " +
+                "Disabling Wine Bus/HID can break controllers.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(8.dp))
+        WineUtils.STARTUP_SERVICES.forEachIndexed { i, entry ->
+            val raw = WineUtils.startupServiceRawName(entry)
+            val label = WineUtils.STARTUP_SERVICE_LABELS.getOrElse(i) { raw }
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Text("$label ($raw)", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                Switch(checked = enabled.contains(raw), onCheckedChange = { onToggle(raw, it) })
+            }
+            if (i < WineUtils.STARTUP_SERVICES.lastIndex) Spacer(Modifier.height(4.dp))
+        }
+    }
+}
+
 @Composable
 internal fun SectionBox(
     title: String,
@@ -1688,12 +1734,30 @@ internal fun LabeledDropdown(
     onSelect: (String) -> Unit,
     enabled: Boolean = true,
     disabledOptions: Set<String> = emptySet(),
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // ── Controller / D-pad support (all defaulted, so every existing touch caller is unaffected) ──
+    // [focused] draws the focus border on the anchor when this dropdown is the highlighted control.
+    // [expandedOverride] (when non-null) lets a parent CONTROL the open state instead of the internal
+    // one — the shortcut editor's root D-pad handler opens/closes exactly one dropdown at a time this
+    // way. [onExpandedChange] fires on every open/close request (touch tap, item pick, outside dismiss)
+    // so the parent's open-tracker stays in sync. [highlightedIndex] tints the option the D-pad cursor
+    // is on. With all four at their defaults the box behaves exactly as before (own state, no highlight).
+    focused: Boolean = false,
+    expandedOverride: Boolean? = null,
+    onExpandedChange: ((Boolean) -> Unit)? = null,
+    highlightedIndex: Int = -1,
 ) {
-    var expanded by remember { mutableStateOf(false) }
+    var internalExpanded by remember { mutableStateOf(false) }
+    val expanded = expandedOverride ?: internalExpanded
+    val setExpanded: (Boolean) -> Unit = { want ->
+        if (enabled) {
+            onExpandedChange?.invoke(want)
+            if (expandedOverride == null) internalExpanded = want
+        }
+    }
     ExposedDropdownMenuBox(
         expanded = expanded,
-        onExpandedChange = { if (enabled) expanded = it },
+        onExpandedChange = { setExpanded(it) },
         modifier = modifier
     ) {
         OutlinedTextField(
@@ -1703,11 +1767,17 @@ internal fun LabeledDropdown(
             enabled = enabled,
             label = { Text(label) },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-            modifier = Modifier.menuAnchor().fillMaxWidth()
+            modifier = Modifier
+                .menuAnchor()
+                .fillMaxWidth()
+                .then(
+                    if (focused) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, MaterialTheme.shapes.extraSmall)
+                    else Modifier
+                )
         )
         ExposedDropdownMenu(
             expanded = expanded,
-            onDismissRequest = { expanded = false },
+            onDismissRequest = { setExpanded(false) },
             modifier = Modifier.outlinedMenuCard(),
         ) {
             options.forEachIndexed { idx, opt ->
@@ -1716,7 +1786,10 @@ internal fun LabeledDropdown(
                 DropdownMenuItem(
                     text = { Text(opt) },
                     enabled = optEnabled,
-                    onClick = { if (optEnabled) { onSelect(opt); expanded = false } }
+                    onClick = { if (optEnabled) { onSelect(opt); setExpanded(false) } },
+                    modifier = if (idx == highlightedIndex)
+                        Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.18f))
+                    else Modifier,
                 )
             }
         }
@@ -2637,17 +2710,29 @@ internal fun FpsCounterConfigDialog(
     }
 
     val cfg = remember(initialConfig) { parseConfig(initialConfig) }
+    val diagContext = LocalContext.current
     fun bool(k: String, fallbackKey: String, d: String) =
         cfg.getOrDefault(k, cfg.getOrDefault(fallbackKey, d)) == "1"
 
     // Orientation (vertical/horizontal) is toggled live by tapping the HUD in-game; preserve it.
     val hudMode = remember { cfg.getOrDefault("hudMode", "vertical") }
-    // 3-way HUD style: classic | gamehub | gamenative.
-    val styles = listOf("classic", "gamehub", "gamenative")
+    // 4-way HUD style: classic | gamehub | gamenative | fusion.
+    val styles = listOf("classic", "gamehub", "gamenative", "fusion")
     var hudStyle by remember { mutableStateOf(cfg.getOrDefault("hudStyle", "classic")) }
     val gameHub = hudStyle == "gamehub"
     val gameNative = hudStyle == "gamenative"
-    val rich = gameHub || gameNative   // both styles share opacity + FPS graph + GPU model + color/outline
+    val fusion = hudStyle == "fusion"
+    val rich = gameHub || gameNative || fusion   // opacity + FPS graph + GPU model + color/outline
+    // Fusion size mode (Full/Tiles/Pill/Minimal/Mega); also live-cycled by tapping the Fusion HUD in-game.
+    val fusionSizes = listOf("full", "tiles", "pill", "minimal", "mega")
+    var fusionSize by remember { mutableStateOf(cfg.getOrDefault("hudSize", "full")) }
+    // The chips this Fusion size actually renders (single source of truth in FusionSize) — used below to
+    // show only the relevant metric chips for the selected view/size.
+    val fusionChips = com.winlator.star.widget.fusionhud.FusionSize.from(fusionSize).supportedChips()
+    // GPU model defaults ON for Fusion (its spec), OFF for the others — matching each view's default.
+    val gpuModelDefault = if (cfg.getOrDefault("hudStyle", "classic") == "fusion") "1" else "0"
+    // Clock defaults ON for Fusion (subtle corner readout), OFF elsewhere.
+    val clockDefault = if (cfg.getOrDefault("hudStyle", "classic") == "fusion") "1" else "0"
 
     // Unified metric toggles (emitted under both classic + gamehub key names so either HUD honors them).
     var showFPS      by remember { mutableStateOf(bool("showFPS", "showFPS", "1")) }
@@ -2658,15 +2743,29 @@ internal fun FpsCounterConfigDialog(
     var showPower    by remember { mutableStateOf(bool("showPower", "showPower", "1")) }
     var showTemp     by remember { mutableStateOf(bool("showTemp", "showBatteryTemp", "1")) }
     var showEngine   by remember { mutableStateOf(bool("showEngine", "showRenderer", "1")) }
-    var showGpuModel by remember { mutableStateOf(bool("showGpuModel", "showGpuModel", "0")) }
+    var showGpuModel by remember { mutableStateOf(bool("showGpuModel", "showGpuModel", gpuModelDefault)) }
     var dualBattery  by remember { mutableStateOf(bool("hudDualBattery", "hudDualBattery", "0")) }
     // GameNative-only extra metrics (absent = off is the intended default).
     var showGpuTemp  by remember { mutableStateOf(bool("showGpuTemp", "showGpuTemp", "0")) }
     var showBattery  by remember { mutableStateOf(bool("showBattery", "showBattery", "0")) }
     var showRuntime  by remember { mutableStateOf(bool("showRuntime", "showRuntime", "0")) }
-    var showClock    by remember { mutableStateOf(bool("showClock", "showClock", "0")) }
+    var showClock    by remember { mutableStateOf(bool("showClock", "showClock", clockDefault)) }
     var showCpuGraph by remember { mutableStateOf(bool("showCPUGraph", "showCPUGraph", "0")) }
     var showGpuGraph by remember { mutableStateOf(bool("showGPUGraph", "showGPUGraph", "0")) }
+    // Fusion extra metrics + global lock (defaults match Container.DEFAULT_FPS_COUNTER_CONFIG).
+    var showVram     by remember { mutableStateOf(bool("showVram", "showVram", "1")) }
+    var showLow001   by remember { mutableStateOf(bool("showLow001", "showLow001", "1")) }
+    var fpsDecimal   by remember { mutableStateOf(bool("fpsDecimal", "fpsDecimal", "1")) }
+    var hudLocked    by remember { mutableStateOf(bool("hudLocked", "hudLocked", "0")) }
+    // Fusion Mega-only metrics (defaults match Container.DEFAULT_FPS_COUNTER_CONFIG).
+    var showPerCore  by remember { mutableStateOf(bool("showPerCore", "showPerCore", "1")) }
+    var showSwap     by remember { mutableStateOf(bool("showSwap", "showSwap", "1")) }
+    var showNet      by remember { mutableStateOf(bool("showNet", "showNet", "1")) }
+    var showResolution by remember { mutableStateOf(bool("showResolution", "showResolution", "1")) }
+    var showProton   by remember { mutableStateOf(bool("showProton", "showProton", "1")) }
+    var showWrapper  by remember { mutableStateOf(bool("showWrapper", "showWrapper", "1")) }
+    var showDxVer    by remember { mutableStateOf(bool("showDxVer", "showDxVer", "1")) }
+    var showSession  by remember { mutableStateOf(bool("showSession", "showSession", "1")) }
     // Temperature display — same keys as the in-game drawer pane, so the two stay interchangeable.
     var tempUnitF  by remember { mutableStateOf(cfg.getOrDefault("tempUnit", "c").equals("f", true)) }
     var tempBands  by remember { mutableStateOf(cfg.getOrDefault("tempBands", "1") != "0") }
@@ -2690,6 +2789,19 @@ internal fun FpsCounterConfigDialog(
     fun i(v: Boolean) = if (v) "1" else "0"
     fun buildConfig(): String = listOf(
         "hudStyle=$hudStyle",
+        "hudSize=$fusionSize",
+        "hudLocked=${i(hudLocked)}",
+        "showVram=${i(showVram)}",
+        "showLow001=${i(showLow001)}",
+        "fpsDecimal=${i(fpsDecimal)}",
+        "showPerCore=${i(showPerCore)}",
+        "showSwap=${i(showSwap)}",
+        "showNet=${i(showNet)}",
+        "showResolution=${i(showResolution)}",
+        "showProton=${i(showProton)}",
+        "showWrapper=${i(showWrapper)}",
+        "showDxVer=${i(showDxVer)}",
+        "showSession=${i(showSession)}",
         "hudMode=$hudMode",
         "showFPS=${i(showFPS)}",
         "showFPSGraph=${i(showGraph)}",
@@ -2736,17 +2848,26 @@ internal fun FpsCounterConfigDialog(
             ) {
                 HudThreeStop(
                     "HUD style",
-                    listOf("Classic", "GameHub", "GameNative"),
+                    listOf("Classic", "GameHub", "GameNative", "Fusion"),
                     styles.indexOf(hudStyle).coerceAtLeast(0)
                 ) { hudStyle = styles[it] }
                 Text(
                     when (hudStyle) {
                         "gamehub" -> "Rich overlay: skins, colored fields, live FPS graph."
                         "gamenative" -> "GameNative-style overlay: compact pill or stacked list with live graphs."
+                        "fusion" -> "Fusion overlay: one color-coded look in 5 sizes (Full/Tiles/Pill/Minimal/Mega) with percentile lows, VRAM + a Mega everything-view."
                         else -> "Classic Bannerlator overlay."
                     },
                     style = MaterialTheme.typography.bodySmall
                 )
+                if (fusion) {
+                    Spacer(Modifier.height(8.dp))
+                    HudThreeStop(
+                        "Size",
+                        listOf("Full", "Tiles", "Pill", "Minimal", "Mega"),
+                        fusionSizes.indexOf(fusionSize).coerceAtLeast(0)
+                    ) { fusionSize = fusionSizes[it] }
+                }
                 Spacer(Modifier.height(4.dp))
                 Text(
                     "Tip: tap the HUD in-game to switch vertical/horizontal layout.",
@@ -2761,30 +2882,47 @@ internal fun FpsCounterConfigDialog(
                 // Build the currently-VISIBLE chips first (respecting per-style gating), then chunk
                 // into an aligned 3-wide grid — so hidden chips never leave holes. Each stays an
                 // independent toggle writing the same state as before.
+                // For Fusion, show only the chips the SELECTED SIZE draws (single source of truth in
+                // FusionSize.supportedChips()). For the other styles, keep the existing style gating.
+                // Hiding a chip is UI-only — buildConfig() still emits every key (strip-invariant).
+                fun show(label: String, styleOk: Boolean): Boolean = if (fusion) label in fusionChips else styleOk
                 val metricChips = buildList<Triple<String, Boolean, () -> Unit>> {
-                    add(Triple("FPS", showFPS) { showFPS = !showFPS })
-                    if (rich) add(Triple("FPS graph", showGraph) { showGraph = !showGraph })
-                    add(Triple("CPU", showCPU) { showCPU = !showCPU })
-                    if (gameNative) add(Triple("CPU graph", showCpuGraph) { showCpuGraph = !showCpuGraph })
-                    add(Triple("GPU", showGPU) { showGPU = !showGPU })
-                    if (gameNative) add(Triple("GPU graph", showGpuGraph) { showGpuGraph = !showGpuGraph })
-                    add(Triple("RAM", showRAM) { showRAM = !showRAM })
-                    add(Triple("Power", showPower) { showPower = !showPower })
-                    add(Triple("Temp", showTemp) { showTemp = !showTemp })
-                    if (gameNative) {
-                        add(Triple("GPU temp", showGpuTemp) { showGpuTemp = !showGpuTemp })
-                        add(Triple("Battery", showBattery) { showBattery = !showBattery })
-                        add(Triple("Runtime", showRuntime) { showRuntime = !showRuntime })
-                        add(Triple("Clock", showClock) { showClock = !showClock })
-                    }
-                    add(Triple("Engine", showEngine) { showEngine = !showEngine })
-                    if (rich) add(Triple("GPU model", showGpuModel) { showGpuModel = !showGpuModel })
-                    if (gameHub) add(Triple("Dual battery", dualBattery) { dualBattery = !dualBattery })
+                    if (show("FPS", true)) add(Triple("FPS", showFPS) { showFPS = !showFPS })
+                    if (show("FPS graph", rich)) add(Triple("FPS graph", showGraph) { showGraph = !showGraph })
+                    if (show("CPU", true)) add(Triple("CPU", showCPU) { showCPU = !showCPU })
+                    if (!fusion && gameNative) add(Triple("CPU graph", showCpuGraph) { showCpuGraph = !showCpuGraph })
+                    if (show("GPU", true)) add(Triple("GPU", showGPU) { showGPU = !showGPU })
+                    if (!fusion && gameNative) add(Triple("GPU graph", showGpuGraph) { showGpuGraph = !showGpuGraph })
+                    if (show("VRAM", false)) add(Triple("VRAM", showVram) { showVram = !showVram })
+                    if (show("RAM", true)) add(Triple("RAM", showRAM) { showRAM = !showRAM })
+                    if (show("Power", true)) add(Triple("Power", showPower) { showPower = !showPower })
+                    if (show("Temp", true)) add(Triple("Temp", showTemp) { showTemp = !showTemp })
+                    if (show("GPU temp", gameNative)) add(Triple("GPU temp", showGpuTemp) { showGpuTemp = !showGpuTemp })
+                    if (show("Battery", gameNative)) add(Triple("Battery", showBattery) { showBattery = !showBattery })
+                    if (!fusion && gameNative) add(Triple("Runtime", showRuntime) { showRuntime = !showRuntime })
+                    if (show("0.01% low", false)) add(Triple("0.01% low", showLow001) { showLow001 = !showLow001 })
+                    if (show("FPS .1", false)) add(Triple("FPS .1", fpsDecimal) { fpsDecimal = !fpsDecimal })
+                    // Fusion Mega-only metrics
+                    if (show("Per-core", false)) add(Triple("Per-core", showPerCore) { showPerCore = !showPerCore })
+                    if (show("Swap", false)) add(Triple("Swap", showSwap) { showSwap = !showSwap })
+                    if (show("Network", false)) add(Triple("Network", showNet) { showNet = !showNet })
+                    if (show("Resolution", false)) add(Triple("Resolution", showResolution) { showResolution = !showResolution })
+                    if (show("Proton", false)) add(Triple("Proton", showProton) { showProton = !showProton })
+                    if (show("Wrapper", false)) add(Triple("Wrapper", showWrapper) { showWrapper = !showWrapper })
+                    if (show("DX ver", false)) add(Triple("DX ver", showDxVer) { showDxVer = !showDxVer })
+                    if (show("Session", false)) add(Triple("Session", showSession) { showSession = !showSession })
+                    // Clock: gamenative's own chip, and every Fusion size (subtle corner readout)
+                    if (show("Clock", gameNative)) add(Triple("Clock", showClock) { showClock = !showClock })
+                    if (show("Engine", true)) add(Triple("Engine", showEngine) { showEngine = !showEngine })
+                    if (show("GPU model", rich)) add(Triple("GPU model", showGpuModel) { showGpuModel = !showGpuModel })
+                    if (!fusion && gameHub) add(Triple("Dual battery", dualBattery) { dualBattery = !dualBattery })
+                    // Global appearance control, shown for every style/size.
+                    add(Triple("Lock in place", hudLocked) { hudLocked = !hudLocked })
                 }
                 ModeChipGrid(metricChips, perRow = 3)
 
                 // ── Temperature display ── only meaningful when a temperature is on screen.
-                if (showTemp || (gameNative && (showGpuTemp || showBattery))) {
+                if (showTemp || ((gameNative || fusion) && (showGpuTemp || showBattery))) {
                     Spacer(Modifier.height(12.dp))
                     HudThreeStop("Temp unit", listOf("\u00B0C", "\u00B0F"), if (tempUnitF) 1 else 0) {
                         tempUnitF = it == 1
@@ -2814,7 +2952,7 @@ internal fun FpsCounterConfigDialog(
                             onValueChange = { tempRedCpu = it.toInt() },
                             valueRange = 50f..110f, steps = 59
                         )
-                        if (gameNative && showGpuTemp) {
+                        if ((gameNative || fusion) && showGpuTemp) {
                             Text("GPU red at: $tempRedGpu\u00B0C", style = MaterialTheme.typography.bodySmall)
                             Slider(
                                 value = tempRedGpu.toFloat(),
@@ -2869,6 +3007,22 @@ internal fun FpsCounterConfigDialog(
                         valueRange = 0f..50f, steps = 49
                     )
                 }
+
+                // General HUD action (not gated to a style): dump every sensor path + value to a
+                // shareable text file so a device owner can report which nodes their SoC exposes.
+                Spacer(Modifier.height(16.dp))
+                OutlinedButton(
+                    onClick = { exportHudDiagnostics(diagContext) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Filled.Share, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Export HUD diagnostics")
+                }
+                Text(
+                    "Saves a sensor report (CPU/GPU/temp/VRAM…) straight to your Downloads folder.",
+                    style = MaterialTheme.typography.bodySmall
+                )
             }
         },
         confirmButton = {

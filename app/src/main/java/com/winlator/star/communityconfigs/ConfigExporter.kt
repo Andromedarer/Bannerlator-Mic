@@ -47,6 +47,22 @@ object ConfigExporter {
         "fexcorePreset", "cpuList", "startupSelection", "inputType", "exclusiveXInput", "disableXinput",
         "simTouchScreen", "numControllers", "controlsProfile", "wincomponents", "midiSoundFont",
         "lc_all", "autoCloseOnExit",
+        // Community-config coverage pass (2026-07): per-game HUD blob + motion/refresh/frame-gen/
+        // vibration/upscaler overrides that were previously dropped. Each round-trips as a scalar the
+        // import write loop applies verbatim; the launch path in XServerDisplayActivity honors every one
+        // as a per-shortcut override (see the resolved*/shortcut.getExtra reads there).
+        //   fpsCounterConfig — the WHOLE HUD KeyValueSet (hudStyle incl. Fusion, hudSize, hudLocked,
+        //   every show* chip, temp unit, colors/outline/opacity/scale, engine/wrapper/dxver).
+        "fpsCounterConfig",
+        // Motion aim (gyro). Deadzone/smoothing are intentionally NOT here — they describe the hand and
+        // the device, not the game, and stay container-scoped (matching the launch resolver).
+        "gyroEnabled", "gyroTarget", "gyroActivator", "gyroActivationMode", "gyroMode",
+        "gyroSensitivity", "gyroInvertX", "gyroInvertY",
+        // In-game refresh cap (both keys; unlock resolved to 1/0, cap 0 = no ceiling).
+        "maxGameRefreshRate", "unlockGameRefreshRate",
+        // #168 custom startup service set (only consumed when startupSelection = Custom); frame-gen
+        // interpolation model; dual-motor vibration; sticky per-game upscaler override.
+        "startupServices", "frameGenModel", "vibrationMode", "vibrationIntensity", "scalingMode",
     )
 
     /**
@@ -70,6 +86,11 @@ object ConfigExporter {
         val uploadToken: String,
         val uploaderName: String? = null,
         val uploaderAvatarUrl: String? = null,
+        // Authoritative Steam appid for the game, when the shortcut carries one (its `steamAppId`
+        // extra). Stamped into meta.steam_appid so the backend can aggregate this upload under the
+        // correct appid-keyed canonical game instead of guessing from the (renameable) name slug —
+        // the export-side counterpart to the appid-first import match. Null for non-Steam titles.
+        val steamAppId: String? = null,
     )
 
     /**
@@ -146,6 +167,7 @@ object ConfigExporter {
         meta.device.nonBlank()?.let { metaObj.put("device", it) }
         meta.soc.nonBlank()?.let { metaObj.put("soc", it) }
         meta.version.nonBlank()?.let { metaObj.put("bh_version", it) }
+        meta.steamAppId.nonBlank()?.let { metaObj.put("steam_appid", it) }
         // Optional signed-in attribution (Phase 2). Only written when logged in; the config-detail page
         // reads it back to show "by <username>", falling back to "Anonymous user" when it's absent.
         meta.uploaderName.nonBlank()?.let { name ->

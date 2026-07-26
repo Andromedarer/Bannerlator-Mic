@@ -119,9 +119,21 @@ class PerformanceHudView(
     private var moved = false
     private var onTapListener: Runnable? = null
     private var onMovedListener: BiConsumer<Float, Float>? = null
+    private var onLockChangedListener: java.util.function.Consumer<Boolean>? = null
 
     fun setOnTapListener(r: Runnable?) { onTapListener = r }
     fun setOnMovedListener(l: BiConsumer<Float, Float>?) { onMovedListener = l }
+    fun setOnLockChangedListener(l: java.util.function.Consumer<Boolean>?) { onLockChangedListener = l }
+
+    // Shared lock / tap / drag behaviour (long-press toggles the position lock).
+    private val lockController = com.winlator.star.widget.HudLockController(
+        context, this,
+        object : com.winlator.star.widget.HudLockController.Callbacks {
+            override fun onTap() { onTapListener?.run() }
+            override fun onMoved(x: Float, y: Float) { onMovedListener?.accept(x, y) }
+            override fun onLockChanged(locked: Boolean) { onLockChangedListener?.accept(locked) }
+        },
+    )
 
     private val backgroundDrawable = GradientDrawable().apply {
         shape = GradientDrawable.RECTANGLE
@@ -257,6 +269,7 @@ class PerformanceHudView(
         }
         outlineIntensity = parseHudOutline(cfg.get("hudOutline", "40")) / 100f
         outlineFollowAccent = cfg.get("hudOutlineAccent", "1") == "1"
+        lockController.setLocked(cfg.get("hudLocked", "0") == "1")
         size = run {
             val scale = try {
                 Integer.parseInt(cfg.get("hudScale", Container.DEFAULT_HUD_SCALE.toString()))
@@ -636,36 +649,12 @@ class PerformanceHudView(
     private val Float.dpF: Float
         get() = this * resources.displayMetrics.density
 
-    // ---- Touch: tap toggles orientation, drag moves the overlay -----------
-    override fun onTouchEvent(event: MotionEvent): Boolean {
-        when (event.action) {
-            MotionEvent.ACTION_DOWN -> {
-                lastX = event.rawX; lastY = event.rawY
-                offsetX = x; offsetY = y
-                downTime = event.eventTime; moved = false
-                return true
-            }
-            MotionEvent.ACTION_MOVE -> {
-                val dx = event.rawX - lastX
-                val dy = event.rawY - lastY
-                val slop = ViewConfiguration.get(context).scaledTouchSlop
-                if (kotlin.math.abs(dx) > slop || kotlin.math.abs(dy) > slop) moved = true
-                x = offsetX + dx; y = offsetY + dy
-                return true
-            }
-            MotionEvent.ACTION_UP -> {
-                if (!moved &&
-                    (event.eventTime - downTime) <= ViewConfiguration.getLongPressTimeout() &&
-                    onTapListener != null
-                ) {
-                    onTapListener?.run()
-                } else if (moved) {
-                    onMovedListener?.accept(x, y)
-                }
-                return true
-            }
-        }
-        return super.onTouchEvent(event)
+    // ---- Touch: long-press locks, tap toggles orientation, drag moves -----
+    override fun onTouchEvent(event: MotionEvent): Boolean = lockController.onTouchEvent(event)
+
+    override fun dispatchDraw(canvas: Canvas) {
+        super.dispatchDraw(canvas)
+        lockController.drawBadge(canvas)
     }
 
     // ---- Views ------------------------------------------------------------
