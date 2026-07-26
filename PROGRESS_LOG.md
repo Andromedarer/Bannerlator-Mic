@@ -4907,3 +4907,29 @@ A volume reported by *any* source is **always** emitted. When its root is unread
 **✅ CONFIRMED ON REAL HARDWARE by @Devaspe (HyperOS device): bionic-fg works, then lsfg-vk confirmed after.** Both layers load. This validates clintOnSky's entire diagnosis.
 
 **Credits (for the release notes):** **@clintOnSky** — diagnosis + fix, PR #96, code contributor (his PR also carries a native present-path fix, not yet landed). **@Shalaykin1** — issue **#40 "Fix framegeneration on HyperOS 3"** ("HyperOS 2 works normally, HyperOS 3 not working, works only in GameHub app" — GameHub ships its own imagefs, hence no symlink). **@Devaspe** — device confirmation on HyperOS. ⚠️ #40 is still CLOSED and its reporter has not been told it's fixed. Also possibly the same bug: **@EddyGameDev** #58 ("tried bionic and LSFG, neither want to work" = the exact both-layers signature, device unstated). **NOT this bug:** @132edsaz #43 (Galaxy A14 / Dimensity 700 — MediaTek/Mali, no libjpeg-hyper).
+
+
+---
+
+## 🏁 2026-07-26 — 2.8.2 HOTFIX CUT + Controller-overlay fix (pinned) + FusionHUD v1.0 first release
+
+**Context:** main had the whole HUD-accuracy pass + the HONOR/mA battery-watts fix merged but unreleased (main `6a14c4a2`, ahead of the 2.8.1 stable tag). This session: built a controller-overlay fix (device-proven, then pinned), then cut 2.8.2 to ship the pile-up.
+
+### 🎮 Controller-overlay fix — HUD renders BENEATH on-screen controls (✅ device-proven, PINNED, NOT in 2.8.2)
+Problem: the in-game perf HUD drew OVER the touchscreen control buttons, so a **locked** HUD on top of e.g. R2 ate the button press. **User rejected Solution A** (make the locked HUD touch-transparent) because it dropped long-press-unlock-while-locked: *"the long press to lock and unlock needs to stay in place."*
+**Solution B (shipped on branch `fix/hud-under-controls` @ `4427571d`, off main `6a14c4a2`):**
+- `XServerDisplayActivity.placeHudBelowControls(View)` drops each built HUD one z-slot BELOW `inputControlsView` (surgical `removeView`+`addView(hud, controlsIndex)` — leaves the DrawerLayout menu + `dialogHostView` ComposeView untouched). Called after all 5 `rootView.addView` HUD sites.
+- `InputControlsView` gains `setHudFallThroughViews(View...)` + `hudAt(x,y)` + `hudTarget`: a touch NOT grabbed by a control ELEMENT (buttons checked first → a button under the HUD wins) that lands on a VISIBLE HUD candidate is forwarded (whole gesture, latched on DOWN / reset on UP) to that HUD — so long-press/drag/tap still reach it. Candidate list = all 5 HUD views (nulls/GONE skipped → classic h/v pair auto-resolves). Controls-off path unchanged (HUD topmost, gets touches directly).
+- `HudLockController` untouched (still always-consumes → long-press intact).
+- **Build snag caught+fixed:** first CI run failed — my field block split an `@Override` from `onTouchEvent` (`error: annotation type not applicable`). Fixed by restoring `@Override` on the method. Green rebuild = run `30219099604` (all 3 flavors), standard APK sha256 `e060ba55…aa807`, staged to Downloads.
+- **User device-verified:** *"R2 works and long press still locks."* Then: *"put a pin in this"* → left UNMERGED, queued for 2.9.
+
+### 🚀 Stable 2.8.2 cut (vc51, tag `2.8.2` → `dc1a78d3`, run `30220212231`)
+HOTFIX over 2.8.1. Version bump on main (vc 50→51, vn 2.8.1→2.8.2, commit `dc1a78d3`), dispatched `release.yml --ref main` (JSON inputs via `gh workflow run --json` stdin — clean multi-line notes). **Verified live:** isPrerelease=false, draft=false, `releases/latest`→2.8.2, **tag→built commit** (release.yml default-branch quirk was harmless: main HEAD == built commit), `update.json` vc51/2.8.2 + all 3 APKs.
+- **Ships:** HONOR/mA battery-watts fix + HUD-accuracy pass (live engine-API label, per-core CPU%, FPS decay+binding-reclaim, follow-active-window) + GL-FPS doc.
+- **Description** (proper format, added post-cut via `gh release edit`): logo/badge header · hotfix framing + "What's fixed" list · Credits (Angel + winlator_ludashi_plus/squalle0nhart) · repeated ⚠️ 2.9-pre VC-Pro-loss warning · expandable `<details>` on OpenGL/DirectDraw-vs-benchmark FPS in the AIO Graphics Test · "🧩 Fusion HUD is open source" section linking the FusionHUD release + repo.
+
+### 🧩 FusionHUD v1.0 — first release of the standalone library
+The repo (`The412Banner/FusionHUD`) had NO releases. Cut **`v1.0`** at `d171774` (`--latest`), attaching `fusionhud-1.0-release.aar` (95 KB library) + `fusionhud-1.0-demo-debug.apk` (3.3 MB preview) from CI run `30217601607`. Notes: what-it-is / adopt-via-JitPack(`com.github.The412Banner:FusionHUD:v1.0`)-or-fork / GPL-3.0 §7(b) attribution. Linked from the 2.8.2 description for other projects to adopt. ⚠️ `gh release create --target` needs a FULL sha (12-char abbrev → HTTP 422).
+
+**▶️ NEXT: 2.9** = merge PR #156 (Virtual Controller Pro) + the pinned `fix/hud-under-controls` + newer work.
