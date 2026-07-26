@@ -5399,8 +5399,17 @@ return true;
         if (perfHud == null && gameNativeHud == null && fusionHud == null && frameRating == null && frameRatingHorizontal == null) return;
 
         if (property != null) {
-            if (property.nameAsString().contains("_MESA_DRV")) mesaDrvWindowIds.add(window.id);
-            if (frameRatingWindowId == -1 && property.nameAsString().contains("_MESA_DRV")) {
+            boolean isMesaDrv = property.nameAsString().contains("_MESA_DRV");
+            if (isMesaDrv) mesaDrvWindowIds.add(window.id);
+            // Bind when unbound, OR UPGRADE off a non-_MESA_DRV *fallback* window (the focused-window
+            // fallback in the unmap branch — e.g. the static AIO menu the HUD parked on after a cube
+            // closed) to this real render window. Without the upgrade the binding stays pinned to the
+            // fallback and the FPS counter keeps ticking a window that isn't presenting, so every cube
+            // after the first reads 0. Don't steal from another real render window (real games keep
+            // their single window). NB mesaDrvWindowIds already includes window.id, so the contains()
+            // check tests the OLD bound id.
+            boolean boundToFallback = frameRatingWindowId != -1 && !mesaDrvWindowIds.contains(frameRatingWindowId);
+            if (isMesaDrv && (frameRatingWindowId == -1 || boundToFallback)) {
                 frameRatingWindowId = window.id;
                 Log.d("XServerDisplayActivity", "Showing hud for Window " + window.getName());
 
