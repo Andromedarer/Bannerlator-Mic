@@ -1060,6 +1060,17 @@ public class HudMetrics {
                 }
             }
         } catch (Exception ignored) {}
+        // Frequency fallback for any core /proc/stat couldn't give us — restricted on some firmwares
+        // (e.g. HONOR / Android 16), which is also why the aggregate getCpuUsagePercent() falls back.
+        // scaling_cur_freq / cpuinfo_max_freq is a load proxy (per-core clocks ARE readable there), and
+        // it also seeds the very first sample. Cores with a real /proc/stat delta keep it (no regression).
+        for (int i = 0; i < out.length; i++) {
+            if (out[i] >= 0) continue;
+            Long cur = readLongFromLine("/sys/devices/system/cpu/cpu" + i + "/cpufreq/scaling_cur_freq");
+            Long max = readLongFromLine("/sys/devices/system/cpu/cpu" + i + "/cpufreq/cpuinfo_max_freq");
+            if (cur != null && max != null && max > 0L)
+                out[i] = clampPercent((int) ((Math.max(0L, Math.min(cur, max)) * 100L) / max));
+        }
         return out;
     }
 

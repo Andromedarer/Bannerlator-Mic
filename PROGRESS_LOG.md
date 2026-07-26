@@ -1,5 +1,15 @@
 # Star-Compose — Progress Log
 
+## 2026-07-26 — 🎯 **HUD accuracy: live engine-API label (fixes "Zink" mislabel on D3D12 games) + per-core % frequency fallback** (branch `fix/hud-engine-label-live`, vc50)
+
+> Two user-reported HUD accuracy bugs, fixed centrally so ALL HUDs benefit (FrameRating h/v, PerfHud, GameNative HUD, Fusion HUD — they all read the one shared label).
+>
+> **1. Engine-API label mislabeled `Zink` on a D3D12 game.** Repro: "Dragon Sword Awakening" (`DSClient-Win64-Shipping.exe`, UE) showed `Zink` on every HUD. **Verified from the live process `/proc/5062/maps`: `d3d12.dll` + `d3d12core.dll` (VKD3D-Proton) mapped → it's really D3D12 · VKD3D.** Root cause: `startDxApiDetection` scanned once and **latched the first result, then stopped** (`return`). UE maps `opengl32.dll` early (GL probe) before `d3d12core.dll` loads, so the first scan returned `Zink` and froze. **Fix:** made detection a **continuous ~2s live loop** (background thread, off the render path) that re-pushes the label only when the API changes and never latches — so it upgrades past a transient GL to the real API. Added **early-exit** to `detectActiveDxApi` (`break` on the top-priority `d3d12` hit) so the /proc/maps scan of a multi-GB game stays cheap. Never downgrades (closed API DLLs stay resident) → the multi-API **AIO Graphics Test** shows the highest API loaded, a documented limit of module-scanning. Detection already fed all 5 HUD surfaces; `stopDxApiDetection` is called on stop+destroy so the forever-loop can't leak the Activity.
+>
+> **2. Per-core CPU % showed `—` (`?` in the diag).** Same HONOR/Android-16 firmware where `/proc/stat` is restricted (the aggregate CPU% already falls back to a scaling-freq estimate; per-core had NO fallback → `-1`). **Fix:** `readPerCorePercent()` now fills any core `/proc/stat` couldn't give from `scaling_cur_freq / cpuinfo_max_freq` (a load proxy, per-core clocks ARE readable) — mirrors the aggregate's fallback, also seeds the first sample. Cores with a real `/proc/stat` delta keep it → no regression.
+>
+> +35/−10, two files. Independent of the battery branch (`fix/hud-battery-watts-voltage-fallback`). vc50 / 2.8.1.
+
 ## 2026-07-26 — 🔋 **Fusion HUD: battery watts stuck at 0.0W on HONOR (EXTRA_VOLTAGE=0) — voltage_now/power_now fallback + diag power_supply probe** (branch `fix/hud-battery-watts-voltage-fallback`, vc stays 49)
 
 > User report (HONOR Magic 7 Pro, PTP-N49, SM8750 / Adreno 830, Android 16) via a HUD diagnostic export. HUD showed `BAT 23% 44°C 0.0W` — %, temp, current, runtime all populate but wattage was stuck at 0.
