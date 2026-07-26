@@ -1,5 +1,21 @@
 # Star-Compose — Progress Log
 
+## 2026-07-26 — 🔋 **Fusion HUD: battery watts stuck at 0.0W on HONOR (EXTRA_VOLTAGE=0) — voltage_now/power_now fallback + diag power_supply probe** (branch `fix/hud-battery-watts-voltage-fallback`, vc stays 49)
+
+> User report (HONOR Magic 7 Pro, PTP-N49, SM8750 / Adreno 830, Android 16) via a HUD diagnostic export. HUD showed `BAT 23% 44°C 0.0W` — %, temp, current, runtime all populate but wattage was stuck at 0.
+>
+> **Root cause:** `HudMetrics` computes watts as `current × voltage`, gating on `voltageMv > 0`. On this HONOR firmware `BatteryManager.EXTRA_VOLTAGE` returns 0 (current comes from `BATTERY_PROPERTY_CURRENT_NOW`, which works — the runtime estimate proves it), so the guard zeroes watts. No voltage fallback existed.
+>
+> **Fix (`collectBattery` = Fusion path, + legacy `getBattery`):** when `voltageMv <= 0`, fall back to power_supply sysfs `voltage_now` (µV→mV) via new `VOLTAGE_CHANNELS`; `collectBattery` additionally uses `power_now` (µW) directly as a last resort via `POWER_CHANNELS` + shared `readLongFromChannels()` helper. **Strictly additive / no regression** — the fallback only fires where watts is already 0 today; devices with a working `EXTRA_VOLTAGE` never touch it. Pack-level nodes used (Magic 7 Pro is dual-cell ~8V, so `I×V` at the pack is correct).
+>
+> **Diagnostic (`buildDiagnosticsReport`):** added `appendPowerSupplyDump()` — the "Exists" section now lists each `/sys/class/power_supply/*` node's readable `voltage_now`/`current_now`/`power_now`. The prior report dumped thermal/kgsl/devfreq but NOT power_supply, so we couldn't confirm sysfs readability. A re-run from this user will show whether `voltage_now` is app-readable (→ fix lands) or SELinux-blocked like kgsl (→ battery also needs root).
+>
+> **GPU %/clock (`—`) NOT fixed — device limitation.** kgsl nodes (`gpubusy`/`gpu_busy_percentage`/`devfreq/gpu_load`/`clock_mhz`) exist but are SELinux-labeled `vendor_sysfs_kgsl`; the `untrusted_app` domain is denied, so every candidate path MISSes. Adding paths can't help (same blocked label). GPU **temp** works (thermal zones ARE app-readable). Also noticed **per-core % shows `—`** (per-core clocks work) — separate `/proc/stat` per-cpu gap, not addressed here.
+>
+> **GPU no-root recon (root toggle deferred — user's device likely NOT rooted).** Key asymmetry: `/dev/kgsl-3d0` is labeled `gpu_device` (`crw-rw-rw-`) and IS app-openable (rendering needs it) — only the `/sys/class/kgsl` *sysfs mirror* is blocked. So the real no-root path is reading GPU busy via **KGSL perf-counter ioctls on the device node** (not sysfs) — native/JNI, needs a proof-of-concept spike (perfcounters may be kernel-gated or conflict with Turnip/DXVK). Middle ground = Shizuku (shell can often read kgsl sysfs). Ruled out: DRM fdinfo (Adreno uses kgsl not `/dev/dri`), Vulkan (no busy% query), compositor-timing estimate (can't see guest GPU work). **Added `appendGpuNoRootProbes()` to the diagnostic** — probes (1) `Os.open(/dev/kgsl-3d0, O_RDWR/O_RDONLY)` reachability and (2) any app-readable `/sys/devices/platform/**/kgsl-3d0/devfreq/*` node — so the user's next export tells us if the ioctl route is viable BEFORE we write native code.
+>
+> +63 lines, one file. ⚠️ NOT verifiable on our Adreno-750 test device (different device) — needs the HONOR user to run the new build + re-export the diagnostic.
+
 ## 2026-07-26 — 🎛️ **Fusion HUD (Mega): DX version off the engine row, stacked below the graph with the wrapper** (branch `feat/hud-mega-version-below-graph`, vc stays 49)
 
 > User-driven layout tweak, **Mega size only** — Full/Tiles/Pill/Minimal untouched. On the shipped 2.8.1 Mega HUD the engine row read `D3D9 · DXVK 2.4.1-1-gplasync-pre-reg-0` (API value + long DX version) and the graphics wrapper (`Original`) was a lone dim line below the frametime graph. That long version string sat in the right column's shared label column and shoved every right-column value (RAM %, FPS, ms) to the far edge.
