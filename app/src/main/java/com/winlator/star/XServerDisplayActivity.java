@@ -431,7 +431,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 String line;
                 while ((line = r.readLine()) != null) {
                     if (line.indexOf(".dll") < 0) continue;
-                    if (line.indexOf("d3d12core.dll") >= 0 || line.indexOf("d3d12.dll") >= 0) d3d12 = true;
+                    if (line.indexOf("d3d12core.dll") >= 0 || line.indexOf("d3d12.dll") >= 0) { d3d12 = true; break; }
                     else if (line.indexOf("d3d11.dll") >= 0) d3d11 = true;
                     else if (line.indexOf("d3d10.dll") >= 0) d3d10 = true;
                     else if (line.indexOf("d3d9.dll") >= 0)  d3d9  = true;
@@ -442,6 +442,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     else if (line.indexOf("opengl32.dll") >= 0) opengl = true;
                 }
             } catch (Exception ignore) {}
+            if (d3d12) break;   // top priority — nothing outranks D3D12, so stop scanning early
         }
         final String SEP = " · ";                       // " · " (middle dot)
         // 1. D3D wins over the API it is layered on (rank 12 > 11 > 10 > 9).
@@ -467,30 +468,43 @@ public class XServerDisplayActivity extends AppCompatActivity {
             || "zink".equals(envVars.get("MESA_LOADER_DRIVER_OVERRIDE"));
     }
 
-    /** Poll for the active D3D API just after launch and update the overlay label once detected. */
+    /**
+     * Continuously track the active graphics API and keep EVERY HUD's label live, like the other
+     * metrics. Runs on a background thread at a ~2s cadence (off the render path, so it never stalls a
+     * frame). We only push to the HUDs when the API actually CHANGES — the label is near-static — and
+     * {@link #detectActiveDxApi} early-exits its /proc/maps scan on the top-priority hit, so the cost
+     * is negligible even on weak devices.
+     *
+     * <p>Crucially it does NOT latch on the first result: a game that maps opengl32.dll early (UE probes
+     * GL before loading d3d12core.dll) used to freeze on "Zink"; now the label upgrades to the real API
+     * ("D3D12 · VKD3D") as soon as it loads. It never downgrades, because closed API DLLs stay resident
+     * (the multi-API AIO test therefore shows the highest API loaded — a known limit of module scanning).
+     */
     private void startDxApiDetection(final String rendererMode, final String fallback) {
         stopDxApiDetection();
         dxApiThread = new Thread(() -> {
-            for (int i = 0; i < 40 && !Thread.currentThread().isInterrupted(); i++) {
+            String lastApi = null;
+            while (!Thread.currentThread().isInterrupted()) {
                 String api = detectActiveDxApi(fallback);
-                if (api != null) {
+                if (api != null && !api.equals(lastApi)) {
+                    lastApi = api;
                     // Classic FrameRating renderer line = "<host renderer> | <api>". Skip the prefix
                     // when the api string already IS the host renderer, so a native-Vulkan game on the
                     // Vulkan compositor reads "Vulkan", not "Vulkan | Vulkan". D3D and Zink/OpenGL keep
                     // the "<renderer> | <api>" form ("Vulkan | D3D11 · DXVK", "OpenGL | Zink").
                     final String label = api.equals(rendererMode) ? api : rendererMode + " | " + api;
+                    final String apiFinal = api;
                     runOnUiThread(() -> {
                         hudRendererLabel = label;
-                        hudEngineShort = api;
+                        hudEngineShort = apiFinal;
                         if (frameRatingHorizontal != null) frameRatingHorizontal.setRenderer(label);
                         if (frameRating != null) frameRating.setRenderer(label);
-                        if (perfHud != null) perfHud.setEngineLabel(api);
-                        if (gameNativeHud != null) gameNativeHud.setEngineLabel(api);
-                        if (fusionHud != null) fusionHud.setEngineLabel(api);
+                        if (perfHud != null) perfHud.setEngineLabel(apiFinal);
+                        if (gameNativeHud != null) gameNativeHud.setEngineLabel(apiFinal);
+                        if (fusionHud != null) fusionHud.setEngineLabel(apiFinal);
                     });
-                    return;
                 }
-                try { Thread.sleep(3000); } catch (InterruptedException e) { return; }
+                try { Thread.sleep(2000); } catch (InterruptedException e) { return; }
             }
         }, "dx-api-detect");
         dxApiThread.start();
