@@ -1347,6 +1347,58 @@ public class HudMetrics {
         appendReadableFiles(sb, "/sys/class/misc/mali0/device");
         appendReadableFiles(sb, "/sys/class/drm/card0/device");
         appendPowerSupplyDump(sb);
+        appendGpuNoRootProbes(sb);
+    }
+
+    /** Probes for a ROOT-FREE GPU-load path on locked-sysfs Adreno devices (SM8750/HONOR etc.):
+     *  (1) can the app open the KGSL device node? The sysfs mirror (/sys/class/kgsl) is SELinux-blocked
+     *      (vendor_sysfs_kgsl), but /dev/kgsl-3d0 is labeled gpu_device and is normally app-openable —
+     *      that's the door for reading GPU busy via ioctl perf-counters instead of sysfs.
+     *  (2) is there an app-readable devfreq node under /sys/devices/platform that bypasses the blocked
+     *      /sys/class/kgsl symlink (a free win for at least the clock). */
+    private void appendGpuNoRootProbes(StringBuilder sb) {
+        sb.append("-- GPU no-root reachability probes --\n");
+        sb.append("  /dev/kgsl-3d0 open O_RDWR:   ")
+          .append(probeOpen("/dev/kgsl-3d0", android.system.OsConstants.O_RDWR)).append('\n');
+        sb.append("  /dev/kgsl-3d0 open O_RDONLY: ")
+          .append(probeOpen("/dev/kgsl-3d0", android.system.OsConstants.O_RDONLY)).append('\n');
+        sb.append("  /dev/dri/renderD128 O_RDWR:  ")
+          .append(probeOpen("/dev/dri/renderD128", android.system.OsConstants.O_RDWR)).append('\n');
+        boolean found = false;
+        File[] roots = { new File("/sys/devices/platform/soc"), new File("/sys/devices/platform") };
+        for (File root : roots) {
+            File[] nodes = root.listFiles();
+            if (nodes == null) continue;
+            for (File soc : nodes) {
+                if (!soc.getName().contains("kgsl-3d0")) continue;
+                File[] inner = new File(soc, "devfreq").listFiles();
+                if (inner == null) continue;
+                for (File node : inner) {
+                    found = true;
+                    Long cur = readLongFromLine(node + "/cur_freq");
+                    Long load = readLongFromLine(node + "/gpu_load");
+                    if (load == null) load = readLongFromLine(node + "/load");
+                    sb.append("  devfreq ").append(node.getAbsolutePath())
+                      .append(": cur_freq=").append(cur == null ? "—" : cur.toString())
+                      .append(" load=").append(load == null ? "—" : load.toString()).append('\n');
+                }
+            }
+        }
+        if (!found) sb.append("  devfreq (platform kgsl): (no app-readable node found)\n");
+    }
+
+    /** open()+close() a path with the given flags, reporting OK or the errno class — used to test
+     *  whether the app's sandbox can reach a device node without root. */
+    private static String probeOpen(String path, int flags) {
+        java.io.FileDescriptor fd = null;
+        try {
+            fd = android.system.Os.open(path, flags, 0);
+            return "OK";
+        } catch (Throwable t) {
+            return t.getClass().getSimpleName() + ": " + t.getMessage();
+        } finally {
+            if (fd != null) try { android.system.Os.close(fd); } catch (Throwable ignored) {}
+        }
     }
 
     /** Battery-wattage inputs: which power_supply nodes this app can actually READ, and their raw
