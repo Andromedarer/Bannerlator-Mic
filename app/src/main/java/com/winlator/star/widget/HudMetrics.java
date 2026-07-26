@@ -627,6 +627,30 @@ public class HudMetrics {
         "/sys/class/power_supply/main/current_now",
     };
 
+    /** power_supply voltage_now channels (µV) — fallback when {@code EXTRA_VOLTAGE} reads 0 on some
+     *  OEM firmwares (e.g. HONOR Magic), which otherwise leaves wattage stuck at 0.0W. */
+    private static final String[] VOLTAGE_CHANNELS = {
+        "/sys/class/power_supply/battery/voltage_now",
+        "/sys/class/power_supply/bms/voltage_now",
+        "/sys/class/power_supply/main/voltage_now",
+    };
+    /** power_supply power_now channels (µW) — last-resort direct power reading when neither the
+     *  BatteryManager voltage nor {@code voltage_now} is available. */
+    private static final String[] POWER_CHANNELS = {
+        "/sys/class/power_supply/battery/power_now",
+        "/sys/class/power_supply/bms/power_now",
+        "/sys/class/power_supply/main/power_now",
+    };
+
+    /** First readable long across a channel list, or null. */
+    private static Long readLongFromChannels(String[] paths) {
+        for (String p : paths) {
+            Long v = readLongFromLine(p);
+            if (v != null) return v;
+        }
+        return null;
+    }
+
     private Double smoothedBatteryRuntimeHours = null;
     private static final double MAX_RUNTIME_HOURS = 72.0;
     private static final double RUNTIME_SMOOTHING_OLD_WEIGHT = 0.65;
@@ -661,6 +685,12 @@ public class HudMetrics {
         // sign therefore reads 0W on battery on those devices (and only shows a value while charging).
         // Use the magnitude for the power figure; the reliable charge DIRECTION is EXTRA_PLUGGED (the
         // `charging` flag), which the HUD already uses for the PWR/CHG label.
+        // EXTRA_VOLTAGE reads 0 on some OEM firmwares even though current is fine — fall back to the
+        // power_supply voltage_now (µV → mV) so wattage isn't stuck at 0.
+        if (voltageMv <= 0) {
+            Long uv = readLongFromChannels(VOLTAGE_CHANNELS);
+            if (uv != null && uv > 0) voltageMv = (int) (Math.abs(uv) / 1000L);
+        }
         float watts = (Math.abs(microAmps) * (float) voltageMv) / 1_000_000_000.0f;
         return new Battery(watts, charging);
     }
@@ -690,9 +720,19 @@ public class HudMetrics {
         int rawTemp = status.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0);
         if (rawTemp > 0) tempC = Math.round(rawTemp / 10f);
 
+        // EXTRA_VOLTAGE reads 0 on some OEM firmwares (e.g. HONOR Magic) even though capacity, temp
+        // and current all work — which left wattage stuck at 0.0W. Fall back to the power_supply
+        // voltage_now (µV → mV); if voltage is still unavailable, use power_now (µW) directly.
+        if (voltageMv <= 0) {
+            Long uv = readLongFromChannels(VOLTAGE_CHANNELS);
+            if (uv != null && uv > 0) voltageMv = (int) (Math.abs(uv) / 1000L);
+        }
         float watts = 0f;
         if (currentMicroAmps > 0L && voltageMv > 0) {
             watts = (float) ((currentMicroAmps * (double) voltageMv) / 1_000_000_000.0);
+        } else {
+            Long uw = readLongFromChannels(POWER_CHANNELS);   // µW
+            if (uw != null && uw != 0L) watts = (float) (Math.abs(uw) / 1_000_000.0);
         }
 
         String runtimeText;
@@ -1306,6 +1346,29 @@ public class HudMetrics {
         appendReadableFiles(sb, "/sys/class/kgsl/kgsl-3d0");
         appendReadableFiles(sb, "/sys/class/misc/mali0/device");
         appendReadableFiles(sb, "/sys/class/drm/card0/device");
+        appendPowerSupplyDump(sb);
+    }
+
+    /** Battery-wattage inputs: which power_supply nodes this app can actually READ, and their raw
+     *  values. Confirms the voltage_now / power_now fallback for devices where EXTRA_VOLTAGE is 0. */
+    private void appendPowerSupplyDump(StringBuilder sb) {
+        sb.append("-- /sys/class/power_supply (battery watts inputs) --\n");
+        File[] nodes = new File("/sys/class/power_supply").listFiles();
+        if (nodes == null || nodes.length == 0) { sb.append("  (absent / unreadable)\n"); return; }
+        boolean any = false;
+        for (File node : nodes) {
+            Long v = readLongFromLine(node + "/voltage_now");
+            Long c = readLongFromLine(node + "/current_now");
+            Long p = readLongFromLine(node + "/power_now");
+            if (v == null && c == null && p == null) continue;
+            any = true;
+            sb.append("  ").append(node.getName())
+              .append(": voltage_now=").append(v == null ? "—" : v + "µV")
+              .append(" current_now=").append(c == null ? "—" : c + "µA")
+              .append(" power_now=").append(p == null ? "—" : p + "µW")
+              .append('\n');
+        }
+        if (!any) sb.append("  (nodes present but voltage_now/current_now/power_now unreadable)\n");
     }
 
     private static void appendDevfreqListing(StringBuilder sb, String rootPath) {
