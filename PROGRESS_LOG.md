@@ -1,5 +1,11 @@
 # Star-Compose — Progress Log
 
+## 2026-07-26 — ⏱️ **HUD FPS freezes on a stale value (idle menu / AIO cube switch) — decay to 0 when no present arrives** (branch `fix/hud-follow-active-window`, vc50)
+
+> User: FPS "stops reading" after changing API in the AIO test, and shows a "random stuck FPS" at the idle menu. Root cause: `FpsCounter.getCurrentFPS()` returns `lastFPS` forever once `tick()` stops — and every present tick (compositor copyArea + Vulkan-AHB + GL-native + ASR) is gated on `wid == frameRatingWindowId`, so when the bound window stops presenting (static menu — kept bound by the follow-active-window fix — or an AIO cube whose present path doesn't tick this window) the number just sits frozen. **Fix:** `getCurrentFPS()` returns **0** when no frame has been presented within `STALE_FPS_MS` (1.5 s) — `lastFrameTime` made `volatile` for the lock-free staleness check. Clears well below 1 fps yet never flickers at normal rates; recovers instantly when presents resume. Fixes all HUDs (shared `FpsCounter`).
+>
+> Note: this makes the idle HUD honestly read 0 fps rather than a frozen value; the API label at the idle AIO menu still reads "Vulkan" because the menu app itself is a Vulkan client (correct, not stale). ⏭️ Undercounting of the AIO cubes' own fps (their present path barely ticks the bound window) is a deeper compositor-signal issue, separate.
+
 ## 2026-07-26 — 🏷️ **HUD engine label: OpenGL/Zink games mislabeled "Vulkan" — check OpenGL before Vulkan** (branch `fix/hud-follow-active-window`, vc50)
 
 > User AIO-test sweep: every non-D3D GL path (OpenGL cube, DirectDraw) showed **"Vulkan"** instead of **"Zink"**. Root cause: `detectActiveDxApi` native path checked `vulkan` before `opengl`, but a **Zink-backed GL** app maps BOTH `opengl32.dll` (GL frontend) AND `vulkan-1.dll` (Zink's Vulkan backend) — so vulkan-first always won and the "Zink" branch was unreachable. **Fix:** swap the order — `if (opengl) return Zink/OpenGL; if (vulkan) return "Vulkan"`. A native-Vulkan app maps `vulkan-1.dll` but NOT `opengl32.dll`, so it still resolves to "Vulkan" (AIO Vulkan cube stays correct). D3D detection is unaffected (checked first). Fixes all HUDs. Verified from the sweep: Vulkan cube ✓, D3D8→D3D9·DXVK ✓, D3D11 ✓, D3D12·VKD3D ✓ — only the GL paths were wrong.
