@@ -10,7 +10,7 @@
 >
 > +35/−10, two files. Independent of the battery branch (`fix/hud-battery-watts-voltage-fallback`). vc50 / 2.8.1.
 
-## 2026-07-26 — 🔋 **Fusion HUD: battery watts stuck at 0.0W on HONOR (EXTRA_VOLTAGE=0) — voltage_now/power_now fallback + diag power_supply probe** (branch `fix/hud-battery-watts-voltage-fallback`, vc stays 49)
+## 2026-07-26 — 🔋 **Fusion HUD: battery watts stuck at 0.0W on HONOR (EXTRA_VOLTAGE=0) — voltage_now/power_now fallback + diag power_supply probe** (branch `fix/hud-battery-watts-voltage-fallback`, vc50)
 
 > User report (HONOR Magic 7 Pro, PTP-N49, SM8750 / Adreno 830, Android 16) via a HUD diagnostic export. HUD showed `BAT 23% 44°C 0.0W` — %, temp, current, runtime all populate but wattage was stuck at 0.
 >
@@ -26,7 +26,7 @@
 >
 > +63 lines, one file. ⚠️ NOT verifiable on our Adreno-750 test device (different device) — needs the HONOR user to run the new build + re-export the diagnostic.
 
-## 2026-07-26 — 🎛️ **Fusion HUD (Mega): DX version off the engine row, stacked below the graph with the wrapper** (branch `feat/hud-mega-version-below-graph`, vc stays 49)
+## 2026-07-26 — 🎛️ **Fusion HUD (Mega): DX version off the engine row, stacked below the graph with the wrapper** (branch `feat/hud-mega-version-below-graph`, vc50)
 
 > User-driven layout tweak, **Mega size only** — Full/Tiles/Pill/Minimal untouched. On the shipped 2.8.1 Mega HUD the engine row read `D3D9 · DXVK 2.4.1-1-gplasync-pre-reg-0` (API value + long DX version) and the graphics wrapper (`Original`) was a lone dim line below the frametime graph. That long version string sat in the right column's shared label column and shoved every right-column value (RAM %, FPS, ms) to the far edge.
 >
