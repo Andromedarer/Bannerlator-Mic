@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-07-27T14-40-42-485d83",
+    "created": "2026-07-27T14:40:42.481Z",
+    "device": "Poco x6 pro",
+    "gpu": "Malig615mc6",
+    "game": "Resident evil 2 remake",
+    "symptom": "Graphical glitches (corruption, flicker, missing textures)",
+    "logs": 1
+  },
+  {
     "id": "2026-07-27T14-09-33-edd8f6",
     "created": "2026-07-27T14:09:33.921Z",
     "device": "Realme 12 5g",
