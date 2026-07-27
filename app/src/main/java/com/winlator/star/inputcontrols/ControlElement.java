@@ -1105,11 +1105,12 @@ public class ControlElement {
                     startY -= scrollOffset % elementSize;
 
                     for (byte i = rangeIndex[0]; i < rangeIndex[1]; i++) {
+                        int index = i % range.max;
                         paint.setStyle(Paint.Style.STROKE);
                         paint.setColor(oldColor);
 
                         if (startY > boundingBox.top && startY < boundingBox.bottom) canvas.drawLine(lineLeft, startY, lineRight, startY, paint);
-                        String text = getRangeTextForIndex(range, i);
+                        String text = getRangeTextForIndex(range, index);
 
                         if (startY < boundingBox.bottom && startY + elementSize > boundingBox.top) {
                             paint.setStyle(Paint.Style.FILL);
@@ -1590,6 +1591,28 @@ public class ControlElement {
                             canvas.drawText(text, startX + elementSize * 0.5f, (boundingBox.centerY() - ((paint.descent() + paint.ascent()) * 0.5f)), paint);
                         }
                         startX += elementSize;
+                    }
+                }
+                else {
+                    float lineLeft = boundingBox.left + strokeWidth * 0.5f;
+                    float lineRight = boundingBox.right - strokeWidth * 0.5f;
+                    float startY = boundingBox.top - (scrollOffset % elementSize);
+
+                    for (byte i = rangeIndex[0]; i < rangeIndex[1]; i++) {
+                        int index = i % range.max;
+                        paint.setStyle(Paint.Style.STROKE);
+                        paint.setColor(strokeColor);
+                        if (startY > boundingBox.top && startY < boundingBox.bottom)
+                            canvas.drawLine(lineLeft, startY, lineRight, startY, paint);
+                        String text = getRangeTextForIndex(range, index);
+                        if (startY < boundingBox.bottom && startY + elementSize > boundingBox.top) {
+                            paint.setStyle(Paint.Style.FILL);
+                            paint.setColor(textColor);
+                            paint.setTextSize(Math.min(getTextSizeForWidth(paint, text, boundingBox.width() - strokeWidth * 2), minTextSize));
+                            paint.setTextAlign(Paint.Align.CENTER);
+                            canvas.drawText(text, boundingBox.centerX(), startY + elementSize * 0.5f - ((paint.descent() + paint.ascent()) * 0.5f), paint);
+                        }
+                        startY += elementSize;
                     }
                 }
                 canvas.restore();

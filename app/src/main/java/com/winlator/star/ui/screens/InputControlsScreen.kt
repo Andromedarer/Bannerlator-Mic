@@ -34,7 +34,6 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Gamepad
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -70,7 +69,6 @@ import com.winlator.star.R
 import com.winlator.star.ControlsEditorActivity
 import com.winlator.star.ExternalControllerBindingsActivity
 import com.winlator.star.MainActivity
-import com.winlator.star.contentdialog.ContentDialog
 import com.winlator.star.core.AppUtils
 import com.winlator.star.core.FileUtils
 import com.winlator.star.core.GyroCalibrator
@@ -101,6 +99,7 @@ fun InputControlsScreen() {
     var importProfileCallback by remember { mutableStateOf<((ControlsProfile) -> Unit)?>(null) }
     var promptCreateName by remember { mutableStateOf(false) }
     var promptRenameOldName by remember { mutableStateOf<String?>(null) }
+    var pendingConfirmation by remember { mutableStateOf<Pair<Int, () -> Unit>?>(null) }
 
     fun refreshProfiles() {
         profiles = manager.getProfiles()
@@ -210,6 +209,24 @@ fun InputControlsScreen() {
                 }) { Text("OK") }
             },
             dismissButton = { TextButton(onClick = { promptRenameOldName = null }) { Text("Cancel") } }
+        )
+    }
+
+    pendingConfirmation?.let { (messageRes, action) ->
+        OutlinedAlertDialog(
+            onDismissRequest = { pendingConfirmation = null },
+            text = { Text(stringResource(messageRes)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingConfirmation = null
+                    action()
+                }) { Text(stringResource(R.string.ok)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingConfirmation = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
         )
     }
 
@@ -351,18 +368,20 @@ fun InputControlsScreen() {
                     else AppUtils.showToast(context, R.string.no_profile_selected)
                 }) { Icon(Icons.Default.Edit, "Edit", tint = MaterialTheme.colorScheme.onSurface) }
                 IconButton(onClick = {
-                    if (currentProfile != null) {
-                        ContentDialog.confirm(context, R.string.do_you_want_to_duplicate_this_profile) {
-                            currentProfile = manager.duplicateProfile(currentProfile!!)
+                    val profile = currentProfile
+                    if (profile != null) {
+                        pendingConfirmation = R.string.do_you_want_to_duplicate_this_profile to {
+                            currentProfile = manager.duplicateProfile(profile)
                             refreshProfiles()
                             refreshControllers()
                         }
                     } else AppUtils.showToast(context, R.string.no_profile_selected)
                 }) { Icon(Icons.Default.ContentCopy, "Duplicate", tint = MaterialTheme.colorScheme.onSurface) }
                 IconButton(onClick = {
-                    if (currentProfile != null) {
-                        ContentDialog.confirm(context, R.string.do_you_want_to_remove_this_profile) {
-                            manager.removeProfile(currentProfile!!)
+                    val profile = currentProfile
+                    if (profile != null) {
+                        pendingConfirmation = R.string.do_you_want_to_remove_this_profile to {
+                            manager.removeProfile(profile)
                             currentProfile = null
                             refreshProfiles()
                             refreshControllers()
@@ -506,7 +525,7 @@ fun InputControlsScreen() {
                         }
                         if (bindingsCount > 0) {
                             IconButton(onClick = {
-                                ContentDialog.confirm(context, R.string.do_you_want_to_remove_this_controller) {
+                                pendingConfirmation = R.string.do_you_want_to_remove_this_controller to {
                                     currentProfile?.removeController(controller)
                                     currentProfile?.save()
                                     refreshControllers()

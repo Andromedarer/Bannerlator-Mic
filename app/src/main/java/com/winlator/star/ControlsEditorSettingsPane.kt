@@ -540,7 +540,7 @@ fun ControlsEditorSettingsPane(
 
         SettingsSection(title = stringResource(R.string.mouse_sensitivity), visible = selectedType == ControlElement.Type.TRACKPAD) {
             LabeledSlider(
-                label = stringResource(R.string.mouse_sensitivity),
+                label = null,
                 value = mouseSensitivity,
                 rangeStart = 1,
                 rangeEnd = 50,
@@ -619,7 +619,7 @@ fun ControlsEditorSettingsPane(
             visible = selectedType == ControlElement.Type.TRACKPAD || selectedType == ControlElement.Type.MOUSE_AREA || selectedType == ControlElement.Type.STICK || selectedType == ControlElement.Type.DYNAMIC_STICK,
         ) {
             SettingSpinner(
-                label = stringResource(R.string.hold_key),
+                label = null,
                 options = holdKeyOptions,
                 selectedIndex = holdKeyIndex,
                 onSelected = { index ->
@@ -746,7 +746,7 @@ fun ControlsEditorSettingsPane(
             }
         }
 
-        if (selectedType != ControlElement.Type.MOUSE_AREA) {
+        if (selectedType != ControlElement.Type.MOUSE_AREA && selectedType != ControlElement.Type.RANGE_BUTTON) {
             SettingsSection(title = stringResource(R.string.bindings), visible = true) {
                 if (selectedType == ControlElement.Type.BUTTON) {
                     val label = stringResource(R.string.binding)
@@ -787,16 +787,6 @@ fun ControlsEditorSettingsPane(
                 } else if (selectedType == ControlElement.Type.EXPANDABLE_BUTTON) {
                     for (index in 0 until expandableChildCount) {
                         val label = stringResource(R.string.child_button_label, index + 1)
-                        BindingValueRow(
-                            label = label,
-                            value = element.getBindingAt(index),
-                            combo = element.getCombo(index)?.toList().orEmpty(),
-                            onSet = { openBindingDialog(index, label) },
-                        )
-                    }
-                } else if (selectedType == ControlElement.Type.RANGE_BUTTON) {
-                    for (index in 0 until bindingCount) {
-                        val label = stringResource(R.string.binding_slot_label, index + 1)
                         BindingValueRow(
                             label = label,
                             value = element.getBindingAt(index),
@@ -935,7 +925,7 @@ fun ControlsEditorSettingsPane(
             }
 
             SettingSpinner(
-                label = stringResource(R.string.group_label),
+                label = null,
                 options = groupOptions,
                 selectedIndex = selectedGroupIndex,
                 onSelected = { index ->
@@ -1039,7 +1029,7 @@ fun ControlsEditorSettingsPane(
 
 @Composable
 private fun LabeledSlider(
-    label: String,
+    label: String?,
     value: Int,
     rangeStart: Int,
     rangeEnd: Int,
@@ -1054,11 +1044,15 @@ private fun LabeledSlider(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = label,
-                modifier = Modifier.weight(1f),
-                color = EditorSubText,
-            )
+            if (label != null) {
+                Text(
+                    text = label,
+                    modifier = Modifier.weight(1f),
+                    color = EditorSubText,
+                )
+            } else {
+                Spacer(modifier = Modifier.weight(1f))
+            }
             Text(
                 text = format(value),
                 color = EditorTextValue,
@@ -1079,7 +1073,7 @@ private fun LabeledSlider(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SettingSpinner(
-    label: String,
+    label: String?,
     options: List<String>,
     selectedIndex: Int,
     onSelected: (Int) -> Unit,
@@ -1089,7 +1083,7 @@ private fun SettingSpinner(
     val selectedText = options.getOrNull(selectedIndex).orEmpty()
 
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(text = label, color = EditorSubText)
+        if (label != null) Text(text = label, color = EditorSubText)
         ExposedDropdownMenuBox(
             expanded = expanded,
             onExpandedChange = { expanded = !expanded },
