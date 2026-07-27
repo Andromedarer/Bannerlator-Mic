@@ -95,12 +95,19 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 import com.winlator.star.R
 import com.winlator.star.container.Container
+import com.winlator.star.perf.PerfRevertRegistry
+import com.winlator.star.perf.PerfRootApplier
+import com.winlator.star.perf.RootManager
+import com.winlator.star.perf.TempWatchdog
 import com.winlator.star.reshade.ReshadeLoadout
 import com.winlator.star.reshade.ReshadeManager
 import com.winlator.star.ui.components.ColorPicker
 import com.winlator.star.ui.screens.MenuItemDivider
+import com.winlator.star.ui.screens.PerfDisclaimerCopy
+import com.winlator.star.ui.screens.PerfDisclaimerDialog
 import com.winlator.star.ui.screens.outlinedMenuCard
 import com.winlator.star.ui.theme.LocalAccentDim
 import com.winlator.star.ui.theme.WinlatorTheme
@@ -2802,6 +2809,111 @@ private fun AdvancedContent(state: XServerDrawerState) {
     val bigCores by state.preferBigCores.collectAsState()
     ToggleRow("Prefer Big Cores", bigCores) {
         state.setPreferBigCores(it); state.onPreferBigCoresChange?.run()
+    }
+
+    Spacer(Modifier.height(14.dp))
+    RootPerformanceSection(state)
+}
+
+// ── Root Performance sub-section (in-game). Mirrors App Settings' root tier; toggles are enabled
+// only when root is GRANTED. Binds to the same shared stores (RootManager.state, PerfRevertRegistry
+// .harnessProven, TempWatchdog.enabled) so App Settings <-> in-game stay in sync. ──
+@Composable
+private fun RootPerformanceSection(state: XServerDrawerState) {
+    val rootState by RootManager.state.collectAsState()
+    val harnessProven by PerfRevertRegistry.harnessProven.collectAsState()
+    val toggles by state.rootToggles.collectAsState()
+    val readouts by state.rootReadouts.collectAsState()
+    val watchdogOn by TempWatchdog.enabled.collectAsState()
+
+    val granted = rootState == RootManager.RootState.GRANTED
+
+    // Poll the live readouts while this section is on screen.
+    LaunchedEffect(granted) {
+        while (true) {
+            state.onRootReadoutPoll?.run()
+            delay(1500)
+        }
+    }
+
+    SectionHeader("Root Performance")
+
+    if (!granted) {
+        Text(
+            "🔒 " + when (rootState) {
+                RootManager.RootState.UNAVAILABLE -> "No root manager detected."
+                else -> "Grant root in App Settings → Performance to enable these."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 6.dp)
+        )
+    } else {
+        // Live readouts.
+        val gov = readouts["governor"] ?: "—"
+        val gpu = readouts["gpuMhz"] ?: "—"
+        val temp = readouts["socTemp"] ?: "—"
+        val fan = readouts["fanRpm"] ?: "—"
+        Text(
+            "Gov $gov · GPU $gpu · SoC $temp · Fan $fan",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(bottom = 6.dp)
+        )
+    }
+
+    RootToggleRow(PerfRootApplier.KEY_CPU_GOVERNOR, "CPU governor → performance", state, toggles, granted, harnessProven)
+    RootToggleRow(PerfRootApplier.KEY_CPU_FREQ_LOCK, "Lock CPU frequency to max", state, toggles, granted, harnessProven)
+    RootToggleRow(PerfRootApplier.KEY_CORES_ONLINE, "Keep all cores online", state, toggles, granted, harnessProven)
+    RootToggleRow(PerfRootApplier.KEY_GPU_CLOCK_LOCK, "Lock GPU to max clock", state, toggles, granted, harnessProven)
+    RootToggleRow(PerfRootApplier.KEY_THERMAL_DISABLE, "Disable thermal throttling", state, toggles, granted, harnessProven)
+    RootToggleRow(PerfRootApplier.KEY_FAN_MAX, "Fan to maximum", state, toggles, granted, harnessProven)
+
+    if (granted && !harnessProven) {
+        Text(
+            "Thermal / fan locked until safety-revert is verified on this device.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+
+    if (granted) {
+        Spacer(Modifier.height(6.dp))
+        AdvancedActionRow("Free memory now", R.drawable.icon_task_manager) { state.onFreeMemory?.run() }
+    }
+
+    // Temperature watchdog (device-wide; OFF requires the hard disclaimer).
+    Spacer(Modifier.height(10.dp))
+    var showWatchdogDisclaimer by remember { mutableStateOf(false) }
+    ToggleRow("Temperature Watchdog (${TempWatchdog.CEILING_C}°C)", watchdogOn) { on ->
+        if (on) TempWatchdog.setWatchdogEnabled(true)
+        else showWatchdogDisclaimer = true
+    }
+    if (showWatchdogDisclaimer) {
+        PerfDisclaimerDialog(
+            title = "Disable thermal safety?",
+            body = PerfDisclaimerCopy.WATCHDOG_OFF,
+            confirmLabel = "Turn watchdog OFF",
+            onDismiss = { showWatchdogDisclaimer = false },
+            onConfirm = { showWatchdogDisclaimer = false; TempWatchdog.setWatchdogEnabled(false) }
+        )
+    }
+}
+
+@Composable
+private fun RootToggleRow(
+    key: String,
+    label: String,
+    state: XServerDrawerState,
+    toggles: Map<String, Boolean>,
+    granted: Boolean,
+    harnessProven: Boolean,
+) {
+    val gated = PerfRootApplier.isHarnessGated(key) && !harnessProven
+    val enabled = granted && !gated
+    ToggleRow(label, toggles[key] ?: false, enabled = enabled) { on ->
+        state.setRootToggle(key, on)
+        state.onRootToggleChange?.accept(key, on)
     }
 }
 

@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -26,21 +27,32 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.winlator.star.perf.PerfRootApplier
 import com.winlator.star.perf.PerformanceSettings
 import com.winlator.star.perf.RootManager
+import com.winlator.star.perf.TempWatchdog
+import kotlinx.coroutines.launch
 
 /**
- * App Settings → Performance menu. Edits the GLOBAL DEFAULTS of the non-root toggles, bound to the
- * same [PerformanceSettings] flows the in-game drawer reads — so a change here is reflected live in
- * the other surface (two-way sync via one store). The root + watchdog section is scaffolded greyed
- * ("Unlocks with root — coming soon") to mirror the structure that lands next phase; no live root UI,
- * grant-gate, or watchdog disclaimer is wired in this cut.
+ * App Settings → Performance menu. Binds the GLOBAL DEFAULTS (non-root three + root six) to the same
+ * [PerformanceSettings] flows the in-game drawer reads, so a change here is reflected live in the
+ * other surface (two-way sync via one store).
+ *
+ * Root tier: a real grant gate (scroll-to-bottom + accept disclaimer -> [RootManager.requestGrant]),
+ * then the root toggles applied live through [PerfRootApplier] (snapshot-before-write; reverted on
+ * exit/background/crash). The two dangerous toggles (thermal disable, fan max) stay disabled until the
+ * safety harness is proven. The temperature watchdog is device-wide; turning it OFF requires its own
+ * hard disclaimer.
  */
 @Composable
 fun PerformanceSettingsScreen(onClose: () -> Unit) {
@@ -49,6 +61,13 @@ fun PerformanceSettingsScreen(onClose: () -> Unit) {
     val bigCores by PerformanceSettings.preferBigCores.collectAsState()
     val rootState by PerformanceSettings.rootState.collectAsState()
     val watchdogOn by PerformanceSettings.watchdogEnabled.collectAsState()
+    val harnessProven by PerformanceSettings.harnessProven.collectAsState()
+
+    val scope = rememberCoroutineScope()
+    var showRootDisclaimer by remember { mutableStateOf(false) }
+    var showWatchdogDisclaimer by remember { mutableStateOf(false) }
+
+    val granted = rootState == RootManager.RootState.GRANTED
 
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
@@ -58,7 +77,6 @@ fun PerformanceSettingsScreen(onClose: () -> Unit) {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Title bar
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 Text(
                     "Performance",
@@ -77,42 +95,114 @@ fun PerformanceSettingsScreen(onClose: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp
             )
 
-            // ── Global defaults (non-root, live-editable) ──
+            // ── Non-root global defaults (always editable) ──
             PerfCard(title = "Global defaults") {
                 PerfToggle("Sustained Performance Mode", sustained) { PerformanceSettings.setSustainedPerfMode(it) }
                 PerfToggle("Thread Priority Boost", priority) { PerformanceSettings.setPerfPriorityBoost(it) }
                 PerfToggle("Prefer Big Cores", bigCores) { PerformanceSettings.setPreferBigCores(it) }
             }
 
-            // ── Root tier (scaffolded, disabled) ──
+            // ── Root tier ──
             PerfCard(title = "Root performance controls") {
-                Text(
-                    "Unlocks with root — coming soon.",
-                    color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, fontWeight = FontWeight.Medium
-                )
-                Text(
-                    "Root status: " + rootStateLabel(rootState),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp
-                )
+                Text("Root status: " + rootStateLabel(rootState),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+
+                when (rootState) {
+                    RootManager.RootState.UNAVAILABLE -> {
+                        Text("No root manager detected (Magisk / KernelSU / APatch). Root controls stay disabled.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                    }
+                    RootManager.RootState.GRANTED -> { /* toggles below are enabled */ }
+                    else -> {
+                        // AVAILABLE_NOT_GRANTED or DENIED -> offer (or re-offer) the grant.
+                        val label = if (rootState == RootManager.RootState.DENIED) "Grant Root (retry)" else "Grant Root"
+                        Button(onClick = { showRootDisclaimer = true }, modifier = Modifier.fillMaxWidth()) {
+                            Text(label, color = MaterialTheme.colorScheme.onPrimary)
+                        }
+                    }
+                }
+
                 Spacer(Modifier.height(2.dp))
-                // Disabled previews of what the root tier will expose.
-                PerfToggle("CPU governor / frequency lock", false, enabled = false) {}
-                PerfToggle("GPU clock floor", false, enabled = false) {}
-                PerfToggle("Keep cores online", false, enabled = false) {}
+                RootToggle(PerfRootApplier.KEY_CPU_GOVERNOR, "CPU governor → performance", granted, harnessProven)
+                RootToggle(PerfRootApplier.KEY_CPU_FREQ_LOCK, "Lock CPU frequency to max", granted, harnessProven)
+                RootToggle(PerfRootApplier.KEY_CORES_ONLINE, "Keep all cores online", granted, harnessProven)
+                RootToggle(PerfRootApplier.KEY_GPU_CLOCK_LOCK, "Lock GPU to max clock", granted, harnessProven)
+                RootToggle(PerfRootApplier.KEY_THERMAL_DISABLE, "Disable thermal throttling", granted, harnessProven)
+                RootToggle(PerfRootApplier.KEY_FAN_MAX, "Fan to maximum", granted, harnessProven)
+
+                if (granted && !harnessProven) {
+                    Text("Thermal / fan controls are locked until safety-revert is verified on this device.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                }
+
+                Spacer(Modifier.height(4.dp))
+                Button(
+                    onClick = { PerfRootApplier.freeMemoryNow() },
+                    enabled = granted,
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Free memory now", color = MaterialTheme.colorScheme.onPrimary) }
+                Text("Background-app freeze — coming in a later update.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
             }
 
+            // ── Temperature watchdog (device-wide; not root-gated) ──
             PerfCard(title = "Temperature watchdog") {
                 Text(
-                    "Unlocks with root — coming soon.",
-                    color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, fontWeight = FontWeight.Medium
+                    "Auto-reverts all performance settings if the SoC reaches ${TempWatchdog.CEILING_C}°C. " +
+                        "Keep this on unless you know what you're doing.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp
                 )
-                // Read-only reflection of the (already-persisted) watchdog state; the arming control +
-                // its safety disclaimer are wired next phase.
-                PerfToggle("Thermal auto-revert (85°C)", watchdogOn, enabled = false) {}
+                PerfToggle("Thermal auto-revert (${TempWatchdog.CEILING_C}°C)", watchdogOn) { on ->
+                    if (on) TempWatchdog.setWatchdogEnabled(true)  // arming needs no disclaimer
+                    else showWatchdogDisclaimer = true             // disarming does
+                }
             }
+
+            Text(
+                "Auto-revert on game exit, app background and crash is always on and cannot be disabled.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp
+            )
 
             Spacer(Modifier.height(24.dp))
         }
+    }
+
+    if (showRootDisclaimer) {
+        PerfDisclaimerDialog(
+            title = "Power-user performance — read first",
+            body = PerfDisclaimerCopy.ROOT_RISK,
+            confirmLabel = "Grant Root",
+            onDismiss = { showRootDisclaimer = false },
+            onConfirm = {
+                showRootDisclaimer = false
+                scope.launch { RootManager.requestGrant() } // fires the su prompt; state updates live
+            }
+        )
+    }
+
+    if (showWatchdogDisclaimer) {
+        PerfDisclaimerDialog(
+            title = "Disable thermal safety?",
+            body = PerfDisclaimerCopy.WATCHDOG_OFF,
+            confirmLabel = "Turn watchdog OFF",
+            onDismiss = { showWatchdogDisclaimer = false },
+            onConfirm = {
+                showWatchdogDisclaimer = false
+                TempWatchdog.setWatchdogEnabled(false)
+            }
+        )
+    }
+}
+
+/** A root toggle bound to its global default; applies live via PerfRootApplier. */
+@Composable
+private fun RootToggle(key: String, label: String, granted: Boolean, harnessProven: Boolean) {
+    val checked by PerformanceSettings.rootDefaultFlow(key).collectAsState()
+    val gated = PerfRootApplier.isHarnessGated(key) && !harnessProven
+    val enabled = granted && !gated
+    PerfToggle(label, checked, enabled = enabled) { on ->
+        PerformanceSettings.setRootDefault(key, on)
+        PerfRootApplier.apply(key, on)
     }
 }
 

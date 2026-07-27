@@ -1,5 +1,6 @@
 package com.winlator.star.ui
 
+import com.winlator.star.perf.PerfRootApplier
 import com.winlator.star.perf.PerformanceSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -325,6 +326,49 @@ object XServerDrawerState {
             "preferBigCores"    -> bigCoresOverridden = true
         }
     }
+
+    // ── Root-tier toggles (in-game). Keyed by PerfRootApplier.ROOT_KEYS. The Activity seeds the
+    // effective values and applies live; the drawer displays this map and fires onRootToggleChange. ──
+    private val _rootToggles = MutableStateFlow<Map<String, Boolean>>(emptyMap())
+    val rootToggles: StateFlow<Map<String, Boolean>> = _rootToggles
+    fun setRootToggles(m: Map<String, Boolean>) { _rootToggles.value = m }
+    fun setRootToggle(key: String, v: Boolean) { _rootToggles.value = _rootToggles.value + (key to v) }
+
+    // Live readouts (governor / GPU MHz / SoC temp / fan RPM), refreshed by the Activity while the
+    // root section is open. Keyed by a small readout id.
+    private val _rootReadouts = MutableStateFlow<Map<String, String>>(emptyMap())
+    val rootReadouts: StateFlow<Map<String, String>> = _rootReadouts
+    fun setRootReadouts(m: Map<String, String>) { _rootReadouts.value = m }
+
+    // Root-tier global->drawer mirror (same idea as startGlobalDefaultSync for the non-root three):
+    // for a root toggle with no per-game override, reflect live global-default changes into the map.
+    private var rootSyncJob: Job? = null
+    private val rootOverridden = mutableSetOf<String>()
+
+    fun startRootDefaultSync(overridden: Set<String>) {
+        rootOverridden.clear(); rootOverridden.addAll(overridden)
+        rootSyncJob?.cancel()
+        rootSyncJob = syncScope.launch {
+            for (key in PerfRootApplier.ROOT_KEYS) {
+                launch {
+                    PerformanceSettings.rootDefaultFlow(key).collect { v ->
+                        if (key !in rootOverridden) _rootToggles.value = _rootToggles.value + (key to v)
+                    }
+                }
+            }
+        }
+    }
+
+    fun markRootOverridden(key: String) { rootOverridden.add(key) }
+
+    // Fired when a root toggle flips: the Activity writes the per-game override (or the global default
+    // for a container-direct launch) and applies it live via PerfRootApplier.
+    @JvmField var onRootToggleChange: java.util.function.BiConsumer<String, Boolean>? = null
+    // One-shot free-memory action (drop_caches).
+    @JvmField var onFreeMemory: Runnable? = null
+    // Drawer asks the Activity to refresh the live readouts (cheap sysfs/HudMetrics reads).
+    @JvmField var onRootReadoutPoll: Runnable? = null
+
     fun toggleFpsExpanded() { _fpsExpanded.value = !_fpsExpanded.value }
 
     fun reset() {
@@ -366,7 +410,12 @@ object XServerDrawerState {
         _perfPriorityBoost.value = false
         _preferBigCores.value = false
         globalSyncJob?.cancel(); globalSyncJob = null
+        rootSyncJob?.cancel(); rootSyncJob = null
         sustainedOverridden = false; priorityOverridden = false; bigCoresOverridden = false
+        rootOverridden.clear()
+        _rootToggles.value = emptyMap()
+        _rootReadouts.value = emptyMap()
+        onRootToggleChange = null; onFreeMemory = null; onRootReadoutPoll = null
         onClose = null; onKeyboard = null; onInputControls = null
         onScreenEffects = null; onGraphicEngine = null; onVibration = null
         onToggleFullscreen = null; onSetFullscreenMode = null; onPauseResume = null; onPipMode = null

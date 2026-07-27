@@ -39,9 +39,15 @@ object PerformanceSettings {
     private val _preferBigCores = MutableStateFlow(false)
     val preferBigCores: StateFlow<Boolean> = _preferBigCores.asStateFlow()
 
+    // ── Root-tier global defaults (one flow per PerfRootApplier.ROOT_KEYS entry), created eagerly in
+    // init() so Compose has stable instances. Same two-level model: these are the global default, a
+    // per-game shortcut extra can override, effective = override ?? global. Persisted as "global_<key>".
+    private val rootDefaults = LinkedHashMap<String, MutableStateFlow<Boolean>>()
+
     // Device-wide state re-exposed read-only so one screen can bind the whole picture.
     val watchdogEnabled: StateFlow<Boolean> get() = TempWatchdog.enabled
     val rootState: StateFlow<RootManager.RootState> get() = RootManager.state
+    val harnessProven: StateFlow<Boolean> get() = PerfRevertRegistry.harnessProven
 
     /** Load persisted global defaults. Call once from the Application, before either surface binds. */
     fun init(context: Context) {
@@ -51,11 +57,31 @@ object PerformanceSettings {
         _sustainedPerfMode.value = prefs.getBoolean(KEY_SUSTAINED, false)
         _perfPriorityBoost.value = prefs.getBoolean(KEY_PRIORITY, false)
         _preferBigCores.value = prefs.getBoolean(KEY_BIG_CORES, false)
+        for (key in PerfRootApplier.ROOT_KEYS) {
+            rootDefaults[key] = MutableStateFlow(prefs.getBoolean("global_$key", false))
+        }
     }
 
     fun setSustainedPerfMode(v: Boolean) = put(KEY_SUSTAINED, v, _sustainedPerfMode)
     fun setPerfPriorityBoost(v: Boolean) = put(KEY_PRIORITY, v, _perfPriorityBoost)
     fun setPreferBigCores(v: Boolean) = put(KEY_BIG_CORES, v, _preferBigCores)
+
+    /** Stable global-default flow for a root toggle key (see PerfRootApplier.ROOT_KEYS). */
+    fun rootDefaultFlow(key: String): StateFlow<Boolean> = flowFor(key)
+    fun rootDefaultValue(key: String): Boolean = flowFor(key).value
+    fun setRootDefault(key: String, v: Boolean) {
+        flowFor(key).value = v
+        appContext?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            ?.edit()?.putBoolean("global_$key", v)?.apply()
+    }
+
+    private fun flowFor(key: String): MutableStateFlow<Boolean> =
+        rootDefaults.getOrPut(key) {
+            MutableStateFlow(
+                appContext?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    ?.getBoolean("global_$key", false) ?: false
+            )
+        }
 
     private fun put(key: String, v: Boolean, flow: MutableStateFlow<Boolean>) {
         flow.value = v

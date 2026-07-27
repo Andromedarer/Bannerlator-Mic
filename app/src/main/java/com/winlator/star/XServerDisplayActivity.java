@@ -900,6 +900,20 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
             persistPerfToggle("preferBigCores", on);
         };
+        // ── Root-tier toggles (in-game). Write the per-game override (or the global default for a
+        // container-direct launch) and apply live through the snapshot/revert pipeline. ──
+        state.onRootToggleChange = (key, on) -> {
+            if (shortcut != null) {
+                shortcut.putExtra(key, on ? "1" : "0");
+                shortcut.saveData();
+                XServerDrawerState.INSTANCE.markRootOverridden(key);
+            } else {
+                com.winlator.star.perf.PerformanceSettings.INSTANCE.setRootDefault(key, on);
+            }
+            com.winlator.star.perf.PerfRootApplier.INSTANCE.apply(key, on);
+        };
+        state.onFreeMemory = () -> com.winlator.star.perf.PerfRootApplier.INSTANCE.freeMemoryNow();
+        state.onRootReadoutPoll = this::refreshRootReadouts;
         // Cycle OFF -> FIT -> STRETCH -> FILL -> INTEGER -> OFF (legacy path; kept for any
         // cycle-style trigger). The drawer selector uses onSetFullscreenMode below instead.
         state.onToggleFullscreen       = () ->
@@ -1132,6 +1146,19 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 shortcut != null && shortcut.hasExtra("sustainedPerfMode"),
                 shortcut != null && shortcut.hasExtra("perfPriorityBoost"),
                 shortcut != null && shortcut.hasExtra("preferBigCores"));
+
+        // Root-tier toggles: seed the drawer with the effective (override ?? global) values, mirror
+        // globals for non-overridden keys, and apply the effective state now (no-op unless root is
+        // granted). Auto-revert on exit/background/crash restores everything (PerfRevertRegistry).
+        java.util.Map<String, Boolean> rootEffective = new java.util.HashMap<>();
+        java.util.Set<String> rootOverridden = new java.util.HashSet<>();
+        for (String rk : com.winlator.star.perf.PerfRootApplier.INSTANCE.getROOT_KEYS()) {
+            rootEffective.put(rk, resolvedRootBool(rk));
+            if (shortcut != null && shortcut.hasExtra(rk)) rootOverridden.add(rk);
+        }
+        XServerDrawerState.INSTANCE.setRootToggles(rootEffective);
+        XServerDrawerState.INSTANCE.startRootDefaultSync(rootOverridden);
+        com.winlator.star.perf.PerfRootApplier.INSTANCE.applyEffective(rootEffective);
 
         containerManager.activateContainer(container);
 
@@ -4776,6 +4803,77 @@ return true;
                 case "preferBigCores":    com.winlator.star.perf.PerformanceSettings.INSTANCE.setPreferBigCores(on); break;
             }
         }
+    }
+
+    // Root-tier effective value: per-game shortcut override (when the shortcut has the key) else the
+    // global default from PerformanceSettings. Same two-level chain as the non-root three.
+    private boolean resolvedRootBool(String key) {
+        return resolvedPerfBool(key, com.winlator.star.perf.PerformanceSettings.INSTANCE.rootDefaultValue(key));
+    }
+
+    // Live readouts for the in-game Root Performance section (governor / GPU MHz / SoC temp / fan RPM).
+    // Cheap sysfs / HudMetrics reads, refreshed on a ~1.5s poll while that section is open.
+    private com.winlator.star.widget.HudMetrics rootHudMetrics;
+    private void refreshRootReadouts() {
+        try {
+            java.util.Map<String, String> m = new java.util.HashMap<>();
+            // Governor (first readable core).
+            String gov = null;
+            for (com.winlator.star.perf.PerfNodeResolver.CpuCoreNodes c :
+                    com.winlator.star.perf.PerfNodeResolver.INSTANCE.cpuCores()) {
+                if (c.getGovernor() != null) { gov = readSysfsLine(c.getGovernor()); break; }
+            }
+            m.put("governor", gov != null ? gov : "—");
+            // SoC temp = hottest of CPU/GPU.
+            if (rootHudMetrics == null) rootHudMetrics = new com.winlator.star.widget.HudMetrics(this);
+            Integer cpuT = rootHudMetrics.getCpuTempC();
+            Integer gpuT = rootHudMetrics.getGpuTempC();
+            Integer soc = (cpuT != null && gpuT != null) ? Math.max(cpuT, gpuT) : (cpuT != null ? cpuT : gpuT);
+            m.put("socTemp", soc != null ? soc + "°C" : "—");
+            // GPU current clock (MHz).
+            String gpuMhz = readGpuMhz();
+            m.put("gpuMhz", gpuMhz != null ? gpuMhz + "MHz" : "—");
+            // Fan RPM (hwmon fanN_input), if any.
+            String fan = readFanRpm();
+            m.put("fanRpm", fan != null ? fan + "rpm" : "n/a");
+            XServerDrawerState.INSTANCE.setRootReadouts(m);
+        } catch (Exception ignored) {}
+    }
+
+    private static String readSysfsLine(String path) {
+        try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(path))) {
+            String line = r.readLine();
+            return line != null ? line.trim() : null;
+        } catch (Exception e) { return null; }
+    }
+
+    private String readGpuMhz() {
+        String[] cands = {
+            "/sys/class/kgsl/kgsl-3d0/gpuclk",             // Adreno, Hz
+            "/sys/class/kgsl/kgsl-3d0/devfreq/cur_freq",   // Adreno devfreq, Hz
+        };
+        for (String c : cands) {
+            String v = readSysfsLine(c);
+            if (v != null) {
+                try { long hz = Long.parseLong(v.trim()); if (hz > 1_000_000L) return String.valueOf(hz / 1_000_000L); }
+                catch (NumberFormatException ignored) {}
+            }
+        }
+        return null;
+    }
+
+    private String readFanRpm() {
+        java.io.File[] chips = new java.io.File("/sys/class/hwmon").listFiles();
+        if (chips != null) {
+            for (java.io.File chip : chips) {
+                java.io.File[] inputs = chip.listFiles((d, n) -> n.matches("fan\\d+_input"));
+                if (inputs != null) for (java.io.File f : inputs) {
+                    String v = readSysfsLine(f.getPath());
+                    if (v != null) return v;
+                }
+            }
+        }
+        return null;
     }
 
     // HUD config (fpsCounterConfig KeyValueSet) resolution. Container-scoped by default, but a shortcut
