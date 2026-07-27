@@ -208,6 +208,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private float globalCursorSpeed = 1.0f;
     private short taskAffinityMask = 0;
     private short taskAffinityMaskWoW64 = 0;
+    // Prefer-big-cores live re-pin: guest pid -> its affinity mask BEFORE we changed it, so toggle OFF
+    // restores each process exactly (revert philosophy). Populated on toggle ON, cleared on OFF.
+    private final java.util.HashMap<Integer, Integer> bigCoreAffinitySnapshot = new java.util.HashMap<>();
     private int frameRatingWindowId = -1;
     // Windows that have published a _MESA_DRV property (GPU/render windows). The perf HUD binds to one
     // of these (frameRatingWindowId); we keep the whole set so that when the bound window unmaps we can
@@ -875,14 +878,16 @@ public class XServerDisplayActivity extends AppCompatActivity {
         };
         state.onPerfPriorityBoostChange = () -> {
             boolean on = XServerDrawerState.INSTANCE.getPerfPriorityBoost().getValue();
-            if (on) com.winlator.star.perf.PerfPriority.INSTANCE.boostRenderThreads();
-            else    com.winlator.star.perf.PerfPriority.INSTANCE.restoreRenderThreads();
+            // Boost the GUEST CPU-worker subtree (box64/wine) + our audio/worker threads, never
+            // downgrading an already-hot thread. Snapshotted so OFF restores exact nice values.
+            if (on) com.winlator.star.perf.PerfPriority.INSTANCE.boost(GuestProgramLauncherComponent.getPid());
+            else    com.winlator.star.perf.PerfPriority.INSTANCE.restore();
             persistPerfToggle("perfPriorityBoost", on);
         };
         state.onPreferBigCoresChange = () -> {
             boolean on = XServerDrawerState.INSTANCE.getPreferBigCores().getValue();
-            // Recompute the affinity mask the guest launcher reads. Fully in effect for processes
-            // spawned after the flip (and on relaunch); already-running processes keep their mask.
+            // Recompute the affinity mask the guest launcher reads (affects processes spawned after
+            // the flip and next launch)...
             if (on) {
                 String bigList = com.winlator.star.perf.CpuTopology.INSTANCE.detectBigCoreCpuList();
                 if (bigList != null && !bigList.isEmpty()) {
@@ -898,6 +903,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
                         ? taskAffinityMask
                         : (short) ProcessHelper.getAffinityMask(container.getCPUListWoW64(true));
             }
+            // ...AND re-pin the ALREADY-RUNNING guest process tree so the current game moves now, not
+            // just on relaunch. Snapshots each process's prior mask on ON, restores it exactly on OFF.
+            reapplyBigCoresToRunningGuest(on);
             persistPerfToggle("preferBigCores", on);
         };
         // ── Root-tier toggles (in-game). Write the per-game override (or the global default for a
@@ -2802,11 +2810,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
         renderer.setCursorVisible(false);
 
         // Power-user perf (non-root): arm the thermal watchdog for this session, and if the priority
-        // boost is on, raise the render/present threads once they exist (short delay so they're up).
+        // boost is on, raise the guest CPU-worker subtree once it exists (short delay so the guest is
+        // up and getPid() is populated).
         com.winlator.star.perf.TempWatchdog.INSTANCE.start(this);
         if (XServerDrawerState.INSTANCE.getPerfPriorityBoost().getValue()) {
             handler.postDelayed(
-                () -> com.winlator.star.perf.PerfPriority.INSTANCE.boostRenderThreads(), 2500);
+                () -> com.winlator.star.perf.PerfPriority.INSTANCE.boost(GuestProgramLauncherComponent.getPid()), 5000);
         }
 
         // Standalone FPS limiter (guest-side, via the X11 Present extension): apply the resolved
@@ -5357,6 +5366,57 @@ return true;
         else if (!className.isEmpty()) {
             winHandler.setProcessAffinity(window.getClassName(), processAffinity);
         }
+    }
+
+    /**
+     * Re-pin the ALREADY-RUNNING guest process tree when Prefer Big Cores is toggled mid-game (the old
+     * behavior only changed the mask for newly-spawned processes, leaving the current game on 0-7).
+     * Enumerates every guest process via the WinHandler process list and sets each one's affinity —
+     * wine maps SetProcessAffinityMask to sched_setaffinity on the process's Linux threads, so the
+     * game's Cpus_allowed_list shrinks to the big cluster. ON snapshots each process's prior mask;
+     * OFF restores it verbatim (revert philosophy). Best-effort: no-op if WinHandler isn't ready.
+     */
+    private void reapplyBigCoresToRunningGuest(boolean on) {
+        if (winHandler == null) return;
+        if (!on && bigCoreAffinitySnapshot.isEmpty()) return; // nothing we changed -> nothing to revert
+        final int bigMask;
+        if (on) {
+            String bigList = com.winlator.star.perf.CpuTopology.INSTANCE.detectBigCoreCpuList();
+            if (bigList == null || bigList.isEmpty()) return; // topology unknown -> nothing to pin to
+            bigMask = ProcessHelper.getAffinityMask(bigList);
+        } else {
+            bigMask = 0;
+        }
+        // Fallback mask for OFF when a process has no snapshot (e.g. spawned after ON): the resolved
+        // container/shortcut cpuList, else all cores.
+        String cpuList = shortcut != null ? shortcut.getExtra("cpuList", container.getCPUList(true))
+                                          : container.getCPUList(true);
+        final int fallbackMask = ProcessHelper.getAffinityMask(
+                (cpuList != null && !cpuList.isEmpty()) ? cpuList : Container.getFallbackCPUList());
+
+        final OnGetProcessInfoListener prev = winHandler.getOnGetProcessInfoListener();
+        final java.util.ArrayList<ProcessInfo> collected = new java.util.ArrayList<>();
+        winHandler.setOnGetProcessInfoListener((index, count, info) -> {
+            if (index == 0) collected.clear();
+            if (info != null && info.pid > 0) collected.add(info);
+            if (count == 0 || index == count - 1) {
+                for (ProcessInfo pi : collected) {
+                    if (on) {
+                        if (!bigCoreAffinitySnapshot.containsKey(pi.pid))
+                            bigCoreAffinitySnapshot.put(pi.pid, pi.affinityMask); // prior mask, once
+                        winHandler.setProcessAffinity(pi.pid, bigMask);
+                    } else {
+                        Integer orig = bigCoreAffinitySnapshot.get(pi.pid);
+                        winHandler.setProcessAffinity(pi.pid, orig != null ? orig : fallbackMask);
+                    }
+                }
+                if (!on) bigCoreAffinitySnapshot.clear();
+                Log.d("XServerDisplayActivity", "Prefer big cores live re-pin (" + (on ? "ON" : "OFF")
+                        + "): " + collected.size() + " guest process(es)");
+                winHandler.setOnGetProcessInfoListener(prev); // hand the listener back
+            }
+        });
+        winHandler.listProcesses();
     }
 
     /** Flip the in-game FPS overlay between horizontal and vertical layouts (tap on the overlay). */
