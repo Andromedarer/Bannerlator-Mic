@@ -1,11 +1,1 @@
-[
-  {
-    "id": "2026-07-27T13-15-00-cfb670",
-    "created": "2026-07-27T13:15:00.961Z",
-    "device": "TEST DEVICE (delete me)",
-    "gpu": "Mali-G710 MC10",
-    "game": "Hades",
-    "symptom": "Black screen (no image)",
-    "logs": 1
-  }
-]
+[]
