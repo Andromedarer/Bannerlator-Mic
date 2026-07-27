@@ -101,13 +101,11 @@ import com.winlator.star.container.Container
 import com.winlator.star.perf.PerfRevertRegistry
 import com.winlator.star.perf.PerfRootApplier
 import com.winlator.star.perf.RootManager
-import com.winlator.star.perf.TempWatchdog
 import com.winlator.star.reshade.ReshadeLoadout
 import com.winlator.star.reshade.ReshadeManager
 import com.winlator.star.ui.components.ColorPicker
 import com.winlator.star.ui.screens.MenuItemDivider
-import com.winlator.star.ui.screens.PerfDisclaimerCopy
-import com.winlator.star.ui.screens.PerfDisclaimerDialog
+import com.winlator.star.ui.screens.WatchdogSection
 import com.winlator.star.ui.screens.outlinedMenuCard
 import com.winlator.star.ui.theme.LocalAccentDim
 import com.winlator.star.ui.theme.WinlatorTheme
@@ -2824,7 +2822,6 @@ private fun RootPerformanceSection(state: XServerDrawerState) {
     val harnessProven by PerfRevertRegistry.harnessProven.collectAsState()
     val toggles by state.rootToggles.collectAsState()
     val readouts by state.rootReadouts.collectAsState()
-    val watchdogOn by TempWatchdog.enabled.collectAsState()
 
     val granted = rootState == RootManager.RootState.GRANTED
 
@@ -2882,22 +2879,9 @@ private fun RootPerformanceSection(state: XServerDrawerState) {
         AdvancedActionRow("Free memory now", R.drawable.icon_task_manager) { state.onFreeMemory?.run() }
     }
 
-    // Temperature watchdog (device-wide; OFF requires the hard disclaimer).
+    // Temperature watchdog (device-wide; shared control block, identical + synced with App Settings).
     Spacer(Modifier.height(10.dp))
-    var showWatchdogDisclaimer by remember { mutableStateOf(false) }
-    ToggleRow("Temperature Watchdog (${TempWatchdog.CEILING_C}°C)", watchdogOn) { on ->
-        if (on) TempWatchdog.setWatchdogEnabled(true)
-        else showWatchdogDisclaimer = true
-    }
-    if (showWatchdogDisclaimer) {
-        PerfDisclaimerDialog(
-            title = "Disable thermal safety?",
-            body = PerfDisclaimerCopy.WATCHDOG_OFF,
-            confirmLabel = "Turn watchdog OFF",
-            onDismiss = { showWatchdogDisclaimer = false },
-            onConfirm = { showWatchdogDisclaimer = false; TempWatchdog.setWatchdogEnabled(false) }
-        )
-    }
+    WatchdogSection()
 }
 
 @Composable

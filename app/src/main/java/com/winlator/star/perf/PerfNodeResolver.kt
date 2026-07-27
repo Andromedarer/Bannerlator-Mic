@@ -32,10 +32,32 @@ object PerfNodeResolver {
         val forceBusOn: String?,       // kgsl force_bus_on
     )
 
+    /**
+     * Device thermal trip points, derived over the CPU/GPU zones we watch. Anchors the watchdog to
+     * the hardware's OWN throttle points instead of a guessed fixed number.
+     *  - [firstTripC] = lowest meaningful throttle trip (where the device first starts backing off).
+     *  - [topTripC]   = highest / hard-critical trip.
+     *  - [watchedTempPaths] = the `temp` nodes of exactly those zones, so the watchdog polls the same
+     *    sensors the trips came from and watches the HOTTEST of them.
+     * Any field is null when the device exposes no usable trips (caller falls back to a fixed ceiling).
+     */
+    data class ThermalTrips(
+        val firstTripC: Int?,
+        val topTripC: Int?,
+        val watchedTempPaths: List<String>,
+    )
+
     private var cpuCache: List<CpuCoreNodes>? = null
     private var gpuCache: GpuNodes? = null
     private var thermalModeCache: List<String>? = null
+    private var thermalTripsCache: ThermalTrips? = null
     private var fanCache: List<String>? = null
+
+    // Zone `type` tokens we treat as CPU/GPU/SoC temperature zones worth watching + trip-reading.
+    private val THERMAL_WATCH_TOKENS = arrayOf(
+        "cpu", "gpu", "soc", "cluster", "tsens", "mtktscpu", "mtktsgpu",
+        "g3d", "kgsl", "mali", "apu", "silicon", "big", "little", "cpuss", "gpuss",
+    )
 
     private fun existing(path: String): String? = if (File(path).exists()) path else null
 
@@ -149,6 +171,41 @@ object PerfNodeResolver {
         }
         return out.toList().also { fanCache = it }
     }
+
+    /**
+     * Enumerate the CPU/GPU thermal zones and derive the device's throttle trip points. Trip temps
+     * are read from `trip_point_*_temp` (millidegrees, normalized to °C); degenerate values (< 40°C or
+     * > 200°C, e.g. a placeholder "1") are ignored. Cached per process.
+     */
+    fun thermalTrips(): ThermalTrips {
+        thermalTripsCache?.let { return it }
+        val watchedTemp = LinkedHashSet<String>()
+        val trips = ArrayList<Int>()
+        val dirs = arrayOf(File("/sys/class/thermal"), File("/sys/devices/virtual/thermal"))
+        for (dir in dirs) {
+            val zones = dir.listFiles { _, name -> name.startsWith("thermal_zone") } ?: continue
+            for (zone in zones) {
+                if (!zone.isDirectory) continue
+                val type = readLine(File(zone, "type"))?.lowercase(Locale.US) ?: continue
+                if (THERMAL_WATCH_TOKENS.none { type.contains(it) }) continue
+                if (File(zone, "temp").exists()) watchedTemp.add(File(zone, "temp").path)
+                // Trip indices can be sparse; scan a fixed range rather than breaking on the first gap.
+                for (i in 0..15) {
+                    val tp = File(zone, "trip_point_${i}_temp")
+                    if (!tp.exists()) continue
+                    val raw = readLine(tp)?.trim()?.toIntOrNull() ?: continue
+                    val c = if (raw > 1000) (raw + 500) / 1000 else raw
+                    if (c in 40..200) trips.add(c)
+                }
+            }
+        }
+        return ThermalTrips(trips.minOrNull(), trips.maxOrNull(), watchedTemp.toList())
+            .also { thermalTripsCache = it }
+    }
+
+    private fun readLine(file: File): String? = try {
+        if (file.exists()) file.bufferedReader().use { it.readLine() } else null
+    } catch (_: Exception) { null }
 
     /** Every node this resolver can currently target, flattened — handy for logging / diagnostics. */
     fun allKnownNodes(): List<String> {

@@ -48,6 +48,34 @@ object PerfDisclaimerCopy {
 }
 
 /**
+ * Informational dialog — a single "Got it" acknowledgement, NOT a hard gate. Used to explain what a
+ * watchdog preset does and the actual °C it resolves to on this device.
+ */
+@Composable
+fun PerfInfoDialog(title: String, body: String, onDismiss: () -> Unit) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(0.92f).padding(8.dp),
+            shape = MaterialTheme.shapes.large,
+            color = MaterialTheme.colorScheme.surface,
+        ) {
+            Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface)
+                // Bounded + scrollable so long explainers (watchdog, the consolidated toggle list) fit.
+                Text(
+                    body, color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp,
+                    modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())
+                )
+                Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                    Button(onClick = onDismiss) { Text("Got it") }
+                }
+            }
+        }
+    }
+}
+
+/**
  * Hard-gate disclaimer: a scrollable risk statement whose confirm button stays disabled until the
  * user has BOTH scrolled to the bottom AND ticked "I understand and accept all risk". Reused for the
  * root grant gate and the watchdog-disable gate.
