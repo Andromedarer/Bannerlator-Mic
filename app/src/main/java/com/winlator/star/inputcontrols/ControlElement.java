@@ -43,8 +43,8 @@ public class ControlElement {
     private static final int MAX_GRID_ROWS = 8;
     private static final int MAX_GRID_COLS = 16;
     private static final int MAX_BINDING_COUNT = MAX_GRID_ROWS * MAX_GRID_COLS;
-    private static final float MIN_SCALE = 0.5f;
-    private static final float MAX_SCALE = 1.5f;
+    public static final float MIN_SCALE = 0.5f;
+    public static final float MAX_SCALE = 3.0f;
     private static final long GRID_FLASH_DURATION_MS = 150;
     public static final int MAX_EXPANDABLE_CHILDREN = 10;
     public static final int MAX_COMBO_BINDINGS = 10;

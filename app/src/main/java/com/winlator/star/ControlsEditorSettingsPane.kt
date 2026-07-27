@@ -97,6 +97,8 @@ private val EditorSubText = Color.White.copy(alpha = 0.7f)
 private val EditorTextValue = Color.White.copy(alpha = 0.9f)
 private val EditorShape = RoundedCornerShape(EditorPadding)
 private val SmallShape = RoundedCornerShape(10.dp)
+private val EditorMinScalePercent = (ControlElement.MIN_SCALE * 100f).roundToInt()
+private val EditorMaxScalePercent = (ControlElement.MAX_SCALE * 100f).roundToInt()
 
 private data class PickerIcon(
     val id: Int,
@@ -175,7 +177,12 @@ fun ControlsEditorSettingsPane(
     var shapeIndex by remember { mutableStateOf(element.getShape().ordinal) }
     var rangeIndex by remember { mutableStateOf(element.getRange().ordinal) }
     var orientationIndex by remember { mutableStateOf(element.getOrientation().toInt().coerceIn(0, 1)) }
-    var scaleValue by remember { mutableStateOf((element.getScale() * 100f).roundToInt().coerceIn(50, 150)) }
+    var scaleValue by remember {
+        mutableStateOf(
+            (element.getScale() * 100f).roundToInt()
+                .coerceIn(EditorMinScalePercent, EditorMaxScalePercent)
+        )
+    }
     var detectionWidth by remember { mutableStateOf(element.getAreaWidth().coerceAtLeast(200)) }
     var detectionHeight by remember { mutableStateOf(element.getAreaHeight().coerceAtLeast(200)) }
     var stickRadius by remember { mutableStateOf(element.getStickRadius().coerceAtLeast(60)) }
@@ -283,7 +290,8 @@ fun ControlsEditorSettingsPane(
         shapeIndex = element.getShape().ordinal
         rangeIndex = element.getRange().ordinal
         orientationIndex = element.getOrientation().toInt().coerceIn(0, 1)
-        scaleValue = (element.getScale() * 100f).roundToInt().coerceIn(50, 150)
+        scaleValue = (element.getScale() * 100f).roundToInt()
+            .coerceIn(EditorMinScalePercent, EditorMaxScalePercent)
         detectionWidth = element.getAreaWidth().coerceAtLeast(200)
         detectionHeight = element.getAreaHeight().coerceAtLeast(200)
         stickRadius = element.getStickRadius().coerceAtLeast(60)
@@ -436,11 +444,12 @@ fun ControlsEditorSettingsPane(
         LabeledSlider(
             label = stringResource(R.string.scale),
             value = scaleValue,
-            rangeStart = 50,
-            rangeEnd = 150,
+            rangeStart = EditorMinScalePercent,
+            rangeEnd = EditorMaxScalePercent,
             suffix = "%",
             onValueChange = { value ->
-                val rounded = ((value / 5f).roundToInt() * 5).coerceIn(50, 150)
+                val rounded = ((value / 5f).roundToInt() * 5)
+                    .coerceIn(EditorMinScalePercent, EditorMaxScalePercent)
                 element.setScale(rounded / 100f)
                 scaleValue = rounded
                 onInvalidate()

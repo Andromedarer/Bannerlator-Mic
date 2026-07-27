@@ -270,6 +270,18 @@ class InputControlsFormatTest {
     }
 
     @Test
+    fun elementScale_supportsThreeHundredPercentAndClampsBounds() {
+        val element = ControlElement(null)
+
+        element.scale = 3f
+        assertEquals(3f, element.scale)
+        element.scale = 4f
+        assertEquals(ControlElement.MAX_SCALE, element.scale)
+        element.scale = 0.1f
+        assertEquals(ControlElement.MIN_SCALE, element.scale)
+    }
+
+    @Test
     fun importedProfileValidation_rejectsMalformedAndNonFiniteElements() {
         val validElement = JSONObject()
             .put("type", "BUTTON")
