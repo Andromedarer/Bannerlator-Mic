@@ -1,0 +1,34 @@
+{
+  "id": "2026-07-27T13-38-19-a894e6",
+  "created": "2026-07-27T13:38:19.926Z",
+  "ip_hash": "mygcpD/nvU",
+  "fields": {
+    "device_model": "SAMPLE — safe to delete",
+    "soc": "Dimensity 9200",
+    "gpu": "Mali-G715 Immortalis",
+    "android": "14",
+    "ram": "12 GB",
+    "app_version": "2.8.2",
+    "install_source": "GitHub release",
+    "game_name": "Hades",
+    "steam_appid": "1145360",
+    "store": "Steam",
+    "exe": "Hades.exe",
+    "symptom": "Black screen (no image)",
+    "when": "Fails at the publisher/loading logo",
+    "graphics_driver": "System",
+    "dx_wrapper": "DXVK",
+    "dxvk": "2.4.1",
+    "proton": "Proton 11.0-1",
+    "box64": "Performance",
+    "resolution": "1280x720",
+    "framegen": "No",
+    "repro": "1. Open game\n2. Publisher logo shows\n3. Black screen, audio keeps playing",
+    "tried": "Switched driver to System, lowered resolution — no change"
+  },
+  "logs": [
+    {
+      "name": "sample-box64.log"
+    }
+  ]
+}
