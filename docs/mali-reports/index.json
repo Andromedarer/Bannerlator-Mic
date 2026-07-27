@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-07-27T18-56-17-e60fb6",
+    "created": "2026-07-27T18:56:17.126Z",
+    "reporter": "",
+    "device": "Poco X6 pro",
+    "gpu": "Mali-G615 MC 6",
+    "game": "God of War",
+    "symptom": "Runs but very low FPS",
+    "logs": 0
+  },
+  {
     "id": "2026-07-27T18-25-39-48f3ae",
     "created": "2026-07-27T18:25:39.727Z",
     "device": "Daria Bond 1",
