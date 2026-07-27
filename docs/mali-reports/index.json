@@ -36,15 +36,6 @@
     "logs": 2
   },
   {
-    "id": "2026-07-27T13-39-45-7871de",
-    "created": "2026-07-27T13:39:45.576Z",
-    "device": "Fold 7",
-    "gpu": "G57",
-    "game": "Banner",
-    "symptom": "Black screen (no image)",
-    "logs": 1
-  },
-  {
     "id": "2026-07-27T13-38-19-a894e6",
     "created": "2026-07-27T13:38:19.926Z",
     "device": "SAMPLE — safe to delete",
