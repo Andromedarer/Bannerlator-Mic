@@ -19,6 +19,9 @@
   <a href="https://the412banner.github.io/bannerlator-game-configs/">
     <img src="https://img.shields.io/badge/🌐%20Community%20Configs-Browse%20the%20Library-8b5cf6?style=for-the-badge" alt="Community Config Library">
   </a>
+  <a href="https://the412banner.github.io/Bannerlator/mali-reports/">
+    <img src="https://img.shields.io/badge/🐛%20Mali%20Reports-Report%20a%20game%20issue-2dd4bf?style=for-the-badge" alt="Report a Mali GPU game issue">
+  </a>
 </p>
 
 <p align="center">
@@ -26,6 +29,7 @@
   <a href="#-ask-me-anything">Ask AI</a> •
   <a href="https://github.com/The412Banner/Bannerlator/releases/latest">Download</a> •
   <a href="https://the412banner.github.io/bannerlator-game-configs/">Config Library</a> •
+  <a href="#-report-a-mali-gpu-game-issue">Mali Reports</a> •
   <a href="https://discord.gg/n8S4G2WZQ4">Discord</a> •
   <a href="https://t.me/The412BannerGaming">Telegram</a> •
   <a href="#️-building">Builds</a> •
@@ -62,10 +66,31 @@
 
 ---
 
+## 🐛 Report a Mali GPU Game Issue
+
+Games misbehaving on a **Mali GPU** (Exynos / Dimensity / Kirin / Helio devices)? We run a dedicated public bug-report board for Mali devices — file a structured report with your logs, and get answers back from the developers in a public discussion thread on each report.
+
+<p align="center">
+  <a href="https://the412banner.github.io/Bannerlator/mali-reports/">
+    <img src="https://img.shields.io/badge/📝%20File%20a%20Mali%20report-Submit%20with%20logs-2dd4bf?style=for-the-badge" alt="File a Mali report">
+  </a>
+  <a href="https://the412banner.github.io/Bannerlator/mali-reports/reports.html">
+    <img src="https://img.shields.io/badge/📋%20Browse%20all%20reports-See%20dev%20answers-8b5cf6?style=for-the-badge" alt="Browse all Mali reports">
+  </a>
+</p>
+
+- **📝 [File a Mali game report](https://the412banner.github.io/Bannerlator/mali-reports/)** — a quick form; attach the log file(s) so we can actually help.
+- **📋 [Browse all reports & dev answers](https://the412banner.github.io/Bannerlator/mali-reports/reports.html)** — see what's been reported, answered, and fixed.
+
+Every report gets its own **public discussion thread**. You can reply as the original poster — no account or password needed — and the developers answer right there in the thread.
+
+---
+
 ## 📖 Contents
 
 - [📌 Project Notice](#-project-notice)
 - [ℹ️ Information](#ℹ️-information)
+- [🐛 Report a Mali GPU Issue](#-report-a-mali-gpu-game-issue)
 - [🆕 What's New in 2.8](#-whats-new-in-28)
 - [✨ Full Features](#-full-features)
   - [🍷 Windows compatibility](#-windows-compatibility)
