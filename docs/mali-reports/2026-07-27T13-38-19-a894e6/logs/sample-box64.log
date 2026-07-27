@@ -1,0 +1,4 @@
+box64: init ok
+wine: created prefix
+vulkan: Mali-G715 detected
+ERROR: DXVK device lost after present
