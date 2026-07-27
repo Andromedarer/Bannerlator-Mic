@@ -63,6 +63,7 @@ code{font-family:var(--mono);background:#8882;padding:1px 6px;border-radius:5px;
   <span class="eyebrow"><span class="hex"></span>Bannerlator</span>
   <h1>Mali <span class="accent">game report</span></h1>
   <p class="lede">Games misbehaving on a Mali GPU? Fill this out so we can actually help. A complete report gets fixed far faster than "it doesn't work."</p>
+  <p style="margin:10px 0 0"><a href="reports.html" style="color:var(--cyan);text-decoration:none;font-weight:600;font-size:14.5px">📋 Browse all reports &amp; dev answers →</a></p>
 
   <div class="notice"><b>Please read:</b> this report and any logs you attach are submitted to a <b>public</b> repository and will be visible to anyone. Don't include passwords, personal files, or anything private. Logs may contain your device model and installed games.</div>
 
@@ -214,7 +215,9 @@ form.addEventListener("submit", async (e) => {
     const out = await res.json();
     if (!res.ok || !out.ok) throw new Error(out.detail || out.error || "Submission failed");
     msg.className = "msg ok";
-    msg.innerHTML = `✅ Thanks! Your report was submitted. Reference ID <code>${out.id}</code>.<br>You can bookmark it here: <a href="${out.url}" target="_blank" rel="noopener">${out.url}</a>`;
+    msg.innerHTML = `✅ Thanks! Your report was submitted. Reference ID <code>${out.id}</code>.`
+      + `<br>Open your report to follow the discussion: <a href="${out.url}" target="_blank" rel="noopener">${out.url}</a>`
+      + `<br>Or browse everyone's reports and dev answers: <a href="reports.html" target="_blank" rel="noopener">all reports →</a>`;
     form.reset(); filelist.textContent = "";
     window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
   } catch (err) {
