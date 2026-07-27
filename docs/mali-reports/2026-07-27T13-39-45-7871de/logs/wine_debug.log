@@ -1,0 +1,539 @@
+=== Wine Debug Log ===
+WINEDEBUG: +seh,+err,+warn,+fixme
+WINEPREFIX: /data/user/0/com.winlator.banner/files/imagefs/home/xuser/.wine
+Container ID: 1
+Shortcut file: /data/user/0/com.winlator.banner/files/imagefs/home/xuser-1/.wine/drive_c/users/xuser/Desktop/AIO Graphics Test.desktop
+Shortcut path (resolved): C:\AIO-Graphics-Test-64bit.exe --cube dx11 --scene spin
+--- DX Wrapper State ---
+dxwrapper type: dxvk+vkd3d
+dxwrapperConfig (raw): version=2.4.1-1-gplasync-pre-reg-0,framerate=0,async=1,asyncCache=0,vkd3dVersion=3.0.1-0,vkd3dLevel=12_1,ddrawrapper=none,csmt=3,gpuName=NVIDIA GeForce GTX 480,videoMemorySize=2048,strict_shader_math=1,OffscreenRenderingMode=fbo,renderer=gl,dxvkConfigFile=
+vkd3dVersion (parsed): 3.0.1-0
+dxvk version (parsed): 2.4.1-1-gplasync-pre-reg-0
+ddrawrapper (parsed): none
+cached dxwrapper extra: dxvk-2.4.1-1-gplasync-pre-reg-0;vkd3d-3.0.1-0;none
+expected full string: dxvk-2.4.1-1-gplasync-pre-reg-0;vkd3d-3.0.1-0;none
+extraction will run: false
+--- End DX Wrapper State ---
+=== Wine output below ===
+_r_debug not found in ld.so
+esync: shm initialized, fd=3 size=4096 pagesize=4096
+esync: up and running.
+Failed to open /etc/machine-id, error No such file or directory.
+_r_debug not found in ld.so
+_r_debug not found in ld.so
+_r_debug not found in ld.so
+_r_debug not found in ld.so
+0070:trace:seh:dispatch_exception code=6ba (RPC_S_SERVER_UNAVAILABLE) flags=0 addr=0000006FFFB1A95C
+0070:trace:seh:dispatch_exception  pc=0000006fffb1a95c  sp=000000000082c3b0  lr=0000006fffb1a95c  fp=000000000082cd90
+0070:trace:seh:dispatch_exception  x0=000000000082c3b8  x1=0000000000000000  x2=0000000000000000  x3=0000000000000000
+0070:trace:seh:dispatch_exception  x4=ffffffffffffffff  x5=71646d6d60612d71  x6=0000006ffff4a640  x7=7f7f7f7f7f7f7f7f
+0070:trace:seh:dispatch_exception  x8=0000006fffea7b80  x9=0000000000000009 x10=0000000000000000 x11=0000000000150780
+0070:trace:seh:dispatch_exception x12=000000000000000f x13=0000000000000003 x14=0000000000000033 x15=000000000000d800
+0070:trace:seh:dispatch_exception x16=0000006fffb1a8fc x17=000000000082c160 x18=000000007ffb0000 x19=0000000000000000
+0070:trace:seh:dispatch_exception x20=00000000000000d4 x21=0000000000930b70 x22=0000006fff0920e0 x23=0000006fff092260
+0070:trace:seh:dispatch_exception x24=0000000000000003 x25=0000006fff09226a x26=0000006fff092280 x27=0000000000000042
+0070:trace:seh:dispatch_exception x28=0000006fff09226a cpsr=60000000 fpcr=00000000 fpsr=00000010
+0070:trace:seh:call_seh_handlers calling handler 0000006FFF8474A0 (rec=000000000082C3B8, frame=82cdb0 context=000000000082C020, dispatch=000000000082BC28)
+0070:trace:seh:call_seh_handlers handler at 0000006FFF8474A0 returned 1
+0070:trace:seh:call_seh_handlers calling handler 0000006FFF8474A0 (rec=000000000082C3B8, frame=82d620 context=000000000082C020, dispatch=000000000082BC28)
+0070:trace:seh:call_seh_handlers handler at 0000006FFF8474A0 returned 1
+0070:trace:seh:call_seh_handlers calling handler 0000006FFF03DBF8 (rec=000000000082C3B8, frame=82d6a0 context=000000000082C020, dispatch=000000000082BC28)
+0070:trace:seh:RtlUnwindEx code=6ba flags=2 end_frame=000000000082D6A0 target_ip=0000006FFF036D30
+0070:trace:seh:RtlUnwindEx  pc=0000006fffea8890  sp=000000000082b230  lr=0000000000000000  fp=000000000082c000
+0070:trace:seh:RtlUnwindEx  x0=0000000000000000  x1=0000006fff036d30  x2=000000000082c3b8  x3=00000000000006ba
+0070:trace:seh:RtlUnwindEx  x4=000000000082b890  x5=000000000082bc80  x6=000000000082c020  x7=000000000082bc28
+0070:trace:seh:RtlUnwindEx  x8=0000006fffea8854  x9=0000000000000003 x10=0000000000000000 x11=0000006fff7f0090
+0070:trace:seh:RtlUnwindEx x12=00000000000fddcc x13=00000000000043d7 x14=000000007ffb349d x15=000000000000d800
+0070:trace:seh:RtlUnwindEx x16=0000006fff83e4ac x17=0000006fff0d07d8 x18=000000007ffb0000 x19=000000000082bc28
+0070:trace:seh:RtlUnwindEx x20=000000000082b890 x21=0000006fff036d30 x22=0000000000038820 x23=000000000082d6a0
+0070:trace:seh:RtlUnwindEx x24=0000000000000000 x25=000000000082c3b8 x26=0000006fff036d28 x27=0000006fff000000
+0070:trace:seh:RtlUnwindEx x28=0000006fff0c1f94 cpsr=00000000 fpcr=00000000 fpsr=00000010
+0070:trace:seh:RtlUnwindEx calling handler 0000006FFFEA7E88 (rec=000000000082C3B8, frame=82b870 context=000000000082B890, dispatch=000000000082B5F8)
+0070:trace:seh:RtlUnwindEx handler 0000006FFFEA7E88 returned 1
+0070:trace:seh:RtlUnwindEx calling handler 0000006FFF8474A0 (rec=000000000082C3B8, frame=82cdb0 context=000000000082B890, dispatch=000000000082B5F8)
+0070:trace:seh:RtlUnwindEx handler 0000006FFF8474A0 returned 1
+0070:trace:seh:RtlUnwindEx calling handler 0000006FFF8474A0 (rec=000000000082C3B8, frame=82d620 context=000000000082B890, dispatch=000000000082B5F8)
+0070:trace:seh:RtlUnwindEx handler 0000006FFF8474A0 returned 1
+0070:trace:seh:RtlUnwindEx calling handler 0000006FFF03DBF8 (rec=000000000082C3B8, frame=82d6a0 context=000000000082B890, dispatch=000000000082B5F8)
+0070:trace:seh:RtlUnwindEx handler 0000006FFF03DBF8 returned 1
+0070:trace:seh:RtlRestoreContext returning to 6fff036d30 stack 82d660
+0070:trace:seh:dispatch_exception code=6ba (RPC_S_SERVER_UNAVAILABLE) flags=0 addr=0000006FFFB1A95C
+0070:trace:seh:dispatch_exception  pc=0000006fffb1a95c  sp=000000000082c3b0  lr=0000006fffb1a95c  fp=000000000082cd90
+0070:trace:seh:dispatch_exception  x0=000000000082c3b8  x1=0000000000000000  x2=0000000000000000  x3=0000000000000000
+0070:trace:seh:dispatch_exception  x4=ffffffffffffffff  x5=71646d6d60612d71  x6=0000006ffff4a640  x7=7f7f7f7f7f7f7f7f
+0070:trace:seh:dispatch_exception  x8=0000006fffea7b80  x9=000000000000000a x10=0000000000000000 x11=0000000000150780
+0070:trace:seh:dispatch_exception x12=000000000000000f x13=0000000000000003 x14=0000000000000033 x15=000000000000d800
+0070:trace:seh:dispatch_exception x16=0000006fffb1a8fc x17=000000000082c160 x18=000000007ffb0000 x19=0000000000000000
+0070:trace:seh:dispatch_exception x20=00000000000000d4 x21=0000000000930b70 x22=0000006fff0920e0 x23=0000006fff092260
+0070:trace:seh:dispatch_exception x24=0000000000000003 x25=0000006fff09226a x26=0000006fff092280 x27=0000000000000042
+0070:trace:seh:dispatch_exception x28=0000006fff09226a cpsr=60000000 fpcr=00000000 fpsr=00000010
+0070:trace:seh:call_seh_handlers calling handler 0000006FFF8474A0 (rec=000000000082C3B8, frame=82cdb0 context=000000000082C020, dispatch=000000000082BC28)
+0070:trace:seh:call_seh_handlers handler at 0000006FFF8474A0 returned 1
+0070:trace:seh:call_seh_handlers calling handler 0000006FFF8474A0 (rec=000000000082C3B8, frame=82d620 context=000000000082C020, dispatch=000000000082BC28)
+0070:trace:seh:call_seh_handlers handler at 0000006FFF8474A0 returned 1
+0070:trace:seh:call_seh_handlers calling handler 0000006FFF03DBF8 (rec=000000000082C3B8, frame=82d6a0 context=000000000082C020, dispatch=000000000082BC28)
+0070:trace:seh:RtlUnwindEx code=6ba flags=2 end_frame=000000000082D6A0 target_ip=0000006FFF036D30
+0070:trace:seh:RtlUnwindEx  pc=0000006fffea8890  sp=000000000082b230  lr=0000000000000000  fp=000000000082c000
+0070:trace:seh:RtlUnwindEx  x0=0000000000000000  x1=0000006fff036d30  x2=000000000082c3b8  x3=00000000000006ba
+0070:trace:seh:RtlUnwindEx  x4=000000000082b890  x5=000000000082bc80  x6=000000000082d6a0  x7=000000000082c020
+0070:trace:seh:RtlUnwindEx  x8=0000006fffea8854  x9=0000000000000003 x10=0000000000000000 x11=000000000000000a
+0070:trace:seh:RtlUnwindEx x12=0000000000000078 x13=0000000000000000 x14=000000007ffb349d x15=000000000000d800
+0070:trace:seh:RtlUnwindEx x16=0000006fff3fbe3c x17=0000006fffeaeeb0 x18=000000007ffb0000 x19=000000000082bc28
+0070:trace:seh:RtlUnwindEx x20=000000000082b890 x21=0000006fff036d30 x22=0000000000038820 x23=000000000082d6a0
+0070:trace:seh:RtlUnwindEx x24=0000000000000000 x25=000000000082c3b8 x26=0000006fff036d28 x27=0000006fff000000
+0070:trace:seh:RtlUnwindEx x28=0000006fff0c1f94 cpsr=00000000 fpcr=00000000 fpsr=00000010
+0070:trace:seh:RtlUnwindEx calling handler 0000006FFFEA7E88 (rec=000000000082C3B8, frame=82b870 context=000000000082B890, dispatch=000000000082B5F8)
+0070:trace:seh:RtlUnwindEx handler 0000006FFFEA7E88 returned 1
+0070:trace:seh:RtlUnwindEx calling handler 0000006FFF8474A0 (rec=000000000082C3B8, frame=82cdb0 context=000000000082B890, dispatch=000000000082B5F8)
+0070:trace:seh:RtlUnwindEx handler 0000006FFF8474A0 returned 1
+0070:trace:seh:RtlUnwindEx calling handler 0000006FFF8474A0 (rec=000000000082C3B8, frame=82d620 context=000000000082B890, dispatch=000000000082B5F8)
+0070:trace:seh:RtlUnwindEx handler 0000006FFF8474A0 returned 1
+0070:trace:seh:RtlUnwindEx calling handler 0000006FFF03DBF8 (rec=000000000082C3B8, frame=82d6a0 context=000000000082B890, dispatch=000000000082B5F8)
+0070:trace:seh:RtlUnwindEx handler 0000006FFF03DBF8 returned 1
+0070:trace:seh:RtlRestoreContext returning to 6fff036d30 stack 82d660
+0070:trace:seh:dispatch_exception code=6ba (RPC_S_SERVER_UNAVAILABLE) flags=0 addr=0000006FFFB1A95C
+0070:trace:seh:dispatch_exception  pc=0000006fffb1a95c  sp=000000000082c3b0  lr=0000006fffb1a95c  fp=000000000082cd90
+0070:trace:seh:dispatch_exception  x0=000000000082c3b8  x1=0000000000000000  x2=0000000000000000  x3=0000000000000000
+0070:trace:seh:dispatch_exception  x4=ffffffffffffffff  x5=71646d6d60612d71  x6=0000006ffff4a640  x7=7f7f7f7f7f7f7f7f
+0070:trace:seh:dispatch_exception  x8=0000006fffea7b80  x9=0000000000000009 x10=0000000000000000 x11=0000000000150780
+0070:trace:seh:dispatch_exception x12=000000000000000f x13=0000000000000003 x14=0000000000000033 x15=000000000000d800
+0070:trace:seh:dispatch_exception x16=0000006fffb1a8fc x17=000000000082c160 x18=000000007ffb0000 x19=0000000000000000
+0070:trace:seh:dispatch_exception x20=00000000000000f4 x21=0000000000930b70 x22=0000006fff0920e0 x23=0000006fff092260
+0070:trace:seh:dispatch_exception x24=0000000000000003 x25=0000006fff09226a x26=0000006fff092280 x27=0000000000000042
+0070:trace:seh:dispatch_exception x28=0000006fff09226a cpsr=60000000 fpcr=00000000 fpsr=00000010
+0070:trace:seh:call_seh_handlers calling handler 0000006FFF8474A0 (rec=000000000082C3B8, frame=82cdb0 context=000000000082C020, dispatch=000000000082BC28)
+0070:trace:seh:call_seh_handlers handler at 0000006FFF8474A0 returned 1
+0070:trace:seh:call_seh_handlers calling handler 0000006FFF8474A0 (rec=000000000082C3B8, frame=82d620 context=000000000082C020, dispatch=000000000082BC28)
+0070:trace:seh:call_seh_handlers handler at 0000006FFF8474A0 returned 1
+0070:trace:seh:call_seh_handlers calling handler 0000006FFF03DBF8 (rec=000000000082C3B8, frame=82d6a0 context=000000000082C020, dispatch=000000000082BC28)
+0070:trace:seh:RtlUnwindEx code=6ba flags=2 end_frame=000000000082D6A0 target_ip=0000006FFF036D30
+0070:trace:seh:RtlUnwindEx  pc=0000006fffea8890  sp=000000000082b230  lr=0000000000000000  fp=000000000082c000
+0070:trace:seh:RtlUnwindEx  x0=0000000000000000  x1=0000006fff036d30  x2=000000000082c3b8  x3=00000000000006ba
+0070:trace:seh:RtlUnwindEx  x4=000000000082b890  x5=000000000082bc80  x6=000000000082d6a0  x7=000000000082c020
+0070:trace:seh:RtlUnwindEx  x8=0000006fffea8854  x9=0000000000000003 x10=0000000000000000 x11=000000000000000a
+0070:trace:seh:RtlUnwindEx x12=0000000000000078 x13=0000000000000000 x14=000000007ffb349d x15=000000000000d800
+0070:trace:seh:RtlUnwindEx x16=0000006fff3fbe3c x17=0000006fffeaeeb0 x18=000000007ffb0000 x19=000000000082bc28
+0070:trace:seh:RtlUnwindEx x20=000000000082b890 x21=0000006fff036d30 x22=0000000000038820 x23=000000000082d6a0
+0070:trace:seh:RtlUnwindEx x24=0000000000000000 x25=000000000082c3b8 x26=0000006fff036d28 x27=0000006fff000000
+0070:trace:seh:RtlUnwindEx x28=0000006fff0c1f94 cpsr=00000000 fpcr=00000000 fpsr=00000010
+0070:trace:seh:RtlUnwindEx calling handler 0000006FFFEA7E88 (rec=000000000082C3B8, frame=82b870 context=000000000082B890, dispatch=000000000082B5F8)
+0070:trace:seh:RtlUnwindEx handler 0000006FFFEA7E88 returned 1
+0070:trace:seh:RtlUnwindEx calling handler 0000006FFF8474A0 (rec=000000000082C3B8, frame=82cdb0 context=000000000082B890, dispatch=000000000082B5F8)
+0070:trace:seh:RtlUnwindEx handler 0000006FFF8474A0 returned 1
+0070:trace:seh:RtlUnwindEx calling handler 0000006FFF8474A0 (rec=000000000082C3B8, frame=82d620 context=000000000082B890, dispatch=000000000082B5F8)
+0070:trace:seh:RtlUnwindEx handler 0000006FFF8474A0 returned 1
+0070:trace:seh:RtlUnwindEx calling handler 0000006FFF03DBF8 (rec=000000000082C3B8, frame=82d6a0 context=000000000082B890, dispatch=000000000082B5F8)
+0070:trace:seh:RtlUnwindEx handler 0000006FFF03DBF8 returned 1
+0070:trace:seh:RtlRestoreContext returning to 6fff036d30 stack 82d660
+0070:trace:seh:dispatch_exception code=6ba (RPC_S_SERVER_UNAVAILABLE) flags=0 addr=0000006FFFB1A95C
+0070:trace:seh:dispatch_exception  pc=0000006fffb1a95c  sp=000000000082c3b0  lr=0000006fffb1a95c  fp=000000000082cd90
+0070:trace:seh:dispatch_exception  x0=000000000082c3b8  x1=0000000000000000  x2=0000000000000000  x3=0000000000000000
+0070:trace:seh:dispatch_exception  x4=ffffffffffffffff  x5=71646d6d60612d71  x6=0000006ffff4a640  x7=7f7f7f7f7f7f7f7f
+0070:trace:seh:dispatch_exception  x8=0000006fffea7b80  x9=000000000000000a x10=0000000000000000 x11=0000000000150780
+0070:trace:seh:dispatch_exception x12=000000000000000f x13=0000000000000003 x14=0000000000000033 x15=000000000000d800
+0070:trace:seh:dispatch_exception x16=0000006fffb1a8fc x17=000000000082c160 x18=000000007ffb0000 x19=0000000000000000
+0070:trace:seh:dispatch_exception x20=00000000000000f4 x21=0000000000930b70 x22=0000006fff0920e0 x23=0000006fff092260
+0070:trace:seh:dispatch_exception x24=0000000000000003 x25=0000006fff09226a x26=0000006fff092280 x27=0000000000000042
+0070:trace:seh:dispatch_exception x28=0000006fff09226a cpsr=60000000 fpcr=00000000 fpsr=00000010
+0070:trace:seh:call_seh_handlers calling handler 0000006FFF8474A0 (rec=000000000082C3B8, frame=82cdb0 context=000000000082C020, dispatch=000000000082BC28)
+0070:trace:seh:call_seh_handlers handler at 0000006FFF8474A0 returned 1
+0070:trace:seh:call_seh_handlers calling handler 0000006FFF8474A0 (rec=000000000082C3B8, frame=82d620 context=000000000082C020, dispatch=000000000082BC28)
+0070:trace:seh:call_seh_handlers handler at 0000006FFF8474A0 returned 1
+0070:trace:seh:call_seh_handlers calling handler 0000006FFF03DBF8 (rec=000000000082C3B8, frame=82d6a0 context=000000000082C020, dispatch=000000000082BC28)
+0070:trace:seh:RtlUnwindEx code=6ba flags=2 end_frame=000000000082D6A0 target_ip=0000006FFF036D30
+0070:trace:seh:RtlUnwindEx  pc=0000006fffea8890  sp=000000000082b230  lr=0000000000000000  fp=000000000082c000
+0070:trace:seh:RtlUnwindEx  x0=0000000000000000  x1=0000006fff036d30  x2=000000000082c3b8  x3=00000000000006ba
+0070:trace:seh:RtlUnwindEx  x4=000000000082b890  x5=000000000082bc80  x6=000000000082d6a0  x7=000000000082c020
+0070:trace:seh:RtlUnwindEx  x8=0000006fffea8854  x9=0000000000000003 x10=0000000000000000 x11=000000000000000a
+0070:trace:seh:RtlUnwindEx x12=0000000000000078 x13=0000000000000000 x14=000000007ffb349d x15=000000000000d800
+0070:trace:seh:RtlUnwindEx x16=0000006fff3fbe3c x17=0000006fffeaeeb0 x18=000000007ffb0000 x19=000000000082bc28
+0070:trace:seh:RtlUnwindEx x20=000000000082b890 x21=0000006fff036d30 x22=0000000000038820 x23=000000000082d6a0
+0070:trace:seh:RtlUnwindEx x24=0000000000000000 x25=000000000082c3b8 x26=0000006fff036d28 x27=0000006fff000000
+0070:trace:seh:RtlUnwindEx x28=0000006fff0c1f94 cpsr=00000000 fpcr=00000000 fpsr=00000010
+0070:trace:seh:RtlUnwindEx calling handler 0000006FFFEA7E88 (rec=000000000082C3B8, frame=82b870 context=000000000082B890, dispatch=000000000082B5F8)
+0070:trace:seh:RtlUnwindEx handler 0000006FFFEA7E88 returned 1
+0070:trace:seh:RtlUnwindEx calling handler 0000006FFF8474A0 (rec=000000000082C3B8, frame=82cdb0 context=000000000082B890, dispatch=000000000082B5F8)
+0070:trace:seh:RtlUnwindEx handler 0000006FFF8474A0 returned 1
+0070:trace:seh:RtlUnwindEx calling handler 0000006FFF8474A0 (rec=000000000082C3B8, frame=82d620 context=000000000082B890, dispatch=000000000082B5F8)
+0070:trace:seh:RtlUnwindEx handler 0000006FFF8474A0 returned 1
+0070:trace:seh:RtlUnwindEx calling handler 0000006FFF03DBF8 (rec=000000000082C3B8, frame=82d6a0 context=000000000082B890, dispatch=000000000082B5F8)
+0070:trace:seh:RtlUnwindEx handler 0000006FFF03DBF8 returned 1
+0070:trace:seh:RtlRestoreContext returning to 6fff036d30 stack 82d660
+0088:fixme:xinput:pdo_pnp code 0xc, not implemented!
+_r_debug not found in ld.so
+0088:trace:seh:dispatch_exception code=6ba (RPC_S_SERVER_UNAVAILABLE) flags=0 addr=0000006FFFB1A95C
+0088:trace:seh:dispatch_exception  pc=0000006fffb1a95c  sp=000000000111bc50  lr=0000006fffb1a95c  fp=000000000111c630
+0088:trace:seh:dispatch_exception  x0=000000000111bc58  x1=0000000000000000  x2=0000000000000000  x3=0000000000000000
+0088:trace:seh:dispatch_exception  x4=ffffffffffffffff  x5=71646d6d60612d71  x6=0000006ffff4a640  x7=7f7f7f7f7f7f7f7f
+0088:trace:seh:dispatch_exception  x8=0000006fffea7b80  x9=000000000000000c x10=0000000000000000 x11=00000000001503e0
+0088:trace:seh:dispatch_exception x12=0000000000000008 x13=0000000000000003 x14=0000000000000033 x15=000000000000d800
+0088:trace:seh:dispatch_exception x16=0000006fffb1a8fc x17=000000000111ba00 x18=000000007ff60000 x19=0000000000000000
+0088:trace:seh:dispatch_exception x20=0000000000000104 x21=0000000000930b70 x22=0000006fff0920e0 x23=0000006fff092260
+0088:trace:seh:dispatch_exception x24=0000000000000003 x25=0000006fff09226a x26=0000006fff092280 x27=0000000000000042
+0088:trace:seh:dispatch_exception x28=0000006fff09226a cpsr=60000000 fpcr=00000000 fpsr=00000000
+0088:trace:seh:call_seh_handlers calling handler 0000006FFF8474A0 (rec=000000000111BC58, frame=111c650 context=000000000111B8C0, dispatch=000000000111B4C8)
+0088:trace:seh:call_seh_handlers handler at 0000006FFF8474A0 returned 1
+0088:trace:seh:call_seh_handlers calling handler 0000006FFF8474A0 (rec=000000000111BC58, frame=111cec0 context=000000000111B8C0, dispatch=000000000111B4C8)
+0088:trace:seh:call_seh_handlers handler at 0000006FFF8474A0 returned 1
+0088:trace:seh:call_seh_handlers calling handler 0000006FFF03DBF8 (rec=000000000111BC58, frame=111cf40 context=000000000111B8C0, dispatch=000000000111B4C8)
+0088:trace:seh:RtlUnwindEx code=6ba flags=2 end_frame=000000000111CF40 target_ip=0000006FFF036D30
+0088:trace:seh:RtlUnwindEx  pc=0000006fffea8890  sp=000000000111aad0  lr=0000000000000000  fp=000000000111b8a0
+0088:trace:seh:RtlUnwindEx  x0=0000000000000000  x1=0000006fff036d30  x2=000000000111bc58  x3=00000000000006ba
+0088:trace:seh:RtlUnwindEx  x4=000000000111b130  x5=000000000111b520  x6=000000000111cf40  x7=000000000111b8c0
+0088:trace:seh:RtlUnwindEx  x8=0000006fffea8854  x9=0000000000000003 x10=0000000000000000 x11=0000000000000000
+0088:trace:seh:RtlUnwindEx x12=b400007d65b90cf0 x13=0000000000000001 x14=0000000000000001 x15=000000000000d800
+0088:trace:seh:RtlUnwindEx x16=0000006fff3fbe3c x17=0000006fffeaeeb0 x18=000000007ff60000 x19=000000000111b4c8
+0088:trace:seh:RtlUnwindEx x20=000000000111b130 x21=0000006fff036d30 x22=0000000000038820 x23=000000000111cf40
+0088:trace:seh:RtlUnwindEx x24=0000000000000000 x25=000000000111bc58 x26=0000006fff036d28 x27=0000006fff000000
+0088:trace:seh:RtlUnwindEx x28=0000006fff0c1f94 cpsr=00000000 fpcr=00000000 fpsr=00000000
+0088:trace:seh:RtlUnwindEx calling handler 0000006FFFEA7E88 (rec=000000000111BC58, frame=111b110 context=000000000111B130, dispatch=000000000111AE98)
+0088:trace:seh:RtlUnwindEx handler 0000006FFFEA7E88 returned 1
+0088:trace:seh:RtlUnwindEx calling handler 0000006FFF8474A0 (rec=000000000111BC58, frame=111c650 context=000000000111B130, dispatch=000000000111AE98)
+0088:trace:seh:RtlUnwindEx handler 0000006FFF8474A0 returned 1
+0088:trace:seh:RtlUnwindEx calling handler 0000006FFF8474A0 (rec=000000000111BC58, frame=111cec0 context=000000000111B130, dispatch=000000000111AE98)
+0088:trace:seh:RtlUnwindEx handler 0000006FFF8474A0 returned 1
+0088:trace:seh:RtlUnwindEx calling handler 0000006FFF03DBF8 (rec=000000000111BC58, frame=111cf40 context=000000000111B130, dispatch=000000000111AE98)
+0088:trace:seh:RtlUnwindEx handler 0000006FFF03DBF8 returned 1
+0088:trace:seh:RtlRestoreContext returning to 6fff036d30 stack 111cf00
+0088:fixme:xinput:pdo_pnp code 0xc, not implemented!
+0088:trace:seh:dispatch_exception code=6ba (RPC_S_SERVER_UNAVAILABLE) flags=0 addr=0000006FFFB1A95C
+0088:trace:seh:dispatch_exception  pc=0000006fffb1a95c  sp=000000000111bc50  lr=0000006fffb1a95c  fp=000000000111c630
+0088:trace:seh:dispatch_exception  x0=000000000111bc58  x1=0000000000000000  x2=0000000000000000  x3=0000000000000000
+0088:trace:seh:dispatch_exception  x4=ffffffffffffffff  x5=71646d6d60612d71  x6=0000006ffff4a640  x7=7f7f7f7f7f7f7f7f
+0088:trace:seh:dispatch_exception  x8=0000006fffea7b80  x9=000000000000000d x10=0000000000000000 x11=0000000000150300
+0088:trace:seh:dispatch_exception x12=0000000000000007 x13=0000000000000000 x14=0000000000000033 x15=000000000000d800
+0088:trace:seh:dispatch_exception x16=0000006fffb1a8fc x17=000000000111ba00 x18=000000007ff60000 x19=0000000000000000
+0088:trace:seh:dispatch_exception x20=0000000000000104 x21=0000000000930b70 x22=0000006fff0920e0 x23=0000006fff092260
+0088:trace:seh:dispatch_exception x24=0000000000000003 x25=0000006fff09226a x26=0000006fff092280 x27=0000000000000042
+0088:trace:seh:dispatch_exception x28=0000006fff09226a cpsr=60000000 fpcr=00000000 fpsr=00000000
+0088:trace:seh:call_seh_handlers calling handler 0000006FFF8474A0 (rec=000000000111BC58, frame=111c650 context=000000000111B8C0, dispatch=000000000111B4C8)
+0088:trace:seh:call_seh_handlers handler at 0000006FFF8474A0 returned 1
+0088:trace:seh:call_seh_handlers calling handler 0000006FFF8474A0 (rec=000000000111BC58, frame=111cec0 context=000000000111B8C0, dispatch=000000000111B4C8)
+0088:trace:seh:call_seh_handlers handler at 0000006FFF8474A0 returned 1
+0088:trace:seh:call_seh_handlers calling handler 0000006FFF03DBF8 (rec=000000000111BC58, frame=111cf40 context=000000000111B8C0, dispatch=000000000111B4C8)
+0088:trace:seh:RtlUnwindEx code=6ba flags=2 end_frame=000000000111CF40 target_ip=0000006FFF036D30
+0088:trace:seh:RtlUnwindEx  pc=0000006fffea8890  sp=000000000111aad0  lr=0000000000000000  fp=000000000111b8a0
+0088:trace:seh:RtlUnwindEx  x0=0000000000000000  x1=0000006fff036d30  x2=000000000111bc58  x3=00000000000006ba
+0088:trace:seh:RtlUnwindEx  x4=000000000111b130  x5=000000000111b520  x6=000000000111cf40  x7=000000000111b8c0
+0088:trace:seh:RtlUnwindEx  x8=0000006fffea8854  x9=0000000000000003 x10=0000000000000000 x11=0000000000000000
+0088:trace:seh:RtlUnwindEx x12=b400007d65b90cf0 x13=0000000000000001 x14=0000000000000001 x15=000000000000d800
+0088:trace:seh:RtlUnwindEx x16=0000006fff3fbe3c x17=0000006fffeaeeb0 x18=000000007ff60000 x19=000000000111b4c8
+0088:trace:seh:RtlUnwindEx x20=000000000111b130 x21=0000006fff036d30 x22=0000000000038820 x23=000000000111cf40
+0088:trace:seh:RtlUnwindEx x24=0000000000000000 x25=000000000111bc58 x26=0000006fff036d28 x27=0000006fff000000
+0088:trace:seh:RtlUnwindEx x28=0000006fff0c1f94 cpsr=00000000 fpcr=00000000 fpsr=00000000
+0088:trace:seh:RtlUnwindEx calling handler 0000006FFFEA7E88 (rec=000000000111BC58, frame=111b110 context=000000000111B130, dispatch=000000000111AE98)
+0088:trace:seh:RtlUnwindEx handler 0000006FFFEA7E88 returned 1
+0088:trace:seh:RtlUnwindEx calling handler 0000006FFF8474A0 (rec=000000000111BC58, frame=111c650 context=000000000111B130, dispatch=000000000111AE98)
+0088:trace:seh:RtlUnwindEx handler 0000006FFF8474A0 returned 1
+0088:trace:seh:RtlUnwindEx calling handler 0000006FFF8474A0 (rec=000000000111BC58, frame=111cec0 context=000000000111B130, dispatch=000000000111AE98)
+0088:trace:seh:RtlUnwindEx handler 0000006FFF8474A0 returned 1
+0088:trace:seh:RtlUnwindEx calling handler 0000006FFF03DBF8 (rec=000000000111BC58, frame=111cf40 context=000000000111B130, dispatch=000000000111AE98)
+0088:trace:seh:RtlUnwindEx handler 0000006FFF03DBF8 returned 1
+0088:trace:seh:RtlRestoreContext returning to 6fff036d30 stack 111cf00
+0088:fixme:xinput:pdo_pnp code 0xc, not implemented!
+0088:trace:seh:dispatch_exception code=6ba (RPC_S_SERVER_UNAVAILABLE) flags=0 addr=0000006FFFB1A95C
+0088:trace:seh:dispatch_exception  pc=0000006fffb1a95c  sp=000000000111bc50  lr=0000006fffb1a95c  fp=000000000111c630
+0088:trace:seh:dispatch_exception  x0=000000000111bc58  x1=0000000000000000  x2=0000000000000000  x3=0000000000000000
+0088:trace:seh:dispatch_exception  x4=ffffffffffffffff  x5=71646d6d60612d71  x6=0000006ffff4a640  x7=7f7f7f7f7f7f7f7f
+0088:trace:seh:dispatch_exception  x8=0000006fffea7b80  x9=0000000000000012 x10=0000000000000000 x11=00000000001501a0
+0088:trace:seh:dispatch_exception x12=0000000000000004 x13=0000000000000001 x14=0000000000000033 x15=000000000000d800
+0088:trace:seh:dispatch_exception x16=0000006fffb1a8fc x17=000000000111ba00 x18=000000007ff60000 x19=0000000000000000
+0088:trace:seh:dispatch_exception x20=0000000000000104 x21=0000000000930b70 x22=0000006fff0920e0 x23=0000006fff092260
+0088:trace:seh:dispatch_exception x24=0000000000000003 x25=0000006fff09226a x26=0000006fff092280 x27=0000000000000042
+0088:trace:seh:dispatch_exception x28=0000006fff09226a cpsr=60000000 fpcr=00000000 fpsr=00000000
+0088:trace:seh:call_seh_handlers calling handler 0000006FFF8474A0 (rec=000000000111BC58, frame=111c650 context=000000000111B8C0, dispatch=000000000111B4C8)
+0088:trace:seh:call_seh_handlers handler at 0000006FFF8474A0 returned 1
+0088:trace:seh:call_seh_handlers calling handler 0000006FFF8474A0 (rec=000000000111BC58, frame=111cec0 context=000000000111B8C0, dispatch=000000000111B4C8)
+0088:trace:seh:call_seh_handlers handler at 0000006FFF8474A0 returned 1
+0088:trace:seh:call_seh_handlers calling handler 0000006FFF03DBF8 (rec=000000000111BC58, frame=111cf40 context=000000000111B8C0, dispatch=000000000111B4C8)
+0088:trace:seh:RtlUnwindEx code=6ba flags=2 end_frame=000000000111CF40 target_ip=0000006FFF036D30
+0088:trace:seh:RtlUnwindEx  pc=0000006fffea8890  sp=000000000111aad0  lr=0000000000000000  fp=000000000111b8a0
+0088:trace:seh:RtlUnwindEx  x0=0000000000000000  x1=0000006fff036d30  x2=000000000111bc58  x3=00000000000006ba
+0088:trace:seh:RtlUnwindEx  x4=000000000111b130  x5=000000000111b520  x6=000000000111cf40  x7=000000000111b8c0
+0088:trace:seh:RtlUnwindEx  x8=0000006fffea8854  x9=0000000000000003 x10=0000000000000000 x11=0000000000000002
+0088:trace:seh:RtlUnwindEx x12=0000000000000000 x13=0000000000000000 x14=000000007ff6349d x15=000000000000d800
+0088:trace:seh:RtlUnwindEx x16=0000006fff3fbe3c x17=0000006fffeaeeb0 x18=000000007ff60000 x19=000000000111b4c8
+0088:trace:seh:RtlUnwindEx x20=000000000111b130 x21=0000006fff036d30 x22=0000000000038820 x23=000000000111cf40
+0088:trace:seh:RtlUnwindEx x24=0000000000000000 x25=000000000111bc58 x26=0000006fff036d28 x27=0000006fff000000
+0088:trace:seh:RtlUnwindEx x28=0000006fff0c1f94 cpsr=00000000 fpcr=00000000 fpsr=00000000
+0088:trace:seh:RtlUnwindEx calling handler 0000006FFFEA7E88 (rec=000000000111BC58, frame=111b110 context=000000000111B130, dispatch=000000000111AE98)
+0088:trace:seh:RtlUnwindEx handler 0000006FFFEA7E88 returned 1
+0088:trace:seh:RtlUnwindEx calling handler 0000006FFF8474A0 (rec=000000000111BC58, frame=111c650 context=000000000111B130, dispatch=000000000111AE98)
+0088:trace:seh:RtlUnwindEx handler 0000006FFF8474A0 returned 1
+0088:trace:seh:RtlUnwindEx calling handler 0000006FFF8474A0 (rec=000000000111BC58, frame=111cec0 context=000000000111B130, dispatch=000000000111AE98)
+0088:trace:seh:RtlUnwindEx handler 0000006FFF8474A0 returned 1
+0088:trace:seh:RtlUnwindEx calling handler 0000006FFF03DBF8 (rec=000000000111BC58, frame=111cf40 context=000000000111B130, dispatch=000000000111AE98)
+0088:trace:seh:RtlUnwindEx handler 0000006FFF03DBF8 returned 1
+0088:trace:seh:RtlRestoreContext returning to 6fff036d30 stack 111cf00
+0088:fixme:xinput:pdo_pnp code 0xc, not implemented!
+0088:trace:seh:dispatch_exception code=6ba (RPC_S_SERVER_UNAVAILABLE) flags=0 addr=0000006FFFB1A95C
+0088:trace:seh:dispatch_exception  pc=0000006fffb1a95c  sp=000000000111bc50  lr=0000006fffb1a95c  fp=000000000111c630
+0088:trace:seh:dispatch_exception  x0=000000000111bc58  x1=0000000000000000  x2=0000000000000000  x3=0000000000000000
+0088:trace:seh:dispatch_exception  x4=ffffffffffffffff  x5=71646d6d60612d71  x6=0000006ffff4a640  x7=7f7f7f7f7f7f7f7f
+0088:trace:seh:dispatch_exception  x8=0000006fffea7b80  x9=0000000000000013 x10=0000000000000000 x11=0000000000150740
+0088:trace:seh:dispatch_exception x12=000000000000000f x13=0000000000000001 x14=0000000000000033 x15=000000000000d800
+0088:trace:seh:dispatch_exception x16=0000006fffb1a8fc x17=000000000111ba00 x18=000000007ff60000 x19=0000000000000000
+0088:trace:seh:dispatch_exception x20=0000000000000104 x21=0000000000930b70 x22=0000006fff0920e0 x23=0000006fff092260
+0088:trace:seh:dispatch_exception x24=0000000000000003 x25=0000006fff09226a x26=0000006fff092280 x27=0000000000000042
+0088:trace:seh:dispatch_exception x28=0000006fff09226a cpsr=60000000 fpcr=00000000 fpsr=00000000
+0088:trace:seh:call_seh_handlers calling handler 0000006FFF8474A0 (rec=000000000111BC58, frame=111c650 context=000000000111B8C0, dispatch=000000000111B4C8)
+0088:trace:seh:call_seh_handlers handler at 0000006FFF8474A0 returned 1
+0088:trace:seh:call_seh_handlers calling handler 0000006FFF8474A0 (rec=000000000111BC58, frame=111cec0 context=000000000111B8C0, dispatch=000000000111B4C8)
+0088:trace:seh:call_seh_handlers handler at 0000006FFF8474A0 returned 1
+0088:trace:seh:call_seh_handlers calling handler 0000006FFF03DBF8 (rec=000000000111BC58, frame=111cf40 context=000000000111B8C0, dispatch=000000000111B4C8)
+0088:trace:seh:RtlUnwindEx code=6ba flags=2 end_frame=000000000111CF40 target_ip=0000006FFF036D30
+0088:trace:seh:RtlUnwindEx  pc=0000006fffea8890  sp=000000000111aad0  lr=0000000000000000  fp=000000000111b8a0
+0088:trace:seh:RtlUnwindEx  x0=0000000000000000  x1=0000006fff036d30  x2=000000000111bc58  x3=00000000000006ba
+0088:trace:seh:RtlUnwindEx  x4=000000000111b130  x5=000000000111b520  x6=000000000111cf40  x7=000000000111b8c0
+0088:trace:seh:RtlUnwindEx  x8=0000006fffea8854  x9=0000000000000003 x10=0000000000000000 x11=0000000000000002
+0088:trace:seh:RtlUnwindEx x12=0000000000000000 x13=0000000000000000 x14=000000007ff6349d x15=000000000000d800
+0088:trace:seh:RtlUnwindEx x16=0000006fff3fbe3c x17=0000006fffeaeeb0 x18=000000007ff60000 x19=000000000111b4c8
+0088:trace:seh:RtlUnwindEx x20=000000000111b130 x21=0000006fff036d30 x22=0000000000038820 x23=000000000111cf40
+0088:trace:seh:RtlUnwindEx x24=0000000000000000 x25=000000000111bc58 x26=0000006fff036d28 x27=0000006fff000000
+0088:trace:seh:RtlUnwindEx x28=0000006fff0c1f94 cpsr=00000000 fpcr=00000000 fpsr=00000000
+0088:trace:seh:RtlUnwindEx calling handler 0000006FFFEA7E88 (rec=000000000111BC58, frame=111b110 context=000000000111B130, dispatch=000000000111AE98)
+0088:trace:seh:RtlUnwindEx handler 0000006FFFEA7E88 returned 1
+0088:trace:seh:RtlUnwindEx calling handler 0000006FFF8474A0 (rec=000000000111BC58, frame=111c650 context=000000000111B130, dispatch=000000000111AE98)
+0088:trace:seh:RtlUnwindEx handler 0000006FFF8474A0 returned 1
+0088:trace:seh:RtlUnwindEx calling handler 0000006FFF8474A0 (rec=000000000111BC58, frame=111cec0 context=000000000111B130, dispatch=000000000111AE98)
+0088:trace:seh:RtlUnwindEx handler 0000006FFF8474A0 returned 1
+0088:trace:seh:RtlUnwindEx calling handler 0000006FFF03DBF8 (rec=000000000111BC58, frame=111cf40 context=000000000111B130, dispatch=000000000111AE98)
+0088:trace:seh:RtlUnwindEx handler 0000006FFF03DBF8 returned 1
+0088:trace:seh:RtlRestoreContext returning to 6fff036d30 stack 111cf00
+0088:fixme:xinput:pdo_pnp code 0xc, not implemented!
+0088:trace:seh:dispatch_exception code=6ba (RPC_S_SERVER_UNAVAILABLE) flags=0 addr=0000006FFFB1A95C
+0088:trace:seh:dispatch_exception  pc=0000006fffb1a95c  sp=000000000111bc50  lr=0000006fffb1a95c  fp=000000000111c630
+0088:trace:seh:dispatch_exception  x0=000000000111bc58  x1=0000000000000000  x2=0000000000000000  x3=0000000000000000
+0088:trace:seh:dispatch_exception  x4=ffffffffffffffff  x5=71646d6d60612d71  x6=0000006ffff4a640  x7=7f7f7f7f7f7f7f7f
+0088:trace:seh:dispatch_exception  x8=0000006fffea7b80  x9=0000000000000018 x10=0000000000000000 x11=0000000000150200
+0088:trace:seh:dispatch_exception x12=0000000000000005 x13=0000000000000000 x14=0000000000000033 x15=0000000000000004
+0088:trace:seh:dispatch_exception x16=0000006fffb1a8fc x17=000000000111ba00 x18=000000007ff60000 x19=0000000000000000
+0088:trace:seh:dispatch_exception x20=0000000000000104 x21=0000000000930b70 x22=0000006fff0920e0 x23=0000006fff092260
+0088:trace:seh:dispatch_exception x24=0000000000000003 x25=0000006fff09226a x26=0000006fff092280 x27=0000000000000042
+0088:trace:seh:dispatch_exception x28=0000006fff09226a cpsr=60000000 fpcr=00000000 fpsr=00000000
+0088:trace:seh:call_seh_handlers calling handler 0000006FFF8474A0 (rec=000000000111BC58, frame=111c650 context=000000000111B8C0, dispatch=000000000111B4C8)
+0088:trace:seh:call_seh_handlers handler at 0000006FFF8474A0 returned 1
+0088:trace:seh:call_seh_handlers calling handler 0000006FFF8474A0 (rec=000000000111BC58, frame=111cec0 context=000000000111B8C0, dispatch=000000000111B4C8)
+0088:trace:seh:call_seh_handlers handler at 0000006FFF8474A0 returned 1
+0088:trace:seh:call_seh_handlers calling handler 0000006FFF03DBF8 (rec=000000000111BC58, frame=111cf40 context=000000000111B8C0, dispatch=000000000111B4C8)
+0088:trace:seh:RtlUnwindEx code=6ba flags=2 end_frame=000000000111CF40 target_ip=0000006FFF036D30
+0088:trace:seh:RtlUnwindEx  pc=0000006fffea8890  sp=000000000111aad0  lr=0000000000000000  fp=000000000111b8a0
+0088:trace:seh:RtlUnwindEx  x0=0000000000000000  x1=0000006fff036d30  x2=000000000111bc58  x3=00000000000006ba
+0088:trace:seh:RtlUnwindEx  x4=000000000111b130  x5=000000000111b520  x6=000000000111cf40  x7=000000000111b8c0
+0088:trace:seh:RtlUnwindEx  x8=0000006fffea8854  x9=0000000000000003 x10=0000000000000000 x11=0000000000000002
+0088:trace:seh:RtlUnwindEx x12=0000000000000000 x13=0000000000000000 x14=000000007ff6349d x15=0000000000000004
+0088:trace:seh:RtlUnwindEx x16=0000006fff3fbe3c x17=0000006fffeaeeb0 x18=000000007ff60000 x19=000000000111b4c8
+0088:trace:seh:RtlUnwindEx x20=000000000111b130 x21=0000006fff036d30 x22=0000000000038820 x23=000000000111cf40
+0088:trace:seh:RtlUnwindEx x24=0000000000000000 x25=000000000111bc58 x26=0000006fff036d28 x27=0000006fff000000
+0088:trace:seh:RtlUnwindEx x28=0000006fff0c1f94 cpsr=00000000 fpcr=00000000 fpsr=00000000
+0088:trace:seh:RtlUnwindEx calling handler 0000006FFFEA7E88 (rec=000000000111BC58, frame=111b110 context=000000000111B130, dispatch=000000000111AE98)
+0088:trace:seh:RtlUnwindEx handler 0000006FFFEA7E88 returned 1
+0088:trace:seh:RtlUnwindEx calling handler 0000006FFF8474A0 (rec=000000000111BC58, frame=111c650 context=000000000111B130, dispatch=000000000111AE98)
+0088:trace:seh:RtlUnwindEx handler 0000006FFF8474A0 returned 1
+0088:trace:seh:RtlUnwindEx calling handler 0000006FFF8474A0 (rec=000000000111BC58, frame=111cec0 context=000000000111B130, dispatch=000000000111AE98)
+0088:trace:seh:RtlUnwindEx handler 0000006FFF8474A0 returned 1
+0088:trace:seh:RtlUnwindEx calling handler 0000006FFF03DBF8 (rec=000000000111BC58, frame=111cf40 context=000000000111B130, dispatch=000000000111AE98)
+0088:trace:seh:RtlUnwindEx handler 0000006FFF03DBF8 returned 1
+0088:trace:seh:RtlRestoreContext returning to 6fff036d30 stack 111cf00
+0088:fixme:xinput:pdo_pnp code 0xc, not implemented!
+_r_debug not found in ld.so
+0088:fixme:xinput:pdo_pnp code 0xc, not implemented!
+0088:fixme:xinput:pdo_pnp code 0xc, not implemented!
+0070:err:ntoskrnl:ZwLoadDriver failed to create driver L"\\Registry\\Machine\\System\\CurrentControlSet\\Services\\winebth": c00000e5
+0034:fixme:service:scmdatabase_autostart_services Auto-start service L"winebth" failed to start: 1359
+_r_debug not found in ld.so
+MESA: info: threaded context 888299536 created
+Mesa: warning: Window 4194306 has no colormap!
+_r_debug not found in ld.so
+0108:trace:seh:RtlInitializeExtendedContext2 context 000000000021F0C0, context_flags 0x100000, context_ex 000000000021F0B8, compaction_mask ffffffffffffffff.
+00f4:trace:seh:dispatch_exception code=6ba (RPC_S_SERVER_UNAVAILABLE) flags=0 addr=0000006FFFB1A95C
+00f4:trace:seh:dispatch_exception  pc=0000006fffb1a95c  sp=000000000011dd50  lr=0000006fffb1a95c  fp=000000000011e730
+00f4:trace:seh:dispatch_exception  x0=000000000011dd58  x1=0000000000000000  x2=0000000000000000  x3=0000000000000000
+00f4:trace:seh:dispatch_exception  x4=00000000c0000034  x5=0000000000729090  x6=0000006ffff4a640  x7=0000000000000024
+00f4:trace:seh:dispatch_exception  x8=0000006fffea7b80  x9=0000000000000004 x10=0000000000000000 x11=0000000000150760
+00f4:trace:seh:dispatch_exception x12=000000000000000f x13=0000000000000002 x14=0000000000000033 x15=000000000000d800
+00f4:trace:seh:dispatch_exception x16=0000006fffb1a8fc x17=000000000011d990 x18=000000007ffc0000 x19=0000000000000000
+00f4:trace:seh:dispatch_exception x20=0000000000000064 x21=0000000000728d50 x22=0000006ffce09840 x23=0000006ffce09a7c
+00f4:trace:seh:dispatch_exception x24=0000000000000000 x25=0000006ffce09a86 x26=0000006ffce09aa0 x27=0000000000000046
+00f4:trace:seh:dispatch_exception x28=0000006ffce09a8a cpsr=60000000 fpcr=00000000 fpsr=00000000
+00f4:trace:seh:call_seh_handlers calling handler 0000006FFF8474A0 (rec=000000000011DD58, frame=11e750 context=000000000011D9C0, dispatch=000000000011D5C8)
+00f4:trace:seh:call_seh_handlers handler at 0000006FFF8474A0 returned 1
+00f4:trace:seh:call_seh_handlers calling handler 0000006FFF8474A0 (rec=000000000011DD58, frame=11efc0 context=000000000011D9C0, dispatch=000000000011D5C8)
+00f4:trace:seh:call_seh_handlers handler at 0000006FFF8474A0 returned 1
+00f4:trace:seh:call_seh_handlers calling handler 0000006FFCDC58BC (rec=000000000011DD58, frame=11f0b0 context=000000000011D9C0, dispatch=000000000011D5C8)
+00f4:trace:seh:RtlUnwindEx code=6ba flags=2 end_frame=000000000011F0B0 target_ip=0000006FFCDBAC0C
+00f4:trace:seh:RtlUnwindEx  pc=0000006fffea8890  sp=000000000011cbd0  lr=0000000000000000  fp=000000000011d9a0
+00f4:trace:seh:RtlUnwindEx  x0=0000000000000000  x1=0000006ffcdbac0c  x2=000000000011dd58  x3=00000000000006ba
+00f4:trace:seh:RtlUnwindEx  x4=000000000011d230  x5=000000000011d620  x6=000000000011f0b0  x7=000000000011d9c0
+00f4:trace:seh:RtlUnwindEx  x8=0000006fffea8854  x9=0000000000000003 x10=0000000000000000 x11=000000000000000a
+00f4:trace:seh:RtlUnwindEx x12=0000000000000078 x13=0000000000000000 x14=000000007ffc349d x15=00000000000000e4
+00f4:trace:seh:RtlUnwindEx x16=0000006fff5b1764 x17=0000006fffeaeeb0 x18=000000007ffc0000 x19=000000000011d5c8
+00f4:trace:seh:RtlUnwindEx x20=000000000011d230 x21=0000006ffcdbac0c x22=000000000002bbfc x23=000000000011f0b0
+00f4:trace:seh:RtlUnwindEx x24=0000000000000000 x25=000000000011dd58 x26=0000006ffcdbabe4 x27=0000006ffcd90000
+00f4:trace:seh:RtlUnwindEx x28=0000006ffce33e40 cpsr=00000000 fpcr=00000000 fpsr=00000000
+00f4:trace:seh:RtlUnwindEx calling handler 0000006FFFEA7E88 (rec=000000000011DD58, frame=11d210 context=000000000011D230, dispatch=000000000011CF98)
+00f4:trace:seh:RtlUnwindEx handler 0000006FFFEA7E88 returned 1
+00f4:trace:seh:RtlUnwindEx calling handler 0000006FFF8474A0 (rec=000000000011DD58, frame=11e750 context=000000000011D230, dispatch=000000000011CF98)
+00f4:trace:seh:RtlUnwindEx handler 0000006FFF8474A0 returned 1
+00f4:trace:seh:RtlUnwindEx calling handler 0000006FFF8474A0 (rec=000000000011DD58, frame=11efc0 context=000000000011D230, dispatch=000000000011CF98)
+00f4:trace:seh:RtlUnwindEx handler 0000006FFF8474A0 returned 1
+00f4:trace:seh:RtlUnwindEx calling handler 0000006FFCDC58BC (rec=000000000011DD58, frame=11f0b0 context=000000000011D230, dispatch=000000000011CF98)
+00f4:trace:seh:RtlUnwindEx handler 0000006FFCDC58BC returned 1
+00f4:trace:seh:RtlRestoreContext returning to 6ffcdbac0c stack 11f010
+_r_debug not found in ld.so
+0108:trace:seh:RtlInitializeExtendedContext2 context 0000007FDEA3ED80, context_flags 0x10000b, context_ex 0000007FDEA3ED78, compaction_mask ffffffffffffffff.
+0138:trace:seh:RtlInitializeExtendedContext2 context 00000000011CF0C0, context_flags 0x100000, context_ex 00000000011CF0B8, compaction_mask ffffffffffffffff.
+0138:trace:seh:RtlInitializeExtendedContext2 context 0000007FC8EEED80, context_flags 0x10000b, context_ex 0000007FC8EEED78, compaction_mask ffffffffffffffff.
+_r_debug not found in ld.so
+_r_debug not found in ld.so
+0138:trace:seh:RtlInitializeExtendedContext2 context 0000007FC8EEEEC0, context_flags 0x10000b, context_ex 0000007FC8EEEEB8, compaction_mask ffffffffffffffff.
+0148:trace:seh:RtlInitializeExtendedContext2 context 000000000021F0C0, context_flags 0x100000, context_ex 000000000021F0B8, compaction_mask ffffffffffffffff.
+0148:trace:seh:RtlInitializeExtendedContext2 context 000000000021B7B0, context_flags 0x10000b, context_ex 000000000021B7A8, compaction_mask ffffffffffffffff.
+0148:warn:seh:dispatch_exception backtrace: --- Exception 0xc000001d.
+0148:trace:seh:dispatch_exception code=c000001d (EXCEPTION_ILLEGAL_INSTRUCTION) flags=0 addr=0000006FFCA966AC
+0148:trace:seh:dispatch_exception rip=0000006ffca966ac rsp=000000000021c8f0 rbp=0000000000000000 eflags=00000202
+0148:trace:seh:dispatch_exception rax=0000000000000000 rbx=0000000000259200 rcx=0000000000000001 rdx=0000006ffcc80f51
+0148:trace:seh:dispatch_exception rsi=000000000021cb20 rdi=0000006ffff7e040  r8=000000000021c8d0  r9=0000000000000008
+0148:trace:seh:dispatch_exception r10=00000000ffffffff r11=0000000000000000 r12=0000007fe0040168 r13=000000000021c9c0
+0148:trace:seh:dispatch_exception r14=000000000021cde8 r15=000000000021c9e0 mxcsr=00001f80 cs=0033 ss=002b
+0148:warn:seh:virtual_unwind backtrace: 0000006FFCA966AC: L"libarm64ecfex.dll" + 00000000001766AC.
+0148:warn:seh:virtual_unwind backtrace: 0000006FFCA9FE40: L"libarm64ecfex.dll" + 000000000017FE40.
+0148:trace:seh:call_seh_handlers calling handler 0000006FFCA92A28 (rec=000000000021C830, frame=21c9c0 context=000000000021B7B0, dispatch=000000000021B3D8)
+0148:trace:seh:call_seh_handlers handler at 0000006FFCA92A28 returned 1
+0148:warn:seh:virtual_unwind backtrace: 0000006FFCAA11A0: L"libarm64ecfex.dll" + 00000000001811A0.
+0148:trace:seh:call_seh_handlers calling handler 0000006FFCA92A28 (rec=000000000021C830, frame=21ca20 context=000000000021B7B0, dispatch=000000000021B3D8)
+0148:trace:seh:call_seh_handlers handler at 0000006FFCA92A28 returned 1
+0148:warn:seh:virtual_unwind backtrace: 0000006FFCAA106C: L"libarm64ecfex.dll" + 000000000018106C.
+0148:trace:seh:call_seh_handlers calling handler 0000006FFCA92A28 (rec=000000000021C830, frame=21ca70 context=000000000021B7B0, dispatch=000000000021B3D8)
+0148:trace:seh:call_seh_handlers handler at 0000006FFCA92A28 returned 1
+0148:warn:seh:virtual_unwind backtrace: 0000006FFCAA46EC: L"libarm64ecfex.dll" + 00000000001846EC.
+0148:trace:seh:call_seh_handlers calling handler 0000006FFCA92A28 (rec=000000000021C830, frame=21cda0 context=000000000021B7B0, dispatch=000000000021B3D8)
+0148:trace:seh:call_seh_handlers handler at 0000006FFCA92A28 returned 1
+0148:warn:seh:virtual_unwind backtrace: 0000006FFCA274F0: L"libarm64ecfex.dll" + 00000000001074F0.
+0148:trace:seh:call_seh_handlers calling handler 0000006FFCA92A28 (rec=000000000021C830, frame=21ee60 context=000000000021B7B0, dispatch=000000000021B3D8)
+0148:trace:seh:call_seh_handlers handler at 0000006FFCA92A28 returned 1
+0148:warn:seh:virtual_unwind backtrace: 0000006FFFF03E8C: L"ntdll.dll" + 00000000000C3E8C.
+0148:warn:seh:virtual_unwind backtrace: 0000006FFFEE18FC: L"ntdll.dll" + 00000000000A18FC.
+0148:warn:seh:virtual_unwind backtrace: 0000006FFFF09E64: L"ntdll.dll" + 00000000000C9E64.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000400007: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 00000001400014D0: L"AIO-Graphics-Test-64bit.exe" + 00000000000014D0.
+0148:warn:seh:virtual_unwind backtrace: 000000007FFD0000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 000000007FFC0000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000220000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000006FFFF09D7C: L"ntdll.dll" + 00000000000C9D7C.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:warn:seh:virtual_unwind backtrace: 0000000000000000: unknown module.
+0148:err:seh:NtRaiseException Unhandled exception code c000001d flags 0 addr 0x6ffca966ac
+0140:fixme:oleacc:find_class_data unhandled window class: L"#32769"
+0140:fixme:uiautomation:uia_get_providers_for_hwnd Override provider callback currently unimplemented.
+0140:fixme:uiautomation:default_uia_provider_callback Default ProviderType_NonClientArea provider unimplemented.
+0140:fixme:oleacc:find_class_data unhandled window class: L"#32769"
+0140:fixme:uiautomation:base_hwnd_fragment_get_FragmentRoot 00000000006FCC38, 000000000011FC08: stub!
+0140:fixme:uiautomation:base_hwnd_fragment_GetEmbeddedFragmentRoots 00000000006FCC38, 000000000011FBF8: stub!
