@@ -22,6 +22,14 @@ import java.io.File
 object RootManager {
 
     private const val TAG = "RootManager"
+    private const val PREFS = "perf_prefs"
+    // Persisted "the user granted us root at least once" flag. Shell.isAppGrantedRoot() returns null on
+    // a cold start (no shell yet), so without this the section greys out every launch. On startup we
+    // use this flag to SILENTLY re-open the shell (a remembered Magisk/KernelSU/APatch grant needs no
+    // prompt). Cleared when a grant attempt is denied / root is found revoked.
+    private const val KEY_GRANTED_ONCE = "root_granted_once"
+
+    private var appContext: Context? = null
 
     enum class RootState {
         /** Not yet probed. */
@@ -67,6 +75,14 @@ object RootManager {
         SU_CANDIDATES.any { File(it).exists() } ||
             (System.getenv("PATH")?.split(":")?.any { File(it, "su").exists() } ?: false)
 
+    private fun grantedOnce(): Boolean =
+        appContext?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)?.getBoolean(KEY_GRANTED_ONCE, false) ?: false
+
+    private fun setGrantedOnce(v: Boolean) {
+        appContext?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            ?.edit()?.putBoolean(KEY_GRANTED_ONCE, v)?.apply()
+    }
+
     /**
      * Cheap, non-prompting probe. Re-run each session (from the Application). Never fires the
      * superuser dialog: it only inspects the su binary and libsu's cached grant knowledge.
@@ -98,6 +114,7 @@ object RootManager {
             false
         }
         _state.value = if (root) RootState.GRANTED else RootState.DENIED
+        setGrantedOnce(root) // remember a grant so we can silently re-acquire next launch; clear on deny
         Log.d(TAG, "requestGrant -> ${_state.value}")
         root
     }
@@ -121,6 +138,7 @@ object RootManager {
             false
         }
         _state.value = if (root) RootState.GRANTED else RootState.DENIED
+        if (root) setGrantedOnce(true)
         return root
     }
 
@@ -166,8 +184,26 @@ object RootManager {
      */
     fun onAppStartup(context: Context) {
         try {
+            appContext = context.applicationContext
             probe()
             PerfRevertRegistry.onAppStartup(context.applicationContext)
+            // Silently re-acquire a REMEMBERED grant every launch (independent of the dirty-snapshot
+            // restore path): if we were granted before, su exists, and the cheap probe didn't already
+            // see GRANTED, re-open the shell off the main thread. A remembered Magisk/KernelSU/APatch
+            // grant returns root with NO prompt, flipping _state to GRANTED silently — so the Root
+            // section no longer greys out on every cold start. Never auto-acquire when the flag is
+            // unset (we must never prompt a user who never granted). If root was actually revoked,
+            // clear the flag so we stop trying.
+            if (_state.value != RootState.GRANTED && grantedOnce() && hasSuBinary()) {
+                Thread({
+                    try {
+                        val ok = ensureGrantedBlocking()
+                        Log.d(TAG, "silent re-acquire (grantedOnce flag set): " +
+                            if (ok) "GRANTED, no prompt" else "root revoked -> clearing flag")
+                        if (!ok) setGrantedOnce(false)
+                    } catch (t: Throwable) { Log.w(TAG, "silent re-acquire failed", t) }
+                }, "root-silent-reacquire").apply { isDaemon = true }.start()
+            }
         } catch (t: Throwable) {
             Log.w(TAG, "onAppStartup failed", t)
         }
