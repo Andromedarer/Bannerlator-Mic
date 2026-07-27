@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-07-27T14-09-33-edd8f6",
+    "created": "2026-07-27T14:09:33.921Z",
+    "device": "Realme 12 5g",
+    "gpu": "Mail G57 Mc2 in",
+    "game": "FNAF 1",
+    "symptom": "Crashes / closes to home",
+    "logs": 0
+  },
+  {
     "id": "2026-07-27T13-58-49-9eda2a",
     "created": "2026-07-27T13:58:49.931Z",
     "device": "Tecno pova le8",
