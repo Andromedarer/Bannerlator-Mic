@@ -1,0 +1,13 @@
+{
+  "id": "2026-07-27T13-27-49-9c511f",
+  "created": "2026-07-27T13:27:49.904Z",
+  "ip_hash": "mygcpD/nvU",
+  "fields": {
+    "device_model": "PAT-CHECK (auto-delete)",
+    "gpu": "Mali-G715",
+    "app_version": "2.8.2",
+    "game_name": "TokenTest",
+    "symptom": "Other"
+  },
+  "logs": []
+}
