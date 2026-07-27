@@ -1320,6 +1320,28 @@ public class ControlElement {
         }
     }
 
+    public void drawEditorSelectionBorder(Canvas canvas) {
+        if (!inputControlsView.isEditMode() || !selected) return;
+
+        Rect bounds = getBoundingBox();
+        Paint paint = inputControlsView.getPaint();
+        float strokeWidth = Math.max(2f, inputControlsView.getSnappingSize() * 0.4f);
+        float inset = strokeWidth * 0.5f;
+        iconAspectFitDestinationRect.set(
+                bounds.left + inset,
+                bounds.top + inset,
+                bounds.right - inset,
+                bounds.bottom - inset);
+
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(strokeWidth);
+        paint.setColor(inputControlsView.getAccentBrightColor());
+        paint.setColorFilter(null);
+        paint.setAlpha(255);
+        float radius = Math.max(6f, inputControlsView.getSnappingSize() * 0.75f);
+        canvas.drawRoundRect(iconAspectFitDestinationRect, radius, radius, paint);
+    }
+
     private boolean isEngaged() {
         return expanded || currentPointerId != -1 || buttonGridTouchState.hasTrackedPointers()
                 || (toggleSwitch && selected);

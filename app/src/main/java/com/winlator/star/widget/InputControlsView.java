@@ -289,6 +289,9 @@ public class InputControlsView extends View {
             if (expandedOverlay != null && !isElementHiddenByGroup(expandedOverlay)) {
                 expandedOverlay.drawExpandedChildren(canvas);
             }
+            if (editMode && selectedElement != null && !isElementHiddenByGroup(selectedElement)) {
+                selectedElement.drawEditorSelectionBorder(canvas);
+            }
         }
 
         if (editMode && editorLongPressElement != null && !editorLongPressTriggered) {
