@@ -7,8 +7,9 @@ import java.io.File
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -63,10 +64,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -1426,16 +1431,47 @@ private fun IconPicker(
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     if (imageBitmap != null) {
+                        if (icon.isCustom) {
+                            CustomIconPreviewBackground(Modifier.size(36.dp))
+                        }
                         androidx.compose.foundation.Image(
                             bitmap = imageBitmap,
                             contentDescription = stringResource(R.string.icon_content_description, icon.id),
                             modifier = Modifier.size(32.dp),
-                            colorFilter = ColorFilter.tint(glyphTint, BlendMode.SrcIn),
+                            colorFilter = if (icon.isCustom) null else ColorFilter.tint(glyphTint, BlendMode.SrcIn),
                         )
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun CustomIconPreviewBackground(modifier: Modifier = Modifier) {
+    val lightCell = Color(0xFFE0E0E0)
+    val darkCell = Color(0xFF707070)
+    val borderColor = Color.White.copy(alpha = 0.45f)
+    Canvas(modifier = modifier.clip(RoundedCornerShape(4.dp))) {
+        val cellCount = 4
+        val cellWidth = size.width / cellCount
+        val cellHeight = size.height / cellCount
+        for (row in 0 until cellCount) {
+            for (column in 0 until cellCount) {
+                drawRect(
+                    color = if ((row + column) % 2 == 0) lightCell else darkCell,
+                    topLeft = Offset(column * cellWidth, row * cellHeight),
+                    size = Size(cellWidth, cellHeight),
+                )
+            }
+        }
+        val borderWidth = 1.dp.toPx()
+        drawRect(
+            color = borderColor,
+            topLeft = Offset(borderWidth / 2, borderWidth / 2),
+            size = Size(size.width - borderWidth, size.height - borderWidth),
+            style = Stroke(width = borderWidth),
+        )
     }
 }
 
