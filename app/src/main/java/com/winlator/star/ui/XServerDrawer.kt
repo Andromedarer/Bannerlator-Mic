@@ -2783,6 +2783,26 @@ private fun AdvancedContent(state: XServerDrawerState) {
     AdvancedActionRow("Show Keyboard", R.drawable.icon_keyboard) {
         state.onClose?.run(); state.onKeyboard?.run()
     }
+
+    Spacer(Modifier.height(14.dp))
+
+    // ── Performance ── non-root power-user toggles; always enabled, applied + persisted live.
+    SectionHeader("Performance")
+
+    val sustainedPerf by state.sustainedPerfMode.collectAsState()
+    ToggleRow("Sustained Performance Mode", sustainedPerf) {
+        state.setSustainedPerfMode(it); state.onSustainedPerfModeChange?.run()
+    }
+
+    val priorityBoost by state.perfPriorityBoost.collectAsState()
+    ToggleRow("Thread Priority Boost", priorityBoost) {
+        state.setPerfPriorityBoost(it); state.onPerfPriorityBoostChange?.run()
+    }
+
+    val bigCores by state.preferBigCores.collectAsState()
+    ToggleRow("Prefer Big Cores", bigCores) {
+        state.setPreferBigCores(it); state.onPreferBigCoresChange?.run()
+    }
 }
 
 @Composable

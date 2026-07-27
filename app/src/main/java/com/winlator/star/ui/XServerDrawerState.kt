@@ -152,6 +152,18 @@ object XServerDrawerState {
     private val _controlsAccentColor = MutableStateFlow(0xFF0055FF.toInt())
     val controlsAccentColor: StateFlow<Int> = _controlsAccentColor
 
+    // ── Power-user performance toggles (non-root; live-toggleable in-game) ──
+    // Seeded from the resolved container/shortcut config in setupUI; each has an onXxx callback the
+    // Activity assigns to apply + persist live.
+    private val _sustainedPerfMode = MutableStateFlow(false)
+    val sustainedPerfMode: StateFlow<Boolean> = _sustainedPerfMode
+
+    private val _perfPriorityBoost = MutableStateFlow(false)
+    val perfPriorityBoost: StateFlow<Boolean> = _perfPriorityBoost
+
+    private val _preferBigCores = MutableStateFlow(false)
+    val preferBigCores: StateFlow<Boolean> = _preferBigCores
+
     // Callbacks wired by XServerDisplayActivity.
     // @JvmField exposes these as public fields so Java can assign them directly.
     // Runnable avoids the kotlin.Unit return-type mismatch for Java void lambdas.
@@ -213,6 +225,12 @@ object XServerDrawerState {
     // saves it, and invalidates the InputControlsView for a live redraw.
     @JvmField var onControlsColorChange: Runnable? = null
 
+    // Fired when a power-user performance toggle changes in the drawer; the Activity reads the flow,
+    // applies it live (sustained-perf window flag / thread priority / big-core affinity) and persists.
+    @JvmField var onSustainedPerfModeChange: Runnable? = null
+    @JvmField var onPerfPriorityBoostChange: Runnable? = null
+    @JvmField var onPreferBigCoresChange:    Runnable? = null
+
     var onCursorExpandedChanged: ((Boolean) -> Unit)? = null
 
     // Setters called from Java
@@ -266,6 +284,10 @@ object XServerDrawerState {
     fun getControlsFollowThemeValue(): Boolean = _controlsFollowTheme.value
     fun setControlsAccentColor(v: Int) { _controlsAccentColor.value = v }
     fun getControlsAccentColorValue(): Int = _controlsAccentColor.value
+
+    fun setSustainedPerfMode(v: Boolean) { _sustainedPerfMode.value = v }
+    fun setPerfPriorityBoost(v: Boolean) { _perfPriorityBoost.value = v }
+    fun setPreferBigCores(v: Boolean)    { _preferBigCores.value = v }
     fun toggleFpsExpanded() { _fpsExpanded.value = !_fpsExpanded.value }
 
     fun reset() {
@@ -303,6 +325,9 @@ object XServerDrawerState {
         _overlayOpacity.value = 0.75f
         _controlsFollowTheme.value = true
         _controlsAccentColor.value = 0xFF0055FF.toInt()
+        _sustainedPerfMode.value = false
+        _perfPriorityBoost.value = false
+        _preferBigCores.value = false
         onClose = null; onKeyboard = null; onInputControls = null
         onScreenEffects = null; onGraphicEngine = null; onVibration = null
         onToggleFullscreen = null; onSetFullscreenMode = null; onPauseResume = null; onPipMode = null
@@ -316,6 +341,9 @@ object XServerDrawerState {
         onRefreshRatePoll = null
         onOverlayOpacityChange = null
         onControlsColorChange = null
+        onSustainedPerfModeChange = null
+        onPerfPriorityBoostChange = null
+        onPreferBigCoresChange = null
         onCursorExpandedChanged = null
     }
 }

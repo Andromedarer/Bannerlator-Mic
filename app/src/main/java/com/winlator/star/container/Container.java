@@ -496,6 +496,40 @@ public class Container {
         putExtra("lsfgPerformanceMode", performanceMode ? "1" : "0");
     }
 
+    // --- Power-user performance toggles (per-container, non-root), stored in extraData ---
+    // All three are also live-toggleable from the in-game drawer and support a per-game override via
+    // Shortcut.getExtra(key, container-default). Defaults keep behaviour unchanged until opted in.
+
+    // Sustained Performance Mode: Window.setSustainedPerformanceMode — a stable (lower, non-boosting)
+    // clock ceiling that avoids thermal throttling mid-session. Default OFF.
+    public boolean isSustainedPerfMode() {
+        return getExtra("sustainedPerfMode", "0").equals("1");
+    }
+
+    public void setSustainedPerfMode(boolean enabled) {
+        putExtra("sustainedPerfMode", enabled ? "1" : "0");
+    }
+
+    // Thread-priority boost: raise the render/emulation threads to URGENT_DISPLAY at launch (no root).
+    // Default OFF.
+    public boolean isPerfPriorityBoost() {
+        return getExtra("perfPriorityBoost", "0").equals("1");
+    }
+
+    public void setPerfPriorityBoost(boolean enabled) {
+        putExtra("perfPriorityBoost", enabled ? "1" : "0");
+    }
+
+    // Prefer big cores: a friendly preset that pins affinity to the top-frequency CPU cluster (no
+    // root). When ON it overrides the raw cpuList affinity at launch. Default OFF.
+    public boolean isPreferBigCores() {
+        return getExtra("preferBigCores", "0").equals("1");
+    }
+
+    public void setPreferBigCores(boolean enabled) {
+        putExtra("preferBigCores", enabled ? "1" : "0");
+    }
+
     // Controller vibration (PC-accurate dual-motor rumble), per-container. Mode gates WHERE rumble
     // goes: 0=Off 1=Controller(default, matches the pre-existing hardcoded behavior) 2=Device(phone)
     // 3=Both. Intensity (0..100) scales amplitude on top of the master/per-slot toggles in WinHandler.

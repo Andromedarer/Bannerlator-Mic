@@ -143,6 +143,10 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     // lsfg-vk performance_mode (per-container): lower interpolation quality for higher FPS. Also
     // live-toggleable from the in-game FG menu. Only meaningful when frameGenEngine == "lsfg".
     var lsfgPerformanceMode by mutableStateOf(false)
+    // Power-user performance toggles (per-container, non-root; also live-toggleable in-game).
+    var sustainedPerfMode by mutableStateOf(false)
+    var perfPriorityBoost by mutableStateOf(false)
+    var preferBigCores by mutableStateOf(false)
     // FPS limiter on/off (loads the layer); the cap value is set live in-game.
     var fpsLimiterEnabled by mutableStateOf(false)
     // VRR: match the display panel refresh rate to the game's FPS. Default ON (safe — no-op unless
@@ -431,6 +435,9 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         frameGenEngine     = c?.frameGenEngine ?: "off"
         frameGenModel      = c?.frameGenModel ?: 0
         lsfgPerformanceMode = c?.isLsfgPerformanceMode == true
+        sustainedPerfMode  = c?.isSustainedPerfMode == true
+        perfPriorityBoost  = c?.isPerfPriorityBoost == true
+        preferBigCores     = c?.isPreferBigCores == true
         fpsLimiterEnabled  = c?.isFpsLimiterEnabled == true
         matchRefreshRate   = c?.isMatchRefreshRate != false   // default ON for new/unset containers
         manualRefreshRate  = c?.manualRefreshRate ?: 0
@@ -739,6 +746,9 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             c.setFrameGenEngine(frameGenEngine)
             c.setFrameGenModel(frameGenModel)
             c.setLsfgPerformanceMode(lsfgPerformanceMode)
+            c.setSustainedPerfMode(sustainedPerfMode)
+            c.setPerfPriorityBoost(perfPriorityBoost)
+            c.setPreferBigCores(preferBigCores)
             c.setFpsLimiterEnabled(fpsLimiterEnabled)
             c.setMatchRefreshRate(matchRefreshRate)
             c.setManualRefreshRate(manualRefreshRate)
@@ -836,6 +846,9 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
                     created.setFrameGenEngine(frameGenEngine)
                     created.setFrameGenModel(frameGenModel)
                     created.setLsfgPerformanceMode(lsfgPerformanceMode)
+                    created.setSustainedPerfMode(sustainedPerfMode)
+                    created.setPerfPriorityBoost(perfPriorityBoost)
+                    created.setPreferBigCores(preferBigCores)
                     created.setVibrationMode(vibrationMode)
                     created.setVibrationIntensity(vibrationIntensity)
                     // Same set as the edit path above — a new container must not silently drop these.

@@ -5125,6 +5125,17 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
         )
     }
 
+    // Power-user performance toggles — per-game overrides (fall back to the container value).
+    var sustainedPerfMode by remember {
+        mutableStateOf(shortcut.getExtra("sustainedPerfMode", if (shortcut.container.isSustainedPerfMode) "1" else "0") == "1")
+    }
+    var perfPriorityBoost by remember {
+        mutableStateOf(shortcut.getExtra("perfPriorityBoost", if (shortcut.container.isPerfPriorityBoost) "1" else "0") == "1")
+    }
+    var preferBigCores by remember {
+        mutableStateOf(shortcut.getExtra("preferBigCores", if (shortcut.container.isPreferBigCores) "1" else "0") == "1")
+    }
+
     // Audio driver
     val audioDriverEntries = remember { res.getStringArray(R.array.audio_driver_entries).toList() }
     var selectedAudioDriver by remember {
@@ -5439,6 +5450,9 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
             putExtra("unlockGameRefreshRate", unlockGameRefreshRate.ifEmpty { null })
             putExtra("frameGenEngine", frameGenEngine)
             putExtra("fpsLimiterEnabled", if (fpsLimiterEnabled) "1" else "0")
+            putExtra("sustainedPerfMode", if (sustainedPerfMode) "1" else "0")
+            putExtra("perfPriorityBoost", if (perfPriorityBoost) "1" else "0")
+            putExtra("preferBigCores", if (preferBigCores) "1" else "0")
             putExtra("dxwrapper", StringUtils.parseIdentifier(selectedDxWrapper))
             putExtra("dxwrapperConfig", dxWrapperConfig)
             putExtra("audioDriver", StringUtils.parseIdentifier(selectedAudioDriver))
@@ -5832,6 +5846,23 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                         DpSwitch(dp, "fpsLimiter", checked = fpsLimiterEnabled, onCheckedChange = { fpsLimiterEnabled = it })
                         Spacer(Modifier.width(8.dp))
                         Text(stringResource(R.string.fps_limiter), modifier = Modifier.weight(1f))
+                    }
+
+                    // Power-user performance toggles — per-game overrides (non-root).
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        DpSwitch(dp, "sustainedPerf", checked = sustainedPerfMode, onCheckedChange = { sustainedPerfMode = it })
+                        Spacer(Modifier.width(8.dp))
+                        Text("Sustained Performance Mode", modifier = Modifier.weight(1f))
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        DpSwitch(dp, "perfPriority", checked = perfPriorityBoost, onCheckedChange = { perfPriorityBoost = it })
+                        Spacer(Modifier.width(8.dp))
+                        Text("Thread Priority Boost", modifier = Modifier.weight(1f))
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        DpSwitch(dp, "preferBigCores", checked = preferBigCores, onCheckedChange = { preferBigCores = it })
+                        Spacer(Modifier.width(8.dp))
+                        Text("Prefer Big Cores", modifier = Modifier.weight(1f))
                     }
 
                     // Audio driver
