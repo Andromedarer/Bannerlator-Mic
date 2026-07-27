@@ -54,6 +54,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -167,6 +169,7 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
     var showSFDropdown by remember { mutableStateOf(false) }
     var showDebugChannelDialog by remember { mutableStateOf(false) }
     var showBackupDialog by remember { mutableStateOf(false) }
+    var showPerformanceMenu by remember { mutableStateOf(false) }
     var showRestoreConfirm by remember { mutableStateOf(false) }
     var isBackingUp by remember { mutableStateOf(false) }
     var pendingRestoreUri by remember { mutableStateOf<Uri?>(null) }
@@ -1008,7 +1011,33 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
             }
         }
 
+        // ── Performance (power-user toggles) ─────────────────────────────
+        FieldSetLabel("Performance")
+        FieldSet {
+            Text(
+                "Global performance defaults (Sustained Performance Mode, Thread Priority Boost, " +
+                "Prefer Big Cores) and — coming soon — root-only controls. Per-game overrides live in " +
+                "each game's settings and the in-game menu.",
+                color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp,
+                modifier = Modifier.padding(bottom = 6.dp)
+            )
+            Button(
+                onClick = { showPerformanceMenu = true },
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+            ) { Text("Open Performance settings", color = MaterialTheme.colorScheme.onPrimary) }
+        }
+
         Spacer(Modifier.height(72.dp))
+    }
+
+    // ── Performance menu (full-screen dialog; inline settings have no sub-screen nav host) ──
+    if (showPerformanceMenu) {
+        Dialog(
+            onDismissRequest = { showPerformanceMenu = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            PerformanceSettingsScreen(onClose = { showPerformanceMenu = false })
+        }
     }
 
     // ── FAB Save ─────────────────────────────────────────────────────────

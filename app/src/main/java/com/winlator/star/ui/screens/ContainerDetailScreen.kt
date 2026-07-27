@@ -1596,35 +1596,6 @@ private fun AdvancedTab(
             )
         }
 
-        // Performance (non-root power-user toggles). Sits next to Processor Affinity because
-        // "Prefer big cores" is an affinity preset over the raw cpuList editor below.
-        SectionBox(title = "Performance") {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Switch(
-                    checked = viewModel.sustainedPerfMode,
-                    onCheckedChange = { viewModel.sustainedPerfMode = it }
-                )
-                Spacer(Modifier.width(8.dp))
-                Text("Sustained Performance Mode", modifier = Modifier.weight(1f))
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Switch(
-                    checked = viewModel.perfPriorityBoost,
-                    onCheckedChange = { viewModel.perfPriorityBoost = it }
-                )
-                Spacer(Modifier.width(8.dp))
-                Text("Thread Priority Boost", modifier = Modifier.weight(1f))
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Switch(
-                    checked = viewModel.preferBigCores,
-                    onCheckedChange = { viewModel.preferBigCores = it }
-                )
-                Spacer(Modifier.width(8.dp))
-                Text("Prefer Big Cores", modifier = Modifier.weight(1f))
-            }
-        }
-
         // Processor Affinity
         SectionBox(title = stringResource(R.string.processor_affinity)) {
             Text(

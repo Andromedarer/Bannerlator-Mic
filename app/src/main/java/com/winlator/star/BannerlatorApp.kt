@@ -6,6 +6,7 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import com.winlator.star.perf.PerfRevertRegistry
+import com.winlator.star.perf.PerformanceSettings
 import com.winlator.star.perf.RootManager
 import com.winlator.star.perf.TempWatchdog
 
@@ -25,6 +26,7 @@ class BannerlatorApp : Application() {
             // Restore-if-dirty + root probe + crash/shutdown safety nets, BEFORE anything touches a node.
             RootManager.onAppStartup(this)
             TempWatchdog.init(this)
+            PerformanceSettings.init(this) // global defaults both perf surfaces bind to
 
             // App-level background => revert privileged writes (a single game Activity stopping is
             // handled in XServerDisplayActivity; this catches process-wide backgrounding).

@@ -1125,6 +1125,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
         XServerDrawerState.INSTANCE.setPerfPriorityBoost(resolvedPerfPriorityBoost());
         XServerDrawerState.INSTANCE.setPreferBigCores(preferBig);
         getWindow().setSustainedPerformanceMode(sustainedPerf);
+        // Keep the drawer flows consistent with the shared global-default store: for any toggle this
+        // session has NO per-game override on, mirror live global-default changes into the drawer so an
+        // edit in App Settings' Performance menu is reflected here too (two-way sync via one store).
+        XServerDrawerState.INSTANCE.startGlobalDefaultSync(
+                shortcut != null && shortcut.hasExtra("sustainedPerfMode"),
+                shortcut != null && shortcut.hasExtra("perfPriorityBoost"),
+                shortcut != null && shortcut.hasExtra("preferBigCores"));
 
         containerManager.activateContainer(container);
 
@@ -4732,35 +4739,42 @@ return true;
         return shortcut != null ? shortcut.getExtra("frameGenEngine", container.getFrameGenEngine()) : container.getFrameGenEngine();
     }
 
-    // ── Power-user performance toggles (non-root) — same read-source discipline as the block above:
-    // shortcut extra wins, container is the fallback. persistPerfToggle() writes back to whichever
-    // owner the launch resolver reads from (shortcut when launched from one, else the container), so a
-    // live in-game flip sticks for next launch instead of drifting between owners.
+    // ── Power-user performance toggles (non-root). LOCKED two-level resolution chain:
+    //     per-game shortcut override (only when the shortcut has that extra key set)  ->  global default.
+    // There is NO container level. The global default is the single shared store both perf surfaces
+    // bind to (App Settings' Performance menu writes it; the in-game drawer reads the effective value).
+    private boolean resolvedPerfBool(String key, boolean globalDefault) {
+        if (shortcut != null && shortcut.hasExtra(key)) return shortcut.getExtra(key, "0").equals("1");
+        return globalDefault;
+    }
     private boolean resolvedSustainedPerfMode() {
-        if (container == null) return false;
-        return shortcut != null
-                ? shortcut.getExtra("sustainedPerfMode", container.isSustainedPerfMode() ? "1" : "0").equals("1")
-                : container.isSustainedPerfMode();
+        return resolvedPerfBool("sustainedPerfMode",
+                com.winlator.star.perf.PerformanceSettings.INSTANCE.getSustainedPerfMode().getValue());
     }
     private boolean resolvedPerfPriorityBoost() {
-        if (container == null) return false;
-        return shortcut != null
-                ? shortcut.getExtra("perfPriorityBoost", container.isPerfPriorityBoost() ? "1" : "0").equals("1")
-                : container.isPerfPriorityBoost();
+        return resolvedPerfBool("perfPriorityBoost",
+                com.winlator.star.perf.PerformanceSettings.INSTANCE.getPerfPriorityBoost().getValue());
     }
     private boolean resolvedPreferBigCores() {
-        if (container == null) return false;
-        return shortcut != null
-                ? shortcut.getExtra("preferBigCores", container.isPreferBigCores() ? "1" : "0").equals("1")
-                : container.isPreferBigCores();
+        return resolvedPerfBool("preferBigCores",
+                com.winlator.star.perf.PerformanceSettings.INSTANCE.getPreferBigCores().getValue());
     }
+
+    // Persist a live in-game flip. With a shortcut this creates/updates the PER-GAME override (and tells
+    // the drawer to stop mirroring the global default onto that toggle). Without a shortcut (a container
+    // launched directly, no per-game store) the flip edits the GLOBAL default — the only durable store —
+    // keeping the two surfaces consistent.
     private void persistPerfToggle(String key, boolean on) {
         if (shortcut != null) {
             shortcut.putExtra(key, on ? "1" : "0");
             shortcut.saveData();
-        } else if (container != null) {
-            container.putExtra(key, on ? "1" : "0");
-            container.saveData();
+            XServerDrawerState.INSTANCE.markPerfOverridden(key);
+        } else {
+            switch (key) {
+                case "sustainedPerfMode": com.winlator.star.perf.PerformanceSettings.INSTANCE.setSustainedPerfMode(on); break;
+                case "perfPriorityBoost": com.winlator.star.perf.PerformanceSettings.INSTANCE.setPerfPriorityBoost(on); break;
+                case "preferBigCores":    com.winlator.star.perf.PerformanceSettings.INSTANCE.setPreferBigCores(on); break;
+            }
         }
     }
 

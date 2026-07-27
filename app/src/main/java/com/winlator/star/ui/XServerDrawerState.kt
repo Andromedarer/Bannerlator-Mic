@@ -1,7 +1,13 @@
 package com.winlator.star.ui
 
+import com.winlator.star.perf.PerformanceSettings
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 
 enum class TabType {
     GRAPHICS, HUD, RESHADE, CONTROLS, ADVANCED, TASK_MANAGER
@@ -288,6 +294,37 @@ object XServerDrawerState {
     fun setSustainedPerfMode(v: Boolean) { _sustainedPerfMode.value = v }
     fun setPerfPriorityBoost(v: Boolean) { _perfPriorityBoost.value = v }
     fun setPreferBigCores(v: Boolean)    { _preferBigCores.value = v }
+
+    // ── Two-way sync with the shared global-default store (PerformanceSettings) ──
+    // For a toggle the running session does NOT override per-game, mirror live changes of the global
+    // default into the drawer flow, so an edit in App Settings' Performance menu shows here too. Once
+    // the user flips it in-game WITH a shortcut (creating a per-game override), we stop mirroring that
+    // one (markPerfOverridden) so the override isn't clobbered by a later global change.
+    private val syncScope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
+    private var globalSyncJob: Job? = null
+    private var sustainedOverridden = false
+    private var priorityOverridden = false
+    private var bigCoresOverridden = false
+
+    fun startGlobalDefaultSync(hasSustained: Boolean, hasPriority: Boolean, hasBigCores: Boolean) {
+        sustainedOverridden = hasSustained
+        priorityOverridden = hasPriority
+        bigCoresOverridden = hasBigCores
+        globalSyncJob?.cancel()
+        globalSyncJob = syncScope.launch {
+            launch { PerformanceSettings.sustainedPerfMode.collect { if (!sustainedOverridden) _sustainedPerfMode.value = it } }
+            launch { PerformanceSettings.perfPriorityBoost.collect { if (!priorityOverridden) _perfPriorityBoost.value = it } }
+            launch { PerformanceSettings.preferBigCores.collect { if (!bigCoresOverridden) _preferBigCores.value = it } }
+        }
+    }
+
+    fun markPerfOverridden(key: String) {
+        when (key) {
+            "sustainedPerfMode" -> sustainedOverridden = true
+            "perfPriorityBoost" -> priorityOverridden = true
+            "preferBigCores"    -> bigCoresOverridden = true
+        }
+    }
     fun toggleFpsExpanded() { _fpsExpanded.value = !_fpsExpanded.value }
 
     fun reset() {
@@ -328,6 +365,8 @@ object XServerDrawerState {
         _sustainedPerfMode.value = false
         _perfPriorityBoost.value = false
         _preferBigCores.value = false
+        globalSyncJob?.cancel(); globalSyncJob = null
+        sustainedOverridden = false; priorityOverridden = false; bigCoresOverridden = false
         onClose = null; onKeyboard = null; onInputControls = null
         onScreenEffects = null; onGraphicEngine = null; onVibration = null
         onToggleFullscreen = null; onSetFullscreenMode = null; onPauseResume = null; onPipMode = null

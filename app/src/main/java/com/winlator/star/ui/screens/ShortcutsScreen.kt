@@ -5125,15 +5125,20 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
         )
     }
 
-    // Power-user performance toggles — per-game overrides (fall back to the container value).
+    // Power-user performance toggles — per-game overrides. Effective seed = per-game override (if the
+    // shortcut already has the key) else the GLOBAL default (App Settings > Performance). No container
+    // level. Saving writes the key, which pins a per-game override (same as the frame-gen/fps rows here).
     var sustainedPerfMode by remember {
-        mutableStateOf(shortcut.getExtra("sustainedPerfMode", if (shortcut.container.isSustainedPerfMode) "1" else "0") == "1")
+        mutableStateOf(shortcut.getExtra("sustainedPerfMode",
+            if (com.winlator.star.perf.PerformanceSettings.sustainedPerfMode.value) "1" else "0") == "1")
     }
     var perfPriorityBoost by remember {
-        mutableStateOf(shortcut.getExtra("perfPriorityBoost", if (shortcut.container.isPerfPriorityBoost) "1" else "0") == "1")
+        mutableStateOf(shortcut.getExtra("perfPriorityBoost",
+            if (com.winlator.star.perf.PerformanceSettings.perfPriorityBoost.value) "1" else "0") == "1")
     }
     var preferBigCores by remember {
-        mutableStateOf(shortcut.getExtra("preferBigCores", if (shortcut.container.isPreferBigCores) "1" else "0") == "1")
+        mutableStateOf(shortcut.getExtra("preferBigCores",
+            if (com.winlator.star.perf.PerformanceSettings.preferBigCores.value) "1" else "0") == "1")
     }
 
     // Audio driver
