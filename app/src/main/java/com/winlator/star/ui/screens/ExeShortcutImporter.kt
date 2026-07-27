@@ -178,7 +178,8 @@ internal object ExeShortcutImporter {
         // Resolve to a Wine drive letter against the container's mount map. Z: would
         // map to imagefs root (chroot view) and not reach external storage, so we use
         // F:/D:/etc. as defined in container.drives. If no existing drive contains the
-        // EXE path we add and persist a new letter pointing at the parent directory.
+        // EXE path we add and persist a new letter for the whole storage VOLUME, so the
+        // next game on the same card or stick reuses it instead of taking another letter.
         val winPath = WinePath.resolveWindowsPath(container, exeFile.absolutePath)
         // 4-backslash separators per Winlator's two-pass StringUtils.unescape().
         val escaped = WinePath.escapeForExec(winPath)

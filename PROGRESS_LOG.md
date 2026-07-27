@@ -1,5 +1,256 @@
 # Star-Compose — Progress Log
 
+## 2026-07-26 — 🔋 **Battery watts `0.0W` on HONOR was a CURRENT-UNIT bug, not voltage — auto-detect mA vs µA** (branch `fix/battery-watts-current-unit`, vc50)
+
+> The HONOR user's OTHER emulator (`squalle0nhart/winlator_ludashi_plus`, Ludashi-plus `WinlatorHUD.java`) shows `PWR 11.9W` where ours showed `0.0W`. Reading its source **corrected our earlier root-cause**: it uses `EXTRA_VOLTAGE` (so **voltage works fine** on that device — not blocked as we'd assumed) × current from `getBatteryCurrentAmps()`, which **auto-detects the current unit**: `raw < 20000 ? raw/1000 (mA→A) : raw/1000000 (µA→A)`. `BATTERY_PROPERTY_CURRENT_NOW` is *nominally* µA but many OEMs (this HONOR) report **mA** — a small number. Our watts assumed µA always → came out ~1000× too small → rounded to `0.0W`. Our runtime estimate still worked because it's a **ratio** (chargeCounter/current), unit-independent — which is why only watts broke and misled us.
+> **Fix (`HudMetrics`):** new `currentRawToAmps(raw)` (the `<20000 ⇒ mA` heuristic + `Long.MIN_VALUE`/0 guard) and `batteryCurrentAmps(bm)` (framework property → sysfs `current_now` fallback). `collectBattery` (Fusion) + legacy `getBattery` now compute watts = `voltage × amps` with unit detection; **`currentMicroAmps` left as-is for the runtime ratio** (no regression). +31/−3. Also keeps the earlier `voltage_now`/`power_now` fallbacks (harmless; fire only if voltage truly 0). Note: GPU is `N/A` on Ludashi-plus too → GPU stays a genuine device wall. ⚠️ NOT yet device-verified — needs the HONOR user to test. → [[project_bannerlator_hud_accuracy_20260726]]
+
+## 2026-07-26 — 📄 **GL/DirectDraw FPS vs benchmark — investigation closed + documented** (`docs/HUD_FPS_OPENGL_DIRECTDRAW.md`, main, vc50)
+
+> User noticed OpenGL/DirectDraw read a LOWER HUD FPS than the AIO benchmark's own counter (HUD ~90 vs "OpenGL 300 FPS"), while D3D/Vulkan match. **Root-caused definitively** with a throwaway `presentPixmap`/`copyArea`/`putImage` probe build (branch `tmp/present-rate-probe`, now deleted) run on-device with a GL cube rendering ~100s continuous: **PPRATE=0, CARATE=0, PIRATE=~8/s** (the benchmark's own FPS-text overlay, not the 3D frames). So **guest GL emits NO per-frame X present** — it renders into a shared GL texture/AHB that the host GLSurfaceView compositor samples at ~display rate; the true loop rate (~300) lives only in Wine's SwapBuffers. D3D/Vulkan present explicitly per-frame via `presentPixmap` (so they read correctly). **Not host-fixable** (would need guest-side Wine/Zink instrumentation; benefits only uncapped GL benchmarks) → **intentionally not pursued**. Committed a user-facing explanation doc; the same blurb is queued for the FusionHUD submodule README + the 2.9 release notes. All this session's HUD-accuracy branches merged to main (`7550ce42`) and their feature branches deleted. → [[project_bannerlator_hud_accuracy_20260726]]
+
+## 2026-07-26 — 🔗 **HUD FPS reads 0 on every AIO cube after the first — let a real render window reclaim the binding from the fallback** (branch `fix/hud-follow-active-window`, vc50)
+
+> Device sweep: the first AIO cube read a correct ~538 fps, every cube after it read 0.0. Cause was my own follow-active-window fix: the HUD binds to a render window only when it sees `_MESA_DRV` AND `frameRatingWindowId == -1`, but the fallback parks the binding on the static menu (never -1) after a cube closes — so the NEXT cube's `_MESA_DRV` never rebinds, and the FPS counter keeps ticking the non-presenting menu → 0. **Fix (`changeFrameRatingVisibility` property branch):** also **upgrade** the binding to a real `_MESA_DRV` render window when currently parked on a non-`_MESA_DRV` *fallback* window (`boundToFallback = frameRatingWindowId != -1 && !mesaDrvWindowIds.contains(frameRatingWindowId)`). Don't steal from another real render window, so single-window real games are unchanged. Restores FPS on the Vulkan + all D3D cubes. (Pure OpenGL/GLX cubes have no `_MESA_DRV` at all, so they stay on the focused-window fallback; their fps may still under-read — a GL-present-signal issue, separate.)
+
+## 2026-07-26 — ↩️ **REVERTED the Zink-label swap — DLL-mapping can't distinguish native-Vulkan from Zink-GL** (branch `fix/hud-follow-active-window`, vc50)
+
+> The opengl-before-vulkan swap (entry below) **regressed the native-Vulkan label**: device sweep showed the AIO **Vulkan cube reading "Zink"**. Root cause: `opengl32.dll` is resident **proactively** (Wine desktop / app startup, not only while GL renders), and Zink-GL *also* maps `vulkan-1.dll` — so BOTH APIs map BOTH DLLs and opengl-first paints everything non-D3D as "Zink". Reverted to **vulkan-first**: native Vulkan reads "Vulkan" (common case correct), OpenGL/Zink reads "Vulkan" too (underlying-accurate — Zink runs on Vulkan). The "Zink" label is effectively unreachable via module scanning and is left as-is. A truly correct GL-vs-Vulkan split would need an active-render signal (per-focused-window render API), not DLL presence — deferred. D3D detection unaffected throughout (Dragon Sword D3D12 etc. stay correct).
+>
+> Also confirmed from the sweep: the **FPS decay works** (no more frozen/stale value — idle reads 0), but the AIO cubes read **0.0 fps** because their present path doesn't tick the bound window's counter (the separate undercount issue). Real games tick fine.
+
+## 2026-07-26 — ⏱️ **HUD FPS freezes on a stale value (idle menu / AIO cube switch) — decay to 0 when no present arrives** (branch `fix/hud-follow-active-window`, vc50)
+
+> User: FPS "stops reading" after changing API in the AIO test, and shows a "random stuck FPS" at the idle menu. Root cause: `FpsCounter.getCurrentFPS()` returns `lastFPS` forever once `tick()` stops — and every present tick (compositor copyArea + Vulkan-AHB + GL-native + ASR) is gated on `wid == frameRatingWindowId`, so when the bound window stops presenting (static menu — kept bound by the follow-active-window fix — or an AIO cube whose present path doesn't tick this window) the number just sits frozen. **Fix:** `getCurrentFPS()` returns **0** when no frame has been presented within `STALE_FPS_MS` (1.5 s) — `lastFrameTime` made `volatile` for the lock-free staleness check. Clears well below 1 fps yet never flickers at normal rates; recovers instantly when presents resume. Fixes all HUDs (shared `FpsCounter`).
+>
+> Note: this makes the idle HUD honestly read 0 fps rather than a frozen value; the API label at the idle AIO menu still reads "Vulkan" because the menu app itself is a Vulkan client (correct, not stale). ⏭️ Undercounting of the AIO cubes' own fps (their present path barely ticks the bound window) is a deeper compositor-signal issue, separate.
+
+## 2026-07-26 — 🏷️ **HUD engine label: OpenGL/Zink games mislabeled "Vulkan" — check OpenGL before Vulkan** (branch `fix/hud-follow-active-window`, vc50)
+
+> User AIO-test sweep: every non-D3D GL path (OpenGL cube, DirectDraw) showed **"Vulkan"** instead of **"Zink"**. Root cause: `detectActiveDxApi` native path checked `vulkan` before `opengl`, but a **Zink-backed GL** app maps BOTH `opengl32.dll` (GL frontend) AND `vulkan-1.dll` (Zink's Vulkan backend) — so vulkan-first always won and the "Zink" branch was unreachable. **Fix:** swap the order — `if (opengl) return Zink/OpenGL; if (vulkan) return "Vulkan"`. A native-Vulkan app maps `vulkan-1.dll` but NOT `opengl32.dll`, so it still resolves to "Vulkan" (AIO Vulkan cube stays correct). D3D detection is unaffected (checked first). Fixes all HUDs. Verified from the sweep: Vulkan cube ✓, D3D8→D3D9·DXVK ✓, D3D11 ✓, D3D12·VKD3D ✓ — only the GL paths were wrong.
+>
+> ⏭️ NEXT: idle "stuck FPS" — the follow-active-window fix keeps the HUD bound to the static AIO menu after a cube closes, freezing the FPS at the last value (the menu never produces frames). Plus the HUD FPS reads wrong on the AIO cube windows themselves (their present path doesn't tick onUpdateWindowContent). Both are the same "fps counter fed by X content-updates" gap — separate fix.
+
+## 2026-07-26 — 🪟 **HUD vanishes on the OpenGL cube (AIO test) — follow the focused window when no `_MESA_DRV` window remains** (branch `fix/hud-follow-active-window`, vc50)
+
+> User: the HUD flashes then disappears ONLY on the AIO Graphics Test's **OpenGL** cube — every other cube (Vulkan, D3D8–12, DirectDraw) keeps the HUD. So it's not a generic new-window issue.
+>
+> **Root cause:** all HUDs bind to one X window via `frameRatingWindowId`, set when a window gets the **`_MESA_DRV`** property (`changeFrameRatingVisibility`). `_MESA_DRV` rides the **Vulkan surface**, so D3D*/Vulkan render windows carry it and the HUD stays bound. A **GL/Zink** title (the OpenGL cube) recreates its render window for GLX; the initial window (with `_MESA_DRV`) **unmaps** → HUD unbinds → and the new GL drawable **never gets `_MESA_DRV`** → the existing rebind loop finds no `_MESA_DRV` window → `frameRatingWindowId = -1` → HUD hides, even though the live cube window is focused right there. (The green "OpenGL 345 FPS" still visible is the AIO test's OWN overlay, not ours.)
+>
+> **Fix (`changeFrameRatingVisibility`, unmap branch):** when the `_MESA_DRV` rebind yields nothing, fall back to `xServer.windowManager.getFocusedWindow()` if it's a mapped **application window** — so the HUD **follows the focused window** instead of vanishing. **Strictly additive** — only fires when the existing `_MESA_DRV` rebind already failed, so D3D*/Vulkan cubes and real games (which keep `_MESA_DRV`) are untouched. Fixes ALL HUDs (shared binding). One file, ~+9 lines.
+>
+> ⚠️ Not yet device-verified — needs the AIO OpenGL cube re-test.
+
+## 2026-07-26 — 🎯 **HUD accuracy: live engine-API label (fixes "Zink" mislabel on D3D12 games) + per-core % frequency fallback** (branch `fix/hud-engine-label-live`, vc50)
+
+> Two user-reported HUD accuracy bugs, fixed centrally so ALL HUDs benefit (FrameRating h/v, PerfHud, GameNative HUD, Fusion HUD — they all read the one shared label).
+>
+> **1. Engine-API label mislabeled `Zink` on a D3D12 game.** Repro: "Dragon Sword Awakening" (`DSClient-Win64-Shipping.exe`, UE) showed `Zink` on every HUD. **Verified from the live process `/proc/5062/maps`: `d3d12.dll` + `d3d12core.dll` (VKD3D-Proton) mapped → it's really D3D12 · VKD3D.** Root cause: `startDxApiDetection` scanned once and **latched the first result, then stopped** (`return`). UE maps `opengl32.dll` early (GL probe) before `d3d12core.dll` loads, so the first scan returned `Zink` and froze. **Fix:** made detection a **continuous ~2s live loop** (background thread, off the render path) that re-pushes the label only when the API changes and never latches — so it upgrades past a transient GL to the real API. Added **early-exit** to `detectActiveDxApi` (`break` on the top-priority `d3d12` hit) so the /proc/maps scan of a multi-GB game stays cheap. Never downgrades (closed API DLLs stay resident) → the multi-API **AIO Graphics Test** shows the highest API loaded, a documented limit of module-scanning. Detection already fed all 5 HUD surfaces; `stopDxApiDetection` is called on stop+destroy so the forever-loop can't leak the Activity.
+>
+> **2. Per-core CPU % showed `—` (`?` in the diag).** Same HONOR/Android-16 firmware where `/proc/stat` is restricted (the aggregate CPU% already falls back to a scaling-freq estimate; per-core had NO fallback → `-1`). **Fix:** `readPerCorePercent()` now fills any core `/proc/stat` couldn't give from `scaling_cur_freq / cpuinfo_max_freq` (a load proxy, per-core clocks ARE readable) — mirrors the aggregate's fallback, also seeds the first sample. Cores with a real `/proc/stat` delta keep it → no regression.
+>
+> +35/−10, two files. Independent of the battery branch (`fix/hud-battery-watts-voltage-fallback`). vc50 / 2.8.1.
+
+## 2026-07-26 — 🔋 **Fusion HUD: battery watts stuck at 0.0W on HONOR (EXTRA_VOLTAGE=0) — voltage_now/power_now fallback + diag power_supply probe** (branch `fix/hud-battery-watts-voltage-fallback`, vc50)
+
+> User report (HONOR Magic 7 Pro, PTP-N49, SM8750 / Adreno 830, Android 16) via a HUD diagnostic export. HUD showed `BAT 23% 44°C 0.0W` — %, temp, current, runtime all populate but wattage was stuck at 0.
+>
+> **Root cause:** `HudMetrics` computes watts as `current × voltage`, gating on `voltageMv > 0`. On this HONOR firmware `BatteryManager.EXTRA_VOLTAGE` returns 0 (current comes from `BATTERY_PROPERTY_CURRENT_NOW`, which works — the runtime estimate proves it), so the guard zeroes watts. No voltage fallback existed.
+>
+> **Fix (`collectBattery` = Fusion path, + legacy `getBattery`):** when `voltageMv <= 0`, fall back to power_supply sysfs `voltage_now` (µV→mV) via new `VOLTAGE_CHANNELS`; `collectBattery` additionally uses `power_now` (µW) directly as a last resort via `POWER_CHANNELS` + shared `readLongFromChannels()` helper. **Strictly additive / no regression** — the fallback only fires where watts is already 0 today; devices with a working `EXTRA_VOLTAGE` never touch it. Pack-level nodes used (Magic 7 Pro is dual-cell ~8V, so `I×V` at the pack is correct).
+>
+> **Diagnostic (`buildDiagnosticsReport`):** added `appendPowerSupplyDump()` — the "Exists" section now lists each `/sys/class/power_supply/*` node's readable `voltage_now`/`current_now`/`power_now`. The prior report dumped thermal/kgsl/devfreq but NOT power_supply, so we couldn't confirm sysfs readability. A re-run from this user will show whether `voltage_now` is app-readable (→ fix lands) or SELinux-blocked like kgsl (→ battery also needs root).
+>
+> **GPU %/clock (`—`) NOT fixed — device limitation.** kgsl nodes (`gpubusy`/`gpu_busy_percentage`/`devfreq/gpu_load`/`clock_mhz`) exist but are SELinux-labeled `vendor_sysfs_kgsl`; the `untrusted_app` domain is denied, so every candidate path MISSes. Adding paths can't help (same blocked label). GPU **temp** works (thermal zones ARE app-readable). Also noticed **per-core % shows `—`** (per-core clocks work) — separate `/proc/stat` per-cpu gap, not addressed here.
+>
+> **GPU no-root recon (root toggle deferred — user's device likely NOT rooted).** Key asymmetry: `/dev/kgsl-3d0` is labeled `gpu_device` (`crw-rw-rw-`) and IS app-openable (rendering needs it) — only the `/sys/class/kgsl` *sysfs mirror* is blocked. So the real no-root path is reading GPU busy via **KGSL perf-counter ioctls on the device node** (not sysfs) — native/JNI, needs a proof-of-concept spike (perfcounters may be kernel-gated or conflict with Turnip/DXVK). Middle ground = Shizuku (shell can often read kgsl sysfs). Ruled out: DRM fdinfo (Adreno uses kgsl not `/dev/dri`), Vulkan (no busy% query), compositor-timing estimate (can't see guest GPU work). **Added `appendGpuNoRootProbes()` to the diagnostic** — probes (1) `Os.open(/dev/kgsl-3d0, O_RDWR/O_RDONLY)` reachability and (2) any app-readable `/sys/devices/platform/**/kgsl-3d0/devfreq/*` node — so the user's next export tells us if the ioctl route is viable BEFORE we write native code.
+>
+> +63 lines, one file. ⚠️ NOT verifiable on our Adreno-750 test device (different device) — needs the HONOR user to run the new build + re-export the diagnostic.
+
+## 2026-07-26 — 🎛️ **Fusion HUD (Mega): DX version off the engine row, stacked below the graph with the wrapper** (branch `feat/hud-mega-version-below-graph`, vc50)
+
+> User-driven layout tweak, **Mega size only** — Full/Tiles/Pill/Minimal untouched. On the shipped 2.8.1 Mega HUD the engine row read `D3D9 · DXVK 2.4.1-1-gplasync-pre-reg-0` (API value + long DX version) and the graphics wrapper (`Original`) was a lone dim line below the frametime graph. That long version string sat in the right column's shared label column and shoved every right-column value (RAM %, FPS, ms) to the far edge.
+>
+> **Change (`FusionHudView.buildMega`):** engine/FPS row now shows just `apiLabel()` (the API value, e.g. `D3D9 · DXVK`) — version stripped off. Below the graph there are now **two** subtle band-style lines, version first then wrapper: `DXVK 2.4.1-1-gplasync-pre-reg-0` (new `dxVersionLabeled()` helper = engine name + version, gated by the existing **DX ver** chip / `showDxVer`) then `Original` (gated by **Wrapper** / `showWrapper`, tight `sp(1f)` gap when both show). Replaced the now-unused `engineLabelWithDx()` with `dxVersionLabeled()`; `apiLabel()`/`dxVersion()` unchanged, other sizes unaffected (they never used `engineLabelWithDx`). `showDxVer` now gates the bottom version line instead of the engine-row suffix — same chip, moved target.
+>
+> Iterated against an HTML before/after preview the user reviewed (final: API value kept on engine row, labeled DX version + wrapper stacked at bottom, panel width left alone). +21/−17 one file.
+>
+> ⚠️ **NOT yet device-verified** — CI build pending, then on-device Mega HUD check on Adreno 750.
+
+## 2026-07-24 — 🎮 **Big Picture: per-game Community configs opened the WRONG (all-games) menu + BP menus were touch-only** (branch `feat/bigpicture-community-configs`, vc stays 49)
+
+> Reported on the current build (installed APK sha `fb51bde2…` == run `30135691692` @ `db1b1767`, standard flavor — verified). In Big Picture, a game's **Options → "Community configs"** opened the same **all-games** `CommunityCatalogBrowser` the top-rail globe opens (`onCommunityConfigs` just did `showCommunity = true`) instead of a menu scoped to the selected game. The top globe is correct and stays.
+>
+> **Fix:** new BP-local `GameCommunitySheet(vm, shortcut, onApply, onImport, onDismiss)` — the couch-mode counterpart of the phone Games screen's per-shortcut community dialog. Auto-matches the game (`vm.matchCommunityConfigs`), lists that game's uploaded configs (`vm.fetchGameConfigs`, device-ranked + "Matches my device" filter), applies a pick via BP's shared `applyCommunityPick` (so the missing-component/driver install + re-apply flow still fires). Share (`exportShortcutConfig`→FileProvider `${applicationId}.tileprovider`), Import (new BP JSON picker → `importConfigFile`), Upload (`uploadShortcutConfig` + replace-confirm) all reuse the phone VM one-shots. **DEFERRED:** "My uploads" manager (couch-mode TODO; still reachable via globe→account). Widened 6 phone composables `private`→`internal` for reuse (`CommunityConfigEntryCard`/`CommunityCard`/`CommunityStoreBadge`/`rememberGameConfigs`/`deviceHeaderLabel`/new `DpadHighlight`); phone dialog body untouched.
+>
+> **Controller/D-pad:** every BP menu is now navigable (Up/Down move highlight, A activate, B/Back close). Sheets are their OWN windows, so the root `onPreviewKeyEvent` can't see their keys — each sheet owns a single focus target (`bpSheetDpad`/`BpSheetScaffold` for the static Game options/Tools/Power sheets; a flat index model in `GameCommunitySheet`; game-list + drilled-config traversal in `CommunityCatalogBrowser`, gated to consume only D-pad/A/B so phone touch + soft-keyboard are unaffected).
+>
+> ⚠️ **NOT yet device-verified** — the load-bearing runtime assumption is that `ModalBottomSheet`/`Dialog` content can grab window focus for controller keys via `focusRequester`+`onPreviewKeyEvent` (mitigated with a first-frame `runCatching { requestFocus() }`). Couch smoke test pending: Game options → Community configs, D-pad moves highlight + A applies.
+
+## 2026-07-24 — 🤝 **PR #96 (@clintOnSky) triaged & closed — fixes already on `main`, contributor credited**
+
+> Downstream fix-pack from **@clintOnSky** (first-time contributor). Verified each of its 7 commits against `main`; closed the PR (not merged) since the wins already landed individually.
+>
+> **✅ Already on `main`:** bionic-fg present-path bounded fence wait (replacing `vkQueueWaitIdle`) + FIFO-pacing guard — landed via upstream `xXJSONDeruloXx/bionic-fg#6`, baked into the submodule, patch step retired in `build-bionic-fg.yml`; Xiaomi `libjpeg.so` symlink-shadow removal (`24d64ea0`, `ImageFsInstaller.java`); sign-agnostic battery wattage for Xiaomi/MTK positive-discharge (`1276f306`, `HudMetrics.java`); `WOWBOX64` content-type for arm64ec Box64 + live version-list refresh after the download sheet (`ShortcutsScreen.kt`).
+>
+> **➖ NOT taken (candidate future work):** HUD CPU% process-tree summation (main kept `/proc/stat` + scaling-freq fallback deliberately); Flow Scale **preset chips** Eco/Flow/Balanced/Boost/Max (main has the slider only); persist in-game frame-gen session multiplier across launches; drawer toggle to **hide store integrations**.
+>
+> Added `@clintOnSky` to README Credits, flagged **🌱 first-time contributor** (`b797ba01` + `02383090`). vc stays 49; README-only, no release.
+
+## 2026-07-24 — 🎯 **New containers start with Motion Aim OFF** (branch `fix/gyro-default-off`, merged to main)
+
+> `Container.GYRO_ENABLED_DEFAULT` was `true`, so a freshly created container began feeding gyro motion input to games without anyone asking for it. Motion aim is a deliberate choice — defaulted off.
+>
+> 🔑 **Checked before flipping, because this constant is NOT only a creation-time default** — it's the fallback for `isGyroEnabled()` whenever the `gyroEnabled` extra is absent, so changing it could have silently switched gyro off for anyone relying on the default. It can't: `ContainerManager.migrateGyroPrefsToContainers()` (one-time, guarded by `gyro_migrated_to_container`) wrote an **explicit** `gyroEnabled` onto every container, verified on-device (xuser-4 `"0"`, xuser-5 `"1"`). So only genuinely new containers see the new default. vc stays 49.
+
+## 2026-07-24 — 🛡️ **ASurfaceTransaction null-guard hardening** (`fix/asurface-transaction-null-guards`, off main `5f495eff`, vc stays 49)
+
+> **Defensive only — fixes no reported symptom.** Audit of every `ASurfaceTransaction_create` call site found the two host-renderer files inconsistent with themselves: some sites checked the result, most didn't. A null return (resource exhaustion) is passed straight into `ST_SETGEO`/`ST_SETBUF`/`ST_SETVIS` → native SIGSEGV, app dies and takes the running game with it. **10 sites fixed across 2 files.**
+>
+> **Scope — NOT the default renderer.** `VulkanRendererContext.cpp` (default `renderer = "vulkan"`, `Container.java:101`) never touches these APIs: **zero** call sites, nothing to fix. Only `ASurfaceRendererContext.cpp` (the opt-in `"surfaceflinger"` renderer) and `scanout/ScanoutContext.cpp` (GL renderer with `rendererNative`, default **false**) were affected. Most users run neither.
+>
+> **🔑 Three sites needed more than a one-line guard:**
+> - `scanoutSetCursorImage` — the guard must land **BEFORE** `int fence = scanoutCursorFence; scanoutCursorFence = -1;`. That pair hands ownership of the `AHardwareBuffer_unlock` fence fd to the transaction. Guarding *after* it orphans the fd (one leaked fd per failure); guarding *before* leaves it owned by the object, closed on the next upload or teardown. The obvious placement is the wrong one.
+> - `applyCursorGeometry` — `scanoutSetCursorPos` records `lastRawCursorX/Y` as applied *before* calling it, and dedupes identical positions. A bare `return` would let the dedupe suppress the retry and strand the cursor at its old position. Guard invalidates the dedupe cache (`SHRT_MIN`) so the next motion event re-issues.
+> - `ScanoutContext` init paths ×2 — `scanoutGameTx`/`scanoutTx` are **paired persistent** transactions. If one succeeds and the other fails, a bare return leaks the survivor, and `scanoutActive` must not go true holding only one. Both paths now delete the survivor, release both SurfaceControls, and (sibling path) fall back to `initFromWindow()`.
+>
+> Also: `updateWindow`'s `currentTx ? currentTx : ST_CREATE()` ternary only ever guarded a null `currentTx`, never `ST_CREATE`'s own result — now guarded. `destroy()`'s best-effort hide is wrapped so teardown still runs (never early-return out of `destroy()`). Added explicit `#include <climits>` — `INT_MAX` at `:183` had been riding a transitive include.
+>
+> **Origin:** comparing against pipetto's `winlator_bionic` DisplayX work, where [`cc4ac7d`](https://github.com/Pipetto-crypto/winlator/commit/cc4ac7d0c5d6db25a5a0d7501ccabcbf4e4ec9e8) fixed the same bug class in his cursor path. His other three DisplayX fixes do **not** apply to us — our ASR has no rendering thread/state machine (his [`bcc5e80`](https://github.com/Pipetto-crypto/winlator/commit/bcc5e804c7b01cd64e79bddc3748217a7e407084), which he partly reverted a day later), our `computeWindowRect` + `adjustRectLT` already handle the fullscreen src/dst case he got backwards, and we `dlsym` the whole `ASurfaceTransaction_*` API at `minSdk 26` so his 284-line Android 10 compat scramble is moot. Our `retireSurfaceControl` already defers release to the transaction-complete callback, which is stronger than his thread hand-off.
+>
+> ⚠️ **COMPILE-VERIFIED ONLY — not device-proven, and not meaningfully device-testable:** transaction-creation failure can't be forced on demand. Treat as hardening, not a repair.
+
+## 2026-07-24 — ✅ **Game-name mangling fixed + a never-passing test corrected** (merged to main)
+
+> **Bug:** `EXE_SUFFIX_RE` was unanchored, so `cleanName()` stripped `win64|shipping|client|launcher|game|x64|…` from ANYWHERE in a title, not just off the end. Device-proven on the real library: folder `Game Controller Test` resolved to **"Controller Test"** — the word "Game" eaten out of the middle. Only affects the fallback naming path (no Steam appid / GOG manifest / usable PE name), which is exactly what repacks and DRM-free copies take — and the new bulk folder import runs it across a whole library at once.
+>
+> **🔑 THE SECOND BUG, found ONLY by device-testing:** anchoring the regex fixed stripping but silently broke a *different* job the same regex was doing. `preferFolder = EXE_SUFFIX_RE.containsMatchIn(exeBase)` asks "does this exe name look like engine boilerplate, so trust the folder instead?" — that question wants **unanchored** matching. Anchoring it meant `GameConTest.exe` stopped preferring its folder and the game would have become **"GameConTest"**. The unit test passed and the diff read correctly; only a real folder on disk exposed it. **Split into two regexes sharing one word list: `EXE_NOISE_RE` (unanchored, boilerplate test) + `EXE_SUFFIX_RE` (anchored, stripping).**
+>
+> **Test 2:** `GameIdentifierTest` asserted `"The Witcher 3: Wild Hunt"` while `normalizeName():108` deliberately converts `:` to `" - "` (illegal in a Windows filename) — the code was right, the test had never passed. Expectation corrected.
+>
+> **✅ DEVICE-VERIFIED against 13 real games:** exactly one name changed (`Controller Test` → `Game Controller Test`), the other 12 byte-identical, same detection/flags/art. Installed APK sha verified as the fix build before testing.
+>
+> Both fixes originate with **arro000**, found buried in the merge commit of draft PR #156 where they were invisible to the diff and unreachable; the regex split is additional. vc stays 49.
+>
+> ⚠️ **NOT included, deliberately:** wiring `gradlew test` into CI. Doing so surfaced **4 pre-existing `ConfigExporterTest` failures** unrelated to this work, so it was pulled back out to keep this branch to the two fixes. Test wiring + those 4 failures are their own job. 🔑 Nothing has EVER run the unit tests in CI.
+
+## 2026-07-24 — 🗂️✅ **File Manager overhaul MERGED to main** — multi-select · real moves · archive extract · search/sort · grid + compact views
+
+> Merged from `feat/fm-multiselect`. **vc stays 49, no release cut.** User confirmed on device: multi-select and bulk ops, instant same-volume moves, merge-on-conflict, zip/7z extraction, search/sort/hidden, cancel, and the path-bar rework ("everything works great", "the path bar works great"). ✅ **Grid view, compact rows and the pinned free-space figure were device-confirmed too** (checked after the merge — an earlier note in this entry wrongly recorded them as untested). So the whole overhaul is device-verified.
+>
+> **🔑 Cut was always copy-every-byte-then-delete.** No `renameTo` fast path existed, so moving a 60 GB folder *within* internal storage rewrote 60 GB the filesystem could have relinked instantly. `moveWithProgress` tries `renameTo` first — **its returning false IS the cross-filesystem signal, so it doubles as the check** — falling back to copy+delete. Only when the destination is free: renaming *onto* an existing directory doesn't merge.
+>
+> **🔑 Merge needed no new copy logic.** `copyWithProgress` already recurses into an existing directory and truncates existing files, so Overwrite and Merge resolve to the same call and differ only in wording (chosen per item type). Previously every paste auto-renamed, so dropping an updated game folder over an existing one gave `DiRT 3 (1)` beside the original.
+>
+> **🔑 Archive extract was wiring, not new capability** — `commons-compress`, `xz` and `zstd-jni` were already in the build. New `core/ArchiveExtractor.kt` (zip · 7z · tar+gz/xz/bz2/zst · bare compressors); `TarCompressorUtils` couldn't be reused (tar.xz/tar.zst only, asset/Uri-shaped). Always extracts to a **named subfolder** — a zip of 400 loose entries would otherwise carpet the folder irreversibly — and every entry goes through a **Zip Slip guard**, since an archive can carry `../../../` entries that a naive `File(dest, name)` writes outside the target. **RAR reported unsupported** rather than failing silently.
+>
+> **UI came from device screenshots, not guesswork:** the path bar ellipsised on the right, so it read `/storage/emulated/0/Winlator/Game…` — hiding the only part that says where you are. Folder name now sits in the bar; the path drops below and **elides from the LEFT** via `elidePathStart` (Compose's TextOverflow can only trim the tail). Free space is pinned right because it slid with path length. Sort keeps folders leading in **both** directions — a descending sort that buries folders isn't what "Z to A" means.
+>
+> **🐞 Self-inflicted build break worth remembering:** a global find-replace of `size(36.dp)` for the compact-row icon also rewrote `FavoriteCard`, which has no `compact` parameter → `Unresolved reference 'compact'`. **Scope find-replace to the function you mean, or verify every hit.**
+
+## 2026-07-24 — 🗂️ **File Manager overhaul: multi-select, real moves, archive extract, search/sort** (branch `feat/fm-multiselect` `838fe876`, CI GREEN ×3, STAGED, ⬜ awaiting device test)
+
+> User asked for the lot after a survey of what the File Manager does and what it lacks. Built as one branch, one APK to test: `/sdcard/Download/bannerlator-fm-all-838fe87-standard.apk`, sha `553f3b52…` host==device. vc stays 49.
+>
+> **1. Multi-select + bulk ops.** Every action was single-file. Long-press enters selection mode, tap toggles from there; Select All / Copy / Cut / Delete bar. Clipboard became a `List<File>` — cut/copy is a property of the batch, since a clipboard mixing both has no coherent meaning. Bulk delete names the first five victims before confirming so an accidental Select All is visible while still reversible.
+>
+> **🔑 2. Cut was ALWAYS copy-every-byte-then-delete.** `FileUtils.copyWithProgress` had no `renameTo` fast path, so moving a 60 GB folder *within* internal storage rewrote 60 GB the filesystem could have relinked instantly. New `moveWithProgress` tries `renameTo` first — **`renameTo` returning false IS the cross-filesystem signal, so it doubles as the check** — and falls back to copy+delete. Only attempted when the destination is free, because renaming *onto* an existing directory doesn't merge.
+>
+> **3. Paste conflicts asked, not silently renamed** (user chose Overwrite/Merge/Keep-both, recommended option): dropping an updated game folder over an existing one used to give `DiRT 3 (1)` beside the original. 🔑 **Merge needed no new copy logic** — `copyWithProgress` already recurses into an existing directory and truncates existing files, so Overwrite and Merge resolve to the same call and differ only in wording (chosen per item type). Apply-to-all for batches.
+>
+> **4. Archive extract — new `core/ArchiveExtractor.kt`.** zip · 7z · tar(.gz/.xz/.bz2/.zst) · bare compressors, on `commons-compress`/`xz`/`zstd-jni` **already in the build** (so this was wiring, not new capability). `TarCompressorUtils` couldn't be reused — it covers only tar.xz/tar.zst and is built around asset/Uri sources. Two deliberate calls: always extracts to a **named subfolder** (a zip of 400 loose entries would otherwise carpet the folder irreversibly), and every entry path goes through a **Zip Slip guard** — an archive can carry `../../../` entries and a naive `File(dest, name)` writes outside the target. **RAR is detected and reported unsupported** rather than failing silently; commons-compress can't read it.
+>
+> **5. Search / sort / hidden / free space.** Filter-this-folder search; sort by name/date/size with tap-to-flip; 🔑 **folders always lead regardless of direction** — a descending sort that buries every folder under the files is not what "Z to A" means; directory `length()` is meaningless so folders order by name inside the size sort. Dotfile toggle, free space above the list. Sort + hidden persist. Row sizes already existed via `StringUtils.formatBytes`, reused rather than adding a second formatter.
+>
+> **Cancel** now works on any long copy/move/extract — previously the only way out of a wrong multi-gigabyte paste was killing the app.
+>
+> **⬜ DEVICE TEST:** long-press → select several → Copy → paste elsewhere · Cut within the same volume (should be **instant**, that's the renameTo path) · Cut internal→SD (must still copy) · paste onto an existing folder → Merge, confirm it updated rather than duplicating · extract a zip and a 7z · search/sort/hidden toggles · cancel a large copy mid-flight. ⚠️ 7z on a big archive is slow (LZMA on ARM) — expected, not a hang.
+
+## 2026-07-24 — ✅ **File Manager "Add to Shortcuts" now identifies the game** (branch `fix/fm-add-shortcut-naming`, DEVICE-VERIFIED "works well", merged to main)
+
+> **The importer was never missing anything — the call site was under-feeding it.** `addShortcutInContainer` passed `file.nameWithoutExtension` and no appId, which silently disabled most of the pipeline: `ExeShortcutImporter.kt:62` skips Steam's 600×900 portrait without an appId, `:64` skips the SGDB-by-appId lookup, `:87` gates off the Steam authoritative rename — leaving only an SGDB-by-name search running on strings like `dirt3_game` or `SACGUI`, which finds nothing. Adding DiRT 3 this way produced a shortcut literally called `dirt3_game` with, at best, an icon scraped out of the PE.
+>
+> Now runs `GameIdentifier.identify(file)` first and passes the resolved name + appId, exactly as `ShortcutsViewModel.importExe` does, falling back to the exe basename when identification finds nothing. **All three entry points finally behave identically** — `+` button, bulk folder import, and File Manager. ✅ Device-verified by the user ("works well"). vc stays 49.
+
+## 2026-07-24 — ✅ **DEVICE-VERIFIED + MERGED: drive letters, games-folder import, exe override, card menus, SD badges**
+
+> **User: *"everything is working as intended"*** — the folder scan, the confirm screen, the manual exe override, importing in bulk, and launching the imported games. Merged to `main` from `fix/drive-letter-exhaustion` (tip `e778c18f`, 9 commits). **vc stays 49, no release cut.**
+>
+> **🔑 The ranking heuristic — the part no build could validate — was right on a real library.** It chose `dirt3_game.exe` over the `dirt3.exe` launcher, `GTAIV.exe` over GTA IV's launcher variants, and `Hades.exe`; it correctly flagged `re3.exe (folder root)` vs `re3.exe (_Windows 7 Fix)` as ambiguous rather than guessing. Every "check this one" badge fired on a folder that genuinely ships two plausible binaries — i.e. the flag marks *ask the user*, not *bad guess*.
+>
+> **Three UI rounds came out of device screenshots**, each from something only visible on a real screen: (1) menus were bare text on a screen made entirely of cards → new `MenuOptionCard` matching the File Manager rows, applied to Select container, Add games, the found-games list and the exe picker; (2) rows ran together → dividers, then superseded by cards (a border per row made both redundant); (3) at the platform default dialog width the titles and exe names truncated to `aio graphics t…` / `AIO-Graphics-Te…`, which defeats a screen whose only job is letting the user read them → both import dialogs now take 94% width.
+>
+> **SD badge** on games stored on removable media, in grid (over the art's top corner) and list (after the container/resolution line). Detection reuses `storageVolumeRootOf` from the drive-letter work — resolve the shortcut's `Exec` to a real path, take its volume root, treat anything not under `/storage/emulated` as removable.
+>
+> **▶️ KNOWN GAP, deliberately not fixed here (own branch):** the File Manager's *Add to Shortcuts* calls `ExeShortcutImporter.addToShortcuts(context, container, file, file.nameWithoutExtension)` — raw exe basename, **no appId**. That cascades: `ExeShortcutImporter.kt:62` skips the Steam CDN portrait, `:64` skips SGDB-by-appId, `:87` gates off the Steam authoritative rename, and the surviving SGDB-by-name search runs on `dirt3_game`/`SACGUI` rather than a real title. So the same importer produces a markedly worse result than the `+` button or the bulk import. Fix is ~4 lines at the call site (`GameIdentifier.identify` → pass `name` + `appId`), kept separate so it wouldn't invalidate the device testing of this branch.
+
+## 2026-07-24 — 📁 **Games folder import: add a whole library in one pick** (same branch `fix/drive-letter-exhaustion` `78972029`, CI GREEN, STAGED — since device-verified, see above)
+
+> **User ask:** the `+` button only ever added one game at a time. Most users keep every game under one parent folder (user's = `/storage/emulated/0/Winlator/Games`), so importing a library meant dozens of identical trips through the picker. After picking a container there is now a **choice of HOW to add**: *Add game EXE* (existing flow, untouched) or *Add games folder*.
+>
+> **Design decisions (user, via AskUserQuestion — all three "recommended"):** (1) the results screen is a **confirmation gate**, nothing is written until accepted; (2) on ambiguity **pick the best candidate but flag it** rather than skipping or prompting per game; (3) games already in the container are **detected and shown as "already added"**, not re-imported.
+>
+> **🔑 THE HARD PART — new `core/GameFolderScanner.kt`. `GameIdentifier` could not be reused for this: it takes an exe the user ALREADY chose and reasons upward. Here the exe is the unknown.** A real install folder holds installers, crash handlers, anti-cheat stubs and launchers beside the game, and the game may sit several levels down (`Game/Binaries/Win64/Game-Win64-Shipping.exe`). So candidates are collected with a **depth-bounded walk (≤4)** and **ranked**: exe named after its folder +100/+60 · `-Win64-Shipping` +70 · `Binaries/Win64` path +30 · launcher-name −40 · junk PE name −30 · depth −8/level · size bonus ≤+30. Skips `_CommonRedist`/`DirectX`/`EasyAntiCheat`/etc. dirs and `unins*`/`vcredist*`/`UnityCrashHandler*`/`dxsetup` names outright.
+>
+> **Confidence falls out of the ranking for free** — below a score threshold, or when the top two are within 15 points, the row is badged *"Check this one — <exe>"*. Deliberately badged, not hidden: the scanner still made its best pick, the user just gets told which are worth a second look.
+>
+> **Reuse, so bulk-added games are indistinguishable from hand-added ones:** naming via `GameIdentifier.identify`, importing via `ExeShortcutImporter.addToShortcuts` — same Steam-name upgrade, same cover-art chain. `isLauncherExe` → **`isLauncherExeName` (public)** so the scanner shares the launcher rules instead of growing a second copy that can drift.
+>
+> **🔑 Cover art on the confirm screen is a URL rendered by Coil, NOT a download.** `saveCoverArt` is coupled to an already-written shortcut, so resolving art pre-import would have meant temp files. Instead `SteamStoreSearch.coverUrl(appId)` gives a URL instantly and only confirmed games fetch/persist. Scanning 40 games pulls zero images into the container.
+>
+> **Duplicate detection** resolves each existing shortcut's `Exec` back through `WinePath.resolveAndroidPath` and compares canonical paths — dimmed, unticked, uncheckable, with "N already added" in the header.
+>
+> **Folder picker uses `InAppFilePicker.buildDirIntent`** (real absolute path, works on SD) — deliberately not SAF, which returns unusable `/mnt/media_rw/…`.
+>
+> **CI GREEN run `30088575796`** (3 flavors, headSha `78972029`). 📲 Staged `/sdcard/Download/bannerlator-folder-import-7897202-standard.apk`, sha256 `404840df…` host==device. vc stays 49. *(Built with the default `1.0-test` label so `stage-apk` works — see the drive-letter entry for why that matters.)*
+>
+> **⚠️ THE RANKING HEURISTIC IS UNPROVEN AND IS THE WHOLE FEATURE.** A green build says nothing about whether it picks the right exe. Only a real library answers that.
+>
+> **⬜ DEVICE TEST:**
+> 1. `+` → container → **Add games folder** → pick `/storage/emulated/0/Winlator/Games`. Every game should be listed, with the **right name and the right art**.
+> 2. **Check what it picked for each** — especially anything badged "Check this one". UE titles (Titanfall 2) and launcher-fronted ones (GTA V's `PlayGTAV.exe`, GTA IV) are the interesting cases.
+> 3. Already-imported games must appear **dimmed and unticked** (this container has 6 → expect all 6 skipped if scanning the same folder).
+> 4. Untick one, press **Add** → only the ticked ones appear, and they **launch**.
+> 5. Run it against the **SD** library too — that path exercises the drive-letter fix at the same time.
+> 6. *Add game EXE* must still behave exactly as before (regression check).
+
+## 2026-07-24 — 🗂️✅ **Drive-letter exhaustion: one letter per VOLUME, not per game — DEVICE-VERIFIED** (branch `fix/drive-letter-exhaustion` `df67a4dc`, CI GREEN, ✅ all six checks pass, awaiting merge decision)
+
+> **✅ DEVICE TEST PASSED 2026-07-24 — user: *"everything is working as intended"*.** All six checks green, including the one that could only fail at runtime: **a freshly-imported SD game launches**, which is what proves Part B computes the path relative to the coarser volume-root mount correctly (the old code returned the bare filename). Second SD game reused the drive with no new letter; internal storage unregressed; new containers get `D:`/`E:`/`F:` per volume; no `bannerlator_components` drive (Part C); dropdown ends at `Z:`.
+>
+> **Ready to merge to `main`. vc stays 49, no release cut.** Existing containers keep their per-game `G:`/`I:`/`J:` drives by design — growth stops, no migration.
+
+
+> **Bug:** every game imported from SD/USB claimed its own drive letter, and the pool is ~24, so a large SD library eventually could not import at all. `resolveWindowsPath` mounted the exe's **own parent folder**, and `bestDriveMatch` only reuses a drive that is an **ancestor** of the new path — one game's folder is never an ancestor of the next game's sibling folder.
+>
+> **🔑 DEVICE-PROVEN SCOPE CORRECTION (2026-07-24, from user screenshots + live dumps): internal storage was NEVER affected, and the user's "it happens on internal too" report did not hold up.** Container-6 dump: `F:`→`/storage/emulated/0` shared by **five** internal games (GTA V, Titanfall 2, The Crew 2, FlatOut 2, God of War — every `Exec` line reads `F:\Winlator\Games\…`), with per-game drives existing **only** for the two SD games. God of War was added live mid-session as the test and correctly reused `F:`, creating nothing. Why it looked otherwise: Container-6 happens to show **5 games and 5 drive rows**, and the Drives tab truncates `G:` and `I:` to the same `…/Winlator/Games/` text, so it reads as one-per-game when it isn't.
+>
+> **🐞 NEW BUG FOUND IN THE SAME SCREENSHOTS (not in the original spec) — the component installer burns a letter per container.** Every container on the device had a drive pointing at `…/.wine/drive_c/windows/temp/bannerlator_components`. Cause: `drivesIterator()` does **not** include `C:`, so any path under `drive_c` misses every drive and allocates. `resolveAndroidPath` has always special-cased `C:` (`WinePath.kt:59-61`) — the two directions were asymmetric. Became **Part C**.
+>
+> **Part A — per-volume defaults for NEW containers** (`ContainerDetailViewModel`): `D:` Downloads, `E:` internal root, `F:` onward per mounted removable volume. **Seeded at the editor seam (`:533`), NOT by changing `Container.DEFAULT_DRIVES`** — that is a `static final` with no Context, and it initialises a field on *every* `Container` object including ones loaded from disk, where the value is immediately overwritten by saved JSON. Two hardening choices beyond the spec: internal/Downloads come from `Environment` (deterministic), and only **genuine volume roots** are pre-declared, because `StorageRoots` deliberately degrades an unreadable volume to the deepest listable dir and would otherwise point `E:`/`F:` at an `Android/data/…` subfolder.
+>
+> **Part B — mount the storage VOLUME ROOT on a miss** (`WinePath`): new pure `storageVolumeRootOf()` handling `/storage/emulated/<n>`, `/storage/<uuid>`, `/mnt/media_rw/<uuid>`; anything else returns null and keeps the old parent-folder behaviour. ⚠️ **Named deliberately unlike `StorageRoots.volumeRootOf` (`StorageRoots.kt:157`), which is a DIFFERENT function** — it walks up from an app-specific dir looking for an `Android` folder. Same name, different job; do not conflate them.
+>
+> **🔑 THE TRAP, handled:** the miss branch used to return `"$letter:\\$fileName"` — the bare filename, correct **only** because the mount was the file's own parent. With a volume-root mount the exe is many folders deep, so it now returns the full path relative to the mount. **This compiles clean and fails only at runtime**, which is why the device test below leads with launching a freshly-imported SD game.
+>
+> **Also:** drive-letter dropdown capped at `Z` (it counted `MAX_DRIVE_LETTERS`=26 steps up from `'D'`, running three past `Z` and offering selectable `"[:"`, `"\:"`, `"]:"`; `addDrive()`'s guard now uses the real option count). Exhaustion throws a typed `NoFreeDriveLetterException` with an actionable message at both call sites instead of a raw `IOException`.
+>
+> **No migration by design.** Existing per-game drives (`G:` DiRT 3, `I:` GTA IV, xuser-4's `J:` DiRT Showdown) stay and keep resolving — `bestDriveMatch` prefers the longest match. Growth stops; collapsing them would mean rewriting every existing shortcut's `Exec`, which is a separate job with its own device test.
+>
+> **Recon confirmed before building** (re-run against current `main`, since Smart Game Import had merged): still exactly **3 writers** (`ExeShortcutImporter:182`, `FileManagerScreen:327`, `ComponentExecInstaller:246`) and **3 readers** (`ShortcutsScreen:883/:4495/:4501`); **only 2 references to `DEFAULT_DRIVES`** in the tree; **zero hardcoded `"F:"`/`"E:"`/`"D:"` literals**, so moving internal to `E:` on new containers breaks nothing.
+>
+> **CI GREEN run `30083172711`** (3 flavors, headSha `df67a4dc` verified). **📲 STAGED `/sdcard/Download/bannerlator-drive-letters-df67a4d-standard.apk`, sha256 `877e7a1e2057b135…` host==device.** vc stays 49. ⚠️ `stage-apk` could not be used — it hardcodes the default `Bannerlator-1.0-test-<flavor>` artifact name and this run was dispatched with `release_number=drive-letters`; staged by hand.
+>
+> **⬜ DEVICE TEST (order matters; #1 is the only one that can really fail):**
+> 1. **Import an SD game and LAUNCH it** — must use a game **not already imported**, since DiRT 3/GTA IV would hit their existing per-game drives and prove nothing.
+> 2. Import a **second** SD game → **no new drive**, and it launches.
+> 3. Import an internal game → still no new drive (God of War is the control).
+> 4. Create a **new** container with the card in → Drives reads `D:` Downloads / `E:` `/storage/emulated/0` / `F:` `/storage/7B7F-E3AA`.
+> 5. Install a component → **no** new `bannerlator_components` drive (Part C).
+> 6. Drive-letter dropdown → last entry `Z:`, no `[:` `\:` `]:`.
+>
+> Logcat marker: `Auto-added drive <X>: -> <path>` — on an SD import it should fire **once** with the bare volume root, and **not at all** on the second SD game.
+
 ## 2026-07-22 — 🖥️ **In-game refresh rate unlocked** — RandR X-server extension + Max-refresh setting (branch `feat/randr-refresh-modes`, vc48→**49**)
 
 > **Every game that exposes a refresh toggle was locked to 60 Hz on a 144 Hz panel, and no client-side setting could change it — the cause was on our side.** The X server implemented BigReq, DRI3, MIT-SHM, Present and Sync but **no RandR at all**. RandR is how `winex11.drv` enumerates display modes; finding none it falls back to its NoRes settings handler (priority 1), whose `nores_get_modes()` returns exactly one mode with `dmDisplayFrequency` hardcoded to 60. That single synthetic mode is what reached the games.
@@ -4656,3 +4907,29 @@ A volume reported by *any* source is **always** emitted. When its root is unread
 **✅ CONFIRMED ON REAL HARDWARE by @Devaspe (HyperOS device): bionic-fg works, then lsfg-vk confirmed after.** Both layers load. This validates clintOnSky's entire diagnosis.
 
 **Credits (for the release notes):** **@clintOnSky** — diagnosis + fix, PR #96, code contributor (his PR also carries a native present-path fix, not yet landed). **@Shalaykin1** — issue **#40 "Fix framegeneration on HyperOS 3"** ("HyperOS 2 works normally, HyperOS 3 not working, works only in GameHub app" — GameHub ships its own imagefs, hence no symlink). **@Devaspe** — device confirmation on HyperOS. ⚠️ #40 is still CLOSED and its reporter has not been told it's fixed. Also possibly the same bug: **@EddyGameDev** #58 ("tried bionic and LSFG, neither want to work" = the exact both-layers signature, device unstated). **NOT this bug:** @132edsaz #43 (Galaxy A14 / Dimensity 700 — MediaTek/Mali, no libjpeg-hyper).
+
+
+---
+
+## 🏁 2026-07-26 — 2.8.2 HOTFIX CUT + Controller-overlay fix (pinned) + FusionHUD v1.0 first release
+
+**Context:** main had the whole HUD-accuracy pass + the HONOR/mA battery-watts fix merged but unreleased (main `6a14c4a2`, ahead of the 2.8.1 stable tag). This session: built a controller-overlay fix (device-proven, then pinned), then cut 2.8.2 to ship the pile-up.
+
+### 🎮 Controller-overlay fix — HUD renders BENEATH on-screen controls (✅ device-proven, PINNED, NOT in 2.8.2)
+Problem: the in-game perf HUD drew OVER the touchscreen control buttons, so a **locked** HUD on top of e.g. R2 ate the button press. **User rejected Solution A** (make the locked HUD touch-transparent) because it dropped long-press-unlock-while-locked: *"the long press to lock and unlock needs to stay in place."*
+**Solution B (shipped on branch `fix/hud-under-controls` @ `4427571d`, off main `6a14c4a2`):**
+- `XServerDisplayActivity.placeHudBelowControls(View)` drops each built HUD one z-slot BELOW `inputControlsView` (surgical `removeView`+`addView(hud, controlsIndex)` — leaves the DrawerLayout menu + `dialogHostView` ComposeView untouched). Called after all 5 `rootView.addView` HUD sites.
+- `InputControlsView` gains `setHudFallThroughViews(View...)` + `hudAt(x,y)` + `hudTarget`: a touch NOT grabbed by a control ELEMENT (buttons checked first → a button under the HUD wins) that lands on a VISIBLE HUD candidate is forwarded (whole gesture, latched on DOWN / reset on UP) to that HUD — so long-press/drag/tap still reach it. Candidate list = all 5 HUD views (nulls/GONE skipped → classic h/v pair auto-resolves). Controls-off path unchanged (HUD topmost, gets touches directly).
+- `HudLockController` untouched (still always-consumes → long-press intact).
+- **Build snag caught+fixed:** first CI run failed — my field block split an `@Override` from `onTouchEvent` (`error: annotation type not applicable`). Fixed by restoring `@Override` on the method. Green rebuild = run `30219099604` (all 3 flavors), standard APK sha256 `e060ba55…aa807`, staged to Downloads.
+- **User device-verified:** *"R2 works and long press still locks."* Then: *"put a pin in this"* → left UNMERGED, queued for 2.9.
+
+### 🚀 Stable 2.8.2 cut (vc51, tag `2.8.2` → `dc1a78d3`, run `30220212231`)
+HOTFIX over 2.8.1. Version bump on main (vc 50→51, vn 2.8.1→2.8.2, commit `dc1a78d3`), dispatched `release.yml --ref main` (JSON inputs via `gh workflow run --json` stdin — clean multi-line notes). **Verified live:** isPrerelease=false, draft=false, `releases/latest`→2.8.2, **tag→built commit** (release.yml default-branch quirk was harmless: main HEAD == built commit), `update.json` vc51/2.8.2 + all 3 APKs.
+- **Ships:** HONOR/mA battery-watts fix + HUD-accuracy pass (live engine-API label, per-core CPU%, FPS decay+binding-reclaim, follow-active-window) + GL-FPS doc.
+- **Description** (proper format, added post-cut via `gh release edit`): logo/badge header · hotfix framing + "What's fixed" list · Credits (Angel + winlator_ludashi_plus/squalle0nhart) · repeated ⚠️ 2.9-pre VC-Pro-loss warning · expandable `<details>` on OpenGL/DirectDraw-vs-benchmark FPS in the AIO Graphics Test · "🧩 Fusion HUD is open source" section linking the FusionHUD release + repo.
+
+### 🧩 FusionHUD v1.0 — first release of the standalone library
+The repo (`The412Banner/FusionHUD`) had NO releases. Cut **`v1.0`** at `d171774` (`--latest`), attaching `fusionhud-1.0-release.aar` (95 KB library) + `fusionhud-1.0-demo-debug.apk` (3.3 MB preview) from CI run `30217601607`. Notes: what-it-is / adopt-via-JitPack(`com.github.The412Banner:FusionHUD:v1.0`)-or-fork / GPL-3.0 §7(b) attribution. Linked from the 2.8.2 description for other projects to adopt. ⚠️ `gh release create --target` needs a FULL sha (12-char abbrev → HTTP 422).
+
+**▶️ NEXT: 2.9** = merge PR #156 (Virtual Controller Pro) + the pinned `fix/hud-under-controls` + newer work.
