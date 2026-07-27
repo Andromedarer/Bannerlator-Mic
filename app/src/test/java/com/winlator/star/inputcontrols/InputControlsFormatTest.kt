@@ -34,6 +34,39 @@ class InputControlsFormatTest {
     }
 
     @Test
+    fun customIconReferenceCount_handlesCurrentAndLegacyIds() {
+        val root = JSONObject().put(
+            "elements",
+            JSONArray()
+                .put(JSONObject().put("iconId", 100))
+                .put(JSONObject().put("iconId", -56))
+                .put(JSONObject().put("iconId", 5))
+        )
+
+        assertEquals(1, InputControlsManager.countCustomIconReferences(root, 100))
+        assertEquals(1, InputControlsManager.countCustomIconReferences(root, 200))
+        assertEquals(0, InputControlsManager.countCustomIconReferences(root, 101))
+    }
+
+    @Test
+    fun customIconReferenceCount_rejectsMalformedProfileData() {
+        assertEquals(
+            -1,
+            InputControlsManager.countCustomIconReferences(
+                JSONObject().put("elements", "invalid"),
+                100,
+            ),
+        )
+        assertEquals(
+            -1,
+            InputControlsManager.countCustomIconReferences(
+                JSONObject().put("elements", JSONArray().put(JSONObject().put("iconId", "100"))),
+                100,
+            ),
+        )
+    }
+
+    @Test
     fun serialization_clearsKnownOptionalFieldsButKeepsForkFields() {
         val source = JSONObject()
             .put("groupId", "old-group")

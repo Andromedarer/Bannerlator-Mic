@@ -434,6 +434,45 @@ public class InputControlsManager {
         return iconId >= Byte.MIN_VALUE && iconId < 0 ? iconId & 0xFF : iconId;
     }
 
+    static int countCustomIconReferences(JSONObject data, int iconId) {
+        if (!data.has("elements")) return 0;
+        JSONArray elements = data.optJSONArray("elements");
+        if (elements == null) return -1;
+
+        int references = 0;
+        for (int i = 0; i < elements.length(); i++) {
+            JSONObject element = elements.optJSONObject(i);
+            if (element == null) return -1;
+            if (!element.has("iconId")) continue;
+            Integer storedIconId = getIntegralVersion(element, "iconId");
+            if (storedIconId == null) return -1;
+            if (normalizeLegacyIconId(storedIconId) == iconId) references++;
+        }
+        return references;
+    }
+
+    public static int countCustomIconReferences(Context context, int iconId) {
+        if (iconId < CustomIconManager.CUSTOM_ICON_ID_OFFSET
+                || iconId > CustomIconManager.MAX_CUSTOM_ICON_ID) return -1;
+        File[] files = getProfilesDir(context).listFiles(
+                (dir, name) -> name.startsWith("controls-") && name.endsWith(".icp"));
+        if (files == null) return -1;
+
+        int references = 0;
+        for (File file : files) {
+            try {
+                int profileReferences = countCustomIconReferences(
+                        new JSONObject(readStringAtomically(file)), iconId);
+                if (profileReferences < 0) return -1;
+                references += profileReferences;
+            }
+            catch (IOException | JSONException e) {
+                return -1;
+            }
+        }
+        return references;
+    }
+
     static void truncateProfileCombos(JSONObject data) {
         JSONArray elements = data.optJSONArray("elements");
         if (elements == null) return;

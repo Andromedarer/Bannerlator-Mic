@@ -254,9 +254,22 @@ public class CustomIconManager {
                 && (long)width * height <= MAX_ICON_PIXELS;
     }
 
-    public void deleteIcon(int id) {
-        if (id >= CUSTOM_ICON_ID_OFFSET && id <= MAX_CUSTOM_ICON_ID) {
-            new File(customIconsDir, id + ".png").delete();
+    public boolean deleteIcon(int id) {
+        synchronized (ICON_STORAGE_LOCK) {
+            return deleteIconLocked(id);
         }
+    }
+
+    public boolean deleteIconIfUnused(int id) {
+        synchronized (ICON_STORAGE_LOCK) {
+            return InputControlsManager.countCustomIconReferences(context, id) == 0
+                    && deleteIconLocked(id);
+        }
+    }
+
+    private boolean deleteIconLocked(int id) {
+        if (id < CUSTOM_ICON_ID_OFFSET || id > MAX_CUSTOM_ICON_ID) return false;
+        File iconFile = new File(customIconsDir, id + ".png");
+        return iconFile.isFile() && iconFile.delete();
     }
 }

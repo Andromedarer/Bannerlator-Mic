@@ -23,6 +23,7 @@ import java.util.List;
 
 import kotlin.Unit;
 import kotlin.jvm.functions.Function0;
+import kotlin.jvm.functions.Function1;
 import kotlin.jvm.functions.Function2;
 
 final class InGameControlsEditor {
@@ -220,6 +221,15 @@ final class InGameControlsEditor {
                             closeDialog();
                             onPickCustomIcon.run();
                         }),
+                        new Function1<Integer, Boolean>() {
+                            @Override
+                            public Boolean invoke(Integer iconId) {
+                                if (iconId == null || !customIconManager.deleteIconIfUnused(iconId)) return false;
+                                inputControlsView.evictCustomIcon(iconId);
+                                refreshSidebar();
+                                return true;
+                            }
+                        },
                         composer,
                         0);
                 return Unit.INSTANCE;

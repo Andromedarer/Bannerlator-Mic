@@ -1597,4 +1597,12 @@ public class InputControlsView extends View {
         }
         return icons[index];
     }
+
+    public void evictCustomIcon(int id) {
+        if (id < CustomIconManager.CUSTOM_ICON_ID_OFFSET || id >= icons.length) return;
+        Bitmap bitmap = icons[id];
+        icons[id] = null;
+        if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
+        invalidate();
+    }
 }

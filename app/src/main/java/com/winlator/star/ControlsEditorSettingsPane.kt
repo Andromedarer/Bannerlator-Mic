@@ -7,9 +7,11 @@ import java.io.File
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -77,6 +79,7 @@ import com.winlator.star.inputcontrols.Binding
 import com.winlator.star.inputcontrols.ControlElement
 import com.winlator.star.inputcontrols.ControlsProfile
 import com.winlator.star.inputcontrols.CustomIconManager
+import com.winlator.star.inputcontrols.InputControlsManager
 import com.winlator.star.ui.components.ColorPicker
 import com.winlator.star.ui.theme.AppThemeState
 import kotlinx.coroutines.delay
@@ -101,6 +104,12 @@ private data class PickerIcon(
     val isCustom: Boolean = false,
 )
 
+private data class CustomIconDeleteRequest(
+    val iconId: Int,
+    val usageCount: Int,
+    val deleteFailed: Boolean = false,
+)
+
 @Composable
 fun ControlsEditorSettingsPane(
     element: ControlElement,
@@ -111,6 +120,7 @@ fun ControlsEditorSettingsPane(
     context: Context,
     onClose: () -> Unit,
     onPickCustomIcon: () -> Unit,
+    onDeleteCustomIcon: (Int) -> Boolean,
 ) {
     val typeOptions = listOf(
         stringResource(R.string.control_type_button),
@@ -198,6 +208,7 @@ fun ControlsEditorSettingsPane(
     var customAreaColor by remember { mutableStateOf(element.getCustomAreaColor()) }
     var customAreaOpacity by remember { mutableStateOf((element.getCustomAreaOpacity() * 100f).roundToInt()) }
     var showAreaColorPicker by remember { mutableStateOf(false) }
+    var customIconDeleteRequest by remember { mutableStateOf<CustomIconDeleteRequest?>(null) }
 
     fun saveAndInvalidate() {
         val normalizedGroupId = groupId.trim()
@@ -874,6 +885,10 @@ fun ControlsEditorSettingsPane(
                         Text(text = stringResource(R.string.add), color = EditorAccent)
                     }
                 }
+                Text(
+                    text = stringResource(R.string.long_press_custom_icon_to_delete),
+                    color = EditorSubText,
+                )
                 IconPicker(
                     icons = customIcons,
                     selectedId = selectedIconId,
@@ -881,6 +896,14 @@ fun ControlsEditorSettingsPane(
                         selectedIconId = id
                         element.setIconId(id)
                         saveAndInvalidate()
+                    },
+                    onLongPress = { id ->
+                        val usageCount = if (profile.save()) {
+                            InputControlsManager.countCustomIconReferences(context, id)
+                        } else {
+                            -1
+                        }
+                        customIconDeleteRequest = CustomIconDeleteRequest(id, usageCount)
                     },
                 )
                 SettingSwitch(
@@ -904,6 +927,55 @@ fun ControlsEditorSettingsPane(
                     },
                 )
             }
+        }
+
+        customIconDeleteRequest?.let { request ->
+            val canDelete = request.usageCount == 0 && !request.deleteFailed
+            val message = when {
+                request.deleteFailed -> stringResource(R.string.unable_to_delete_custom_icon)
+                request.usageCount < 0 -> stringResource(R.string.unable_to_check_custom_icon_usage)
+                request.usageCount > 0 -> context.resources.getQuantityString(
+                    R.plurals.custom_icon_in_use,
+                    request.usageCount,
+                    request.usageCount,
+                )
+                else -> stringResource(R.string.delete_custom_icon_confirmation)
+            }
+            AlertDialog(
+                onDismissRequest = { customIconDeleteRequest = null },
+                title = {
+                    Text(
+                        text = stringResource(
+                            if (canDelete) R.string.delete_custom_icon else R.string.custom_icon_not_deleted
+                        ),
+                        color = EditorText,
+                    )
+                },
+                text = { Text(text = message, color = EditorSubText) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        if (!canDelete) {
+                            customIconDeleteRequest = null
+                        } else if (onDeleteCustomIcon(request.iconId)) {
+                            customIconDeleteRequest = null
+                        } else {
+                            customIconDeleteRequest = request.copy(deleteFailed = true)
+                        }
+                    }) {
+                        Text(
+                            text = stringResource(if (canDelete) R.string.remove else R.string.ok),
+                            color = EditorAccent,
+                        )
+                    }
+                },
+                dismissButton = {
+                    if (canDelete) {
+                        TextButton(onClick = { customIconDeleteRequest = null }) {
+                            Text(text = stringResource(R.string.cancel), color = EditorTextValue)
+                        }
+                    }
+                },
+            )
         }
 
         SettingsSection(title = stringResource(R.string.group_label), visible = true) {
@@ -1260,16 +1332,19 @@ private fun QuickFillBar(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun IconPicker(
     icons: List<PickerIcon>,
     selectedId: Int,
     onSelected: (Int) -> Unit,
+    onLongPress: ((Int) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val thumbnailSizePx = with(LocalDensity.current) { 32.dp.roundToPx() }
     val glyphTint = Color(AppThemeState.getCurrentAccentArgb())
+    val deleteLabel = stringResource(R.string.delete_custom_icon)
     LazyRow(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(EditorSpacing),
@@ -1292,8 +1367,12 @@ private fun IconPicker(
                 color = if (selected) EditorSurface else Color.Transparent,
                 border = border,
                 modifier = Modifier
-                    .size(44.dp)
-                    .clickable { onSelected(icon.id) },
+                    .size(48.dp)
+                    .combinedClickable(
+                        onLongClickLabel = if (onLongPress != null) deleteLabel else null,
+                        onLongClick = onLongPress?.let { callback -> { callback(icon.id) } },
+                        onClick = { onSelected(icon.id) },
+                    ),
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     if (imageBitmap != null) {

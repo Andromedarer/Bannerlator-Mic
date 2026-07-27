@@ -39,6 +39,7 @@ import java.util.List;
 
 import kotlin.Unit;
 import kotlin.jvm.functions.Function0;
+import kotlin.jvm.functions.Function1;
 import kotlin.jvm.functions.Function2;
 
 public class ControlsEditorActivity extends AppCompatActivity {
@@ -521,6 +522,15 @@ public class ControlsEditorActivity extends AppCompatActivity {
                         public Unit invoke() {
                             promptPickCustomIcon();
                             return Unit.INSTANCE;
+                        }
+                    },
+                    new Function1<Integer, Boolean>() {
+                        @Override
+                        public Boolean invoke(Integer iconId) {
+                            if (iconId == null || !customIconManager.deleteIconIfUnused(iconId)) return false;
+                            inputControlsView.evictCustomIcon(iconId);
+                            refreshSidebarSettings();
+                            return true;
                         }
                     },
                     composer,

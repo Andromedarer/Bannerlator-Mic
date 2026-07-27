@@ -127,6 +127,16 @@
     <string name="tint_custom_icon">Tint custom icon with accent</string>
     <string name="use_custom_icon_as_button">Use custom icon as button</string>
     <string name="icon_content_description">Icon %1$d</string>
+    <string name="long_press_custom_icon_to_delete">Long-press an unused custom icon to delete it.</string>
+    <string name="delete_custom_icon">Delete custom icon</string>
+    <string name="delete_custom_icon_confirmation">Custom icons are shared across control profiles. Delete this unused icon?</string>
+    <string name="custom_icon_not_deleted">Custom icon not deleted</string>
+    <string name="unable_to_check_custom_icon_usage">Unable to verify whether this icon is in use. No changes were made.</string>
+    <string name="unable_to_delete_custom_icon">The icon could not be deleted. It may have been used or removed elsewhere.</string>
+    <plurals name="custom_icon_in_use">
+        <item quantity="one">This icon is used by %1$d control. Reassign it before deleting the icon.</item>
+        <item quantity="other">This icon is used by %1$d controls. Reassign them before deleting the icon.</item>
+    </plurals>
     <string name="clear">Clear</string>
     <string name="no_items_to_display_saves">Register a save file directory from one of your containers to get started!</string>
     <string name="do_you_want_to_remove_this_profile">Do you want to remove this profile?</string>
