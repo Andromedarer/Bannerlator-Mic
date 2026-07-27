@@ -1,0 +1,21 @@
+{
+  "id": "2026-07-27T13-15-00-cfb670",
+  "created": "2026-07-27T13:15:00.961Z",
+  "ip_hash": "mygcpD/nvU",
+  "fields": {
+    "device_model": "TEST DEVICE (delete me)",
+    "gpu": "Mali-G710 MC10",
+    "soc": "Dimensity 9200",
+    "android": "14",
+    "app_version": "2.8.2",
+    "game_name": "Hades",
+    "symptom": "Black screen (no image)",
+    "graphics_driver": "System",
+    "dx_wrapper": "DXVK"
+  },
+  "logs": [
+    {
+      "name": "test.log"
+    }
+  ]
+}
