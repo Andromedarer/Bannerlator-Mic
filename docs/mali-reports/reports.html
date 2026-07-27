@@ -132,7 +132,7 @@ function cardHtml(r){
     +   '<h3>'+esc(r.game||"(no game)")+' — '+esc(r.symptom||"?")+'</h3>'
     +   '<div class="sub">'+esc(r.device||"?")+' · '+esc(fmt(r.created))+' · <code>'+esc(r.id)+'</code></div>'
     + '</div><span class="st '+esc(r.status)+'">'+esc(statusLabel)+'</span></div>'
-    + '<div class="badges">'+badge("GPU",r.gpu)+badge("Device",r.device)+ans+reps+lock+'</div>'
+    + '<div class="badges">'+badge("By",r.reporter)+badge("GPU",r.gpu)+badge("Device",r.device)+ans+reps+lock+'</div>'
     + '</a>';
 }
 

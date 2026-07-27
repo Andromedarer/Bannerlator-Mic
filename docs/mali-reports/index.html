@@ -82,6 +82,10 @@ code{font-family:var(--mono);background:#8882;padding:1px 6px;border-radius:5px;
     <!-- honeypot: hidden from humans, bots fill it -->
     <div class="hp"><label>Website<input name="website" tabindex="-1"></label></div>
 
+    <fieldset><legend>About you <span style="color:var(--faint);font-weight:400;text-transform:none;letter-spacing:0"> — optional</span></legend>
+      <label><span class="lab">What should we call you? <span class="hint">(shown to the developers so they can address you when they reply in the discussion)</span></span><input name="reporter_name" maxlength="40" placeholder="e.g. Alex"></label>
+    </fieldset>
+
     <fieldset class="req"><legend>Your device</legend>
       <div class="grid">
         <label><span class="lab">Phone / tablet model</span><input name="device_model" placeholder="Samsung Galaxy S23 FE" required></label>

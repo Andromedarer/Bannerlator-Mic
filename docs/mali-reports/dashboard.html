@@ -232,6 +232,7 @@ function cardHtml(r){
       <span class="st ${r.status}">${r.status}</span>
     </div>
     <div class="badges">
+      ${badge("Reporter", r.reporter)}
       ${badge("GPU", r.gpu)}
       ${badge("Device", r.device)}
       ${r.answered?'<span class="pill ans">✓ answered</span>':""}
