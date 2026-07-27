@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-07-27T18-25-39-48f3ae",
+    "created": "2026-07-27T18:25:39.727Z",
+    "device": "Daria Bond 1",
+    "gpu": "MALi _ g68 mc4",
+    "game": "GTA V",
+    "symptom": "Runs but very low FPS",
+    "logs": 0
+  },
+  {
     "id": "2026-07-27T16-55-36-99eb48",
     "created": "2026-07-27T16:55:36.294Z",
     "device": "Poco X6 Pro / Redmi K70E",
