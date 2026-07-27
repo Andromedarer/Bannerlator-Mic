@@ -1,15 +1,5 @@
 [
   {
-    "id": "2026-07-27T19-04-07-ec67d0",
-    "created": "2026-07-27T19:04:07.479Z",
-    "reporter": "TokenTester",
-    "device": "",
-    "gpu": "Mali-TEST",
-    "game": "ZZ-OP-TEST (delete me)",
-    "symptom": "",
-    "logs": 0
-  },
-  {
     "id": "2026-07-27T18-56-17-e60fb6",
     "created": "2026-07-27T18:56:17.126Z",
     "reporter": "",
