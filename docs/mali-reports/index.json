@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-07-27T13-58-49-9eda2a",
+    "created": "2026-07-27T13:58:49.931Z",
+    "device": "Tecno pova le8",
+    "gpu": "Mali-g68 cm4",
+    "game": "Need for speed rivals",
+    "symptom": "Runs but very low FPS",
+    "logs": 0
+  },
+  {
     "id": "2026-07-27T13-56-36-56acad",
     "created": "2026-07-27T13:56:36.448Z",
     "device": "Tecno pova le8",
