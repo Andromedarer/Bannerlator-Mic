@@ -36,6 +36,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -48,6 +49,24 @@ public class InputControlsManager {
     private ArrayList<ControlsProfile> profiles;
     private int maxProfileId;
     private boolean profilesLoaded = false;
+
+    public static final class CustomIconUsage {
+        private final int controlCount;
+        private final ArrayList<String> profileNames;
+
+        private CustomIconUsage(int controlCount, ArrayList<String> profileNames) {
+            this.controlCount = controlCount;
+            this.profileNames = profileNames;
+        }
+
+        public int getControlCount() {
+            return controlCount;
+        }
+
+        public List<String> getProfileNames() {
+            return Collections.unmodifiableList(profileNames);
+        }
+    }
 
     public InputControlsManager(Context context) {
         this.context = context;
@@ -451,26 +470,47 @@ public class InputControlsManager {
         return references;
     }
 
-    public static int countCustomIconReferences(Context context, int iconId) {
+    @Nullable
+    static CustomIconUsage getCustomIconUsage(ArrayList<JSONObject> profiles, int iconId) {
+        int references = 0;
+        ArrayList<String> profileNames = new ArrayList<>();
+        for (JSONObject profile : profiles) {
+            int profileReferences = countCustomIconReferences(profile, iconId);
+            if (profileReferences < 0) return null;
+            if (profileReferences == 0) continue;
+
+            Object nameValue = profile.opt("name");
+            if (!(nameValue instanceof String) || ((String)nameValue).trim().isEmpty()) return null;
+            references += profileReferences;
+            profileNames.add(((String)nameValue).trim());
+        }
+        profileNames.sort(String.CASE_INSENSITIVE_ORDER);
+        return new CustomIconUsage(references, profileNames);
+    }
+
+    @Nullable
+    public static CustomIconUsage getCustomIconUsage(Context context, int iconId) {
         if (iconId < CustomIconManager.CUSTOM_ICON_ID_OFFSET
-                || iconId > CustomIconManager.MAX_CUSTOM_ICON_ID) return -1;
+                || iconId > CustomIconManager.MAX_CUSTOM_ICON_ID) return null;
         File[] files = getProfilesDir(context).listFiles(
                 (dir, name) -> name.startsWith("controls-") && name.endsWith(".icp"));
-        if (files == null) return -1;
+        if (files == null) return null;
 
-        int references = 0;
+        ArrayList<JSONObject> profiles = new ArrayList<>(files.length);
         for (File file : files) {
             try {
-                int profileReferences = countCustomIconReferences(
-                        new JSONObject(readStringAtomically(file)), iconId);
-                if (profileReferences < 0) return -1;
-                references += profileReferences;
+                profiles.add(new JSONObject(readStringAtomically(file)));
             }
             catch (IOException | JSONException e) {
-                return -1;
+                return null;
             }
         }
-        return references;
+        return getCustomIconUsage(profiles, iconId);
+    }
+
+    public static int countCustomIconReferences(Context context, int iconId) {
+        CustomIconUsage usage = getCustomIconUsage(context, iconId);
+        return usage != null ? usage.getControlCount() : -1;
     }
 
     static void truncateProfileCombos(JSONObject data) {

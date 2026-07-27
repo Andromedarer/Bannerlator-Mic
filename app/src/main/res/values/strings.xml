@@ -137,6 +137,10 @@
         <item quantity="one">This icon is used by %1$d control. Reassign it before deleting the icon.</item>
         <item quantity="other">This icon is used by %1$d controls. Reassign them before deleting the icon.</item>
     </plurals>
+    <plurals name="custom_icon_profiles_in_use">
+        <item quantity="one">Used in %1$d profile:</item>
+        <item quantity="other">Used in %1$d profiles:</item>
+    </plurals>
     <string name="clear">Clear</string>
     <string name="no_items_to_display_saves">Register a save file directory from one of your containers to get started!</string>
     <string name="do_you_want_to_remove_this_profile">Do you want to remove this profile?</string>

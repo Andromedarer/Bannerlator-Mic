@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.selectable
@@ -71,6 +72,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -108,7 +110,7 @@ private data class PickerIcon(
 
 private data class CustomIconDeleteRequest(
     val iconId: Int,
-    val usageCount: Int,
+    val usage: InputControlsManager.CustomIconUsage?,
     val deleteFailed: Boolean = false,
 )
 
@@ -907,12 +909,12 @@ fun ControlsEditorSettingsPane(
                         saveAndInvalidate()
                     },
                     onLongPress = { id ->
-                        val usageCount = if (profile.save()) {
-                            InputControlsManager.countCustomIconReferences(context, id)
+                        val usage = if (profile.save()) {
+                            InputControlsManager.getCustomIconUsage(context, id)
                         } else {
-                            -1
+                            null
                         }
-                        customIconDeleteRequest = CustomIconDeleteRequest(id, usageCount)
+                        customIconDeleteRequest = CustomIconDeleteRequest(id, usage)
                     },
                 )
                 SettingSwitch(
@@ -939,14 +941,15 @@ fun ControlsEditorSettingsPane(
         }
 
         customIconDeleteRequest?.let { request ->
-            val canDelete = request.usageCount == 0 && !request.deleteFailed
+            val usage = request.usage
+            val canDelete = usage?.controlCount == 0 && !request.deleteFailed
             val message = when {
                 request.deleteFailed -> stringResource(R.string.unable_to_delete_custom_icon)
-                request.usageCount < 0 -> stringResource(R.string.unable_to_check_custom_icon_usage)
-                request.usageCount > 0 -> context.resources.getQuantityString(
+                usage == null -> stringResource(R.string.unable_to_check_custom_icon_usage)
+                usage.controlCount > 0 -> context.resources.getQuantityString(
                     R.plurals.custom_icon_in_use,
-                    request.usageCount,
-                    request.usageCount,
+                    usage.controlCount,
+                    usage.controlCount,
                 )
                 else -> stringResource(R.string.delete_custom_icon_confirmation)
             }
@@ -960,7 +963,45 @@ fun ControlsEditorSettingsPane(
                         color = EditorText,
                     )
                 },
-                text = { Text(text = message, color = EditorSubText) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(EditorSpacing)) {
+                        Text(text = message, color = EditorSubText)
+                        if (usage != null && usage.profileNames.isNotEmpty()) {
+                            Text(
+                                text = context.resources.getQuantityString(
+                                    R.plurals.custom_icon_profiles_in_use,
+                                    usage.profileNames.size,
+                                    usage.profileNames.size,
+                                ),
+                                color = EditorTextValue,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            LazyColumn(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 160.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                items(usage.profileNames) { profileName ->
+                                    Surface(
+                                        color = EditorSurface,
+                                        shape = SmallShape,
+                                    ) {
+                                        Text(
+                                            text = profileName,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                                            color = EditorTextValue,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
                 confirmButton = {
                     TextButton(onClick = {
                         if (!canDelete) {

@@ -67,6 +67,31 @@ class InputControlsFormatTest {
     }
 
     @Test
+    fun customIconUsage_listsOnlyReferencingProfilesByName() {
+        val profiles = arrayListOf(
+            JSONObject()
+                .put("name", "Beta")
+                .put("elements", JSONArray().put(JSONObject().put("iconId", 100))),
+            JSONObject()
+                .put("name", "Unused")
+                .put("elements", JSONArray().put(JSONObject().put("iconId", 5))),
+            JSONObject()
+                .put("name", "Alpha")
+                .put(
+                    "elements",
+                    JSONArray()
+                        .put(JSONObject().put("iconId", 100))
+                        .put(JSONObject().put("iconId", 100)),
+                ),
+        )
+
+        val usage = InputControlsManager.getCustomIconUsage(profiles, 100)!!
+
+        assertEquals(3, usage.controlCount)
+        assertEquals(listOf("Alpha", "Beta"), usage.profileNames)
+    }
+
+    @Test
     fun serialization_clearsKnownOptionalFieldsButKeepsForkFields() {
         val source = JSONObject()
             .put("groupId", "old-group")
