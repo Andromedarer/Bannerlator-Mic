@@ -80,10 +80,12 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .thread.open{display:block}
 .tmsg{border:1px solid var(--line-2);border-radius:10px;padding:9px 11px;margin:8px 0;background:var(--bg-2)}
 .tmsg.dev{border-color:#e07b3966;background:#1a130c}
+.tmsg.op{border-color:#2f7de066;background:#0b1420}
 .tmh{display:flex;justify-content:space-between;gap:8px;align-items:center;font-size:12px;font-weight:600;margin-bottom:4px}
 .tmh .mt{color:var(--faint);font-weight:400;display:flex;gap:8px;align-items:center}
 .tmb{font-size:13.5px;color:var(--ink);overflow-wrap:anywhere;white-space:pre-wrap}
 .devtag{font:600 10px/1 var(--mono);background:#e07b39;color:#fff;padding:2px 6px;border-radius:4px}
+.optag{font:600 10px/1 var(--mono);background:#2f7de0;color:#fff;padding:2px 6px;border-radius:4px}
 .xmsg{background:transparent;border:1px solid #4a2028;color:var(--err);padding:2px 7px;border-radius:6px;font-size:11px;cursor:pointer}
 .xmsg:hover{background:var(--err-bg)}
 .dcompose{display:flex;flex-direction:column;gap:8px;margin-top:12px}
@@ -287,9 +289,11 @@ async function loadThread(id){
   let h = "";
   if(!msgs.length) h += '<div class="tempty">No messages yet.</div>';
   for(const m of msgs){
-    const dev = m.role === "dev";
-    const who = dev ? (esc(m.name||"dev")+' <span class="devtag">DEV</span>') : esc(m.name||"Anonymous");
-    h += '<div class="tmsg'+(dev?" dev":"")+'">'
+    const role = m.role;
+    const tag = role==="dev" ? ' <span class="devtag">DEV</span>' : (role==="op" ? ' <span class="optag">OP</span>' : '');
+    const nm  = role==="dev" ? (m.name||"dev") : (role==="op" ? (m.name||"Original poster") : (m.name||"Anonymous"));
+    const who = esc(nm) + tag;
+    h += '<div class="tmsg'+(role==="dev"?" dev":(role==="op"?" op":""))+'">'
       + '<div class="tmh"><span>'+who+'</span><span class="mt">'+esc(fmtDT(m.ts))
       + ' <button class="xmsg" data-delmid="'+esc(m.mid)+'">delete</button></span></div>'
       + '<div class="tmb">'+esc(m.text)+'</div></div>';

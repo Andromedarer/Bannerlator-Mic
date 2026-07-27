@@ -218,9 +218,11 @@ form.addEventListener("submit", async (e) => {
     });
     const out = await res.json();
     if (!res.ok || !out.ok) throw new Error(out.detail || out.error || "Submission failed");
+    const opLink = out.url + (out.token ? ("?k=" + encodeURIComponent(out.token)) : "");
+    if (out.token) { try { localStorage.setItem("mali_op_" + out.id, out.token); } catch(e){} }
     msg.className = "msg ok";
     msg.innerHTML = `✅ Thanks! Your report was submitted. Reference ID <code>${out.id}</code>.`
-      + `<br>Open your report to follow the discussion: <a href="${out.url}" target="_blank" rel="noopener">${out.url}</a>`
+      + `<br><b>Your report link</b> — bookmark it. Replying from it (or from this device) marks you as the original poster so we know it's really you:<br><a href="${opLink}" target="_blank" rel="noopener">${opLink}</a>`
       + `<br>Or browse everyone's reports and dev answers: <a href="reports.html" target="_blank" rel="noopener">all reports →</a>`;
     form.reset(); filelist.textContent = "";
     window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
