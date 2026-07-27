@@ -2792,25 +2792,68 @@ private fun AdvancedContent(state: XServerDrawerState) {
     Spacer(Modifier.height(14.dp))
 
     // ── Performance ── non-root power-user toggles; always enabled, applied + persisted live.
+    // Each row shows whether it's a per-game override or inheriting the App Settings global default,
+    // with a "Reset to global" affordance (a per-game toggle is only saved when it differs).
     SectionHeader("Performance")
+
+    val overridden by state.overriddenKeys.collectAsState()
 
     val sustainedPerf by state.sustainedPerfMode.collectAsState()
     ToggleRow("Sustained Performance Mode", sustainedPerf) {
         state.setSustainedPerfMode(it); state.onSustainedPerfModeChange?.run()
     }
+    PerfOverrideLine("sustainedPerfMode" in overridden) { state.onResetPerfKey?.accept("sustainedPerfMode") }
 
     val priorityBoost by state.perfPriorityBoost.collectAsState()
     ToggleRow("Thread Priority Boost", priorityBoost) {
         state.setPerfPriorityBoost(it); state.onPerfPriorityBoostChange?.run()
     }
+    PerfOverrideLine("perfPriorityBoost" in overridden) { state.onResetPerfKey?.accept("perfPriorityBoost") }
 
     val bigCores by state.preferBigCores.collectAsState()
     ToggleRow("Prefer Big Cores", bigCores) {
         state.setPreferBigCores(it); state.onPreferBigCoresChange?.run()
     }
+    PerfOverrideLine("preferBigCores" in overridden) { state.onResetPerfKey?.accept("preferBigCores") }
 
     Spacer(Modifier.height(14.dp))
     RootPerformanceSection(state)
+
+    // One-tap "reset every per-game override" — shown only when this game overrides something.
+    if (overridden.isNotEmpty()) {
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "↺ Reset all game overrides to global",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .clickable { state.onResetAllPerf?.run() }
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+        )
+    }
+}
+
+// Subtle per-toggle indicator: "per-game override (Reset)" vs "using global default".
+@Composable
+private fun PerfOverrideLine(overridden: Boolean, onReset: () -> Unit) {
+    val accent = MaterialTheme.colorScheme.primary
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(start = 12.dp, top = 1.dp, bottom = 6.dp)
+    ) {
+        Text(
+            if (overridden) "● Per-game override" else "○ Using global default",
+            fontSize = 10.sp,
+            color = if (overridden) accent else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f)
+        )
+        if (overridden) {
+            Text("Reset to global", fontSize = 10.sp, color = accent,
+                modifier = Modifier.clickable { onReset() })
+        }
+    }
 }
 
 // ── Root Performance sub-section (in-game). Mirrors App Settings' root tier; toggles are enabled
@@ -2822,6 +2865,7 @@ private fun RootPerformanceSection(state: XServerDrawerState) {
     val harnessProven by PerfRevertRegistry.harnessProven.collectAsState()
     val toggles by state.rootToggles.collectAsState()
     val readouts by state.rootReadouts.collectAsState()
+    val overridden by state.overriddenKeys.collectAsState()
 
     val granted = rootState == RootManager.RootState.GRANTED
 
@@ -2859,12 +2903,12 @@ private fun RootPerformanceSection(state: XServerDrawerState) {
         )
     }
 
-    RootToggleRow(PerfRootApplier.KEY_CPU_GOVERNOR, "CPU governor → performance", state, toggles, granted, harnessProven)
-    RootToggleRow(PerfRootApplier.KEY_CPU_FREQ_LOCK, "Lock CPU frequency to max", state, toggles, granted, harnessProven)
-    RootToggleRow(PerfRootApplier.KEY_CORES_ONLINE, "Keep all cores online", state, toggles, granted, harnessProven)
-    RootToggleRow(PerfRootApplier.KEY_GPU_CLOCK_LOCK, "Lock GPU to max clock", state, toggles, granted, harnessProven)
-    RootToggleRow(PerfRootApplier.KEY_THERMAL_DISABLE, "Disable thermal throttling", state, toggles, granted, harnessProven)
-    RootToggleRow(PerfRootApplier.KEY_FAN_MAX, "Fan to maximum", state, toggles, granted, harnessProven)
+    RootToggleRow(PerfRootApplier.KEY_CPU_GOVERNOR, "CPU governor → performance", state, toggles, granted, harnessProven, overridden)
+    RootToggleRow(PerfRootApplier.KEY_CPU_FREQ_LOCK, "Lock CPU frequency to max", state, toggles, granted, harnessProven, overridden)
+    RootToggleRow(PerfRootApplier.KEY_CORES_ONLINE, "Keep all cores online", state, toggles, granted, harnessProven, overridden)
+    RootToggleRow(PerfRootApplier.KEY_GPU_CLOCK_LOCK, "Lock GPU to max clock", state, toggles, granted, harnessProven, overridden)
+    RootToggleRow(PerfRootApplier.KEY_THERMAL_DISABLE, "Disable thermal throttling", state, toggles, granted, harnessProven, overridden)
+    RootToggleRow(PerfRootApplier.KEY_FAN_MAX, "Fan to maximum", state, toggles, granted, harnessProven, overridden)
 
     if (granted && !harnessProven) {
         Text(
@@ -2892,6 +2936,7 @@ private fun RootToggleRow(
     toggles: Map<String, Boolean>,
     granted: Boolean,
     harnessProven: Boolean,
+    overridden: Set<String>,
 ) {
     val gated = PerfRootApplier.isHarnessGated(key) && !harnessProven
     val enabled = granted && !gated
@@ -2899,6 +2944,7 @@ private fun RootToggleRow(
         state.setRootToggle(key, on)
         state.onRootToggleChange?.accept(key, on)
     }
+    PerfOverrideLine(key in overridden) { state.onResetPerfKey?.accept(key) }
 }
 
 @Composable

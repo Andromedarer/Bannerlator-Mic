@@ -28,6 +28,29 @@ object PerformanceSettings {
     private const val KEY_PRIORITY = "global_perfPriorityBoost"
     private const val KEY_BIG_CORES = "global_preferBigCores"
 
+    // The per-game override / extraData key names (NOT the "global_"-prefixed pref keys). Used by the
+    // override-when-different + reset-to-global logic to iterate every perf toggle uniformly.
+    val NON_ROOT_KEYS = listOf("sustainedPerfMode", "perfPriorityBoost", "preferBigCores")
+    val ALL_PERF_KEYS: List<String> = NON_ROOT_KEYS + PerfRootApplier.ROOT_KEYS
+
+    /** Current global default for any perf key (non-root three or root six), by its extraData name. */
+    fun globalDefault(key: String): Boolean = when (key) {
+        "sustainedPerfMode" -> _sustainedPerfMode.value
+        "perfPriorityBoost" -> _perfPriorityBoost.value
+        "preferBigCores" -> _preferBigCores.value
+        else -> rootDefaultValue(key)
+    }
+
+    /** Set the global default for any perf key uniformly. */
+    fun setGlobalDefault(key: String, v: Boolean) {
+        when (key) {
+            "sustainedPerfMode" -> setSustainedPerfMode(v)
+            "perfPriorityBoost" -> setPerfPriorityBoost(v)
+            "preferBigCores" -> setPreferBigCores(v)
+            else -> setRootDefault(key, v)
+        }
+    }
+
     private var appContext: Context? = null
 
     private val _sustainedPerfMode = MutableStateFlow(false)

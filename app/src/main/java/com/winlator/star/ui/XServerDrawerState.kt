@@ -296,34 +296,41 @@ object XServerDrawerState {
     fun setPerfPriorityBoost(v: Boolean) { _perfPriorityBoost.value = v }
     fun setPreferBigCores(v: Boolean)    { _preferBigCores.value = v }
 
-    // ── Two-way sync with the shared global-default store (PerformanceSettings) ──
-    // For a toggle the running session does NOT override per-game, mirror live changes of the global
-    // default into the drawer flow, so an edit in App Settings' Performance menu shows here too. Once
-    // the user flips it in-game WITH a shortcut (creating a per-game override), we stop mirroring that
-    // one (markPerfOverridden) so the override isn't clobbered by a later global change.
+    // ── Two-way sync + per-game override tracking (unified for all 9 perf keys) ──
+    // overriddenKeys = the perf keys the running game overrides per-game (shortcut.hasExtra at launch,
+    // updated as the user flips/resets). A key IN the set is pinned to its per-game value; a key NOT in
+    // the set mirrors the App Settings global default live. Drives the override/global indicator +
+    // reset affordance in the drawer, and gates the global->drawer mirror so an override isn't clobbered.
     private val syncScope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
-    private var globalSyncJob: Job? = null
-    private var sustainedOverridden = false
-    private var priorityOverridden = false
-    private var bigCoresOverridden = false
+    private var perfSyncJob: Job? = null
+    private val _overriddenKeys = MutableStateFlow<Set<String>>(emptySet())
+    val overriddenKeys: StateFlow<Set<String>> = _overriddenKeys
+    fun isOverridden(key: String): Boolean = key in _overriddenKeys.value
 
-    fun startGlobalDefaultSync(hasSustained: Boolean, hasPriority: Boolean, hasBigCores: Boolean) {
-        sustainedOverridden = hasSustained
-        priorityOverridden = hasPriority
-        bigCoresOverridden = hasBigCores
-        globalSyncJob?.cancel()
-        globalSyncJob = syncScope.launch {
-            launch { PerformanceSettings.sustainedPerfMode.collect { if (!sustainedOverridden) _sustainedPerfMode.value = it } }
-            launch { PerformanceSettings.perfPriorityBoost.collect { if (!priorityOverridden) _perfPriorityBoost.value = it } }
-            launch { PerformanceSettings.preferBigCores.collect { if (!bigCoresOverridden) _preferBigCores.value = it } }
+    fun startPerfSync(overridden: Set<String>) {
+        _overriddenKeys.value = overridden
+        perfSyncJob?.cancel()
+        perfSyncJob = syncScope.launch {
+            launch { PerformanceSettings.sustainedPerfMode.collect { if ("sustainedPerfMode" !in _overriddenKeys.value) _sustainedPerfMode.value = it } }
+            launch { PerformanceSettings.perfPriorityBoost.collect { if ("perfPriorityBoost" !in _overriddenKeys.value) _perfPriorityBoost.value = it } }
+            launch { PerformanceSettings.preferBigCores.collect { if ("preferBigCores" !in _overriddenKeys.value) _preferBigCores.value = it } }
+            for (key in PerfRootApplier.ROOT_KEYS) {
+                launch { PerformanceSettings.rootDefaultFlow(key).collect { v -> if (key !in _overriddenKeys.value) _rootToggles.value = _rootToggles.value + (key to v) } }
+            }
         }
     }
 
-    fun markPerfOverridden(key: String) {
+    fun markOverridden(key: String) { _overriddenKeys.value = _overriddenKeys.value + key }
+
+    // A key re-inherits the global default: drop it from the overridden set AND immediately reflect the
+    // current global value in the drawer flow/map so the UI updates without waiting for the next emit.
+    fun markInherited(key: String) {
+        _overriddenKeys.value = _overriddenKeys.value - key
         when (key) {
-            "sustainedPerfMode" -> sustainedOverridden = true
-            "perfPriorityBoost" -> priorityOverridden = true
-            "preferBigCores"    -> bigCoresOverridden = true
+            "sustainedPerfMode" -> _sustainedPerfMode.value = PerformanceSettings.sustainedPerfMode.value
+            "perfPriorityBoost" -> _perfPriorityBoost.value = PerformanceSettings.perfPriorityBoost.value
+            "preferBigCores"    -> _preferBigCores.value = PerformanceSettings.preferBigCores.value
+            else -> _rootToggles.value = _rootToggles.value + (key to PerformanceSettings.rootDefaultValue(key))
         }
     }
 
@@ -340,27 +347,6 @@ object XServerDrawerState {
     val rootReadouts: StateFlow<Map<String, String>> = _rootReadouts
     fun setRootReadouts(m: Map<String, String>) { _rootReadouts.value = m }
 
-    // Root-tier global->drawer mirror (same idea as startGlobalDefaultSync for the non-root three):
-    // for a root toggle with no per-game override, reflect live global-default changes into the map.
-    private var rootSyncJob: Job? = null
-    private val rootOverridden = mutableSetOf<String>()
-
-    fun startRootDefaultSync(overridden: Set<String>) {
-        rootOverridden.clear(); rootOverridden.addAll(overridden)
-        rootSyncJob?.cancel()
-        rootSyncJob = syncScope.launch {
-            for (key in PerfRootApplier.ROOT_KEYS) {
-                launch {
-                    PerformanceSettings.rootDefaultFlow(key).collect { v ->
-                        if (key !in rootOverridden) _rootToggles.value = _rootToggles.value + (key to v)
-                    }
-                }
-            }
-        }
-    }
-
-    fun markRootOverridden(key: String) { rootOverridden.add(key) }
-
     // Fired when a root toggle flips: the Activity writes the per-game override (or the global default
     // for a container-direct launch) and applies it live via PerfRootApplier.
     @JvmField var onRootToggleChange: java.util.function.BiConsumer<String, Boolean>? = null
@@ -368,6 +354,11 @@ object XServerDrawerState {
     @JvmField var onFreeMemory: Runnable? = null
     // Drawer asks the Activity to refresh the live readouts (cheap sysfs/HudMetrics reads).
     @JvmField var onRootReadoutPoll: Runnable? = null
+    // Reset ONE perf key's per-game override so it re-inherits the global default (Activity removes the
+    // shortcut extra, marks inherited, re-applies the global value live).
+    @JvmField var onResetPerfKey: java.util.function.Consumer<String>? = null
+    // Reset ALL 9 perf keys for this game so it fully re-inherits.
+    @JvmField var onResetAllPerf: Runnable? = null
 
     fun toggleFpsExpanded() { _fpsExpanded.value = !_fpsExpanded.value }
 
@@ -409,13 +400,12 @@ object XServerDrawerState {
         _sustainedPerfMode.value = false
         _perfPriorityBoost.value = false
         _preferBigCores.value = false
-        globalSyncJob?.cancel(); globalSyncJob = null
-        rootSyncJob?.cancel(); rootSyncJob = null
-        sustainedOverridden = false; priorityOverridden = false; bigCoresOverridden = false
-        rootOverridden.clear()
+        perfSyncJob?.cancel(); perfSyncJob = null
+        _overriddenKeys.value = emptySet()
         _rootToggles.value = emptyMap()
         _rootReadouts.value = emptyMap()
         onRootToggleChange = null; onFreeMemory = null; onRootReadoutPoll = null
+        onResetPerfKey = null; onResetAllPerf = null
         onClose = null; onKeyboard = null; onInputControls = null
         onScreenEffects = null; onGraphicEngine = null; onVibration = null
         onToggleFullscreen = null; onSetFullscreenMode = null; onPauseResume = null; onPipMode = null

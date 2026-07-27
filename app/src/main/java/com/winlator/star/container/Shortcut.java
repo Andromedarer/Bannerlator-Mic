@@ -166,6 +166,12 @@ import java.nio.file.Files;
             return extraData.has(name);
         }
 
+        // Drop a per-game override so the key re-inherits (hasExtra becomes false). Mirrors putExtra;
+        // the caller is responsible for saveData(), same as putExtra.
+        public void removeExtra(String name) {
+            extraData.remove(name);
+        }
+
         public void saveData() {
             String content = "[Desktop Entry]\n";
             for (String line : FileUtils.readLines(file)) {

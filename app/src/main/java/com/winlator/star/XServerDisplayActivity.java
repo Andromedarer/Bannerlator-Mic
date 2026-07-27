@@ -870,56 +870,30 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // Drawer HUD/FPS tab opened — refresh the live display-rate readout.
         state.onRefreshRatePoll = this::updateCurrentRefreshRate;
 
-        // ── Power-user performance toggles (non-root). Apply live + persist to the launch owner. ──
+        // ── Power-user performance toggles (non-root + root). Apply the effect live, then persist:
+        // with a shortcut the value is written as a per-game override ONLY when it DIFFERS from the
+        // global default, else the override is removed so the game re-inherits (see persistPerfToggle). ──
         state.onSustainedPerfModeChange = () -> {
             boolean on = XServerDrawerState.INSTANCE.getSustainedPerfMode().getValue();
-            runOnUiThread(() -> getWindow().setSustainedPerformanceMode(on));
+            applyPerfKeyLive("sustainedPerfMode", on);
             persistPerfToggle("sustainedPerfMode", on);
         };
         state.onPerfPriorityBoostChange = () -> {
             boolean on = XServerDrawerState.INSTANCE.getPerfPriorityBoost().getValue();
-            // Boost the GUEST CPU-worker subtree (box64/wine) + our audio/worker threads, never
-            // downgrading an already-hot thread. Snapshotted so OFF restores exact nice values.
-            if (on) com.winlator.star.perf.PerfPriority.INSTANCE.boost(GuestProgramLauncherComponent.getPid());
-            else    com.winlator.star.perf.PerfPriority.INSTANCE.restore();
+            applyPerfKeyLive("perfPriorityBoost", on);
             persistPerfToggle("perfPriorityBoost", on);
         };
         state.onPreferBigCoresChange = () -> {
             boolean on = XServerDrawerState.INSTANCE.getPreferBigCores().getValue();
-            // Recompute the affinity mask the guest launcher reads (affects processes spawned after
-            // the flip and next launch)...
-            if (on) {
-                String bigList = com.winlator.star.perf.CpuTopology.INSTANCE.detectBigCoreCpuList();
-                if (bigList != null && !bigList.isEmpty()) {
-                    taskAffinityMask = (short) ProcessHelper.getAffinityMask(bigList);
-                    taskAffinityMaskWoW64 = taskAffinityMask;
-                }
-            } else {
-                String cpuList = shortcut != null
-                        ? shortcut.getExtra("cpuList", container.getCPUList(true))
-                        : container.getCPUList(true);
-                taskAffinityMask = (short) ProcessHelper.getAffinityMask(cpuList);
-                taskAffinityMaskWoW64 = shortcut != null
-                        ? taskAffinityMask
-                        : (short) ProcessHelper.getAffinityMask(container.getCPUListWoW64(true));
-            }
-            // ...AND re-pin the ALREADY-RUNNING guest process tree so the current game moves now, not
-            // just on relaunch. Snapshots each process's prior mask on ON, restores it exactly on OFF.
-            reapplyBigCoresToRunningGuest(on);
+            applyPerfKeyLive("preferBigCores", on);
             persistPerfToggle("preferBigCores", on);
         };
-        // ── Root-tier toggles (in-game). Write the per-game override (or the global default for a
-        // container-direct launch) and apply live through the snapshot/revert pipeline. ──
         state.onRootToggleChange = (key, on) -> {
-            if (shortcut != null) {
-                shortcut.putExtra(key, on ? "1" : "0");
-                shortcut.saveData();
-                XServerDrawerState.INSTANCE.markRootOverridden(key);
-            } else {
-                com.winlator.star.perf.PerformanceSettings.INSTANCE.setRootDefault(key, on);
-            }
-            com.winlator.star.perf.PerfRootApplier.INSTANCE.apply(key, on);
+            applyPerfKeyLive(key, on);
+            persistPerfToggle(key, on);
         };
+        state.onResetPerfKey = key -> resetPerfKey(key);
+        state.onResetAllPerf = this::resetAllPerfOverrides;
         state.onFreeMemory = () -> com.winlator.star.perf.PerfRootApplier.INSTANCE.freeMemoryNow();
         state.onRootReadoutPoll = this::refreshRootReadouts;
         // Cycle OFF -> FIT -> STRETCH -> FILL -> INTEGER -> OFF (legacy path; kept for any
@@ -1147,26 +1121,27 @@ public class XServerDisplayActivity extends AppCompatActivity {
         XServerDrawerState.INSTANCE.setPerfPriorityBoost(resolvedPerfPriorityBoost());
         XServerDrawerState.INSTANCE.setPreferBigCores(preferBig);
         getWindow().setSustainedPerformanceMode(sustainedPerf);
-        // Keep the drawer flows consistent with the shared global-default store: for any toggle this
-        // session has NO per-game override on, mirror live global-default changes into the drawer so an
-        // edit in App Settings' Performance menu is reflected here too (two-way sync via one store).
-        XServerDrawerState.INSTANCE.startGlobalDefaultSync(
-                shortcut != null && shortcut.hasExtra("sustainedPerfMode"),
-                shortcut != null && shortcut.hasExtra("perfPriorityBoost"),
-                shortcut != null && shortcut.hasExtra("preferBigCores"));
 
-        // Root-tier toggles: seed the drawer with the effective (override ?? global) values, mirror
-        // globals for non-overridden keys, and apply the effective state now (no-op unless root is
-        // granted). Auto-revert on exit/background/crash restores everything (PerfRevertRegistry).
+        // Root-tier toggles: seed the drawer with the effective (override ?? global) values and apply
+        // the effective state now (no-op unless root is granted). Auto-revert on exit/background/crash
+        // restores everything (PerfRevertRegistry).
         java.util.Map<String, Boolean> rootEffective = new java.util.HashMap<>();
-        java.util.Set<String> rootOverridden = new java.util.HashSet<>();
         for (String rk : com.winlator.star.perf.PerfRootApplier.INSTANCE.getROOT_KEYS()) {
             rootEffective.put(rk, resolvedRootBool(rk));
-            if (shortcut != null && shortcut.hasExtra(rk)) rootOverridden.add(rk);
         }
         XServerDrawerState.INSTANCE.setRootToggles(rootEffective);
-        XServerDrawerState.INSTANCE.startRootDefaultSync(rootOverridden);
         com.winlator.star.perf.PerfRootApplier.INSTANCE.applyEffective(rootEffective);
+
+        // Unified per-game override tracking + two-way sync for ALL 9 keys: seed the overridden set
+        // from the shortcut's extras (a key present = per-game override; absent = inherit + mirror the
+        // App Settings global default live). Drives the override/global indicator + reset affordance.
+        java.util.Set<String> overriddenKeys = new java.util.HashSet<>();
+        if (shortcut != null) {
+            for (String pk : com.winlator.star.perf.PerformanceSettings.INSTANCE.getALL_PERF_KEYS()) {
+                if (shortcut.hasExtra(pk)) overriddenKeys.add(pk);
+            }
+        }
+        XServerDrawerState.INSTANCE.startPerfSync(overriddenKeys);
 
         containerManager.activateContainer(container);
 
@@ -4796,22 +4771,82 @@ return true;
                 com.winlator.star.perf.PerformanceSettings.INSTANCE.getPreferBigCores().getValue());
     }
 
-    // Persist a live in-game flip. With a shortcut this creates/updates the PER-GAME override (and tells
-    // the drawer to stop mirroring the global default onto that toggle). Without a shortcut (a container
-    // launched directly, no per-game store) the flip edits the GLOBAL default — the only durable store —
-    // keeping the two surfaces consistent.
+    // Persist a live in-game flip under the rule "App Settings = default; a per-game toggle is saved
+    // and honored only when it's DIFFERENT". With a shortcut: if the new value EQUALS the global
+    // default we REMOVE the extra (the game re-inherits, hasExtra=false); if it DIFFERS we write the
+    // per-game override. Without a shortcut (container-direct launch, no per-game store) the flip edits
+    // the GLOBAL default — the only durable store. Applies to all 9 keys (non-root three + root six).
     private void persistPerfToggle(String key, boolean on) {
         if (shortcut != null) {
-            shortcut.putExtra(key, on ? "1" : "0");
-            shortcut.saveData();
-            XServerDrawerState.INSTANCE.markPerfOverridden(key);
-        } else {
-            switch (key) {
-                case "sustainedPerfMode": com.winlator.star.perf.PerformanceSettings.INSTANCE.setSustainedPerfMode(on); break;
-                case "perfPriorityBoost": com.winlator.star.perf.PerformanceSettings.INSTANCE.setPerfPriorityBoost(on); break;
-                case "preferBigCores":    com.winlator.star.perf.PerformanceSettings.INSTANCE.setPreferBigCores(on); break;
+            boolean global = com.winlator.star.perf.PerformanceSettings.INSTANCE.globalDefault(key);
+            if (on == global) {
+                shortcut.removeExtra(key);
+                XServerDrawerState.INSTANCE.markInherited(key); // resume mirroring the global default
+            } else {
+                shortcut.putExtra(key, on ? "1" : "0");
+                XServerDrawerState.INSTANCE.markOverridden(key);
             }
+            shortcut.saveData();
+        } else {
+            com.winlator.star.perf.PerformanceSettings.INSTANCE.setGlobalDefault(key, on);
         }
+    }
+
+    // The LIVE effect of a perf key (independent of persistence), so both a toggle flip and a
+    // reset-to-global re-apply it the same way.
+    private void applyPerfKeyLive(String key, boolean on) {
+        switch (key) {
+            case "sustainedPerfMode":
+                runOnUiThread(() -> getWindow().setSustainedPerformanceMode(on));
+                break;
+            case "perfPriorityBoost":
+                // Boost the GUEST CPU-worker subtree (box64/wine) + our audio/worker threads, never
+                // downgrading an already-hot thread. Snapshotted so OFF restores exact nice values.
+                if (on) com.winlator.star.perf.PerfPriority.INSTANCE.boost(GuestProgramLauncherComponent.getPid());
+                else    com.winlator.star.perf.PerfPriority.INSTANCE.restore();
+                break;
+            case "preferBigCores":
+                // Recompute the affinity mask the guest launcher reads (processes spawned after the
+                // flip + next launch)...
+                if (on) {
+                    String bigList = com.winlator.star.perf.CpuTopology.INSTANCE.detectBigCoreCpuList();
+                    if (bigList != null && !bigList.isEmpty()) {
+                        taskAffinityMask = (short) ProcessHelper.getAffinityMask(bigList);
+                        taskAffinityMaskWoW64 = taskAffinityMask;
+                    }
+                } else {
+                    String cpuList = shortcut != null
+                            ? shortcut.getExtra("cpuList", container.getCPUList(true))
+                            : container.getCPUList(true);
+                    taskAffinityMask = (short) ProcessHelper.getAffinityMask(cpuList);
+                    taskAffinityMaskWoW64 = shortcut != null
+                            ? taskAffinityMask
+                            : (short) ProcessHelper.getAffinityMask(container.getCPUListWoW64(true));
+                }
+                // ...AND re-pin the ALREADY-RUNNING guest tree so the current game moves now.
+                reapplyBigCoresToRunningGuest(on);
+                break;
+            default: // root six
+                com.winlator.star.perf.PerfRootApplier.INSTANCE.apply(key, on);
+                break;
+        }
+    }
+
+    // Reset ONE perf key: drop the per-game override so it re-inherits the global default, update the
+    // drawer display, and re-apply the (now global) value live.
+    private void resetPerfKey(String key) {
+        if (shortcut == null) return; // no per-game store -> global already IS the value
+        if (shortcut.hasExtra(key)) {
+            shortcut.removeExtra(key);
+            shortcut.saveData();
+        }
+        XServerDrawerState.INSTANCE.markInherited(key);
+        applyPerfKeyLive(key, com.winlator.star.perf.PerformanceSettings.INSTANCE.globalDefault(key));
+    }
+
+    // Reset ALL 9 perf keys so the game fully re-inherits the global defaults.
+    private void resetAllPerfOverrides() {
+        for (String key : com.winlator.star.perf.PerformanceSettings.INSTANCE.getALL_PERF_KEYS()) resetPerfKey(key);
     }
 
     // Root-tier effective value: per-game shortcut override (when the shortcut has the key) else the
