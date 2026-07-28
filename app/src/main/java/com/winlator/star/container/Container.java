@@ -30,6 +30,12 @@ public class Container {
     public static final String DEFAULT_ENV_VARS = "WRAPPER_MAX_IMAGE_COUNT=0 ZINK_DESCRIPTORS=lazy ZINK_DEBUG=compact MESA_SHADER_CACHE_DISABLE=false MESA_SHADER_CACHE_MAX_SIZE=512MB mesa_glthread=true WINEESYNC=1 TU_DEBUG=noconform,sysmem DXVK_HUD=devinfo,fps,frametimes,gpuload,version,api";
     public static final String DEFAULT_SCREEN_SIZE = "1280x720";
     public static final String DEFAULT_GRAPHICS_DRIVER = "wrapper";
+    /**
+     * The graphics wrapper built for non-Adreno parts (Mali, Xclipse, PowerVR) — the WrapperManager
+     * slot identifier, not an adrenotools driver id. New containers on those GPUs default to this
+     * instead of {@link #DEFAULT_GRAPHICS_DRIVER}, which targets Adreno/Turnip.
+     */
+    public static final String GRAPHICS_DRIVER_GAMENATIVE = "wrapper-gamenative";
     public static final String DEFAULT_AUDIO_DRIVER = "alsa";
     public static final String DEFAULT_EMULATOR = "FEXCore";
     public static final String DEFAULT_DXWRAPPER = "dxvk+vkd3d";

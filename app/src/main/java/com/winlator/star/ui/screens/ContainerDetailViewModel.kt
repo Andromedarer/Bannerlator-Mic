@@ -405,7 +405,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             ?.let { selectedBox64Version = it }
 
         // Graphics driver (load as display name for dropdown)
-        selectedGraphicsDriver   = identifierToDisplay(c?.graphicsDriver ?: Container.DEFAULT_GRAPHICS_DRIVER, graphicsDriverEntries)
+        selectedGraphicsDriver   = identifierToDisplay(c?.graphicsDriver ?: defaultGraphicsDriverForNewContainer(), graphicsDriverEntries)
         graphicsDriverConfig     = c?.graphicsDriverConfig ?: Container.DEFAULT_GRAPHICSDRIVERCONFIG
         rendererNative           = c?.isRendererNative() ?: false
         rendererPresentMode      = c?.getRendererPresentMode() ?: "fifo"
@@ -960,6 +960,29 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
      */
     val duplicateDriveLetters: Set<String>
         get() = drives.groupingBy { it.letter }.eachCount().filterValues { it > 1 }.keys
+
+    /**
+     * Default graphics driver for a NEW container: the GameNative wrapper on non-Adreno GPUs.
+     *
+     * `Container.DEFAULT_GRAPHICS_DRIVER` is plain "wrapper", which targets Adreno/Turnip. On Mali,
+     * Xclipse and PowerVR that hands a brand-new container a driver never built for it;
+     * wrapper-gamenative is the one that covers those parts. Ported from GameNative PR #1736.
+     *
+     * Falls back to the plain default when wrapper-gamenative is not among the installed driver
+     * entries — [identifierToDisplay] silently degrades an unknown id to entry 0, which on a Mali
+     * device would land somewhere arbitrary rather than on "wrapper".
+     *
+     * Same reasoning as [defaultDrivesForNewContainer] for computing it here: the static constant
+     * has no Context and initialises a field on EVERY Container loaded from disk, where a saved
+     * graphicsDriver overwrites it anyway. This runs only when the editor opens with no container.
+     */
+    private fun defaultGraphicsDriverForNewContainer(): String {
+        if (GPUInformation.isAdrenoGPU(context)) return Container.DEFAULT_GRAPHICS_DRIVER
+        val installed = graphicsDriverEntries.any {
+            StringUtils.parseIdentifier(it) == Container.GRAPHICS_DRIVER_GAMENATIVE
+        }
+        return if (installed) Container.GRAPHICS_DRIVER_GAMENATIVE else Container.DEFAULT_GRAPHICS_DRIVER
+    }
 
     /**
      * Default drives for a NEW container: one per storage volume, instead of internal-only.
