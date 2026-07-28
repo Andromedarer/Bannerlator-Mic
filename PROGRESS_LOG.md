@@ -1,5 +1,17 @@
 # Star-Compose — Progress Log
 
+## 2026-07-28 — 🐛 **Report button named the handheld as the GPU** (branch `feat/log-manager` @ `c2d14099`, run `30403529505`)
+
+> Device test of the new **Report** button: the prefilled GitHub issue read ``- GPU: `AYANEO AYANEO Pocket FIT` `` — the device, not the GPU.
+>
+> **🔑 Every fact extractor in `LogReport.facts()` was an unanchored regex, so each matched the first thing that looked close enough.** `Device *: *(.+)` was written for DXVK's `info:    Device : Adreno (TM) 750`, but our OWN logcat header line — `Device: AYANEO AYANEO Pocket FIT`, written by `LogcatCapture.deviceHeader` at the top of `logcat.log` — sits in the same scanned blob and wins. For an **app-bucket report it is the only line that can ever match**, which is exactly the report in the screenshot (zip `app-2026-07-28_17-59-45.zip`). Two more of the four were broken the same way and had simply not been noticed: `DXVK: *v?(…)` also matches `DXVK: Read 46 valid state cache entries` → version `"Read"` whenever that line lands first, and `vkd3d-proton *v?(…)` captured the `-` out of `vkd3d-proton - applicationVersion: 3.0.1`.
+>
+> All four re-anchored to the shape the writing layer actually emits (`(?m)^info: +Device *: *…`, etc.), verified against the real logs on device — `Adreno (TM) 750` / `turnip Mesa driver (whitebelyash branch) 26.1.99` / `3.0-gplasync` / `3.0.1`, with the old patterns reproducing the bug on the same input.
+>
+> Added a fallback to `GPUInformation.getRenderer(null, null)` → `extractModelName` when no DXVK log is in the bundle, so app-only, native-Vulkan and wined3d reports still carry a real GPU instead of dropping the line.
+>
+> Also `LogcatCapture.deviceHeader` no longer repeats itself — MANUFACTURER/BRAND/MODEL overlap on most devices and the naive join produced the doubled "AYANEO AYANEO Pocket FIT" in the System block too.
+
 ## 2026-07-28 — 🗂️ **Log Manager pass 3 — dead "Open in File Manager" fixed + laid out to match the approved mockup** (branch `feat/log-manager`)
 
 > Device screenshot showed the buttons doing nothing and the bottom half of the screen still not matching the HTML mockup (`/sdcard/Download/bannerlator-log-manager-plan.html`). Installed APK verified first: device base.apk sha256 `883a8ebf…14683582` == the staged `bannerlator-logmgr2-8239a36-standard.apk`, so this was the real build, not a stale install.
