@@ -3919,6 +3919,31 @@ public class XServerDisplayActivity extends AppCompatActivity {
     
     String adrenoToolsDriverId = graphicsDriverConfig.get("version");
 
+    // turnip-26.1.0 (the direct Vulkan ICD) was removed along with its bundled asset. A container or
+    // shortcut saved on it would otherwise be handed to adrenotools with an id that has no installed
+    // driver. Self-heal on the first launch of an affected container instead of sweeping every
+    // container at startup: fall back to System AND persist it, so the editor stops showing a driver
+    // that no longer exists. Shortcut override wins over the container, same as everywhere else.
+    if (DefaultVersion.REMOVED_TURNIP_ICD.equals(adrenoToolsDriverId)) {
+        Log.w("GraphicsDriverExtraction", "Driver '" + DefaultVersion.REMOVED_TURNIP_ICD
+                + "' was removed — falling back to " + DefaultVersion.WRAPPER + " and persisting");
+        adrenoToolsDriverId = DefaultVersion.WRAPPER;
+        graphicsDriverConfig.put("version", DefaultVersion.WRAPPER);
+        try {
+            String rewritten = GraphicsDriverConfigDialog.toGraphicsDriverConfig(graphicsDriverConfig);
+            if (shortcut != null && !shortcut.getExtra("graphicsDriverConfig", "").isEmpty()) {
+                shortcut.putExtra("graphicsDriverConfig", rewritten);
+                shortcut.saveData();
+            } else if (container != null) {
+                container.setGraphicsDriverConfig(rewritten);
+                container.saveData();
+            }
+        } catch (Exception e) {
+            // Never block the launch on the persist half — the in-memory fallback above is enough.
+            Log.w("GraphicsDriverExtraction", "could not persist turnip-26.1.0 migration", e);
+        }
+    }
+
     Log.d("GraphicsDriverExtraction", "Selected Driver from Config: " + selectedDriver);
     Log.d("GraphicsDriverExtraction", "Adrenotools DriverID: " + adrenoToolsDriverId);
 
@@ -4049,27 +4074,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
         TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, bcnLayerOverride, rootDir);
     }
 
-    // 3. Driver integration.
-    //
-    // Two mutually-exclusive turnip delivery modes share the "version" slot:
-    //   (a) Direct Vulkan ICD (turnip-26.1.0): point the Vulkan loader straight at the Mesa
-    //       turnip ICD and DO NOT touch the ADRENOTOOLS_* env. This avoids the adrenotools /
-    //       linkernsbypass linker-namespace hook (which needs ~Android 11+) and is the only
-    //       turnip that works on Android < 11 (SD845/Adreno 630 / Android 10 reporter, #18).
-    //   (b) Everything else (turnip-sdk36, v819, custom-installed): adrenotools as before.
-    boolean directIcdTurnip = DefaultVersion.WRAPPER_TURNIP_ICD.equals(adrenoToolsDriverId);
-    if (directIcdTurnip) {
-        installDirectIcdTurnip();
-        // VK_ICD_FILENAMES uses host-side absolute paths in this fork (the guest program runs
-        // with host LD_LIBRARY_PATH=<rootDir>/usr/lib:/system/lib64, see
-        // GuestProgramLauncherComponent), so the loader reads this manifest off the host fs,
-        // exactly like wrapper_icd above. Override wrapper_icd -> freedreno_icd.
-        envVars.put("VK_ICD_FILENAMES",
-            new File(imageFs.getShareDir(), "vulkan/icd.d/freedreno_icd.aarch64.json").getAbsolutePath());
-        // NOTE: deliberately NO ADRENOTOOLS_* env here — that hook is the whole reason this
-        // mode exists. Leaving them unset keeps the loader on the plain-ICD path.
-    }
-    else if (adrenoToolsDriverId != null && !adrenoToolsDriverId.equals("System")) {
+    // 3. Driver integration — adrenotools for every selectable driver (turnip-sdk36, v819,
+    // custom-installed). The old direct-Vulkan-ICD mode (turnip-26.1.0) has been removed along
+    // with its bundled asset; a container still saved on it is migrated to System just above.
+    if (adrenoToolsDriverId != null && !adrenoToolsDriverId.equals("System")) {
         AdrenotoolsManager adrenotoolsManager = new AdrenotoolsManager(this);
         adrenotoolsManager.setDriverById(envVars, imageFs, adrenoToolsDriverId);
     }
@@ -4077,13 +4085,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // --- Environment Variable Setup ---
     String vulkanVersion = graphicsDriverConfig.get("vulkanVersion");
     if (vulkanVersion == null) vulkanVersion = "1.4";
-    // The direct-ICD turnip is not an adrenotools driver, so the native getVulkanVersion()
-    // probe can't describe it and may return a non-dotted string -> split(".")[2] would crash.
-    // turnip-26.1.0's ICD manifest advertises api_version 1.4.318, so use that directly.
-    String driverVkVersion = directIcdTurnip
-        ? "1.4.318"
-        : GPUInformation.getVulkanVersion(adrenoToolsDriverId, this);
-    String[] driverVkParts = driverVkVersion.split("\\.");
+    String driverVkVersion = GPUInformation.getVulkanVersion(adrenoToolsDriverId, this);
+    // The probe can return a short or non-dotted string for a driver it can't describe; the old
+    // direct-ICD turnip used to be special-cased here. Fall back rather than crash the launch on
+    // split(".")[2] — 1.3's patch level is the safe floor and the clamp below still applies.
+    String[] driverVkParts = (driverVkVersion != null && driverVkVersion.split("\\.").length >= 3)
+        ? driverVkVersion.split("\\.")
+        : new String[] { "1", "3", "0" };
     String vulkanVersionPatch = driverVkParts[2];
     // Never advertise a Vulkan minor the driver does not implement. We append the DRIVER's patch
     // level to the USER's chosen minor, so an unclamped "1.4" pick on a 1.3.289 driver would export
@@ -4361,47 +4369,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
     }
 }
-    
-    
-    // Installs the Mesa Turnip 26.1.0 driver as a plain Vulkan ICD (issue #18) and rewrites the
-    // ICD manifest's library_path to a path the loader can actually resolve here.
-    //
-    // The Winlator asset hardcodes library_path to "/data/data/com.winlator/files/rootfs/lib/
-    // libvulkan_freedreno.so" (its own package + a "rootfs" layout we don't use), so it MUST be
-    // rewritten. We point it at the absolute HOST path imageFs.getLibDir()/libvulkan_freedreno.so,
-    // because in this fork the Vulkan loader runs with host LD_LIBRARY_PATH = <rootDir>/usr/lib:
-    // /system/lib64 (GuestProgramLauncherComponent) and VK_ICD_FILENAMES itself is a host
-    // getShareDir() path — i.e. the existing wrapper_icd resolves its library off the host fs in
-    // exactly the same <rootDir>/usr/lib directory. The absolute form is unambiguous (no reliance
-    // on search order, and won't accidentally bind /system/lib64).
-    //
-    // This runs AFTER the firstTimeBoot extra_libs.tzst extraction above, so the (newer,
-    // universal a6xx/a7xx/a8xx) 26.1.0 turnip wins over the dormant older freedreno that
-    // extra_libs ships but nothing currently selects.
-    private void installDirectIcdTurnip() {
-        File rootDir = imageFs.getRootDir();
-        Log.d("GraphicsDriverExtraction", "Extracting direct Vulkan ICD turnip: graphics_driver/turnip-26.1.0.tzst");
-        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/turnip-26.1.0.tzst", rootDir);
-
-        File soFile = new File(imageFs.getLibDir(), "libvulkan_freedreno.so");
-        File icdJson = new File(imageFs.getShareDir(), "vulkan/icd.d/freedreno_icd.aarch64.json");
-        try {
-            JSONObject icd = new JSONObject();
-            icd.put("api_version", "1.4.318");
-            icd.put("library_arch", "64");
-            icd.put("library_path", soFile.getAbsolutePath());
-            JSONObject root = new JSONObject();
-            root.put("ICD", icd);
-            root.put("file_format_version", "1.0.1");
-            icdJson.getParentFile().mkdirs();
-            FileUtils.writeString(icdJson, root.toString());
-            Log.d("GraphicsDriverExtraction", "Rewrote freedreno ICD library_path -> " + soFile.getAbsolutePath());
-        }
-        catch (JSONException e) {
-            Log.e("GraphicsDriverExtraction", "Failed to rewrite freedreno ICD manifest", e);
-        }
-    }
-
     @Override
     public boolean dispatchGenericMotionEvent(MotionEvent event) {
         if (inGameControlsEditor != null) {

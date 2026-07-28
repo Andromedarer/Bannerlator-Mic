@@ -12,14 +12,10 @@ public abstract class GPUInformation {
         if (!isAdrenoGPU(context) && !driverName.equals("System"))
             return false;
 
-        // Direct Vulkan ICD turnip (turnip-26.1.0) is NOT an adrenotools driver: it is loaded
-        // as a plain system Vulkan ICD, so the native getRenderer() adrenotools probe cannot
-        // describe it (and that very probe is what fails on Android < 11, hiding turnip-sdk36
-        // from the picker on devices like the SD845/Adreno 630 / Android 10 reporter). Gate it
-        // on the GPU family only (Turnip == Freedreno == Adreno) so it stays selectable exactly
-        // where it works, without going through the failing hook probe.
-        if (DefaultVersion.WRAPPER_TURNIP_ICD.equals(driverName))
-            return isAdrenoGPU(context);
+        // turnip-26.1.0 (the direct Vulkan ICD) has been removed — never report it as supported,
+        // so a saved container pointing at it can't keep it alive in any picker.
+        if (DefaultVersion.REMOVED_TURNIP_ICD.equals(driverName))
+            return false;
 
         String renderer = getRenderer(driverName, context);
 
