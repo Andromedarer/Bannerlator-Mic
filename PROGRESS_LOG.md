@@ -1,5 +1,17 @@
 # Star-Compose — Progress Log
 
+## 2026-07-28 — ✨ **Per-shortcut "View logs" + browse all 521 Wine channels** (branch `feat/log-manager` @ `9ef0839b`, run `30405709785`)
+
+> **View logs on every shortcut.** Reaching a game's logs meant App Settings → Logs → Open Log Manager → find the game. Added to **both** menus — grid long-press and list overflow — opening the viewer on that game directly. New `LogInventory.forGame()` does the lookup, and 🔑 deliberately does **not** call `LogLocation.resolveGameLogDir`: **that creates the folder**, and asking whether logs exist must not.
+>
+> 🔑 The two empty cases are told apart rather than both opening a blank viewer. With per-game folders **off**, every game writes into one shared directory under names that cannot be attributed to a shortcut — there is no honest "this game's logs" to show, so it says that and points at the setting. On-but-nothing-captured says that instead.
+>
+> **Browse all 521 channels.** The picker showed 18 chips and a search field, and **search only helps once you know a name to type** — so 503 channels were effectively unreachable. Added a **"Browse all 521…" chip as the last item in the flow** (reading as "and the rest are through here" rather than as another channel) opening a scrollable dialog over the whole catalog, **grouped by family**: 521 names in one alphabetical column is technically all of them and practically unreadable, whereas "Sound" holding 15 is something a user can shop from. In-dialog search, an "On only" filter, and a **"What's this?"** toggle putting a one-line explanation under every row — off by default because it triples row height.
+>
+> 🔑 **New `WineChannelInfo.kt` works in two tiers, and the split is the point.** 185 hand-written descriptions for the channels genuinely worth knowing, and a prefix/suffix `categoryOf` classifier covering all 521 so the tail gets a **true** sentence ("Direct3D and graphics — output from Wine's `d3dxof` component") rather than an invented one. Nobody can honestly write 521 accurate descriptions. 📌 **Rule for future edits: if the specific behaviour isn't known, leave it out of `DESCRIPTIONS` and let the category answer.** Verified every described key exists in `wine_debug_channels.json` — dropped `trace`/`pid`/`timestamp`/`server`/`virtual`, which are debug *classes* and output modifiers, not channels.
+>
+> ⏭️ Both are **built and CI-green but NOT device-tested** (staged `bannerlator-logmgr9-9ef0839-standard.apk`).
+
 ## 2026-07-28 — 🐛 **Report button named the handheld as the GPU** (branch `feat/log-manager` @ `c2d14099`, run `30403529505`)
 
 > Device test of the new **Report** button: the prefilled GitHub issue read ``- GPU: `AYANEO AYANEO Pocket FIT` `` — the device, not the GPU.
