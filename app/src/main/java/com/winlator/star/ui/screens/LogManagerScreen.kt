@@ -23,6 +23,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material3.Button
@@ -47,10 +48,11 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.preference.PreferenceManager
 import com.winlator.star.core.FileUtils
-import com.winlator.star.core.InAppFilePicker
+import com.winlator.star.util.InAppFilePicker
 import com.winlator.star.core.LogInventory
 import com.winlator.star.core.LogLocation
 import com.winlator.star.core.LogcatCapture
@@ -142,8 +144,8 @@ fun LogManagerScreen(onClose: () -> Unit) {
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 Text(
@@ -157,131 +159,92 @@ fun LogManagerScreen(onClose: () -> Unit) {
                 }
             }
 
-            Text(
-                "Logs help diagnose a problem. Two of these slow games down while they're on — " +
-                    "tap ? on any option to see which.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp
-            )
-
-            // ── Where logs go ──
-            LogCard(title = "Where logs go") {
+            // ── Where logs go ────────────────────────────────────────────
+            SectionLabel("Where logs go")
+            LogCard {
+                PickRow(
+                    label = when (locationMode) {
+                        LogLocation.MODE_DOWNLOAD -> "Download"
+                        LogLocation.MODE_DOCUMENTS -> "Documents"
+                        LogLocation.MODE_CUSTOM -> if (customPath.isNotEmpty()) "Custom folder" else "Choose folder…"
+                        else -> "App data (default)"
+                    },
+                    sub = LogLocation.resolveLogDir(context)?.absolutePath ?: "—",
+                    action = "Change",
+                    onClick = { showLocationMenu = true }
+                )
                 Box {
-                    Button(
-                        onClick = { showLocationMenu = true },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            when (locationMode) {
-                                LogLocation.MODE_DOWNLOAD -> "Download (/sdcard/Download/bannerlator)"
-                                LogLocation.MODE_DOCUMENTS -> "Documents (/sdcard/Documents/bannerlator)"
-                                LogLocation.MODE_CUSTOM ->
-                                    if (customPath.isNotEmpty()) customPath else "Choose folder…"
-                                else -> "App data (default)"
-                            },
-                            color = MaterialTheme.colorScheme.onPrimary
-                        )
-                    }
-                    DropdownMenu(
-                        expanded = showLocationMenu,
-                        onDismissRequest = { showLocationMenu = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("App data (default)") },
+                    DropdownMenu(expanded = showLocationMenu, onDismissRequest = { showLocationMenu = false }) {
+                        DropdownMenuItem(text = { Text("App data (default)") },
                             onClick = { saveMode(LogLocation.MODE_APP_DATA); showLocationMenu = false })
-                        DropdownMenuItem(
-                            text = { Text("Download") },
+                        DropdownMenuItem(text = { Text("Download") },
                             onClick = { saveMode(LogLocation.MODE_DOWNLOAD); showLocationMenu = false })
-                        DropdownMenuItem(
-                            text = { Text("Documents") },
+                        DropdownMenuItem(text = { Text("Documents") },
                             onClick = { saveMode(LogLocation.MODE_DOCUMENTS); showLocationMenu = false })
-                        DropdownMenuItem(
-                            text = { Text("Choose folder…") },
+                        DropdownMenuItem(text = { Text("Choose folder…") },
                             onClick = {
                                 showLocationMenu = false
                                 dirLauncher.launch(InAppFilePicker.buildDirIntent(context, "Select log folder"))
                             })
                     }
                 }
-                Text(
-                    LogLocation.resolveLogDir(context)?.absolutePath ?: "—",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp
-                )
-                Spacer(Modifier.height(4.dp))
                 LogToggle("Folder for each game", perGame,
+                    hint = "Each game keeps its own folder",
                     onInfo = { info = "Folder for each game" to LogCopy.PER_GAME }) {
                     perGame = it; putBool(LogLocation.PREF_PER_GAME, it); refreshTick++
                 }
             }
 
-            // ── What to record ──
-            LogCard(title = "What to record") {
+            // ── What to record ───────────────────────────────────────────
+            SectionLabel("What to record")
+            LogCard {
                 LogToggle("Wine debug", wineDebug,
+                    hint = "Slows games down — for diagnosing a problem",
                     onInfo = { info = "Wine debug" to LogCopy.WINE }) {
                     wineDebug = it; putBool("enable_wine_debug", it)
                 }
                 if (wineDebug) {
                     FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxWidth().padding(start = 2.dp, bottom = 6.dp)
                     ) {
                         channels.forEachIndexed { i, ch ->
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh,
-                                        RoundedCornerShape(4.dp))
-                                    .padding(start = 8.dp, end = 2.dp, top = 2.dp, bottom = 2.dp)
-                            ) {
-                                Text(ch, color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp)
-                                IconButton(
-                                    onClick = { saveChannels(channels.toMutableList().also { it.removeAt(i) }) },
-                                    modifier = Modifier.size(20.dp)
-                                ) {
-                                    Icon(Icons.Default.Close, "Remove",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(14.dp))
-                                }
-                            }
+                            Chip(ch) { saveChannels(channels.toMutableList().also { it.removeAt(i) }) }
                         }
-                        IconButton(onClick = { showChannelPicker = true }, modifier = Modifier.size(28.dp)) {
-                            Icon(Icons.Default.Add, "Add",
-                                tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                        }
-                        IconButton(
-                            onClick = {
-                                saveChannels(com.winlator.star.SettingsFragment.DEFAULT_WINE_DEBUG_CHANNELS
-                                    .split(",").filter { it.isNotBlank() })
-                            },
-                            modifier = Modifier.size(28.dp)
-                        ) {
-                            Icon(Icons.Default.Refresh, "Reset",
-                                tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                        ChipButton("+ add") { showChannelPicker = true }
+                        ChipButton("reset") {
+                            saveChannels(com.winlator.star.SettingsFragment.DEFAULT_WINE_DEBUG_CHANNELS
+                                .split(",").filter { it.isNotBlank() })
                         }
                     }
                 }
                 LogToggle("Box64 / FEXCore", box64Logs,
+                    hint = "Slows games down at higher verbosity",
                     onInfo = { info = "Box64 / FEXCore" to LogCopy.BOX64 }) {
                     box64Logs = it; putBool("enable_box64_logs", it)
                 }
                 LogToggle("DXVK & VKD3D", dxvkLogs,
+                    hint = "Safe to leave on — mostly written at startup",
                     onInfo = { info = "DXVK & VKD3D" to LogCopy.DXVK }) {
                     dxvkLogs = it; putBool("enable_dxvk_logs", it)
                 }
                 LogToggle("Android logcat", logcat,
+                    hint = "Bannerlator's own output only",
                     onInfo = { info = "Android logcat" to LogCopy.LOGCAT }) {
                     logcat = it; putBool("enable_logcat", it)
                 }
                 LogToggle("Crash reports", crashReports,
+                    hint = "Nothing runs until something crashes",
                     onInfo = { info = "Crash reports" to LogCopy.CRASH }) {
                     crashReports = it; putBool("enable_crash_reports", it)
                 }
 
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(2.dp))
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                     Button(
                         onClick = {
                             // Runtime.exec + 1000 lines + a redaction pass + a file write: far too
-                            // much for the UI thread (its own docs say so). Off to IO, refresh when done.
+                            // much for the UI thread (its own docs say so). Off to IO, refresh after.
                             scope.launch {
                                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                                     LogcatCapture.captureToFile(context, LogcatCapture.DEFAULT_LINES)
@@ -289,8 +252,6 @@ fun LogManagerScreen(onClose: () -> Unit) {
                                 refreshTick++
                             }
                         },
-                        // Disabled rather than hidden when logcat is off, so the switch above visibly
-                        // controls something instead of being a preference that does nothing.
                         enabled = logcat,
                         modifier = Modifier.weight(1f)
                     ) { Text("Capture logcat now", color = MaterialTheme.colorScheme.onPrimary) }
@@ -298,52 +259,58 @@ fun LogManagerScreen(onClose: () -> Unit) {
                 }
             }
 
-            // ── History ──
-            LogCard(title = "History") {
+            // ── Housekeeping ─────────────────────────────────────────────
+            SectionLabel("Housekeeping")
+            LogCard {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Keep last $keepLast runs per game",
-                            color = MaterialTheme.colorScheme.onSurface)
-                        Text("Older runs are moved to a \"previous\" folder, then pruned.",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                        Text("Keep last", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
+                        Text(
+                            if (keepLast == 0) "No history — each run replaces the last"
+                            else "$keepLast run${if (keepLast == 1) "" else "s"} per game",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp
+                        )
                     }
                     InfoDot { info = "Keep last runs" to LogCopy.KEEP_LAST }
-                    Spacer(Modifier.width(4.dp))
-                    Text("−", color = MaterialTheme.colorScheme.primary, fontSize = 22.sp,
-                        modifier = Modifier
-                            .clickable {
-                                if (keepLast > 0) {
-                                    keepLast--; prefs.edit().putInt(LogLocation.PREF_KEEP_LAST, keepLast).apply()
-                                }
-                            }
-                            .padding(horizontal = 10.dp))
-                    Text("+", color = MaterialTheme.colorScheme.primary, fontSize = 20.sp,
-                        modifier = Modifier
-                            .clickable {
-                                if (keepLast < 50) {
-                                    keepLast++; prefs.edit().putInt(LogLocation.PREF_KEEP_LAST, keepLast).apply()
-                                }
-                            }
-                            .padding(horizontal = 10.dp))
+                    Stepper(
+                        onMinus = {
+                            if (keepLast > 0) { keepLast--; prefs.edit().putInt(LogLocation.PREF_KEEP_LAST, keepLast).apply() }
+                        },
+                        onPlus = {
+                            if (keepLast < 50) { keepLast++; prefs.edit().putInt(LogLocation.PREF_KEEP_LAST, keepLast).apply() }
+                        }
+                    )
                 }
-            }
-
-            // ── Logs on disk ──
-            LogCard(title = "Logs on disk — " + LogInventory.humanBytes(LogInventory.totalBytes(entries))) {
-                if (entries.isEmpty()) {
-                    Text("No logs yet.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
-                } else {
-                    entries.forEach { e ->
-                        LogGroupRow(e, onOpen = { browseDir = e.dir })
+                Divider()
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Total size", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
+                        Text(
+                            LogInventory.humanBytes(LogInventory.totalBytes(entries)) +
+                                " across ${entries.size} " + if (entries.size == 1) "folder" else "folders",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp
+                        )
                     }
+                    // Deleting goes through the File Manager rather than a button here — see the
+                    // note in LogInventory about why this screen owns no delete of its own.
+                    Text("Manage", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp,
+                        modifier = Modifier
+                            .clickable { browseDir = LogLocation.resolveLogDir(context) }
+                            .padding(horizontal = 10.dp, vertical = 6.dp))
                 }
-                Spacer(Modifier.height(4.dp))
-                Button(
-                    onClick = { browseDir = LogLocation.resolveLogDir(context) },
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("Browse all logs", color = MaterialTheme.colorScheme.onPrimary) }
             }
 
+            // ── Logs by game ─────────────────────────────────────────────
+            SectionLabel("Logs by game")
+            if (entries.isEmpty()) {
+                LogCard {
+                    Text("No logs yet.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                }
+            } else {
+                entries.forEach { e -> GameLogCard(e) { browseDir = e.dir } }
+            }
+
+            Spacer(Modifier.height(8.dp))
             Button(onClick = { showExplainAll = true }, modifier = Modifier.fillMaxWidth()) {
                 Text("Explain the log types", color = MaterialTheme.colorScheme.onPrimary)
             }
@@ -351,29 +318,11 @@ fun LogManagerScreen(onClose: () -> Unit) {
             Text(
                 "Logs are scrubbed of usernames, e-mail addresses and tokens before they are written, " +
                     "so they are safe to share. Logcat only ever contains Bannerlator's own output.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp
+                color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp,
+                modifier = Modifier.padding(top = 8.dp)
             )
 
             Spacer(Modifier.height(24.dp))
-        }
-    }
-
-    // The File Manager can delete or move files, so re-scan when it closes rather than
-    // showing counts that no longer match what is on disk.
-    browseDir?.let { dir ->
-        androidx.compose.ui.window.Dialog(
-            onDismissRequest = { browseDir = null; refreshTick++ },
-            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
-        ) {
-            // A Dialog window is transparent by default and FileManagerScreen draws no background
-            // of its own (it normally sits inside the nav host's scaffold), so without this the Log
-            // Manager shows through the file list.
-            Surface(
-                modifier = Modifier.fillMaxSize(),
-                color = MaterialTheme.colorScheme.background
-            ) {
-                FileManagerScreen(initialDir = dir)
-            }
         }
     }
 
@@ -425,32 +374,143 @@ fun LogManagerScreen(onClose: () -> Unit) {
     }
 }
 
+/** Small uppercase section heading that sits ABOVE its card, as in the design. */
 @Composable
-private fun LogGroupRow(entry: LogInventory.Entry, onOpen: () -> Unit) {
+private fun SectionLabel(text: String) {
+    Text(
+        text.uppercase(),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        fontSize = 11.sp,
+        letterSpacing = 0.08.em,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.padding(start = 4.dp, top = 14.dp, bottom = 6.dp)
+    )
+}
+
+/** Untitled card — the heading lives above it now. */
+@Composable
+private fun LogCard(content: @Composable () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceContainer, RoundedCornerShape(10.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(10.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) { content() }
+}
+
+/** A row that reads as a value with its detail underneath and an action on the right. */
+@Composable
+private fun PickRow(label: String, sub: String, action: String, onClick: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(8.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
+            Text(sub, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, maxLines = 2)
+        }
+        Text(action, color = MaterialTheme.colorScheme.primary, fontSize = 13.sp)
+    }
+}
+
+@Composable
+private fun Chip(text: String, onRemove: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(16.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp))
+            .padding(start = 10.dp, end = 2.dp, top = 2.dp, bottom = 2.dp)
+    ) {
+        Text(text, color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp)
+        IconButton(onClick = onRemove, modifier = Modifier.size(22.dp)) {
+            Icon(Icons.Default.Close, "Remove",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(13.dp))
+        }
+    }
+}
+
+@Composable
+private fun ChipButton(text: String, onClick: () -> Unit) {
+    Text(
+        text,
+        color = MaterialTheme.colorScheme.primary,
+        fontSize = 12.sp,
+        modifier = Modifier
+            .clickable { onClick() }
+            .border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(16.dp))
+            .padding(horizontal = 12.dp, vertical = 5.dp)
+    )
+}
+
+@Composable
+private fun Stepper(onMinus: () -> Unit, onPlus: () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("−", color = MaterialTheme.colorScheme.primary, fontSize = 20.sp,
+            modifier = Modifier.clickable { onMinus() }.padding(horizontal = 12.dp, vertical = 4.dp))
+        Text("+", color = MaterialTheme.colorScheme.primary, fontSize = 18.sp,
+            modifier = Modifier.clickable { onPlus() }.padding(horizontal = 12.dp, vertical = 4.dp))
+    }
+}
+
+@Composable
+private fun Divider() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp)
+            .height(1.dp)
+            .background(MaterialTheme.colorScheme.outline)
+    )
+}
+
+/**
+ * One game's logs. Expanding lists the individual files; the action opens the File Manager at this
+ * folder, which is where viewing, sharing and deleting live.
+ */
+@Composable
+private fun GameLogCard(entry: LogInventory.Entry, onOpen: () -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 3.dp)
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainer, RoundedCornerShape(10.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(10.dp))
             .padding(10.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(8.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    if (entry.isAppBucket) Icons.Outlined.HelpOutline else Icons.Default.Folder,
+                    null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(19.dp)
+                )
+            }
+            Spacer(Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f).clickable { expanded = !expanded }) {
                 Text(if (entry.isAppBucket) "App & crash logs" else entry.name,
                     color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
-                val bits = buildString {
-                    append("${entry.fileCount} file${if (entry.fileCount == 1) "" else "s"}")
-                    append(" · ").append(LogInventory.humanBytes(entry.totalBytes))
-                    if (entry.archivedRuns > 0) append(" · ${entry.archivedRuns} kept")
-                }
-                Text(bits, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                Text(
+                    buildString {
+                        append("${entry.fileCount} file${if (entry.fileCount == 1) "" else "s"}")
+                        append(" · ").append(LogInventory.humanBytes(entry.totalBytes))
+                        if (entry.archivedRuns > 0) append(" · ${entry.archivedRuns} kept")
+                        append(" · ").append(relativeTime(entry.lastModified))
+                    },
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp
+                )
             }
-            // View / share / delete all live in the File Manager — it already does multi-select,
-            // bulk delete, share and a file viewer. Opening it here rooted at this game's folder
-            // reuses all of that instead of reimplementing it badly in three places.
-            Text("Open", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp,
-                modifier = Modifier.clickable { onOpen() }.padding(horizontal = 8.dp, vertical = 4.dp))
         }
         if (expanded) {
             Spacer(Modifier.height(6.dp))
@@ -460,22 +520,31 @@ private fun LogGroupRow(entry: LogInventory.Entry, onOpen: () -> Unit) {
                     modifier = Modifier.padding(start = 6.dp, top = 2.dp))
             }
         }
+        Spacer(Modifier.height(8.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onOpen() }
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(8.dp))
+                .border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
+                .padding(vertical = 7.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("Open in File Manager", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
+        }
     }
 }
 
-@Composable
-private fun LogCard(title: String, content: @Composable () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceContainer, RoundedCornerShape(8.dp))
-            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        Text(title, color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold)
-        content()
+/** "12 min ago" / "yesterday" — a timestamp is not what anyone is looking for in this list. */
+private fun relativeTime(millis: Long): String {
+    if (millis <= 0) return "—"
+    val mins = (System.currentTimeMillis() - millis) / 60000
+    return when {
+        mins < 1 -> "just now"
+        mins < 60 -> "$mins min ago"
+        mins < 60 * 24 -> "${mins / 60} hr ago"
+        mins < 60 * 48 -> "yesterday"
+        else -> "${mins / (60 * 24)} days ago"
     }
 }
 
@@ -483,18 +552,24 @@ private fun LogCard(title: String, content: @Composable () -> Unit) {
 private fun LogToggle(
     label: String,
     checked: Boolean,
+    hint: String? = null,
     enabled: Boolean = true,
     onInfo: (() -> Unit)? = null,
     onCheckedChange: (Boolean) -> Unit,
 ) {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+    ) {
+        Column(
             modifier = Modifier
                 .weight(1f)
                 .then(if (enabled) Modifier.clickable { onCheckedChange(!checked) } else Modifier.alpha(0.4f))
         ) {
-            Text(label, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+            Text(label, color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
+            if (hint != null) {
+                Text(hint, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+            }
         }
         if (onInfo != null) InfoDot(onInfo)
         Spacer(Modifier.width(4.dp))
