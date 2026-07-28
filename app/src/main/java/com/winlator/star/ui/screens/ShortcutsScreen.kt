@@ -81,6 +81,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInNew
@@ -210,6 +211,8 @@ import com.winlator.star.core.DefaultVersion
 import com.winlator.star.core.FileUtils
 import com.winlator.star.core.GameFolderScanner
 import com.winlator.star.core.KeyValueSet
+import com.winlator.star.core.LogInventory
+import com.winlator.star.core.LogLocation
 import com.winlator.star.core.StringUtils
 import com.winlator.star.core.WineInfo
 import com.winlator.star.core.WinePath
@@ -261,6 +264,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     var settingsShortcut by remember { mutableStateOf<Shortcut?>(null) }
     var gameDetailsShortcut by remember { mutableStateOf<Shortcut?>(null) }
     var propertiesShortcut by remember { mutableStateOf<Shortcut?>(null) }
+    var logsShortcut by remember { mutableStateOf<Shortcut?>(null) }
     var showSortMenu by remember { mutableStateOf(false) }
     var showImportContainerPicker by remember { mutableStateOf(false) }
     var pendingImportContainerIndex by remember { mutableStateOf(-1) }
@@ -720,6 +724,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                     onScrapeCover = { scrapeCoverFor(shortcut) },
                                     onCommunityConfigs = { communityConfigsFor(shortcut) },
                                     onGameDetails = { gameDetailsShortcut = shortcut },
+                                    onViewLogs = { logsShortcut = shortcut },
                                 )
                             }
                         }
@@ -745,6 +750,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                     onScrapeCover = { scrapeCoverFor(shortcut) },
                                     onCommunityConfigs = { communityConfigsFor(shortcut) },
                                     onGameDetails = { gameDetailsShortcut = shortcut },
+                                    onViewLogs = { logsShortcut = shortcut },
                                 )
                             }
                         }
@@ -1295,6 +1301,43 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
             confirmButton = {},
             dismissButton = { TextButton(onClick = { cloneTarget = null }) { Text("Cancel") } },
         )
+    }
+
+    // "View logs" — straight to this game's logs, no trip through App Settings.
+    //
+    // Three outcomes, and it matters that they read differently: per-game folders off (nothing is
+    // filed per game, so we cannot show "this game's" logs at all), on but nothing captured yet, or
+    // the viewer. Silently opening an empty viewer for the first two would look like a bug.
+    logsShortcut?.let { s ->
+        val entry = remember(s.name) { LogInventory.forGame(context, s.name) }
+        val perGameOff = remember { !LogLocation.isPerGameEnabled(context) }
+        if (entry != null) {
+            androidx.compose.ui.window.Dialog(
+                onDismissRequest = { logsShortcut = null },
+                properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+            ) {
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    LogViewerScreen(entry = entry, onClose = { logsShortcut = null })
+                }
+            }
+        } else {
+            OutlinedAlertDialog(
+                onDismissRequest = { logsShortcut = null },
+                title = { Text("No logs for ${s.name}") },
+                text = {
+                    Text(
+                        if (perGameOff)
+                            "Per-game log folders are turned off, so everything is written to one " +
+                            "shared folder and logs can't be traced back to a single game. Turn them " +
+                            "on in Settings › Logs, then play ${s.name} once."
+                        else
+                            "Nothing has been captured for ${s.name} yet. Logs are written while a " +
+                            "game runs — play it once, then check back here."
+                    )
+                },
+                confirmButton = { TextButton(onClick = { logsShortcut = null }) { Text("OK") } },
+            )
+        }
     }
 
     // Shortcut properties dialog
@@ -4162,6 +4205,7 @@ private fun ShortcutItemLayoutL(
     onScrapeCover: () -> Unit,
     onCommunityConfigs: () -> Unit,
     onGameDetails: () -> Unit,
+    onViewLogs: () -> Unit,
 ) {
     val res = LocalContext.current.resources
 
@@ -4265,6 +4309,7 @@ private fun ShortcutItemLayoutL(
             onScrapeCover = onScrapeCover,
             onCommunityConfigs = onCommunityConfigs,
             onGameDetails = onGameDetails,
+            onViewLogs = onViewLogs,
         )
       }
     }
@@ -4282,6 +4327,7 @@ private fun ShortcutOverflowButton(
     onScrapeCover: () -> Unit,
     onCommunityConfigs: () -> Unit,
     onGameDetails: () -> Unit,
+    onViewLogs: () -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     Box {
@@ -4342,6 +4388,12 @@ private fun ShortcutOverflowButton(
             )
             MenuItemDivider()
             DropdownMenuItem(
+                text = { Text("View logs") },
+                leadingIcon = { Icon(Icons.Filled.Description, null) },
+                onClick = { menuExpanded = false; onViewLogs() },
+            )
+            MenuItemDivider()
+            DropdownMenuItem(
                 text = { Text("Properties") },
                 leadingIcon = { Icon(Icons.Filled.Info, null) },
                 onClick = { menuExpanded = false; onProperties() },
@@ -4364,6 +4416,7 @@ private fun ShortcutGridItem(
     onScrapeCover: () -> Unit,
     onCommunityConfigs: () -> Unit,
     onGameDetails: () -> Unit,
+    onViewLogs: () -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
@@ -4464,6 +4517,8 @@ private fun ShortcutGridItem(
             DropdownMenuItem(text = { Text("Scrape cover") }, leadingIcon = { Icon(Icons.Filled.Search, null, tint = MaterialTheme.colorScheme.primary) }, onClick = { menuExpanded = false; onScrapeCover() })
             MenuItemDivider()
             DropdownMenuItem(text = { Text("Community configs") }, leadingIcon = { Icon(Icons.Filled.Public, null, tint = MaterialTheme.colorScheme.primary) }, onClick = { menuExpanded = false; onCommunityConfigs() })
+            MenuItemDivider()
+            DropdownMenuItem(text = { Text("View logs") }, leadingIcon = { Icon(Icons.Filled.Description, null) }, onClick = { menuExpanded = false; onViewLogs() })
             MenuItemDivider()
             DropdownMenuItem(text = { Text("Properties") }, leadingIcon = { Icon(Icons.Filled.Info, null) }, onClick = { menuExpanded = false; onProperties() })
         }

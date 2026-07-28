@@ -97,6 +97,27 @@ public final class LogInventory {
     }
 
     /**
+     * The log group for one game, or null when it has none yet. Used by the per-shortcut "View logs"
+     * entry, which has a game name and nothing else to go on.
+     *
+     * Deliberately narrow: it resolves ONLY a per-game folder. With per-game folders off every game
+     * writes into the same flat directory under names we cannot attribute back to a shortcut, so
+     * there is no honest answer — the caller is expected to say so rather than open a viewer full of
+     * some other game's logs. {@link LogLocation#resolveGameLogDir} is not used because it CREATES
+     * the folder, and merely asking whether logs exist must not.
+     */
+    public static Entry forGame(Context context, String gameName) {
+        if (gameName == null || gameName.trim().isEmpty()) return null;
+        if (!LogLocation.isPerGameEnabled(context)) return null;
+        File base = LogLocation.resolveLogDir(context);
+        if (base == null || !base.isDirectory()) return null;
+
+        File dir = new File(base, LogLocation.sanitizeFolderName(gameName));
+        if (!dir.isDirectory() || !containsOurLogs(dir)) return null;
+        return describe(dir, false);
+    }
+
+    /**
      * True when a directory holds at least one file this app produced — a current-run log, a crash
      * report, or an archived run. Cheap and shallow on purpose: it runs for every folder in the log
      * root each time the screen opens.
