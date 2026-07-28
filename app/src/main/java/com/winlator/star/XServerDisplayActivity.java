@@ -208,6 +208,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private float globalCursorSpeed = 1.0f;
     private short taskAffinityMask = 0;
     private short taskAffinityMaskWoW64 = 0;
+    // Prefer-big-cores live re-pin: guest pid -> its affinity mask BEFORE we changed it, so toggle OFF
+    // restores each process exactly (revert philosophy). Populated on toggle ON, cleared on OFF.
+    private final java.util.HashMap<Integer, Integer> bigCoreAffinitySnapshot = new java.util.HashMap<>();
     private int frameRatingWindowId = -1;
     // Windows that have published a _MESA_DRV property (GPU/render windows). The perf HUD binds to one
     // of these (frameRatingWindowId); we keep the whole set so that when the bound window unmaps we can
@@ -866,6 +869,33 @@ public class XServerDisplayActivity extends AppCompatActivity {
         };
         // Drawer HUD/FPS tab opened — refresh the live display-rate readout.
         state.onRefreshRatePoll = this::updateCurrentRefreshRate;
+
+        // ── Power-user performance toggles (non-root + root). Apply the effect live, then persist:
+        // with a shortcut the value is written as a per-game override ONLY when it DIFFERS from the
+        // global default, else the override is removed so the game re-inherits (see persistPerfToggle). ──
+        state.onSustainedPerfModeChange = () -> {
+            boolean on = XServerDrawerState.INSTANCE.getSustainedPerfMode().getValue();
+            applyPerfKeyLive("sustainedPerfMode", on);
+            persistPerfToggle("sustainedPerfMode", on);
+        };
+        state.onPerfPriorityBoostChange = () -> {
+            boolean on = XServerDrawerState.INSTANCE.getPerfPriorityBoost().getValue();
+            applyPerfKeyLive("perfPriorityBoost", on);
+            persistPerfToggle("perfPriorityBoost", on);
+        };
+        state.onPreferBigCoresChange = () -> {
+            boolean on = XServerDrawerState.INSTANCE.getPreferBigCores().getValue();
+            applyPerfKeyLive("preferBigCores", on);
+            persistPerfToggle("preferBigCores", on);
+        };
+        state.onRootToggleChange = (key, on) -> {
+            applyPerfKeyLive(key, on);
+            persistPerfToggle(key, on);
+        };
+        state.onResetPerfKey = key -> resetPerfKey(key);
+        state.onResetAllPerf = this::resetAllPerfOverrides;
+        state.onFreeMemory = () -> com.winlator.star.perf.PerfRootApplier.INSTANCE.freeMemoryNow();
+        state.onRootReadoutPoll = this::refreshRootReadouts;
         // Cycle OFF -> FIT -> STRETCH -> FILL -> INTEGER -> OFF (legacy path; kept for any
         // cycle-style trigger). The drawer selector uses onSetFullscreenMode below instead.
         state.onToggleFullscreen       = () ->
@@ -1082,6 +1112,37 @@ public class XServerDisplayActivity extends AppCompatActivity {
         XServerDrawerState.INSTANCE.setManualRefreshRate(resolvedManualRefreshRate());
         updateCurrentRefreshRate();
 
+        // Power-user performance toggles (non-root). Seed the drawer, apply the ones that take effect
+        // at launch. preferBig feeds the affinity computation just below; priority boost is applied
+        // once the render threads exist (setupUI). All three are live-toggleable from the drawer.
+        boolean sustainedPerf = resolvedSustainedPerfMode();
+        boolean preferBig     = resolvedPreferBigCores();
+        XServerDrawerState.INSTANCE.setSustainedPerfMode(sustainedPerf);
+        XServerDrawerState.INSTANCE.setPerfPriorityBoost(resolvedPerfPriorityBoost());
+        XServerDrawerState.INSTANCE.setPreferBigCores(preferBig);
+        getWindow().setSustainedPerformanceMode(sustainedPerf);
+
+        // Root-tier toggles: seed the drawer with the effective (override ?? global) values and apply
+        // the effective state now (no-op unless root is granted). Auto-revert on exit/background/crash
+        // restores everything (PerfRevertRegistry).
+        java.util.Map<String, Boolean> rootEffective = new java.util.HashMap<>();
+        for (String rk : com.winlator.star.perf.PerfRootApplier.INSTANCE.getROOT_KEYS()) {
+            rootEffective.put(rk, resolvedRootBool(rk));
+        }
+        XServerDrawerState.INSTANCE.setRootToggles(rootEffective);
+        com.winlator.star.perf.PerfRootApplier.INSTANCE.applyEffective(rootEffective);
+
+        // Unified per-game override tracking + two-way sync for ALL 9 keys: seed the overridden set
+        // from the shortcut's extras (a key present = per-game override; absent = inherit + mirror the
+        // App Settings global default live). Drives the override/global indicator + reset affordance.
+        java.util.Set<String> overriddenKeys = new java.util.HashSet<>();
+        if (shortcut != null) {
+            for (String pk : com.winlator.star.perf.PerformanceSettings.INSTANCE.getALL_PERF_KEYS()) {
+                if (shortcut.hasExtra(pk)) overriddenKeys.add(pk);
+            }
+        }
+        XServerDrawerState.INSTANCE.startPerfSync(overriddenKeys);
+
         containerManager.activateContainer(container);
 
         // Pre-create all 4 event files so Wine registers every slot at startup.
@@ -1098,6 +1159,18 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (shortcut != null) {
             taskAffinityMask = (short) ProcessHelper.getAffinityMask(shortcut.getExtra("cpuList", container.getCPUList(true)));
             taskAffinityMaskWoW64 = taskAffinityMask;
+        }
+
+        // "Prefer big cores" preset overrides the raw cpuList affinity with the top-frequency cluster.
+        // Non-root: this only feeds the existing taskAffinityMask path. Empty result (undetectable
+        // topology) leaves the computed affinity untouched.
+        if (preferBig) {
+            String bigList = com.winlator.star.perf.CpuTopology.INSTANCE.detectBigCoreCpuList();
+            if (bigList != null && !bigList.isEmpty()) {
+                taskAffinityMask = (short) ProcessHelper.getAffinityMask(bigList);
+                taskAffinityMaskWoW64 = taskAffinityMask;
+                Log.d("XServerDisplayActivity", "Prefer big cores: affinity -> " + bigList);
+            }
         }
 
         // Determine the class name for the startup workarounds
@@ -2203,6 +2276,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        // Power-user perf: stop the thermal watchdog and revert any privileged sysfs writes on game
+        // exit (no-op unless a root toggle wrote something this session).
+        com.winlator.star.perf.TempWatchdog.INSTANCE.stop();
+        com.winlator.star.perf.PerfRevertRegistry.INSTANCE.revertAll();
         unregisterGyroSensor();
         stopDxApiDetection();
         cancelLaunchTimers();
@@ -2706,6 +2783,15 @@ public class XServerDisplayActivity extends AppCompatActivity {
         xServerView.initRenderer(rendererType);
         final HostRenderer renderer = xServerView.getRenderer();
         renderer.setCursorVisible(false);
+
+        // Power-user perf (non-root): arm the thermal watchdog for this session, and if the priority
+        // boost is on, raise the guest CPU-worker subtree once it exists (short delay so the guest is
+        // up and getPid() is populated).
+        com.winlator.star.perf.TempWatchdog.INSTANCE.start(this);
+        if (XServerDrawerState.INSTANCE.getPerfPriorityBoost().getValue()) {
+            handler.postDelayed(
+                () -> com.winlator.star.perf.PerfPriority.INSTANCE.boost(GuestProgramLauncherComponent.getPid()), 5000);
+        }
 
         // Standalone FPS limiter (guest-side, via the X11 Present extension): apply the resolved
         // per-game/container value up front, independent of the frame-gen engine. The in-game toggle
@@ -4664,6 +4750,176 @@ return true;
         return shortcut != null ? shortcut.getExtra("frameGenEngine", container.getFrameGenEngine()) : container.getFrameGenEngine();
     }
 
+    // ── Power-user performance toggles (non-root). LOCKED two-level resolution chain:
+    //     per-game shortcut override (only when the shortcut has that extra key set)  ->  global default.
+    // There is NO container level. The global default is the single shared store both perf surfaces
+    // bind to (App Settings' Performance menu writes it; the in-game drawer reads the effective value).
+    private boolean resolvedPerfBool(String key, boolean globalDefault) {
+        if (shortcut != null && shortcut.hasExtra(key)) return shortcut.getExtra(key, "0").equals("1");
+        return globalDefault;
+    }
+    private boolean resolvedSustainedPerfMode() {
+        return resolvedPerfBool("sustainedPerfMode",
+                com.winlator.star.perf.PerformanceSettings.INSTANCE.getSustainedPerfMode().getValue());
+    }
+    private boolean resolvedPerfPriorityBoost() {
+        return resolvedPerfBool("perfPriorityBoost",
+                com.winlator.star.perf.PerformanceSettings.INSTANCE.getPerfPriorityBoost().getValue());
+    }
+    private boolean resolvedPreferBigCores() {
+        return resolvedPerfBool("preferBigCores",
+                com.winlator.star.perf.PerformanceSettings.INSTANCE.getPreferBigCores().getValue());
+    }
+
+    // Persist a live in-game flip under the rule "App Settings = default; a per-game toggle is saved
+    // and honored only when it's DIFFERENT". With a shortcut: if the new value EQUALS the global
+    // default we REMOVE the extra (the game re-inherits, hasExtra=false); if it DIFFERS we write the
+    // per-game override. Without a shortcut (container-direct launch, no per-game store) the flip edits
+    // the GLOBAL default — the only durable store. Applies to all 9 keys (non-root three + root six).
+    private void persistPerfToggle(String key, boolean on) {
+        if (shortcut != null) {
+            boolean global = com.winlator.star.perf.PerformanceSettings.INSTANCE.globalDefault(key);
+            if (on == global) {
+                shortcut.removeExtra(key);
+                XServerDrawerState.INSTANCE.markInherited(key); // resume mirroring the global default
+            } else {
+                shortcut.putExtra(key, on ? "1" : "0");
+                XServerDrawerState.INSTANCE.markOverridden(key);
+            }
+            shortcut.saveData();
+        } else {
+            com.winlator.star.perf.PerformanceSettings.INSTANCE.setGlobalDefault(key, on);
+        }
+    }
+
+    // The LIVE effect of a perf key (independent of persistence), so both a toggle flip and a
+    // reset-to-global re-apply it the same way.
+    private void applyPerfKeyLive(String key, boolean on) {
+        switch (key) {
+            case "sustainedPerfMode":
+                runOnUiThread(() -> getWindow().setSustainedPerformanceMode(on));
+                break;
+            case "perfPriorityBoost":
+                // Boost the GUEST CPU-worker subtree (box64/wine) + our audio/worker threads, never
+                // downgrading an already-hot thread. Snapshotted so OFF restores exact nice values.
+                if (on) com.winlator.star.perf.PerfPriority.INSTANCE.boost(GuestProgramLauncherComponent.getPid());
+                else    com.winlator.star.perf.PerfPriority.INSTANCE.restore();
+                break;
+            case "preferBigCores":
+                // Recompute the affinity mask the guest launcher reads (processes spawned after the
+                // flip + next launch)...
+                if (on) {
+                    String bigList = com.winlator.star.perf.CpuTopology.INSTANCE.detectBigCoreCpuList();
+                    if (bigList != null && !bigList.isEmpty()) {
+                        taskAffinityMask = (short) ProcessHelper.getAffinityMask(bigList);
+                        taskAffinityMaskWoW64 = taskAffinityMask;
+                    }
+                } else {
+                    String cpuList = shortcut != null
+                            ? shortcut.getExtra("cpuList", container.getCPUList(true))
+                            : container.getCPUList(true);
+                    taskAffinityMask = (short) ProcessHelper.getAffinityMask(cpuList);
+                    taskAffinityMaskWoW64 = shortcut != null
+                            ? taskAffinityMask
+                            : (short) ProcessHelper.getAffinityMask(container.getCPUListWoW64(true));
+                }
+                // ...AND re-pin the ALREADY-RUNNING guest tree so the current game moves now.
+                reapplyBigCoresToRunningGuest(on);
+                break;
+            default: // root six
+                com.winlator.star.perf.PerfRootApplier.INSTANCE.apply(key, on);
+                break;
+        }
+    }
+
+    // Reset ONE perf key: drop the per-game override so it re-inherits the global default, update the
+    // drawer display, and re-apply the (now global) value live.
+    private void resetPerfKey(String key) {
+        if (shortcut == null) return; // no per-game store -> global already IS the value
+        if (shortcut.hasExtra(key)) {
+            shortcut.removeExtra(key);
+            shortcut.saveData();
+        }
+        XServerDrawerState.INSTANCE.markInherited(key);
+        applyPerfKeyLive(key, com.winlator.star.perf.PerformanceSettings.INSTANCE.globalDefault(key));
+    }
+
+    // Reset ALL 9 perf keys so the game fully re-inherits the global defaults.
+    private void resetAllPerfOverrides() {
+        for (String key : com.winlator.star.perf.PerformanceSettings.INSTANCE.getALL_PERF_KEYS()) resetPerfKey(key);
+    }
+
+    // Root-tier effective value: per-game shortcut override (when the shortcut has the key) else the
+    // global default from PerformanceSettings. Same two-level chain as the non-root three.
+    private boolean resolvedRootBool(String key) {
+        return resolvedPerfBool(key, com.winlator.star.perf.PerformanceSettings.INSTANCE.rootDefaultValue(key));
+    }
+
+    // Live readouts for the in-game Root Performance section (governor / GPU MHz / SoC temp / fan RPM).
+    // Cheap sysfs / HudMetrics reads, refreshed on a ~1.5s poll while that section is open.
+    private com.winlator.star.widget.HudMetrics rootHudMetrics;
+    private void refreshRootReadouts() {
+        try {
+            java.util.Map<String, String> m = new java.util.HashMap<>();
+            // Governor (first readable core).
+            String gov = null;
+            for (com.winlator.star.perf.PerfNodeResolver.CpuCoreNodes c :
+                    com.winlator.star.perf.PerfNodeResolver.INSTANCE.cpuCores()) {
+                if (c.getGovernor() != null) { gov = readSysfsLine(c.getGovernor()); break; }
+            }
+            m.put("governor", gov != null ? gov : "—");
+            // SoC temp = hottest of CPU/GPU.
+            if (rootHudMetrics == null) rootHudMetrics = new com.winlator.star.widget.HudMetrics(this);
+            Integer cpuT = rootHudMetrics.getCpuTempC();
+            Integer gpuT = rootHudMetrics.getGpuTempC();
+            Integer soc = (cpuT != null && gpuT != null) ? Math.max(cpuT, gpuT) : (cpuT != null ? cpuT : gpuT);
+            m.put("socTemp", soc != null ? soc + "°C" : "—");
+            // GPU current clock (MHz).
+            String gpuMhz = readGpuMhz();
+            m.put("gpuMhz", gpuMhz != null ? gpuMhz + "MHz" : "—");
+            // Fan RPM (hwmon fanN_input), if any.
+            String fan = readFanRpm();
+            m.put("fanRpm", fan != null ? fan + "rpm" : "n/a");
+            XServerDrawerState.INSTANCE.setRootReadouts(m);
+        } catch (Exception ignored) {}
+    }
+
+    private static String readSysfsLine(String path) {
+        try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(path))) {
+            String line = r.readLine();
+            return line != null ? line.trim() : null;
+        } catch (Exception e) { return null; }
+    }
+
+    private String readGpuMhz() {
+        String[] cands = {
+            "/sys/class/kgsl/kgsl-3d0/gpuclk",             // Adreno, Hz
+            "/sys/class/kgsl/kgsl-3d0/devfreq/cur_freq",   // Adreno devfreq, Hz
+        };
+        for (String c : cands) {
+            String v = readSysfsLine(c);
+            if (v != null) {
+                try { long hz = Long.parseLong(v.trim()); if (hz > 1_000_000L) return String.valueOf(hz / 1_000_000L); }
+                catch (NumberFormatException ignored) {}
+            }
+        }
+        return null;
+    }
+
+    private String readFanRpm() {
+        java.io.File[] chips = new java.io.File("/sys/class/hwmon").listFiles();
+        if (chips != null) {
+            for (java.io.File chip : chips) {
+                java.io.File[] inputs = chip.listFiles((d, n) -> n.matches("fan\\d+_input"));
+                if (inputs != null) for (java.io.File f : inputs) {
+                    String v = readSysfsLine(f.getPath());
+                    if (v != null) return v;
+                }
+            }
+        }
+        return null;
+    }
+
     // HUD config (fpsCounterConfig KeyValueSet) resolution. Container-scoped by default, but a shortcut
     // may OWN it — e.g. a community config imported onto the shortcut writes the whole blob as an extra.
     // When the shortcut carries the extra we honor it at launch AND route live in-game drawer edits back
@@ -5145,6 +5401,57 @@ return true;
         else if (!className.isEmpty()) {
             winHandler.setProcessAffinity(window.getClassName(), processAffinity);
         }
+    }
+
+    /**
+     * Re-pin the ALREADY-RUNNING guest process tree when Prefer Big Cores is toggled mid-game (the old
+     * behavior only changed the mask for newly-spawned processes, leaving the current game on 0-7).
+     * Enumerates every guest process via the WinHandler process list and sets each one's affinity —
+     * wine maps SetProcessAffinityMask to sched_setaffinity on the process's Linux threads, so the
+     * game's Cpus_allowed_list shrinks to the big cluster. ON snapshots each process's prior mask;
+     * OFF restores it verbatim (revert philosophy). Best-effort: no-op if WinHandler isn't ready.
+     */
+    private void reapplyBigCoresToRunningGuest(boolean on) {
+        if (winHandler == null) return;
+        if (!on && bigCoreAffinitySnapshot.isEmpty()) return; // nothing we changed -> nothing to revert
+        final int bigMask;
+        if (on) {
+            String bigList = com.winlator.star.perf.CpuTopology.INSTANCE.detectBigCoreCpuList();
+            if (bigList == null || bigList.isEmpty()) return; // topology unknown -> nothing to pin to
+            bigMask = ProcessHelper.getAffinityMask(bigList);
+        } else {
+            bigMask = 0;
+        }
+        // Fallback mask for OFF when a process has no snapshot (e.g. spawned after ON): the resolved
+        // container/shortcut cpuList, else all cores.
+        String cpuList = shortcut != null ? shortcut.getExtra("cpuList", container.getCPUList(true))
+                                          : container.getCPUList(true);
+        final int fallbackMask = ProcessHelper.getAffinityMask(
+                (cpuList != null && !cpuList.isEmpty()) ? cpuList : Container.getFallbackCPUList());
+
+        final OnGetProcessInfoListener prev = winHandler.getOnGetProcessInfoListener();
+        final java.util.ArrayList<ProcessInfo> collected = new java.util.ArrayList<>();
+        winHandler.setOnGetProcessInfoListener((index, count, info) -> {
+            if (index == 0) collected.clear();
+            if (info != null && info.pid > 0) collected.add(info);
+            if (count == 0 || index == count - 1) {
+                for (ProcessInfo pi : collected) {
+                    if (on) {
+                        if (!bigCoreAffinitySnapshot.containsKey(pi.pid))
+                            bigCoreAffinitySnapshot.put(pi.pid, pi.affinityMask); // prior mask, once
+                        winHandler.setProcessAffinity(pi.pid, bigMask);
+                    } else {
+                        Integer orig = bigCoreAffinitySnapshot.get(pi.pid);
+                        winHandler.setProcessAffinity(pi.pid, orig != null ? orig : fallbackMask);
+                    }
+                }
+                if (!on) bigCoreAffinitySnapshot.clear();
+                Log.d("XServerDisplayActivity", "Prefer big cores live re-pin (" + (on ? "ON" : "OFF")
+                        + "): " + collected.size() + " guest process(es)");
+                winHandler.setOnGetProcessInfoListener(prev); // hand the listener back
+            }
+        });
+        winHandler.listProcesses();
     }
 
     /** Flip the in-game FPS overlay between horizontal and vertical layouts (tap on the overlay). */

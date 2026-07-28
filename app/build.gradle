@@ -215,6 +215,14 @@ dependencies {
     implementation 'com.kohlschutter.junixsocket:junixsocket-native-common:2.6.0'
     annotationProcessor 'com.github.bumptech.glide:compiler:4.11.0'
 
+    // topjohnwu libsu — the ONLY su-invoking dependency in the app. Used exclusively by
+    // com.winlator.star.perf.RootManager (the power-user performance toggles' root tier).
+    implementation 'com.github.topjohnwu.libsu:core:6.0.0'
+
+    // ProcessLifecycleOwner: the perf revert registry restores sysfs nodes when the whole app
+    // goes to background (not just when a single activity stops).
+    implementation 'androidx.lifecycle:lifecycle-process:2.7.0'
+
     // JVM unit tests (community-config export round-trip). org.json is a real artifact here so the
     // core's JSONObject calls run on the JVM instead of hitting android.jar's "not mocked" stubs.
     testImplementation 'junit:junit:4.13.2'
