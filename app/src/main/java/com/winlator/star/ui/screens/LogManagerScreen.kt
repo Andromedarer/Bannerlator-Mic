@@ -21,12 +21,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.outlined.HelpOutline
-import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -133,8 +132,13 @@ fun LogManagerScreen(onClose: () -> Unit) {
 
     var info by remember { mutableStateOf<Pair<String, String>?>(null) }
     var showExplainAll by remember { mutableStateOf(false) }
+    var showKeepMenu by remember { mutableStateOf(false) }
     // Folder the embedded File Manager is showing, or null when it is closed.
     var browseDir by remember { mutableStateOf<File?>(null) }
+    // Group open in the log viewer, and the two destructive confirmations.
+    var viewing by remember { mutableStateOf<LogInventory.Entry?>(null) }
+    var confirmDelete by remember { mutableStateOf<LogInventory.Entry?>(null) }
+    var confirmClearAll by remember { mutableStateOf(false) }
     val entries = remember(refreshTick, perGame) { LogInventory.scan(context) }
 
     fun putBool(key: String, v: Boolean) = prefs.edit().putBoolean(key, v).apply()
@@ -239,22 +243,24 @@ fun LogManagerScreen(onClose: () -> Unit) {
                     crashReports = it; putBool("enable_crash_reports", it)
                 }
 
-                Spacer(Modifier.height(2.dp))
+                // Outlined rather than a filled button: the design keeps solid accent for switches
+                // only, and this is an occasional action, not the point of the screen.
+                Spacer(Modifier.height(4.dp))
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Button(
-                        onClick = {
-                            // Runtime.exec + 1000 lines + a redaction pass + a file write: far too
-                            // much for the UI thread (its own docs say so). Off to IO, refresh after.
-                            scope.launch {
-                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                    LogcatCapture.captureToFile(context, LogcatCapture.DEFAULT_LINES)
-                                }
-                                refreshTick++
+                    CardAction(
+                        "Capture logcat now",
+                        modifier = Modifier.weight(1f).alpha(if (logcat) 1f else 0.4f)
+                    ) {
+                        if (!logcat) return@CardAction
+                        // Runtime.exec + 1000 lines + a redaction pass + a file write: far too
+                        // much for the UI thread (its own docs say so). Off to IO, refresh after.
+                        scope.launch {
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                LogcatCapture.captureToFile(context, LogcatCapture.DEFAULT_LINES)
                             }
-                        },
-                        enabled = logcat,
-                        modifier = Modifier.weight(1f)
-                    ) { Text("Capture logcat now", color = MaterialTheme.colorScheme.onPrimary) }
+                            refreshTick++
+                        }
+                    }
                     InfoDot { info = "Capture logcat now" to LogCopy.CAPTURE_NOW }
                 }
             }
@@ -262,27 +268,30 @@ fun LogManagerScreen(onClose: () -> Unit) {
             // ── Housekeeping ─────────────────────────────────────────────
             SectionLabel("Housekeeping")
             LogCard {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Keep last", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
-                        Text(
-                            if (keepLast == 0) "No history — each run replaces the last"
-                            else "$keepLast run${if (keepLast == 1) "" else "s"} per game",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp
-                        )
-                    }
-                    InfoDot { info = "Keep last runs" to LogCopy.KEEP_LAST }
-                    Stepper(
-                        onMinus = {
-                            if (keepLast > 0) { keepLast--; prefs.edit().putInt(LogLocation.PREF_KEEP_LAST, keepLast).apply() }
-                        },
-                        onPlus = {
-                            if (keepLast < 50) { keepLast++; prefs.edit().putInt(LogLocation.PREF_KEEP_LAST, keepLast).apply() }
-                        }
+                Box {
+                    PickRow(
+                        label = "Keep last",
+                        sub = if (keepLast == 0) "No history — each run replaces the last"
+                              else "$keepLast launch${if (keepLast == 1) "" else "es"} per game",
+                        action = "▾",
+                        onInfo = { info = "Keep last launches" to LogCopy.KEEP_LAST },
+                        onClick = { showKeepMenu = true }
                     )
+                    DropdownMenu(expanded = showKeepMenu, onDismissRequest = { showKeepMenu = false }) {
+                        listOf(0, 1, 3, 5, 10, 20, 50).forEach { n ->
+                            DropdownMenuItem(
+                                text = { Text(if (n == 0) "No history" else "$n launch${if (n == 1) "" else "es"}") },
+                                onClick = {
+                                    keepLast = n
+                                    prefs.edit().putInt(LogLocation.PREF_KEEP_LAST, n).apply()
+                                    showKeepMenu = false
+                                }
+                            )
+                        }
+                    }
                 }
-                Divider()
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Row(verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Total size", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
                         Text(
@@ -291,12 +300,15 @@ fun LogManagerScreen(onClose: () -> Unit) {
                             color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp
                         )
                     }
-                    // Deleting goes through the File Manager rather than a button here — see the
-                    // note in LogInventory about why this screen owns no delete of its own.
-                    Text("Manage", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp,
+                    Text("Browse", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp,
                         modifier = Modifier
                             .clickable { browseDir = LogLocation.resolveLogDir(context) }
-                            .padding(horizontal = 10.dp, vertical = 6.dp))
+                            .padding(horizontal = 8.dp, vertical = 6.dp))
+                    Text("Clear all", color = DangerRed, fontSize = 12.sp,
+                        modifier = Modifier
+                            .clickable { if (entries.isNotEmpty()) confirmClearAll = true }
+                            .padding(horizontal = 6.dp, vertical = 6.dp)
+                            .alpha(if (entries.isEmpty()) 0.4f else 1f))
                 }
             }
 
@@ -307,19 +319,29 @@ fun LogManagerScreen(onClose: () -> Unit) {
                     Text("No logs yet.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                 }
             } else {
-                entries.forEach { e -> GameLogCard(e) { browseDir = e.dir } }
+                entries.forEach { e ->
+                    GameLogCard(
+                        entry = e,
+                        onView = { viewing = e },
+                        onShare = { shareLogGroup(context, e) },
+                        onDelete = { confirmDelete = e }
+                    )
+                }
             }
 
-            Spacer(Modifier.height(8.dp))
-            Button(onClick = { showExplainAll = true }, modifier = Modifier.fillMaxWidth()) {
-                Text("Explain the log types", color = MaterialTheme.colorScheme.onPrimary)
-            }
-
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "Explain the log types",
+                color = MaterialTheme.colorScheme.primary, fontSize = 12.sp,
+                modifier = Modifier
+                    .clickable { showExplainAll = true }
+                    .padding(vertical = 6.dp, horizontal = 4.dp)
+            )
             Text(
                 "Logs are scrubbed of usernames, e-mail addresses and tokens before they are written, " +
                     "so they are safe to share. Logcat only ever contains Bannerlator's own output.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp,
-                modifier = Modifier.padding(top = 8.dp)
+                modifier = Modifier.padding(top = 4.dp)
             )
 
             Spacer(Modifier.height(24.dp))
@@ -367,6 +389,89 @@ fun LogManagerScreen(onClose: () -> Unit) {
         )
     }
 
+    // The File Manager, opened at a log folder. This host block is what "Browse" needs to do
+    // anything at all — without it browseDir is written and never read, which is exactly how the
+    // button ended up dead. It also re-scans on close, since the File Manager can delete or move.
+    browseDir?.let { dir ->
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { browseDir = null; refreshTick++ },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            // A Dialog window is transparent and the File Manager draws no background of its own —
+            // without this Surface it renders on top of whatever is behind the dialog.
+            Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                FileManagerScreen(initialDir = dir)
+            }
+        }
+    }
+
+    viewing?.let { entry ->
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { viewing = null },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                LogViewerScreen(entry = entry, onClose = { viewing = null })
+            }
+        }
+    }
+
+    confirmDelete?.let { entry ->
+        val count = remember(entry.dir) { LogInventory.deletableCount(entry) }
+        OutlinedAlertDialog(
+            onDismissRequest = { confirmDelete = null },
+            title = { Text(if (entry.isAppBucket) "Delete app & crash logs?" else "Delete ${entry.name} logs?") },
+            text = {
+                Text(
+                    "Deletes $count log file${if (count == 1) "" else "s"}, including any kept " +
+                        "history.\n\nOnly files Bannerlator wrote are removed — anything else in " +
+                        "that folder is left alone."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val n = LogInventory.deleteGroup(context, entry)
+                    confirmDelete = null
+                    refreshTick++
+                    android.widget.Toast.makeText(
+                        context, "Deleted $n file${if (n == 1) "" else "s"}",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }) { Text("Delete", color = DangerRed) }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Cancel") } }
+        )
+    }
+
+    if (confirmClearAll) {
+        val count = remember(refreshTick) { entries.sumOf { LogInventory.deletableCount(it) } }
+        OutlinedAlertDialog(
+            onDismissRequest = { confirmClearAll = false },
+            title = { Text("Clear all logs?") },
+            text = {
+                Text(
+                    "Deletes $count log file${if (count == 1) "" else "s"} across ${entries.size} " +
+                        "folder${if (entries.size == 1) "" else "s"}, including kept history.\n\n" +
+                        "Only files Bannerlator wrote are removed. Other files in your log folder — " +
+                        "including anything you put there yourself — are left alone."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    var n = 0
+                    entries.forEach { n += LogInventory.deleteGroup(context, it) }
+                    confirmClearAll = false
+                    refreshTick++
+                    android.widget.Toast.makeText(
+                        context, "Deleted $n file${if (n == 1) "" else "s"}",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }) { Text("Delete all", color = DangerRed) }
+            },
+            dismissButton = { TextButton(onClick = { confirmClearAll = false }) { Text("Cancel") } }
+        )
+    }
+
     info?.let { (title, body) -> PerfInfoDialog(title = title, body = body, onDismiss = { info = null }) }
     if (showExplainAll) {
         PerfInfoDialog(title = "What each log is for", body = LogCopy.explainAll(),
@@ -402,19 +507,26 @@ private fun LogCard(content: @Composable () -> Unit) {
 
 /** A row that reads as a value with its detail underneath and an action on the right. */
 @Composable
-private fun PickRow(label: String, sub: String, action: String, onClick: () -> Unit) {
+private fun PickRow(
+    label: String,
+    sub: String,
+    action: String,
+    onInfo: (() -> Unit)? = null,
+    onClick: () -> Unit,
+) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onClick() }
             .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(8.dp))
-            .padding(horizontal = 12.dp, vertical = 10.dp)
+            .padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 10.dp)
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(label, color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
             Text(sub, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, maxLines = 2)
         }
+        if (onInfo != null) InfoDot(onInfo)
         Text(action, color = MaterialTheme.colorScheme.primary, fontSize = 13.sp)
     }
 }
@@ -449,33 +561,17 @@ private fun ChipButton(text: String, onClick: () -> Unit) {
     )
 }
 
-@Composable
-private fun Stepper(onMinus: () -> Unit, onPlus: () -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("−", color = MaterialTheme.colorScheme.primary, fontSize = 20.sp,
-            modifier = Modifier.clickable { onMinus() }.padding(horizontal = 12.dp, vertical = 4.dp))
-        Text("+", color = MaterialTheme.colorScheme.primary, fontSize = 18.sp,
-            modifier = Modifier.clickable { onPlus() }.padding(horizontal = 12.dp, vertical = 4.dp))
-    }
-}
-
-@Composable
-private fun Divider() {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 8.dp)
-            .height(1.dp)
-            .background(MaterialTheme.colorScheme.outline)
-    )
-}
-
 /**
- * One game's logs. Expanding lists the individual files; the action opens the File Manager at this
- * folder, which is where viewing, sharing and deleting live.
+ * One game's logs: icon, name, what is on disk, then View / Share / Delete as in the design.
+ * Tapping the name expands the file list.
  */
 @Composable
-private fun GameLogCard(entry: LogInventory.Entry, onOpen: () -> Unit) {
+private fun GameLogCard(
+    entry: LogInventory.Entry,
+    onView: () -> Unit,
+    onShare: () -> Unit,
+    onDelete: () -> Unit,
+) {
     var expanded by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier
@@ -493,7 +589,11 @@ private fun GameLogCard(entry: LogInventory.Entry, onOpen: () -> Unit) {
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    if (entry.isAppBucket) Icons.Outlined.HelpOutline else Icons.Default.Folder,
+                    when {
+                        entry.isAppBucket -> Icons.Default.PhoneAndroid
+                        entry.dir.name.startsWith("Container") -> Icons.Default.Settings
+                        else -> Icons.Default.SportsEsports
+                    },
                     null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(19.dp)
                 )
             }
@@ -520,20 +620,57 @@ private fun GameLogCard(entry: LogInventory.Entry, onOpen: () -> Unit) {
                     modifier = Modifier.padding(start = 6.dp, top = 2.dp))
             }
         }
-        Spacer(Modifier.height(8.dp))
+        // Divider then a three-up action row, as in the design.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { onOpen() }
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(8.dp))
-                .border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
-                .padding(vertical = 7.dp),
-            contentAlignment = Alignment.Center
+                .padding(top = 9.dp)
+                .height(1.dp)
+                .background(MaterialTheme.colorScheme.outline)
+        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxWidth().padding(top = 9.dp)
         ) {
-            Text("Open in File Manager", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
+            CardAction("View", modifier = Modifier.weight(1f), primary = true, onClick = onView)
+            CardAction("Share", modifier = Modifier.weight(1f), onClick = onShare)
+            CardAction("Delete", modifier = Modifier.weight(1f), danger = true, onClick = onDelete)
         }
     }
 }
+
+/** One of the three per-card actions. */
+@Composable
+private fun CardAction(
+    label: String,
+    modifier: Modifier = Modifier,
+    primary: Boolean = false,
+    danger: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val fg = when {
+        danger -> DangerRed
+        primary -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+    Box(
+        modifier = modifier
+            .clickable { onClick() }
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(7.dp))
+            .border(
+                1.dp,
+                if (primary) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                RoundedCornerShape(7.dp)
+            )
+            .padding(vertical = 6.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(label, color = fg, fontSize = 12.sp)
+    }
+}
+
+/** The design's one non-theme colour: destructive actions read as red in both light and dark. */
+private val DangerRed = androidx.compose.ui.graphics.Color(0xFFE05C4A)
 
 /** "12 min ago" / "yesterday" — a timestamp is not what anyone is looking for in this list. */
 private fun relativeTime(millis: Long): String {

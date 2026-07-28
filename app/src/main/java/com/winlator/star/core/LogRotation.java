@@ -37,7 +37,7 @@ public final class LogRotation {
     public static void rotate(File gameDir, int keepLast) {
         if (gameDir == null || !gameDir.isDirectory()) return;
         try {
-            File[] stale = gameDir.listFiles(f -> f.isFile() && looksLikeLog(f.getName()));
+            File[] stale = gameDir.listFiles(f -> f.isFile() && isOurRunLog(f.getName()));
             if (stale == null || stale.length == 0) {
                 pruneArchives(gameDir, keepLast);
                 return;
@@ -110,8 +110,11 @@ public final class LogRotation {
      *
      * So: an explicit allowlist of the names we actually produce. DXVK derives its filenames from
      * the executable, hence the suffix forms rather than exact matches.
+     *
+     * Public because the Log Manager's delete actions must use exactly THIS list — a second,
+     * looser definition of "a log file" is how the destructive bug got in the first time.
      */
-    private static boolean looksLikeLog(String name) {
+    public static boolean isOurRunLog(String name) {
         String n = name.toLowerCase(Locale.US);
         if (!n.endsWith(".log")) return false;              // never .txt — that is other people's
         return n.equals("wine_debug.log")

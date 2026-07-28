@@ -1,5 +1,22 @@
 # Star-Compose — Progress Log
 
+## 2026-07-28 — 🗂️ **Log Manager pass 3 — dead "Open in File Manager" fixed + laid out to match the approved mockup** (branch `feat/log-manager`)
+
+> Device screenshot showed the buttons doing nothing and the bottom half of the screen still not matching the HTML mockup (`/sdcard/Download/bannerlator-log-manager-plan.html`). Installed APK verified first: device base.apk sha256 `883a8ebf…14683582` == the staged `bannerlator-logmgr2-8239a36-standard.apk`, so this was the real build, not a stale install.
+>
+> **🐛 THE BUG: the restyle commit `8239a364` deleted the dialog that HOSTS the File Manager.** `browseDir` was still written by "Open in File Manager" and by "Manage" — and read by nothing. The `browseDir?.let { Dialog { FileManagerScreen(initialDir = dir) } }` block existed in `96742d22` and did not survive the 405-line rewrite, so both buttons set state into the void. Restored, plus the opaque `Surface` wrapper (a Dialog window is transparent and the File Manager paints no background of its own) and the re-scan on close.
+>
+> **Laid out to the mockup** — the remaining gaps were all in the bottom half:
+> - **Per-game cards** now carry the design's three-up **View · Share · Delete** row under a divider, replacing the single full-width "Open in File Manager" button. Icon tile picks 🎮 / ⚙️ / 📱 by group type.
+> - **New `ui/screens/LogViewerScreen.kt` — mockup screen 3, which had never been built.** File chips, a live **● following** tail, monospace body with severity colouring (err red / warn amber / layer chatter blue), and **Wrap · Find · Copy · Share**. Reads only the **last 256 KB** (`RandomAccessFile` seek, partial first line dropped) capped at 4000 lines — a Wine debug log with `seh` on reaches tens of MB in minutes, and a full read on the main thread would jank the dialog. Find filters lines with a match count; one shared horizontal scroll state so no-wrap mode can't shear lines apart.
+> - **Housekeeping** matches the mockup: "Keep last" is a value row with a **▾ preset menu** (0/1/3/5/10/20/50) instead of a −/+ stepper, and the total-size row regains **Clear all** in red, with **Browse** next to it for the File Manager.
+> - "Explain the log types" demoted from a filled accent button to a text link, and "Capture logcat now" from filled to outlined — the design keeps solid accent for switches only.
+>
+> **⚠️ Delete and Clear all reverse an earlier decision, so they are built to be incapable of the old bug.** `LogInventory.deleteGroup()` walks the folder and removes only names on `LogRotation.isOurRunLog`'s allowlist (now public, so there is exactly ONE definition of "a log we wrote") plus our own `crash_*.txt`; it recurses solely into the `previous/` archive we created, and removes the folder itself only when we emptied it and it is not the log root. `steam_debug.txt`, `bh_*_debug.txt`, ReShade/ and anything a user put in a custom log folder are untouchable by construction, not by care. Both actions confirm first and say the file count.
+> - Sharing copies to `cacheDir/logs/share` before handing a URI to the chooser (new `log_share` cache-path in `file_paths.xml`) — logs can live in a user-picked folder and granting a chooser access to that folder is not something to do casually.
+>
+> ⏭️ Device test still owes: rotation with **per-game OFF + a CUSTOM location** (the data-loss path), the new Delete/Clear all against a folder holding foreign files, and the viewer following a live game.
+
 ## 2026-07-28 — 🗂️ **LOG MANAGER — built, CI-green, staged, NOT merged, NOT device-tested** (branch `feat/log-manager` @ `8239a36`, run `30389992534`)
 
 > ⏸️ **PAUSED — user at work, resuming later.** Staged `/sdcard/Download/bannerlator-logmgr2-8239a36-standard.apk` sha256 `883a8ebf…14683582` (host==device). Nothing merged; `main` untouched at `cc526ac2`.

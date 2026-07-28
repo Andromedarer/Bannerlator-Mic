@@ -136,11 +136,85 @@ public final class LogInventory {
         return out;
     }
 
-    // NOTE: there is deliberately NO delete() here. Deleting is done through the File Manager,
-    // which the Log Manager opens at the folder in question. An earlier version had one, but it
-    // deleteTree()'d whatever directory an Entry pointed at — safe only for as long as scan() never
-    // returned a folder the app did not create. That is too sharp an edge to leave lying around for
-    // a future caller to pick up.
+    /**
+     * Delete the logs THIS APP wrote in one group, and nothing else.
+     *
+     * The first version of this method took a directory and deleteTree()'d it, which was only ever
+     * safe while scan() never returned a folder we did not create — and scan() did exactly that
+     * (ReShade/), while the "Older logs" group points at the shared log root, which holds
+     * steam_debug.txt and friends, and on a CUSTOM location is a folder full of the user's own
+     * files. So this walks the folder and removes only names on {@link LogRotation#isOurRunLog}'s
+     * allowlist plus our own crash reports, recurses ONLY into the {@code previous/} archive we
+     * created, and removes the folder itself solely when we have emptied it and it is not the log
+     * root. Anything else in there survives, by construction rather than by good intentions.
+     *
+     * @return how many files were actually deleted.
+     */
+    public static int deleteGroup(Context context, Entry entry) {
+        if (entry == null || entry.dir == null || !entry.dir.isDirectory()) return 0;
+        int deleted = 0;
+        File[] files = entry.dir.listFiles();
+        if (files != null) {
+            for (File f : files) {
+                if (f.isDirectory()) {
+                    // Only our own archive folder, never an arbitrary subdirectory.
+                    if (LogRotation.ARCHIVE_DIR.equals(f.getName())) deleted += deleteTree(f);
+                    continue;
+                }
+                if (isOurs(f.getName()) && f.delete()) deleted++;
+            }
+        }
+        File base = LogLocation.resolveLogDir(context);
+        if (base != null && !entry.dir.equals(base)) {
+            File[] left = entry.dir.listFiles();
+            if (left != null && left.length == 0) //noinspection ResultOfMethodCallIgnored
+                entry.dir.delete();
+        }
+        return deleted;
+    }
+
+    /** How many files {@link #deleteGroup} would remove — so the confirmation can say a number. */
+    public static int deletableCount(Entry entry) {
+        if (entry == null || entry.dir == null) return 0;
+        int n = 0;
+        File[] files = entry.dir.listFiles();
+        if (files != null) {
+            for (File f : files) {
+                if (f.isDirectory()) {
+                    if (LogRotation.ARCHIVE_DIR.equals(f.getName())) n += countTree(f);
+                } else if (isOurs(f.getName())) n++;
+            }
+        }
+        return n;
+    }
+
+    /** The only names any delete in this class will touch. */
+    private static boolean isOurs(String name) {
+        String n = name.toLowerCase(Locale.US);
+        if (LogRotation.isOurRunLog(n)) return true;
+        // Crash reports are ours and are .txt, which the run-log allowlist deliberately excludes.
+        return n.startsWith("crash_") && n.endsWith(".txt");
+    }
+
+    private static int deleteTree(File f) {
+        if (f == null) return 0;
+        int n = 0;
+        File[] kids = f.listFiles();
+        if (kids != null) for (File k : kids) n += deleteTree(k);
+        if (f.isFile() && f.delete()) n++;
+        else if (f.isDirectory()) //noinspection ResultOfMethodCallIgnored
+            f.delete();
+        return n;
+    }
+
+    private static int countTree(File f) {
+        if (f == null) return 0;
+        if (f.isFile()) return 1;
+        int n = 0;
+        File[] kids = f.listFiles();
+        if (kids != null) for (File k : kids) n += countTree(k);
+        return n;
+    }
 
     public static long totalBytes(List<Entry> entries) {
         long t = 0;
