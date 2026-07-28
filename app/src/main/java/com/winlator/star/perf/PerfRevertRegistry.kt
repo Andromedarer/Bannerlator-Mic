@@ -38,10 +38,13 @@ object PerfRevertRegistry {
     private var appContext: Context? = null
     private var hooksInstalled = false
 
-    // Safety gate for the two DANGEROUS root toggles (thermal disable, fan max). FALSE until the
-    // on-device crash-revert test is proven; only [setHarnessProven] flips it. While false those two
-    // rows stay disabled AND their appliers no-op, so a broken revert can't cook a device.
-    private val _harnessProven = MutableStateFlow(false)
+    // Safety gate for the two DANGEROUS root toggles (thermal disable, fan max). Was FALSE until the
+    // on-device crash-revert harness was proven — now DEVICE-VERIFIED (2026-07-27, Pocket FIT: all 3
+    // revert paths proven incl. background revertAll), so it DEFAULTS TRUE. The real safety at runtime
+    // is the exact snapshot-revert (device-agnostic: captures & restores whatever the node held) + the
+    // always-on exit/background/crash revertAll + the temperature watchdog + the root grant disclaimer.
+    // [setHarnessProven]/the pref can still force it false to re-gate if ever needed.
+    private val _harnessProven = MutableStateFlow(true)
     val harnessProven: StateFlow<Boolean> = _harnessProven.asStateFlow()
 
     @Synchronized
@@ -50,7 +53,7 @@ object PerfRevertRegistry {
         appContext = ctx
         if (snapshotFile == null) snapshotFile = File(ctx.filesDir, FILE_NAME)
         _harnessProven.value = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getBoolean(KEY_HARNESS, false)
+            .getBoolean(KEY_HARNESS, true) // default TRUE — harness device-verified 2026-07-27 (Pocket FIT)
         installSafetyNets()
         // Repair a snapshot left dirty by a hard kill last session, off the main thread (may need su).
         val file = snapshotFile ?: return
