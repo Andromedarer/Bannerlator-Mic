@@ -661,6 +661,15 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         resolvedColorAsString: String,
         onDone: () -> Unit
     ) {
+        // No Wine/Proton ships in the APK any more, so on a fresh install this list is empty until
+        // the user installs one from the in-app catalog. Saving anyway would write wineVersion="",
+        // which WineInfo.fromIdentifier can only resolve to a non-existent fallback path — i.e. a
+        // container that looks fine and dies at launch. Refuse with a message instead.
+        if (selectedWineVersion.isBlank()) {
+            AppUtils.showToast(context, R.string.no_wine_version_installed)
+            onDone()
+            return
+        }
         isSaving = true
         PreloaderState.show(context.getString(R.string.creating_container))
         val cleanup = {

@@ -1,5 +1,20 @@
 # Star-Compose — Progress Log
 
+## 2026-07-28 — 📦 **Bundled Proton 9 DROPPED — APK ~103 MB smaller; first run now installs a Proton from the catalog** (branch `feat/drop-bundled-proton9` @ `761a91ae`, run `30363048862` green ×3) ✅ **DEVICE-VERIFIED**
+
+> **The bundled `proton-9.0-arm64ec` never launched.** User report: a new container on the bundled layer fails, while the same Proton downloaded from our catalog works. Dialog = "Failed · Launching Windows / The game exited before rendering / exit code 5"; `wine_debug.log` = `_r_debug not found in ld.so` then `c0000005` (EXCEPTION_ACCESS_VIOLATION) in `kernelbase.dll+0x29E98` during `loader_init` — **identically for both `wineboot.exe` and `start.exe`**, i.e. every PE process dies at DLL init.
+>
+> **Ruled out, one at a time (device-checked):**
+> - ❌ **The `-N` suffix naming** (user's hypothesis: catalog entries are `Proton-10.0-arm64ec-0`, bundled is `proton-9.0-arm64ec`). 🔑 It works the OPPOSITE way: `WineInfo.fromIdentifier:129` chops the last 2 chars **only for installed ContentProfiles** then lowercases, so `Proton-10.0-arm64ec-0` → `proton-10.0-arm64ec` → matches the regex, and the bundled name matches as-is with no chop. Both resolve. ⚠️ **Latent landmine though: a CATALOG entry named WITHOUT the `-N` suffix would get `ec` chopped off `arm64ec`, fail the regex, and silently fall back to MAIN_WINE_VERSION.** So the suffix IS load-bearing for catalog names.
+> - ❌ **Truncated/incomplete asset** — 727 aarch64-windows DLLs, 29 aarch64-unix `.so`, 786 i386, all four guest EXEs present.
+> - ❌ **Prefix/version mismatch** — xuser-2's `kernelbase.dll` = 2461696 B = P9's own install exactly (P11's is 2293760).
+> - ❌ **FEXCore pairing** (my hypothesis: bundled P9 has ZERO `load_unixlib_by_name` vs P11's 3, so it can't serve a `-unix` FEX). **Disproved by experiment:** the failing container was on the BUNDLED FEX `2508`, not the `-unix` nightly; swapping it to `2601-Denuvo-0` and relaunching gave the **identical** crash. → it's the P9 layer itself.
+> - 🔎 Likely origin: `app/build.gradle` fetched it from `star-emu/contents` at **`refs/heads/main` — an unpinned moving branch on a third party**, the exact risk the inert `base-assets-v1` was created to fix.
+>
+> **Change (user chose "drop it" over "pin the source"):** removed `proton-9.0-arm64ec.tar.zst` (96 MB, build-time download), `proton-9.0-arm64ec_container_pattern.tzst` (10 MB, git-tracked), and the `downloadProton` gradle task; `preBuild` now depends on `downloadImageFS` directly. **`wine_entries` emptied** — `ImageFsInstaller.installWineFromAssets()` iterates that array, so it becomes a no-op with no code change. Downloaded Protons were already covered: `ContainerManager.extractContainerPatternFile:349` falls back to the layer's own `prefixPack.txz`. `EvshimPatcher` reads `winebus.so` from that tree but has **zero callers** (dead code). **New guard:** creating a container with no Wine installed now refuses with `no_wine_version_installed` — saving would otherwise write `wineVersion=""`, which resolves only to a non-existent fallback path (a container that looks fine and dies at launch).
+>
+> **📉 APK 584 MB → 476 MB (~103 MB smaller).** Staged `/sdcard/Download/bannerlator-noproton-761a91a-ludashi.apk`, sha256 `2459f157…e437d71` (host==device). ✅ **USER DEVICE-VERIFIED: "works fine, added p10 Arm, no issues"** — fresh-install path (no bundled Wine → catalog download → working container) confirmed end-to-end.
+
 ## 2026-07-28 — 🔺 **Vulkan version clamp + 1.4 default + non-Adreno wrapper default** (all merged to main; upstream sync pass over WinNative/GameNative)
 
 > Three merges to main today after the GPU-turbo work, all CI-green all 3 flavors, **no release cut, no vc bump**.
