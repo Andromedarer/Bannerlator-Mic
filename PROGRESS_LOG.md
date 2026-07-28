@@ -1,5 +1,34 @@
 # Star-Compose — Progress Log
 
+## 2026-07-28 — 🗂️ **LOG MANAGER — built, CI-green, staged, NOT merged, NOT device-tested** (branch `feat/log-manager` @ `8239a36`, run `30389992534`)
+
+> ⏸️ **PAUSED — user at work, resuming later.** Staged `/sdcard/Download/bannerlator-logmgr2-8239a36-standard.apk` sha256 `883a8ebf…14683582` (host==device). Nothing merged; `main` untouched at `cc526ac2`.
+>
+> **What it is.** One Log Manager screen replacing the old Settings › Logs section: where logs go, which types to record, Wine channel chips, retention, and what is on disk per game. Same shape as the Performance screen incl. an always-live **`?` on every toggle whose copy LEADS WITH THE PERFORMANCE COST** (user's explicit ask). New files: `core/LogRotation.java`, `core/LogcatCapture.java`, `core/LogInventory.java`, `core/CrashReporter.java`, `ui/screens/LogManagerScreen.kt`; extended `core/LogLocation.java`.
+>
+> **User decisions (locked):** (1) game folders named after the **shortcut** (container name when no shortcut); (2) **leave** pre-existing flat logs alone, no migration; (3) **keep last 5**, user-adjustable via stepper; (4) originally "both surfaces" but **REVERSED after testing → App Settings ONLY**; the in-game entry was fully reverted (drawer row, `onLogManager`, `LOG_MANAGER` enum, host branch, activity callback — verified zero dangling refs). Correct call: the screen hosts a directory-picker launcher and the File Manager, neither safe inside XServerDisplayActivity.
+>
+> **Per-game folders are clean because we own all three destinations:** `DXVK_LOG_PATH` is a *directory* (DXVK names files itself), `VKD3D_LOG_FILE` a full path we set, `wine_debug.log` we write. No renaming or parsing needed.
+>
+> **🔐 SECURITY (user asked — the answer was "no, not automatically").** `SteamLogRedactor` only guarded the Steam diagnostic files. Now applied to logcat capture (per line, streaming) **and** crash reports **including the exception message and stack trace** — those routinely carry a tokenised URL or a path under the account name. Redaction failure drops the line rather than emitting it raw. 🔑 **Logcat is APP-ONLY BY DELIBERATE DESIGN — no system-wide capture even with root granted** (user's call): it would sweep other apps' data into a file we invite users to share, and our redactor cannot know a third party's secrets. I had added `RootManager.runCommand()` for that and **removed it again** rather than widen the su surface for an unshipped path.
+>
+> **🕵️ REVIEW AGENT CAUGHT TWO SHIP-BLOCKERS** (user asked for the handoff — vindicated):
+> 1. **Hard compile break** — a Kotlin local `fun saveMode()` referenced `refreshTick` declared 22 lines BELOW it. Locals resolve in declaration order. Signature damage from scripted text patching.
+> 2. **Guaranteed clobber, would have hit every user** — the old Logs UI was deleted but the Settings **Save FAB still wrote all five keys** from `remember{}`-ed state snapshotted at first composition. LogManagerScreen is a `Dialog` INSIDE SettingsScreen's composition, so SettingsScreen is never disposed and never re-reads. Repro: set anything in the manager → close → tap Save → silently reverts.
+> 3. **DATA LOSS, fixed after** — `LogRotation` matched **any `.log`/`.txt`** and ran on whatever `resolveGameLogDir()` returned. With per-game folders OFF that is the shared log root, which already holds `steam_debug.txt`, `steam_session.txt`, `bh_epic_debug.txt`, `bh_gog_debug.txt`, `bh_amazon_debug.txt`; with `MODE_CUSTOM` it is a folder the USER picked. Every launch archived them and pruning deleted them — **immediately with keep=0**. Now an explicit allowlist of names we write, **never `.txt`**, and rotation only runs when per-game folders are ON.
+> 4. **`LogInventory.delete()` DELETED OUTRIGHT** rather than fixed — it `deleteTree()`'d whatever dir an Entry pointed at, safe only while `scan()` never returned a folder we didn't create (it did: `ReShade/` under the default location). Deleting now goes through the File Manager. **That is why there is no "Clear all" button.**
+> 5. Logcat capture ran `Runtime.exec` + redaction + file write **on the UI thread** against its own documented contract → moved to `Dispatchers.IO`.
+>
+> **Two of my own bugs found by user device-testing:** `FileManagerScreen` honoured `initialDir` **only in pickMode** (browse mode hardcoded `/storage/emulated/0`) — that's why "Open" landed at Internal; and the FM shown in a `Dialog` was **transparent** (Dialog windows are, and FM draws no background of its own, normally sitting in the nav-host scaffold) → wrapped in an opaque `Surface`.
+>
+> **Restyle:** first cut drifted badly from the approved HTML mockup (`/sdcard/Download/bannerlator-log-manager-plan.html`). Now matches: section labels above cards, location as value+path row with *Change*, per-toggle hint lines, real chips with *+ add*/*reset*, retention stepper, total size, per-game cards with icon + relative time + one *Open in File Manager*.
+>
+> **⏭️ OPEN WHEN RESUMING:**
+> - **DEVICE TEST, priority one:** rotation with **per-game folders OFF + a CUSTOM location** (the data-loss path), plus normal per-game rotation across two launches, the `?` dialogs, and the FM opening at the right folder with an opaque background.
+> - **Untouched review findings:** disk I/O during composition (`LogInventory.scan` + recursive `sizeOfTree` synchronously in composition); DXVK toggle OFF no longer sets `DXVK_LOG_PATH`, so stray logs may fall back to the game's working dir — confirm on device.
+> - **Dead code to sweep in `SettingsScreen.kt`:** orphaned `enableWineDebug`/`wineDebugChannels`/`enableBox64Logs`/`logLocationMode`/`logLocationCustomPath`/`showLogLocationDropdown`/`logLocationDirLauncher` and the whole ~44-line `showDebugChannelDialog` block (nothing sets it true any more). Warnings only — `allWarningsAsErrors` is off.
+> - ⚠️ **SCOPE CREEP to decide:** this branch also corrects the stale Performance blurb ("coming soon — root-only controls" → "plus the opt-in root controls"). Correct post-2.9 but not Log Manager work — pull it out or keep it.
+
 ## 🔖 NEXT RELEASE NOTES — carry these into the next release body
 
 > **📥 Proton 9 is no longer bundled — link it in every release from now on.** A fresh install now ships with **NO Wine at all**; the user installs one from the in-app catalog on first run (the create-container guard says so). Add to the release body, next to the APK assets:
