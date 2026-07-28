@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -84,7 +83,6 @@ import com.winlator.star.contentdialog.ContentDialog
 import com.winlator.star.contents.ContentsManager
 import com.winlator.star.core.AppUtils
 import com.winlator.star.core.FileUtils
-import com.winlator.star.core.LogLocation
 import com.winlator.star.core.PreloaderDialog
 import com.winlator.star.core.UpdateManager
 import com.winlator.star.fexcore.FEXCoreEditPresetDialog
@@ -129,13 +127,6 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
     LaunchedEffect(Unit) {
         UpdateManager.check(context) { info -> activity?.runOnUiThread { updateInfo = info } }
     }
-    var enableWineDebug by remember { mutableStateOf(prefs.getBoolean("enable_wine_debug", false)) }
-    var wineDebugChannels by remember { mutableStateOf(
-        (prefs.getString("wine_debug_channels", SettingsFragment.DEFAULT_WINE_DEBUG_CHANNELS) ?: SettingsFragment.DEFAULT_WINE_DEBUG_CHANNELS).split(",").toMutableList()
-    ) }
-    var enableBox64Logs by remember { mutableStateOf(prefs.getBoolean("enable_box64_logs", false)) }
-    var logLocationMode by remember { mutableStateOf(prefs.getString(LogLocation.PREF_MODE, LogLocation.MODE_APP_DATA) ?: LogLocation.MODE_APP_DATA) }
-    var logLocationCustomPath by remember { mutableStateOf(prefs.getString(LogLocation.PREF_CUSTOM_PATH, "") ?: "") }
     var enableFileProvider by remember { mutableStateOf(prefs.getBoolean("enable_file_provider", true)) }
     var openWithBrowser by remember { mutableStateOf(prefs.getBoolean("open_with_android_browser", false)) }
     var shareClipboard by remember { mutableStateOf(prefs.getBoolean("share_android_clipboard", false)) }
@@ -165,9 +156,7 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
 
     var showBox64Dropdown by remember { mutableStateOf(false) }
     var showFEXCoreDropdown by remember { mutableStateOf(false) }
-    var showLogLocationDropdown by remember { mutableStateOf(false) }
     var showSFDropdown by remember { mutableStateOf(false) }
-    var showDebugChannelDialog by remember { mutableStateOf(false) }
     var showBackupDialog by remember { mutableStateOf(false) }
     var showPerformanceMenu by remember { mutableStateOf(false) }
     var showLogManager by remember { mutableStateOf(false) }
@@ -242,18 +231,6 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
         refreshFEXCorePresets()
         refreshSF()
         onDispose { }
-    }
-
-    // Log location "Choose folder…": pick a directory via the in-app File Manager (issue #70).
-    val logLocationDirLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            InAppFilePicker.pickedPath(result.data)?.let { path ->
-                logLocationCustomPath = path
-                logLocationMode = LogLocation.MODE_CUSTOM
-            }
-        }
     }
 
     val winlatorPathLauncher = rememberLauncherForActivityResult(
@@ -1005,53 +982,6 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
         }
     }
 
-    // ── Debug Channel Dialog ─────────────────────────────────────────
-    if (showDebugChannelDialog) {
-        val allChannels = remember {
-            try {
-                val json = FileUtils.readString(context, "wine_debug_channels.json")
-                val arr = org.json.JSONArray(json)
-                (0 until arr.length()).map { arr.getString(it) }
-            } catch (_: Exception) { emptyList() }
-        }
-        val selectedSet = remember { mutableStateOf(wineDebugChannels.toSet()) }
-
-        OutlinedAlertDialog(
-            onDismissRequest = { showDebugChannelDialog = false },
-            title = { Text("Wine Debug Channels") },
-            text = {
-                // Hundreds of channels — bound the height and scroll so the whole
-                // alphabetical list (vulkan, heap, …) stays reachable, not just the top.
-                Column(modifier = Modifier
-                    .heightIn(max = 400.dp)
-                    .verticalScroll(rememberScrollState())) {
-                    allChannels.forEach { channel ->
-                        val checked = channel in selectedSet.value
-                        Row(verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.clickable {
-                                selectedSet.value = if (checked) selectedSet.value - channel
-                                else selectedSet.value + channel
-                            }) {
-                            Checkbox(checked = checked, onCheckedChange = {
-                                selectedSet.value = if (it) selectedSet.value + channel
-                                else selectedSet.value - channel
-                            })
-                            Text(channel)
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    wineDebugChannels = selectedSet.value.toMutableList()
-                    showDebugChannelDialog = false
-                }) { Text("OK") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDebugChannelDialog = false }) { Text("Cancel") }
-            }
-        )
-    }
 }
 
 // ─── Reusable components ──────────────────────────────────────────────────
