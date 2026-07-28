@@ -10,6 +10,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.height
@@ -30,10 +33,13 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.HistoryToggleOff
+import androidx.compose.material.icons.filled.ListAlt
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.outlined.HelpOutline
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.DropdownMenu
@@ -548,6 +554,7 @@ private fun WineChannelGroup(
     val context = LocalContext.current
     var expanded by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
+    var browseAll by remember { mutableStateOf(false) }
 
     val all = remember {
         try {
@@ -629,6 +636,18 @@ private fun WineChannelGroup(
                     label = { Text(ch, fontSize = 11.sp) }
                 )
             }
+            // Last chip in the flow, so it reads as "…and the rest are through here" rather than
+            // as another channel. Searching only helps once you know a name to type; this is the
+            // way in for someone who doesn't.
+            if (all.isNotEmpty()) {
+                AssistChip(
+                    onClick = { browseAll = true },
+                    label = { Text("Browse all ${all.size}…", fontSize = 11.sp) },
+                    leadingIcon = {
+                        Icon(Icons.Default.ListAlt, null, modifier = Modifier.size(14.dp))
+                    },
+                )
+            }
         }
         if (query.isNotBlank() && shown.isEmpty()) {
             Text("No channel matches \"$query\".",
@@ -646,6 +665,201 @@ private fun WineChannelGroup(
                 }
                 .padding(top = 6.dp, bottom = 2.dp)
         )
+    }
+
+    if (browseAll) {
+        AllChannelsDialog(
+            all = all,
+            selected = selected,
+            onChange = onChange,
+            onDismiss = { browseAll = false },
+        )
+    }
+}
+
+/**
+ * Every Wine channel, browsable. The chip grid above deliberately shows only the ~18 people use, and
+ * the search field only helps if you already know a name to type — this is the way in for someone
+ * who doesn't know what exists.
+ *
+ * Grouped by family rather than listed alphabetically: 521 names in one column is technically "all
+ * of them" and practically unreadable, whereas "Sound" holding 15 entries is something a user can
+ * actually shop from. "What's this?" turns on a one-line explanation under every row, which is the
+ * difference between a list of names and a reference — it is off by default because with it on each
+ * row is three lines tall and scanning gets slower.
+ */
+@Composable
+private fun AllChannelsDialog(
+    all: List<String>,
+    selected: List<String>,
+    onChange: (List<String>) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var query by remember { mutableStateOf("") }
+    var showHelp by remember { mutableStateOf(false) }
+    var selectedOnly by remember { mutableStateOf(false) }
+
+    // Grouping is pure string work over 521 items, so it is cheap — but it must not rerun on every
+    // recomposition (every keystroke, every toggle), hence the key on the list identity alone.
+    val grouped = remember(all) {
+        all.groupBy { WineChannelInfo.categoryOf(it) }
+            .toList()
+            .sortedBy { (cat, _) ->
+                WineChannelInfo.CATEGORY_ORDER.indexOf(cat)
+                    .let { if (it < 0) WineChannelInfo.CATEGORY_ORDER.size else it }
+            }
+            .map { (cat, names) -> cat to names.sorted() }
+    }
+
+    val visible = remember(grouped, query, selectedOnly, selected) {
+        val q = query.trim()
+        grouped.mapNotNull { (cat, names) ->
+            val kept = names.filter { ch ->
+                (q.isBlank() || ch.contains(q, ignoreCase = true) ||
+                    cat.contains(q, ignoreCase = true)) &&
+                    (!selectedOnly || ch in selected)
+            }
+            if (kept.isEmpty()) null else cat to kept
+        }
+    }
+
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(0.94f).fillMaxHeight(0.9f),
+            color = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(16.dp),
+        ) {
+            Column(modifier = Modifier.fillMaxSize().padding(14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("All Wine channels", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "${all.size} available · ${selected.size} on",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, "Close", tint = MaterialTheme.colorScheme.onSurface)
+                    }
+                }
+
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    label = { Text("Search") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                )
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(bottom = 4.dp),
+                ) {
+                    FilterChip(
+                        selected = showHelp,
+                        onClick = { showHelp = !showHelp },
+                        label = { Text("What's this?", fontSize = 11.sp) },
+                        leadingIcon = {
+                            Icon(Icons.Outlined.HelpOutline, null, modifier = Modifier.size(14.dp))
+                        },
+                    )
+                    FilterChip(
+                        selected = selectedOnly,
+                        onClick = { selectedOnly = !selectedOnly },
+                        label = { Text("On only", fontSize = 11.sp) },
+                    )
+                }
+
+                if (showHelp) {
+                    Text(
+                        "Each channel switches on the debug output of one part of Wine. Turning on " +
+                            "more means a bigger log and a slower game — pick the ones that match " +
+                            "the problem.",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 6.dp),
+                    )
+                }
+
+                if (visible.isEmpty()) {
+                    Text(
+                        if (selectedOnly && query.isBlank()) "No channels are on."
+                        else "Nothing matches \"$query\".",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 12.dp),
+                    )
+                } else {
+                    LazyColumn(modifier = Modifier.weight(1f)) {
+                        visible.forEach { (category, names) ->
+                            item(key = "hdr-$category") {
+                                Column(modifier = Modifier.padding(top = 10.dp, bottom = 4.dp)) {
+                                    Text(
+                                        category.uppercase(),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                    if (showHelp) {
+                                        Text(
+                                            WineChannelInfo.categoryBlurb(category),
+                                            fontSize = 10.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                }
+                            }
+                            items(names, key = { "ch-$it" }) { ch ->
+                                val isOn = ch in selected
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            onChange(if (isOn) selected - ch else selected + ch)
+                                        }
+                                        .padding(vertical = 3.dp),
+                                ) {
+                                    Checkbox(
+                                        checked = isOn,
+                                        onCheckedChange = {
+                                            onChange(if (isOn) selected - ch else selected + ch)
+                                        },
+                                    )
+                                    Column(modifier = Modifier.weight(1f).padding(start = 2.dp)) {
+                                        Text(
+                                            ch,
+                                            fontSize = 13.sp,
+                                            color = if (isOn) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.onSurface,
+                                        )
+                                        if (showHelp) {
+                                            Text(
+                                                WineChannelInfo.describe(ch),
+                                                fontSize = 10.sp,
+                                                lineHeight = 13.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Row(
+                    horizontalArrangement = Arrangement.End,
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                ) {
+                    TextButton(onClick = onDismiss) { Text("Done") }
+                }
+            }
+        }
     }
 }
 
