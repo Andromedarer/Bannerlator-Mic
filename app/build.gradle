@@ -32,22 +32,8 @@ tasks.register("downloadImageFS") {
     }
 }
 
-tasks.register("downloadProton") {
-    def assetDir = new File(project.rootDir, ["app","src","main","assets"].join(File.separator))
-    File protonARM64EC = new File(assetDir, "proton-9.0-arm64ec.tar.zst")
-    String protonARM64ECUrl = "https://github.com/star-emu/contents/raw/refs/heads/main/proton-9.0-arm64ec.tar.zst"
-
-    doLast {
-        if (!protonARM64EC.exists()) {
-            println("Proton 9.0 ARM64EC was not present, downloading...\n")
-            new URL(protonARM64ECUrl).withInputStream { i -> protonARM64EC.withOutputStream { it << i } }
-        }
-    }
-}
-
 tasks.register("prepareKotlinBuildScriptModel"){}
-downloadProton.dependsOn(downloadImageFS)
-preBuild.dependsOn(downloadProton)
+preBuild.dependsOn(downloadImageFS)
 
 android {
     namespace 'com.winlator.star'

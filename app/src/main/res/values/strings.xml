@@ -978,4 +978,5 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="wrapper_catalog_download_ok">%1$s added</string>
     <string name="wrapper_catalog_download_failed">Couldn\'t download %1$s</string>
     <string name="wrapper_catalog_close">Done</string>
+    <string name="no_wine_version_installed">No Wine version installed — download a Proton from the in-app catalog first (Containers → download icon).</string>
 </resources>
