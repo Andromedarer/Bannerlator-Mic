@@ -31,9 +31,16 @@ public final class LogInventory {
         public final long lastModified;
         public final boolean isAppBucket;  // the "_app" folder: logcat + crash reports
         public final int archivedRuns;
+        /** Loose files in the log root — pre-folder logs, or everything when per-game is off. */
+        public final boolean isLooseBucket;
 
         Entry(String name, File dir, int fileCount, long totalBytes, long lastModified,
               boolean isAppBucket, int archivedRuns) {
+            this(name, dir, fileCount, totalBytes, lastModified, isAppBucket, archivedRuns, false);
+        }
+
+        Entry(String name, File dir, int fileCount, long totalBytes, long lastModified,
+              boolean isAppBucket, int archivedRuns, boolean isLooseBucket) {
             this.name = name;
             this.dir = dir;
             this.fileCount = fileCount;
@@ -41,6 +48,7 @@ public final class LogInventory {
             this.lastModified = lastModified;
             this.isAppBucket = isAppBucket;
             this.archivedRuns = archivedRuns;
+            this.isLooseBucket = isLooseBucket;
         }
     }
 
@@ -77,7 +85,7 @@ public final class LogInventory {
             long bytes = 0, newest = 0;
             for (File f : loose) { bytes += f.length(); newest = Math.max(newest, f.lastModified()); }
             out.add(new Entry(sawFolder ? "Older logs" : "All logs", base,
-                    loose.size(), bytes, newest, false, 0));
+                    loose.size(), bytes, newest, false, 0, true));
         }
 
         Collections.sort(out, new Comparator<Entry>() {
@@ -125,6 +133,54 @@ public final class LogInventory {
             }
         }
         return new Entry(dir.getName(), dir, count, bytes, newest, appBucket, archives);
+    }
+
+    /** One run of a game: the current one, or an archived launch under {@code previous/}. */
+    public static final class Run {
+        public final File dir;
+        public final boolean current;
+        /** When the run happened, from the archive folder's timestamp name. */
+        public final long millis;
+
+        Run(File dir, boolean current, long millis) {
+            this.dir = dir;
+            this.current = current;
+            this.millis = millis;
+        }
+    }
+
+    /**
+     * Every run whose logs are still on disk: the current one first, then archived launches newest
+     * first. This is what "keep last 5" actually produces, and without it the viewer could only ever
+     * show the newest launch — which is the wrong one whenever a game worked yesterday and doesn't
+     * today.
+     */
+    public static List<Run> runsIn(File groupDir) {
+        List<Run> out = new ArrayList<>();
+        if (groupDir == null || !groupDir.isDirectory()) return out;
+        out.add(new Run(groupDir, true, groupDir.lastModified()));
+
+        File[] archived = new File(groupDir, LogRotation.ARCHIVE_DIR).listFiles(File::isDirectory);
+        if (archived == null) return out;
+
+        List<Run> old = new ArrayList<>();
+        for (File f : archived) old.add(new Run(f, false, stampToMillis(f.getName(), f.lastModified())));
+        // Sort on the folder NAME's timestamp, not mtime, which a copy or a file manager rewrites.
+        Collections.sort(old, new Comparator<Run>() {
+            @Override public int compare(Run a, Run b) { return Long.compare(b.millis, a.millis); }
+        });
+        out.addAll(old);
+        return out;
+    }
+
+    /** {@code yyyy-MM-dd_HH-mm-ss} as written by LogRotation, falling back to the folder's mtime. */
+    private static long stampToMillis(String name, long fallback) {
+        try {
+            return new java.text.SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US)
+                    .parse(name).getTime();
+        } catch (Exception e) {
+            return fallback;
+        }
     }
 
     /** Current-run log files in a group, newest first. Archives are not included. */

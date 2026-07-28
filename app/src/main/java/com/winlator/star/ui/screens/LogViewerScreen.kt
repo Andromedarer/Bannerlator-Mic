@@ -73,8 +73,13 @@ fun LogViewerScreen(entry: LogInventory.Entry, onClose: () -> Unit) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
 
-    val files = remember(entry.dir) { LogInventory.filesIn(entry.dir) }
-    var selected by remember { mutableStateOf(files.firstOrNull()) }
+    // Runs first, then the files inside the chosen run. "Keep last N" means there can be N past
+    // launches sitting in previous/ — showing only the newest would hide exactly the run a user
+    // is comparing against.
+    val runs = remember(entry.dir) { LogInventory.runsIn(entry.dir) }
+    var selectedRun by remember { mutableStateOf(runs.firstOrNull()) }
+    val files = remember(selectedRun) { LogInventory.filesIn(selectedRun?.dir ?: entry.dir) }
+    var selected by remember(selectedRun) { mutableStateOf(files.firstOrNull()) }
     var following by remember { mutableStateOf(false) }
     var wrap by remember { mutableStateOf(false) }
     var findOpen by remember { mutableStateOf(false) }
@@ -124,6 +129,26 @@ fun LogViewerScreen(entry: LogInventory.Entry, onClose: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp,
                     modifier = Modifier.padding(top = 12.dp))
                 return@Column
+            }
+
+            // Run switcher, shown only when there is history to switch to.
+            if (runs.size > 1) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
+                ) {
+                    runs.forEach { r ->
+                        FileChip(
+                            if (r.current) "Current" else runLabel(r.millis),
+                            r == selectedRun
+                        ) {
+                            selectedRun = r
+                            query = ""
+                            // Following a finished run would poll a file that can never change.
+                            if (!r.current) following = false
+                        }
+                    }
+                }
             }
 
             // One chip per file in the folder — the mockup's file switcher.
@@ -319,6 +344,23 @@ private fun ViewerAction(
             color = if (accent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
             fontSize = 12.sp
         )
+    }
+}
+
+/**
+ * Label for an archived run. Recent ones read better as an age ("2 hr ago"), older ones as a date —
+ * "6 days ago" is not something anyone can line up against when a game broke.
+ */
+private fun runLabel(millis: Long): String {
+    if (millis <= 0) return "earlier"
+    val mins = (System.currentTimeMillis() - millis) / 60000
+    return when {
+        mins < 1 -> "just now"
+        mins < 60 -> "$mins min ago"
+        mins < 60 * 24 -> "${mins / 60} hr ago"
+        mins < 60 * 48 -> "yesterday"
+        else -> java.text.SimpleDateFormat("d MMM HH:mm", java.util.Locale.US)
+            .format(java.util.Date(millis))
     }
 }
 

@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SportsEsports
@@ -591,6 +592,8 @@ private fun GameLogCard(
                 Icon(
                     when {
                         entry.isAppBucket -> Icons.Default.PhoneAndroid
+                        // Loose files in the log root are not a game and must not look like one.
+                        entry.isLooseBucket -> Icons.Default.History
                         entry.dir.name.startsWith("Container") -> Icons.Default.Settings
                         else -> Icons.Default.SportsEsports
                     },
