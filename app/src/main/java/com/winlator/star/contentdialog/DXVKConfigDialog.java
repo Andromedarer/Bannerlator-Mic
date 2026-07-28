@@ -99,6 +99,17 @@ public class DXVKConfigDialog {
     }
 
     public static void setEnvVars(Context context, KeyValueSet config, EnvVars envVars) {
+        setEnvVars(context, config, envVars, null);
+    }
+
+    /**
+     * @param logDirOverride where DXVK/VKD3D should write their logs — the launching activity passes
+     *                       this game's folder so its logs sit beside the Wine log instead of in one
+     *                       shared pile. Null keeps the old flat behaviour (used by config previews,
+     *                       which have no game context).
+     */
+    public static void setEnvVars(Context context, KeyValueSet config, EnvVars envVars,
+                                  java.io.File logDirOverride) {
         String configFile = config.get("dxvkConfigFile");
         boolean hasConfigFile = configFile != null && !configFile.isEmpty() && !configFile.equals("0") && !configFile.equals("None");
 
@@ -139,10 +150,21 @@ public class DXVKConfigDialog {
         // Co-locate the DXVK/DXGI (and VKD3D-Proton) logs in the same user-chosen folder as
         // wine_debug.log (issue #70). These stay SEPARATE files (<app>_d3d11.log / <app>_dxgi.log /
         // vkd3d-proton.log), just written next to the wine log instead of the game working dir.
-        java.io.File logDir = com.winlator.star.core.LogLocation.resolveLogDir(context);
+        java.io.File logDir = logDirOverride != null
+                ? logDirOverride
+                : com.winlator.star.core.LogLocation.resolveLogDir(context);
         if (logDir != null) {
-            envVars.put("DXVK_LOG_PATH", logDir.getAbsolutePath());
-            envVars.put("VKD3D_LOG_FILE", new java.io.File(logDir, "vkd3d-proton.log").getAbsolutePath());
+            // Honour the Log Manager's "DXVK & VKD3D" switch. DXVK logs unless told otherwise, so
+            // turning it off means silencing it explicitly rather than just not choosing a path.
+            boolean dxvkLogs = androidx.preference.PreferenceManager
+                    .getDefaultSharedPreferences(context).getBoolean("enable_dxvk_logs", true);
+            if (!dxvkLogs) {
+                envVars.put("DXVK_LOG_LEVEL", "none");
+                envVars.put("VKD3D_DEBUG", "none");
+            } else {
+                envVars.put("DXVK_LOG_PATH", logDir.getAbsolutePath());
+                envVars.put("VKD3D_LOG_FILE", new java.io.File(logDir, "vkd3d-proton.log").getAbsolutePath());
+            }
         }
 
         // DXVK_CONFIG_FILE (config source path, e.g. /storage/emulated/0/dxvk.conf)

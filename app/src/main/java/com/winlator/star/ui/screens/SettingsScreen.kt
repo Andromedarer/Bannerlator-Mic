@@ -170,6 +170,7 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
     var showDebugChannelDialog by remember { mutableStateOf(false) }
     var showBackupDialog by remember { mutableStateOf(false) }
     var showPerformanceMenu by remember { mutableStateOf(false) }
+    var showLogManager by remember { mutableStateOf(false) }
     var showRestoreConfirm by remember { mutableStateOf(false) }
     var isBackingUp by remember { mutableStateOf(false) }
     var pendingRestoreUri by remember { mutableStateOf<Uri?>(null) }
@@ -1016,7 +1017,7 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
         FieldSet {
             Text(
                 "Global performance defaults (Sustained Performance Mode, Thread Priority Boost, " +
-                "Prefer Big Cores) and — coming soon — root-only controls. Per-game overrides live in " +
+                "Prefer Big Cores, GPU clock lock) plus the opt-in root controls. Per-game overrides live in " +
                 "each game's settings and the in-game menu.",
                 color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp,
                 modifier = Modifier.padding(bottom = 6.dp)
@@ -1025,6 +1026,22 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
                 onClick = { showPerformanceMenu = true },
                 modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
             ) { Text("Open Performance settings", color = MaterialTheme.colorScheme.onPrimary) }
+        }
+
+        // ── Log Manager ──────────────────────────────────────────────────
+        FieldSetLabel("Logs")
+        FieldSet {
+            Text(
+                "Where logs go, which ones are produced, how many past runs to keep, and what is on " +
+                "disk right now for each game. Two log types slow games down while enabled — the " +
+                "manager says which.",
+                color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp,
+                modifier = Modifier.padding(bottom = 6.dp)
+            )
+            Button(
+                onClick = { showLogManager = true },
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+            ) { Text("Open Log Manager", color = MaterialTheme.colorScheme.onPrimary) }
         }
 
         Spacer(Modifier.height(72.dp))
@@ -1037,6 +1054,15 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
             properties = DialogProperties(usePlatformDefaultWidth = false)
         ) {
             PerformanceSettingsScreen(onClose = { showPerformanceMenu = false })
+        }
+    }
+
+    if (showLogManager) {
+        Dialog(
+            onDismissRequest = { showLogManager = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            LogManagerScreen(onClose = { showLogManager = false })
         }
     }
 
