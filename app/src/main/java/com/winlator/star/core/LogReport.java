@@ -119,10 +119,21 @@ public final class LogReport {
         // deserves a real GPU line — ask the driver directly rather than leaving it out.
         if (gpu == null) {
             try {
-                gpu = GPUInformation.extractModelName(GPUInformation.getRenderer(null, null));
+                gpu = GPUInformation.getRenderer(null, null);
             } catch (Throwable ignored) {
             }
-            if (gpu != null && gpu.trim().isEmpty()) gpu = null;
+        }
+
+        // Normalize whichever source won. DXVK reports the driver's raw device string, which on a
+        // wrapper container reads "Wrapper(Adreno (TM) 750)" — a GPU line should name the GPU, and
+        // the wrapper is already evident from the Driver line right below it.
+        if (gpu != null) {
+            try {
+                String model = GPUInformation.extractModelName(gpu);
+                if (model != null && !model.trim().isEmpty()) gpu = model.trim();
+            } catch (Throwable ignored) {
+            }
+            if (gpu.trim().isEmpty()) gpu = null;
         }
         if (gpu != null || driver != null || dxvk != null || vkd3d != null) {
             b.append("### From the logs\n\n");

@@ -401,26 +401,49 @@ fun LogManagerScreen(onClose: () -> Unit) {
         val count = remember(entry.dir) { LogInventory.deletableCount(entry) }
         OutlinedAlertDialog(
             onDismissRequest = { confirmDelete = null },
-            title = { Text(if (entry.isAppBucket) "Delete app & crash logs?" else "Delete ${entry.name} logs?") },
+            // The loose bucket is already named "Older logs"/"All logs", so "Delete ${name} logs?"
+            // read "Delete Older logs logs?". Only a game name needs the word appending.
+            title = {
+                Text(
+                    when {
+                        entry.isAppBucket -> "Delete app & crash logs?"
+                        entry.isLooseBucket -> "Delete ${entry.name.replaceFirstChar { it.lowercase() }}?"
+                        else -> "Delete ${entry.name} logs?"
+                    }
+                )
+            },
             text = {
                 Text(
-                    "Deletes $count log file${if (count == 1) "" else "s"}, including any kept " +
-                        "history.\n\nOnly files Bannerlator wrote are removed — anything else in " +
-                        "that folder is left alone."
+                    if (count == 0)
+                    // Reachable: the loose bucket counts every log-shaped file it finds, but only
+                    // the ones we wrote are deletable. A folder holding nothing but a user's own
+                    // files lands here, and must not imply we are about to touch them.
+                        "Nothing here was written by Bannerlator, so there is nothing to delete. " +
+                            "The files in this folder are yours and are left alone."
+                    else
+                        "Deletes $count log file${if (count == 1) "" else "s"}, including any kept " +
+                            "history.\n\nOnly files Bannerlator wrote are removed — anything else in " +
+                            "that folder is left alone."
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
-                    val n = LogInventory.deleteGroup(context, entry)
-                    confirmDelete = null
-                    refreshTick++
-                    android.widget.Toast.makeText(
-                        context, "Deleted $n file${if (n == 1) "" else "s"}",
-                        android.widget.Toast.LENGTH_SHORT
-                    ).show()
-                }) { Text("Delete", color = DangerRed) }
+                if (count > 0) {
+                    TextButton(onClick = {
+                        val n = LogInventory.deleteGroup(context, entry)
+                        confirmDelete = null
+                        refreshTick++
+                        android.widget.Toast.makeText(
+                            context, "Deleted $n file${if (n == 1) "" else "s"}",
+                            android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                    }) { Text("Delete", color = DangerRed) }
+                }
             },
-            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Cancel") } }
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = null }) {
+                    Text(if (count == 0) "OK" else "Cancel")
+                }
+            }
         )
     }
 
@@ -708,7 +731,14 @@ private fun AllChannelsDialog(
                 WineChannelInfo.CATEGORY_ORDER.indexOf(cat)
                     .let { if (it < 0) WineChannelInfo.CATEGORY_ORDER.size else it }
             }
-            .map { (cat, names) -> cat to names.sorted() }
+            // Within a category, the ones we can actually explain come first. Plain alphabetical put
+            // `debug_buffer` at the top of "Errors and tracing" and pushed err/warn/fixme/seh below
+            // the fold — the exact channels someone opening this list is looking for.
+            .map { (cat, names) ->
+                cat to names.sortedWith(
+                    compareByDescending<String> { WineChannelInfo.hasDetail(it) }.thenBy { it }
+                )
+            }
     }
 
     val visible = remember(grouped, query, selectedOnly, selected) {
@@ -728,11 +758,15 @@ private fun AllChannelsDialog(
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
     ) {
         Surface(
-            modifier = Modifier.fillMaxWidth(0.94f).fillMaxHeight(0.9f),
+            // Nearly full-bleed. This device is a landscape handheld, and at 0.9 height with the
+            // title, search field and chips each on their own row the list got a single visible
+            // row — the one part of the dialog that matters. The header is now one row and the
+            // list takes everything left over.
+            modifier = Modifier.fillMaxWidth(0.96f).fillMaxHeight(0.95f),
             color = MaterialTheme.colorScheme.surface,
             shape = RoundedCornerShape(16.dp),
         ) {
-            Column(modifier = Modifier.fillMaxSize().padding(14.dp)) {
+            Column(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text("All Wine channels", style = MaterialTheme.typography.titleMedium)
@@ -742,24 +776,6 @@ private fun AllChannelsDialog(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, "Close", tint = MaterialTheme.colorScheme.onSurface)
-                    }
-                }
-
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    label = { Text("Search") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                )
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.padding(bottom = 4.dp),
-                ) {
                     FilterChip(
                         selected = showHelp,
                         onClick = { showHelp = !showHelp },
@@ -768,23 +784,25 @@ private fun AllChannelsDialog(
                             Icon(Icons.Outlined.HelpOutline, null, modifier = Modifier.size(14.dp))
                         },
                     )
+                    Spacer(modifier = Modifier.width(6.dp))
                     FilterChip(
                         selected = selectedOnly,
                         onClick = { selectedOnly = !selectedOnly },
                         label = { Text("On only", fontSize = 11.sp) },
                     )
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, "Close", tint = MaterialTheme.colorScheme.onSurface)
+                    }
                 }
 
-                if (showHelp) {
-                    Text(
-                        "Each channel switches on the debug output of one part of Wine. Turning on " +
-                            "more means a bigger log and a slower game — pick the ones that match " +
-                            "the problem.",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(bottom = 6.dp),
-                    )
-                }
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    placeholder = { Text("Search", fontSize = 12.sp) },
+                    singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                )
 
                 if (visible.isEmpty()) {
                     Text(
@@ -852,12 +870,6 @@ private fun AllChannelsDialog(
                     }
                 }
 
-                Row(
-                    horizontalArrangement = Arrangement.End,
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                ) {
-                    TextButton(onClick = onDismiss) { Text("Done") }
-                }
             }
         }
     }
