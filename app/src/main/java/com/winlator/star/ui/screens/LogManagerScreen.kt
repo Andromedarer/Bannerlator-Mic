@@ -731,12 +731,20 @@ private fun AllChannelsDialog(
                 WineChannelInfo.CATEGORY_ORDER.indexOf(cat)
                     .let { if (it < 0) WineChannelInfo.CATEGORY_ORDER.size else it }
             }
-            // Within a category, the ones we can actually explain come first. Plain alphabetical put
-            // `debug_buffer` at the top of "Errors and tracing" and pushed err/warn/fixme/seh below
-            // the fold — the exact channels someone opening this list is looking for.
+            // Within a category: the everyday ones first, then ones we can explain, then the rest
+            // alphabetically. Plain alphabetical put `debug_buffer` at the top of "Errors and
+            // tracing" and pushed err/warn/fixme/seh below the fold — the exact channels someone
+            // opening this list came for. Sorting by "has a description" alone does not fix it,
+            // because debug_buffer has one too; COMMON_WINE_CHANNELS is the actual priority order.
+            // Deliberately NOT selected-first: rows would jump under the finger as you tick them.
             .map { (cat, names) ->
                 cat to names.sortedWith(
-                    compareByDescending<String> { WineChannelInfo.hasDetail(it) }.thenBy { it }
+                    compareBy<String> {
+                        val i = COMMON_WINE_CHANNELS.indexOf(it)
+                        if (i < 0) COMMON_WINE_CHANNELS.size else i
+                    }
+                        .thenByDescending { WineChannelInfo.hasDetail(it) }
+                        .thenBy { it }
                 )
             }
     }
