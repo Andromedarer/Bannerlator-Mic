@@ -103,10 +103,27 @@ public final class LogReport {
         StringBuilder b = new StringBuilder();
         b.append("### System\n\n```\n").append(LogcatCapture.deviceHeader(context)).append("```\n\n");
 
-        String gpu = firstMatch(scanned, "Device *: *(.+)");
-        String driver = firstMatch(scanned, "Driver *: *(.+)");
-        String dxvk = firstMatch(scanned, "DXVK: *v?([\\w.\\-]+)");
-        String vkd3d = firstMatch(scanned, "vkd3d-proton *v?([\\w.\\-]+)");
+        // These all have to be anchored to the shape the writing layer actually uses. An unanchored
+        // "Device *: *(.+)" matched our OWN logcat header ("Device: AYANEO AYANEO Pocket FIT") and
+        // reported the handheld as the GPU; an unanchored "DXVK: *v?" matched "DXVK: Read 46 valid
+        // state cache entries" and reported the version as "Read".
+        //   DXVK   "info:    Device : Adreno (TM) 750" / "info:    Driver : turnip Mesa driver …"
+        //          "info:  DXVK: v3.0-gplasync"
+        //   VKD3D  "0144:info:vkd3d_get_vk_version: vkd3d-proton - applicationVersion: 3.0.1."
+        String gpu = firstMatch(scanned, "(?m)^info: +Device *: *(\\S.*?) *$");
+        String driver = firstMatch(scanned, "(?m)^info: +Driver *: *(\\S.*?) *$");
+        String dxvk = firstMatch(scanned, "(?m)^info: +DXVK: *v([\\w.\\-]+)");
+        String vkd3d = firstMatch(scanned, "vkd3d-proton *-? *applicationVersion: *([\\d][\\w.\\-]*?)\\.?\\s*$");
+
+        // No DXVK log in the bundle (a native-Vulkan or wined3d run, or an app-only report) still
+        // deserves a real GPU line — ask the driver directly rather than leaving it out.
+        if (gpu == null) {
+            try {
+                gpu = GPUInformation.extractModelName(GPUInformation.getRenderer(null, null));
+            } catch (Throwable ignored) {
+            }
+            if (gpu != null && gpu.trim().isEmpty()) gpu = null;
+        }
         if (gpu != null || driver != null || dxvk != null || vkd3d != null) {
             b.append("### From the logs\n\n");
             if (gpu != null) b.append("- GPU: `").append(gpu).append("`\n");

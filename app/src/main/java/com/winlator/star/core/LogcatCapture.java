@@ -103,9 +103,28 @@ public final class LogcatCapture {
         return "=== Bannerlator log ===\n"
                 + "Captured: " + timestamp() + "\n"
                 + "App: " + appVersion + "\n"
-                + "Device: " + Build.MANUFACTURER + " " + Build.BRAND + " " + Build.MODEL + "\n"
+                + "Device: " + deviceName() + "\n"
                 + "Android: " + Build.VERSION.RELEASE + " (SDK " + Build.VERSION.SDK_INT + ")\n"
                 + "Scope: Bannerlator only (system-wide capture is deliberately not offered)\n\n";
+    }
+
+    /**
+     * Manufacturer/brand/model without the repetition. Vendors set all three, and they overlap far
+     * more often than not — on the AYANEO Pocket FIT the naive join reads "AYANEO AYANEO Pocket FIT",
+     * and plenty of OEMs already bake the brand into MODEL. Keep the first occurrence of each token.
+     */
+    private static String deviceName() {
+        StringBuilder out = new StringBuilder();
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (String part : new String[]{Build.MANUFACTURER, Build.BRAND, Build.MODEL}) {
+            if (part == null) continue;
+            for (String token : part.trim().split("\\s+")) {
+                if (token.isEmpty() || !seen.add(token.toLowerCase(Locale.US))) continue;
+                if (out.length() > 0) out.append(' ');
+                out.append(token);
+            }
+        }
+        return out.length() == 0 ? "unknown" : out.toString();
     }
 
     /**
