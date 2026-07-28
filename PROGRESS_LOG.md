@@ -1,5 +1,30 @@
 # Star-Compose — Progress Log
 
+## 2026-07-28 — ✅ **Log Manager DEVICE-TESTED end to end — the two blocking tests PASS, five defects found and fixed** (branch `feat/log-manager` @ `6f89ed63`, run `30408135473`)
+
+> Drove the whole suite on the AYANEO Pocket FIT via the root bridge (prefs edited directly in `shared_prefs`, UI driven with `input tap/swipe` + screenshot verification). **Backed the real log folder up first** (`bannerlator-BACKUP-20260728`, 82 files, manifest-verified byte-identical) and ran every destructive test against a throwaway folder — a data-loss test must not be run on real data to find out whether the data-loss bug is fixed.
+>
+> ### 🟢 TEST 1 — rotation, per-game **OFF** + **CUSTOM** location + **keep=0** (the old data-loss path) — **PASS**
+> Planted `steam_debug.txt`, `bh_epic_debug.txt`, `bh_gog_debug.txt`, `my_notes.txt`, **`important.log` (a foreign `.log`, which the old bug matched)** and a `ReShade/preset.ini`, then launched twice. **All six survived byte-identical.** No `previous/` was created — rotation correctly stays inert while per-game folders are off, which is the designed guard.
+>
+> ### 🟢 TEST 1b — rotation actually WORKS when it should — **PASS**
+> Per-game ON, keep=2, four more launches: `previous/` went 1 → 2 → **2 with the oldest pruned**. Root decoys still byte-identical after six launches total.
+>
+> ### 🟢 TEST 2 — Delete / Clear all against foreign files — **PASS**
+> Of 9 loose files the confirm offered **4**; delete removed exactly our 4 and left every decoy + `ReShade/` untouched. **Clear all** then wiped the game folder and our logs and again left all five foreign files byte-identical. The allowlist holds.
+>
+> ### 🟢 Report button, GAME path (the untested half) — **PASS**, and it caught a follow-on
+> Issue body read `Device: AYANEO Pocket FIT` (dedup fix good) and **`GPU: Wrapper(Adreno (TM) 750)`** — a GPU at last, not the handheld. But a line labelled GPU should name the GPU: that raw DXVK device string now goes through `extractModelName` too, which the fallback path was already using.
+>
+> ### 🐛 Five defects found and fixed
+> 1. **GPU not normalized** — above.
+> 2. **"Delete Older logs logs?"** — the loose bucket is already named "Older logs", so only a game name needs the word appending.
+> 3. **Dead Delete button** — the loose bucket counts every log-shaped file but only ours are deletable, so a folder holding purely the user's files showed "5 files" then "Deletes 0 log files" with a live Delete. Now says nothing there is ours and offers only OK.
+> 4. **Browse-all dialog unusable in landscape** — title, search and chips each on their own row left **exactly one visible list row** on a landscape handheld, the form factor this runs on. Header collapsed to one row, redundant Done removed (the X closes it): **1 → 11 rows**.
+> 5. **Channel order buried the important ones** — `debug_buffer` sorted above `err`/`warn`/`fixme`/`seh`. 🔑 **My first fix (described-first) was verified on device to do nothing** — `debug_buffer` has a description too. `COMMON_WINE_CHANNELS` is the real priority order; now err/warn/fixme/seh/relay lead. Deliberately NOT selected-first: rows would jump under the finger while ticking.
+>
+> ⏭️ After testing, prefs restored (Download / per-game ON / keep 5), sandbox and test artifacts removed, and the real folder re-verified **82 files byte-identical** to the pre-test manifest. Backup kept at `/sdcard/Download/bannerlator-BACKUP-20260728`.
+
 ## 2026-07-28 — ✨ **Per-shortcut "View logs" + browse all 521 Wine channels** (branch `feat/log-manager` @ `9ef0839b`, run `30405709785`)
 
 > **View logs on every shortcut.** Reaching a game's logs meant App Settings → Logs → Open Log Manager → find the game. Added to **both** menus — grid long-press and list overflow — opening the viewer on that game directly. New `LogInventory.forGame()` does the lookup, and 🔑 deliberately does **not** call `LogLocation.resolveGameLogDir`: **that creates the folder**, and asking whether logs exist must not.
