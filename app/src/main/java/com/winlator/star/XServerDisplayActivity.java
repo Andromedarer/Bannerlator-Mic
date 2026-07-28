@@ -4076,13 +4076,32 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     // --- Environment Variable Setup ---
     String vulkanVersion = graphicsDriverConfig.get("vulkanVersion");
+    if (vulkanVersion == null) vulkanVersion = "1.3";
     // The direct-ICD turnip is not an adrenotools driver, so the native getVulkanVersion()
     // probe can't describe it and may return a non-dotted string -> split(".")[2] would crash.
-    // turnip-26.1.0's ICD manifest advertises api_version 1.4.318, so use that patch directly.
-    String vulkanVersionPatch = directIcdTurnip
-        ? "318"
-        : GPUInformation.getVulkanVersion(adrenoToolsDriverId, this).split("\\.")[2];
-    vulkanVersion = (vulkanVersion != null ? vulkanVersion : "1.3") + "." + vulkanVersionPatch;
+    // turnip-26.1.0's ICD manifest advertises api_version 1.4.318, so use that directly.
+    String driverVkVersion = directIcdTurnip
+        ? "1.4.318"
+        : GPUInformation.getVulkanVersion(adrenoToolsDriverId, this);
+    String[] driverVkParts = driverVkVersion.split("\\.");
+    String vulkanVersionPatch = driverVkParts[2];
+    // Never advertise a Vulkan minor the driver does not implement. We append the DRIVER's patch
+    // level to the USER's chosen minor, so an unclamped "1.4" pick on a 1.3.289 driver would export
+    // WRAPPER_VK_VERSION=1.4.289 and lie to DXVK/VKD3D about what the ICD actually supports.
+    // Ported from WinNative PR #669.
+    try {
+        int driverMinor = Integer.parseInt(driverVkParts[1]);
+        int chosenMinor = Integer.parseInt(vulkanVersion.split("\\.")[1]);
+        if (driverMinor < chosenMinor) {
+            Log.i("XServerVulkan", "Clamping Vulkan " + vulkanVersion + " to driver-supported "
+                + driverVkParts[0] + "." + driverVkParts[1]);
+            vulkanVersion = driverVkParts[0] + "." + driverVkParts[1];
+        }
+    } catch (NumberFormatException | ArrayIndexOutOfBoundsException e) {
+        Log.w("XServerVulkan", "Vulkan version clamp skipped — unparseable driver='"
+            + driverVkVersion + "' chosen='" + vulkanVersion + "'");
+    }
+    vulkanVersion = vulkanVersion + "." + vulkanVersionPatch;
     envVars.put("WRAPPER_VK_VERSION", vulkanVersion);
 
     String blacklistedExtensions = graphicsDriverConfig.get("blacklistedExtensions");
