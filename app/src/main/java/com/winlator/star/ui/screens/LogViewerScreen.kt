@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -24,18 +25,23 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,8 +56,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import com.winlator.star.core.LogInventory
+import com.winlator.star.core.LogReport
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.RandomAccessFile
@@ -86,6 +94,7 @@ fun LogViewerScreen(entry: LogInventory.Entry, onClose: () -> Unit) {
     var query by remember { mutableStateOf("") }
     var lines by remember { mutableStateOf<List<String>>(emptyList()) }
     var truncatedFrom by remember { mutableStateOf(0L) }
+    var reportOpen by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
     val hScroll = rememberScrollState()
@@ -296,8 +305,113 @@ fun LogViewerScreen(entry: LogInventory.Entry, onClose: () -> Unit) {
                     selected?.let { shareLogFile(context, it) }
                 }
             }
+
+            ViewerAction(
+                "Report a problem",
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
+            ) { reportOpen = true }
         }
     }
+
+    if (reportOpen) {
+        ReportDialog(
+            entry = entry,
+            runDir = selectedRun?.dir ?: entry.dir,
+            onDismiss = { reportOpen = false }
+        )
+    }
+}
+
+/**
+ * Collects a title and a description, builds the redacted zip, then opens GitHub's new-issue form
+ * with everything we know already filled in. The attach itself is the user's tap — see LogReport
+ * for why that cannot be automated.
+ */
+@Composable
+private fun ReportDialog(entry: LogInventory.Entry, runDir: File, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var title by remember { mutableStateOf(if (entry.isAppBucket) "" else "${entry.name}: ") }
+    var description by remember { mutableStateOf("") }
+    var includeApp by remember { mutableStateOf(true) }
+    var busy by remember { mutableStateOf(false) }
+
+    val willAttach = remember(runDir) { LogInventory.filesIn(runDir).map { it.name } }
+
+    OutlinedAlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        title = { Text("Report a problem") },
+        text = {
+            Column(modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("What went wrong?") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text("Any detail that helps (optional)") },
+                    minLines = 3,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(10.dp))
+                Text("Will be attached", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                willAttach.forEach {
+                    Text("• $it", color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp)
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().clickable { includeApp = !includeApp }
+                ) {
+                    Checkbox(checked = includeApp, onCheckedChange = { includeApp = it })
+                    Text("Also app logcat and crash reports",
+                        color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp)
+                }
+                Text(
+                    "The logs are saved as a zip in Downloads and redacted first. GitHub can't " +
+                        "receive a file from a link, so attach the zip with 📎 once the form opens.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !busy,
+                onClick = {
+                    busy = true
+                    scope.launch {
+                        // Reading, redacting and zipping several megabytes: not on the UI thread.
+                        val bundle = withContext(Dispatchers.IO) {
+                            LogReport.build(context, entry, runDir, includeApp)
+                        }
+                        busy = false
+                        if (bundle == null) {
+                            Toast.makeText(context, "Couldn't build the report.", Toast.LENGTH_SHORT).show()
+                            return@launch
+                        }
+                        onDismiss()
+                        Toast.makeText(
+                            context, "Saved ${bundle.zip.name} to Downloads", Toast.LENGTH_LONG
+                        ).show()
+                        try {
+                            context.startActivity(
+                                Intent(Intent.ACTION_VIEW,
+                                    android.net.Uri.parse(LogReport.issueUrl(title, description, bundle.facts)))
+                            )
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "No browser to open GitHub with.", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            ) { Text(if (busy) "Working…" else "Continue on GitHub") }
+        },
+        dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("Cancel") } }
+    )
 }
 
 @Composable

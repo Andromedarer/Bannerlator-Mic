@@ -22,12 +22,20 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.HistoryToggleOff
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.outlined.HelpOutline
-import androidx.compose.material3.Checkbox
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.TextButton
@@ -102,7 +110,6 @@ fun LogManagerScreen(onClose: () -> Unit) {
                 .split(",").filter { it.isNotBlank() }
         )
     }
-    var showChannelPicker by remember { mutableStateOf(false) }
 
     // Bumped after any destructive/refreshing action to force a re-scan of the filesystem.
     // Declared before saveMode() below, which increments it — a Kotlin local function can only
@@ -179,18 +186,29 @@ fun LogManagerScreen(onClose: () -> Unit) {
                     onClick = { showLocationMenu = true }
                 )
                 Box {
-                    DropdownMenu(expanded = showLocationMenu, onDismissRequest = { showLocationMenu = false }) {
-                        DropdownMenuItem(text = { Text("App data (default)") },
-                            onClick = { saveMode(LogLocation.MODE_APP_DATA); showLocationMenu = false })
-                        DropdownMenuItem(text = { Text("Download") },
-                            onClick = { saveMode(LogLocation.MODE_DOWNLOAD); showLocationMenu = false })
-                        DropdownMenuItem(text = { Text("Documents") },
-                            onClick = { saveMode(LogLocation.MODE_DOCUMENTS); showLocationMenu = false })
-                        DropdownMenuItem(text = { Text("Choose folder…") },
-                            onClick = {
-                                showLocationMenu = false
-                                dirLauncher.launch(InAppFilePicker.buildDirIntent(context, "Select log folder"))
-                            })
+                    // Same card, leading icons and dividers as the File Manager's drive menu —
+                    // one menu style across the app, from the shared MenuStyle helpers.
+                    DropdownMenu(
+                        expanded = showLocationMenu,
+                        onDismissRequest = { showLocationMenu = false },
+                        modifier = Modifier.outlinedMenuCard(),
+                    ) {
+                        MenuRow("App data (default)", Icons.Default.Folder) {
+                            saveMode(LogLocation.MODE_APP_DATA); showLocationMenu = false
+                        }
+                        MenuItemDivider()
+                        MenuRow("Download", Icons.Default.Download) {
+                            saveMode(LogLocation.MODE_DOWNLOAD); showLocationMenu = false
+                        }
+                        MenuItemDivider()
+                        MenuRow("Documents", Icons.Default.Description) {
+                            saveMode(LogLocation.MODE_DOCUMENTS); showLocationMenu = false
+                        }
+                        MenuItemDivider()
+                        MenuRow("Choose folder…", Icons.Default.FolderOpen) {
+                            showLocationMenu = false
+                            dirLauncher.launch(InAppFilePicker.buildDirIntent(context, "Select log folder"))
+                        }
                     }
                 }
                 LogToggle("Folder for each game", perGame,
@@ -209,19 +227,11 @@ fun LogManagerScreen(onClose: () -> Unit) {
                     wineDebug = it; putBool("enable_wine_debug", it)
                 }
                 if (wineDebug) {
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.fillMaxWidth().padding(start = 2.dp, bottom = 6.dp)
-                    ) {
-                        channels.forEachIndexed { i, ch ->
-                            Chip(ch) { saveChannels(channels.toMutableList().also { it.removeAt(i) }) }
-                        }
-                        ChipButton("+ add") { showChannelPicker = true }
-                        ChipButton("reset") {
-                            saveChannels(com.winlator.star.SettingsFragment.DEFAULT_WINE_DEBUG_CHANNELS
-                                .split(",").filter { it.isNotBlank() })
-                        }
-                    }
+                    WineChannelGroup(
+                        selected = channels,
+                        onChange = { saveChannels(it) },
+                        modifier = Modifier.padding(start = 2.dp, bottom = 6.dp)
+                    )
                 }
                 LogToggle("Box64 / FEXCore", box64Logs,
                     hint = "Slows games down at higher verbosity",
@@ -278,16 +288,21 @@ fun LogManagerScreen(onClose: () -> Unit) {
                         onInfo = { info = "Keep last launches" to LogCopy.KEEP_LAST },
                         onClick = { showKeepMenu = true }
                     )
-                    DropdownMenu(expanded = showKeepMenu, onDismissRequest = { showKeepMenu = false }) {
-                        listOf(0, 1, 3, 5, 10, 20, 50).forEach { n ->
-                            DropdownMenuItem(
-                                text = { Text(if (n == 0) "No history" else "$n launch${if (n == 1) "" else "es"}") },
-                                onClick = {
-                                    keepLast = n
-                                    prefs.edit().putInt(LogLocation.PREF_KEEP_LAST, n).apply()
-                                    showKeepMenu = false
-                                }
-                            )
+                    DropdownMenu(
+                        expanded = showKeepMenu,
+                        onDismissRequest = { showKeepMenu = false },
+                        modifier = Modifier.outlinedMenuCard(),
+                    ) {
+                        listOf(0, 1, 3, 5, 10, 20, 50).forEachIndexed { i, n ->
+                            if (i > 0) MenuItemDivider()
+                            MenuRow(
+                                if (n == 0) "No history" else "$n launch${if (n == 1) "" else "es"}",
+                                if (n == 0) Icons.Default.HistoryToggleOff else Icons.Default.History
+                            ) {
+                                keepLast = n
+                                prefs.edit().putInt(LogLocation.PREF_KEEP_LAST, n).apply()
+                                showKeepMenu = false
+                            }
                         }
                     }
                 }
@@ -347,47 +362,6 @@ fun LogManagerScreen(onClose: () -> Unit) {
 
             Spacer(Modifier.height(24.dp))
         }
-    }
-
-    if (showChannelPicker) {
-        val allChannels = remember {
-            try {
-                val arr = org.json.JSONArray(FileUtils.readString(context, "wine_debug_channels.json"))
-                (0 until arr.length()).map { arr.getString(it) }
-            } catch (_: Exception) { emptyList() }
-        }
-        val selected = remember { mutableStateOf(channels.toSet()) }
-        OutlinedAlertDialog(
-            onDismissRequest = { showChannelPicker = false },
-            title = { Text("Wine debug channels") },
-            text = {
-                // Hundreds of channels — bound the height and scroll, same as the old dialog.
-                Column(modifier = Modifier
-                    .heightIn(max = 400.dp)
-                    .verticalScroll(rememberScrollState())) {
-                    allChannels.forEach { ch ->
-                        val checked = ch in selected.value
-                        Row(verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.clickable {
-                                selected.value = if (checked) selected.value - ch else selected.value + ch
-                            }) {
-                            Checkbox(checked = checked, onCheckedChange = {
-                                selected.value = if (it) selected.value + ch else selected.value - ch
-                            })
-                            Text(ch)
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    saveChannels(selected.value.toList()); showChannelPicker = false
-                }) { Text("OK") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showChannelPicker = false }) { Text("Cancel") }
-            }
-        )
     }
 
     // The File Manager, opened at a log folder. This host block is what "Browse" needs to do
@@ -532,34 +506,147 @@ private fun PickRow(
     }
 }
 
+/** A drive-menu-style row: leading icon tinted primary, label, whole row clickable. */
 @Composable
-private fun Chip(text: String, onRemove: () -> Unit) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(16.dp))
-            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp))
-            .padding(start = 10.dp, end = 2.dp, top = 2.dp, bottom = 2.dp)
-    ) {
-        Text(text, color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp)
-        IconButton(onClick = onRemove, modifier = Modifier.size(22.dp)) {
-            Icon(Icons.Default.Close, "Remove",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(13.dp))
-        }
-    }
+private fun MenuRow(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onClick: () -> Unit,
+) {
+    DropdownMenuItem(
+        text = { Text(label) },
+        leadingIcon = {
+            Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+        },
+        onClick = onClick,
+    )
 }
 
+/** The channels people actually turn on. The other 500 are behind the search field. */
+private val COMMON_WINE_CHANNELS = listOf(
+    "err", "warn", "fixme", "seh", "module", "loaddll", "process", "thread",
+    "sync", "file", "reg", "heap", "ntdll", "d3d", "dxgi", "vulkan", "opengl", "relay"
+)
+
+/**
+ * Wine debug channels, built like the DXVK_HUD group in the env-var editor: a disclosure header,
+ * the selection shown as static labels while collapsed, and a FilterChip grid when open.
+ *
+ * One deliberate difference. DXVK_HUD has ~20 options and TU_DEBUG ~30, so those can show every
+ * chip when expanded; Wine has **521**, which is a wall of chips nobody can read and a slow
+ * composition besides. So the expanded grid shows the channels that actually get used, and a
+ * search field reaches the rest — the same escape hatch the env-var editor's own add-picker uses
+ * for its oversized catalog. Anything already selected is always shown, however obscure.
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-private fun ChipButton(text: String, onClick: () -> Unit) {
-    Text(
-        text,
-        color = MaterialTheme.colorScheme.primary,
-        fontSize = 12.sp,
-        modifier = Modifier
-            .clickable { onClick() }
-            .border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(16.dp))
-            .padding(horizontal = 12.dp, vertical = 5.dp)
-    )
+private fun WineChannelGroup(
+    selected: List<String>,
+    onChange: (List<String>) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    var expanded by remember { mutableStateOf(false) }
+    var query by remember { mutableStateOf("") }
+
+    val all = remember {
+        try {
+            val arr = org.json.JSONArray(FileUtils.readString(context, "wine_debug_channels.json"))
+            (0 until arr.length()).map { arr.getString(it) }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    // Selected first so a channel can always be switched back off, then the common set, then
+    // whatever the query matches.
+    val shown = remember(query, selected, all) {
+        if (query.isBlank()) (selected + COMMON_WINE_CHANNELS).distinct()
+        else all.filter { it.contains(query.trim(), ignoreCase = true) }.take(60)
+    }
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }
+        ) {
+            Text(
+                "Channels",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.weight(1f)
+            )
+            Icon(
+                if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                if (expanded) "Collapse channels" else "Expand channels",
+                tint = MaterialTheme.colorScheme.primary
+            )
+        }
+
+        if (!expanded) {
+            // Static labels, not chips: a tap that silently deselected a channel from a summary
+            // view would be a destructive action hidden behind a collapsed control.
+            if (selected.isEmpty()) {
+                Text("None selected", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp,
+                    modifier = Modifier.padding(vertical = 4.dp))
+            } else {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+                ) {
+                    selected.forEach { ch ->
+                        Box(
+                            modifier = Modifier
+                                .background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(8.dp))
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        ) {
+                            Text(ch, color = MaterialTheme.colorScheme.onSecondaryContainer, fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+            return@Column
+        }
+
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            label = { Text("Search all ${all.size} channels") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)
+        )
+
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            shown.forEach { ch ->
+                val isOn = ch in selected
+                FilterChip(
+                    selected = isOn,
+                    onClick = { onChange(if (isOn) selected - ch else selected + ch) },
+                    label = { Text(ch, fontSize = 11.sp) }
+                )
+            }
+        }
+        if (query.isNotBlank() && shown.isEmpty()) {
+            Text("No channel matches \"$query\".",
+                color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+        }
+
+        Text(
+            "Reset to defaults",
+            color = MaterialTheme.colorScheme.primary, fontSize = 12.sp,
+            modifier = Modifier
+                .clickable {
+                    onChange(com.winlator.star.SettingsFragment.DEFAULT_WINE_DEBUG_CHANNELS
+                        .split(",").filter { it.isNotBlank() })
+                    query = ""
+                }
+                .padding(top = 6.dp, bottom = 2.dp)
+        )
+    }
 }
 
 /**
