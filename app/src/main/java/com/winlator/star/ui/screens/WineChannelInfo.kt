@@ -75,7 +75,6 @@ object WineChannelInfo {
         "fixme" to "Wine admitting a feature is missing or faked. Very often the cause of a bug.",
         "seh" to "Windows exceptions as they are thrown. Invaluable for a crash, but games throw " +
             "these constantly, so it makes logs huge and slows the game down noticeably.",
-        "trace" to "The firehose: every traced call. Enormous, and slow.",
         "relay" to "Logs every call in and out of a DLL. Extremely detailed and extremely slow — " +
             "useful for a specific hang, unusable as a general setting.",
         "snoop" to "Like relay, but for calls Wine did not build itself. Same cost.",
@@ -193,15 +192,11 @@ object WineChannelInfo {
         "unloaddll" to "DLLs being unloaded.",
         "heap" to "Memory allocation. Verbose, but the place to look for memory corruption.",
         "globalmem" to "Global memory allocation.",
-        "virtual" to "Virtual memory mapping.",
         "sync" to "Locks, mutexes and synchronisation. The channel for a hang or deadlock.",
         "ntdll" to "The lowest-level Windows library. Broad and noisy.",
         "kernelbase" to "Core kernel API calls.",
         "ntoskrnl" to "Kernel-side calls, used by drivers and anti-cheat.",
-        "server" to "Talking to the Wine server, which coordinates processes.",
         "syslevel" to "Legacy 16-bit locking.",
-        "timestamp" to "Adds a timestamp to every line. Handy when correlating with a crash.",
-        "pid" to "Adds the process ID to every line.",
         "environ" to "Environment variables as the process sees them.",
         "exec" to "Program execution.",
         "toolhelp" to "Process and module enumeration, used by tools and anti-cheat.",
