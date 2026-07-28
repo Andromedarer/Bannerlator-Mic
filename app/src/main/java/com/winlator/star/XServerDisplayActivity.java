@@ -4076,7 +4076,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     // --- Environment Variable Setup ---
     String vulkanVersion = graphicsDriverConfig.get("vulkanVersion");
-    if (vulkanVersion == null) vulkanVersion = "1.3";
+    if (vulkanVersion == null) vulkanVersion = "1.4";
     // The direct-ICD turnip is not an adrenotools driver, so the native getVulkanVersion()
     // probe can't describe it and may return a non-dotted string -> split(".")[2] would crash.
     // turnip-26.1.0's ICD manifest advertises api_version 1.4.318, so use that directly.

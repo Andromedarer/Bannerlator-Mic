@@ -36,7 +36,7 @@ object WrapperSettingsDictionary {
     // settings" section filters them out so nothing is shown twice.
     private val DEFS: Map<String, SettingDef> = listOf(
         // --- WRAPPER_* (integrated ICD) ---
-        SettingDef("WRAPPER_VK_VERSION", Type.TEXT, "Vulkan version", "e.g. 1.3", default = "1.3"),
+        SettingDef("WRAPPER_VK_VERSION", Type.TEXT, "Vulkan version", "e.g. 1.4", default = "1.4"),
         SettingDef("WRAPPER_EMULATE_BCN", Type.DROPDOWN, "BCn emulation",
             "0 off · 1 basic · 2 full · 3 auto", default = "3", choices = listOf("0", "1", "2", "3")),
         SettingDef("WRAPPER_BCN_ASTC", Type.TOGGLE, "BCn → ASTC transcode"),

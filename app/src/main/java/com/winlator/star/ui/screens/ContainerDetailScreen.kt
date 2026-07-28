@@ -1863,7 +1863,7 @@ internal fun GraphicsDriverConfigDialog(
     }
 
     var version          by remember { mutableStateOf(cfg["version"] ?: "") }
-    var vulkanVersion    by remember { mutableStateOf(cfg["vulkanVersion"] ?: "1.3") }
+    var vulkanVersion    by remember { mutableStateOf(cfg["vulkanVersion"] ?: "1.4") }
     var gpuName          by remember { mutableStateOf(cfg["gpuName"] ?: "Device") }
     var presentMode      by remember { mutableStateOf(cfg["presentMode"] ?: "mailbox") }
     var resourceType     by remember { mutableStateOf(cfg["resourceType"] ?: "auto") }
