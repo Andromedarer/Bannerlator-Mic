@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-07-28T16-49-33-1e5fd5",
+    "created": "2026-07-28T16:49:33.271Z",
+    "reporter": "Omar",
+    "device": "Xiaomi 14t",
+    "gpu": "Mali g615 mc6",
+    "game": "Forza horizon 4",
+    "symptom": "شاشة سوداء (بدون صورة)",
+    "logs": 1
+  },
+  {
     "id": "2026-07-28T13-25-40-f843c1",
     "created": "2026-07-28T13:25:40.245Z",
     "reporter": "Tharusha",
