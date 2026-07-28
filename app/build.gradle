@@ -19,15 +19,37 @@ plugins {
 apply plugin: 'kotlin-android'
 apply plugin: 'org.jetbrains.kotlin.plugin.compose'
 
+// Base rootfs, fetched at build time from OUR OWN pinned release rather than a third party's
+// moving branch. It used to come from star-emu/contents at refs/heads/main — no tag, no version,
+// no checksum — so whatever sat on someone else's main at build time got baked into the APK, and
+// an outage there simply broke the build (HTTP 504s, and a Connection reset that failed the
+// standard flavor on 2026-07-28). base-assets-v1 is byte-identical to that upstream as of
+// 2026-07-24: this is a pin, not a fork.
+//
+// The checksum is verified after download and the file is deleted on mismatch, so a corrupt or
+// swapped asset fails the build loudly instead of shipping silently. To move to a newer rootfs,
+// publish a new tag and update BOTH the URL and the hash together.
 tasks.register("downloadImageFS") {
     def assetDir = new File(project.rootDir, ["app","src","main","assets"].join(File.separator))
     File imageFS = new File(assetDir, "imagefs.tar.zst")
-    String imageFSURL = "https://github.com/star-emu/contents/raw/refs/heads/main/imagefs.tar.zst"
+    String imageFSURL = "https://github.com/The412Banner/winlator-contents/releases/download/base-assets-v1/imagefs.tar.zst"
+    String imageFSSha256 = "7838756e6a05c91afff68f4bf12aa2780f815877753f8dd354e203e99b9caf8a"
 
     doLast {
         if (!imageFS.exists()) {
             println("ImageFS was not present, downloading...\n")
             new URL(imageFSURL).withInputStream { i -> imageFS.withOutputStream { it << i } }
+
+            def digest = java.security.MessageDigest.getInstance("SHA-256")
+            imageFS.eachByte(1024 * 1024) { buf, len -> digest.update(buf, 0, len) }
+            def actual = digest.digest().encodeHex().toString()
+            if (actual != imageFSSha256) {
+                imageFS.delete()
+                throw new GradleException(
+                    "imagefs.tar.zst checksum mismatch\n  expected ${imageFSSha256}\n  actual   ${actual}\n" +
+                    "Deleted the download. Either the release asset changed or the transfer was truncated.")
+            }
+            println("ImageFS checksum OK (${actual})\n")
         }
     }
 }
