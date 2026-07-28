@@ -23,20 +23,41 @@ object PerfRootApplier {
     const val KEY_CPU_GOVERNOR = "rootCpuGovernorPerf"
     const val KEY_CPU_FREQ_LOCK = "rootCpuFreqLockMax"
     const val KEY_CORES_ONLINE = "rootAllCoresOnline"
+
+    /**
+     * GPU max-clock pin. Historically root-only, hence the "root" prefix — the key name is FROZEN for
+     * persistence compatibility (existing prefs, shortcut extras and shared community configs all
+     * carry it) even though the toggle is no longer root-only. See [applyGpuMaxClockLock].
+     */
     const val KEY_GPU_CLOCK_LOCK = "rootGpuMaxClockLock"
     const val KEY_THERMAL_DISABLE = "rootThermalDisable"
     const val KEY_FAN_MAX = "rootFanMax"
 
-    /** All root toggle keys, in display order. */
+    /** Every key this applier owns, in display order (includes the dual-tier GPU pin). */
     val ROOT_KEYS = listOf(
         KEY_CPU_GOVERNOR, KEY_CPU_FREQ_LOCK, KEY_CORES_ONLINE,
         KEY_GPU_CLOCK_LOCK, KEY_THERMAL_DISABLE, KEY_FAN_MAX,
     )
 
+    /**
+     * Keys that genuinely need root — i.e. what the UI shows under "Root performance controls". The
+     * GPU pin is excluded: it now has a non-root path ([PerfGpuTurbo]) and is presented alongside the
+     * other no-root-needed toggles.
+     */
+    val ROOT_ONLY_KEYS = ROOT_KEYS - KEY_GPU_CLOCK_LOCK
+
     /** Keys gated behind the safety harness (dangerous — can overheat if revert is broken). */
     val HARNESS_GATED = setOf(KEY_THERMAL_DISABLE, KEY_FAN_MAX)
 
     fun isHarnessGated(key: String): Boolean = key in HARNESS_GATED
+
+    /**
+     * Whether a key can do anything at all on this device with the privileges we currently hold.
+     * Only the GPU pin can be useful without root, and only on Adreno.
+     */
+    fun isUsable(key: String): Boolean =
+        if (key == KEY_GPU_CLOCK_LOCK) RootManager.isGranted || PerfGpuTurbo.isSupported
+        else RootManager.isGranted
 
     // ── generic dispatch ─────────────────────────────────────────────────────────────────────────
 
@@ -90,18 +111,33 @@ object PerfRootApplier {
         else PerfRevertRegistry.revertNodes(nodes)
     }
 
-    // ── GPU max-clock lock + force clocks on ───────────────────────────────────────────────────────
-    fun applyGpuMaxClockLock(on: Boolean) = guarded(KEY_GPU_CLOCK_LOCK) {
-        val g = PerfNodeResolver.gpu()
-        val touched = listOfNotNull(g.minClock, g.forceClkOn)
-        if (on) {
-            g.maxClock?.let { maxNode ->
-                val maxVal = RootManager.readNode(maxNode)
-                if (maxVal != null && g.minClock != null) PerfRevertRegistry.applyWrite(g.minClock, maxVal)
+    // ── GPU max-clock lock — DUAL TIER ─────────────────────────────────────────────────────────────
+    // With root: pin via sysfs pwrlevel (+force_clk_on), snapshot-reverted like every other root node.
+    // Without root: fall back to the KGSL turbo property ([PerfGpuTurbo]) — Adreno-only, but it means
+    // this toggle finally works for users who never granted root. Only ONE path runs, so there is only
+    // ever one thing to unwind.
+    fun applyGpuMaxClockLock(on: Boolean) {
+        if (!RootManager.isGranted) {
+            // Non-root path. No harness gate — this can't disable thermal protection.
+            try { PerfGpuTurbo.apply(on) } catch (t: Throwable) { Log.w(TAG, "turbo $on failed", t) }
+            return
+        }
+        // Root granted: make sure the non-root pin isn't also left standing, then use sysfs.
+        PerfGpuTurbo.revert()
+        try {
+            val g = PerfNodeResolver.gpu()
+            val touched = listOfNotNull(g.minClock, g.forceClkOn)
+            if (on) {
+                g.maxClock?.let { maxNode ->
+                    val maxVal = RootManager.readNode(maxNode)
+                    if (maxVal != null && g.minClock != null) PerfRevertRegistry.applyWrite(g.minClock, maxVal)
+                }
+                g.forceClkOn?.let { PerfRevertRegistry.applyWrite(it, "1") }
+            } else {
+                PerfRevertRegistry.revertNodes(touched)
             }
-            g.forceClkOn?.let { PerfRevertRegistry.applyWrite(it, "1") }
-        } else {
-            PerfRevertRegistry.revertNodes(touched)
+        } catch (t: Throwable) {
+            Log.w(TAG, "apply $KEY_GPU_CLOCK_LOCK failed", t)
         }
     }
 
@@ -146,9 +182,15 @@ object PerfRootApplier {
     // TODO(next pass): background-app freeze — needs `am`/package enumeration + a safelist; bigger and
     // riskier, deliberately deferred.
 
-    /** Apply the resolved effective state of every root toggle at game launch. */
+    /**
+     * Apply the resolved effective state of every toggle this applier owns, at game launch.
+     * The GPU pin runs even without root (non-root turbo path); the rest need the grant.
+     */
     fun applyEffective(effective: Map<String, Boolean>) {
-        if (!RootManager.isGranted) return
+        if (!RootManager.isGranted) {
+            apply(KEY_GPU_CLOCK_LOCK, effective[KEY_GPU_CLOCK_LOCK] ?: false)
+            return
+        }
         for (key in ROOT_KEYS) apply(key, effective[key] ?: false)
     }
 }

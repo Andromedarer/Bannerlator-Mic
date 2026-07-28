@@ -98,6 +98,7 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import com.winlator.star.R
 import com.winlator.star.container.Container
+import com.winlator.star.perf.PerfGpuTurbo
 import com.winlator.star.perf.PerfRevertRegistry
 import com.winlator.star.perf.PerfRootApplier
 import com.winlator.star.perf.RootManager
@@ -2817,6 +2818,10 @@ private fun AdvancedContent(state: XServerDrawerState) {
     }
     PerfOverrideLine("preferBigCores" in overridden) { state.onResetPerfKey?.accept("preferBigCores") }
 
+    // GPU max-clock pin — sits with the no-root toggles because on Adreno it works without root
+    // (KGSL turbo); it upgrades to the sysfs pin automatically when root is granted.
+    GpuClockLockRow(state, overridden)
+
     Spacer(Modifier.height(14.dp))
     RootPerformanceSection(state)
 
@@ -2854,6 +2859,37 @@ private fun PerfOverrideLine(overridden: Boolean, onReset: () -> Unit) {
             Text("Reset to global", fontSize = 10.sp, color = accent,
                 modifier = Modifier.clickable { onReset() })
         }
+    }
+}
+
+/**
+ * "Lock GPU to max clock" — the one PerfRootApplier-owned toggle that is NOT root-only, so it lives
+ * with the non-root rows. Enabled when root is granted (sysfs pwrlevel pin) OR the device is Adreno
+ * (non-root KGSL turbo). On a non-Adreno device with no root there is nothing to drive, so the row
+ * greys out with a reason.
+ */
+@Composable
+private fun GpuClockLockRow(state: XServerDrawerState, overridden: Set<String>) {
+    val key = PerfRootApplier.KEY_GPU_CLOCK_LOCK
+    val rootState by RootManager.state.collectAsState()
+    val toggles by state.rootToggles.collectAsState()
+
+    val granted = rootState == RootManager.RootState.GRANTED
+    val enabled = granted || PerfGpuTurbo.isSupported
+
+    ToggleRow("Lock GPU to max clock", toggles[key] ?: false, enabled = enabled) { on ->
+        state.setRootToggle(key, on)
+        state.onRootToggleChange?.accept(key, on)
+    }
+    if (!enabled) {
+        Text(
+            "🔒 Needs an Adreno GPU, or root on other GPUs.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 12.dp, bottom = 4.dp)
+        )
+    } else {
+        PerfOverrideLine(key in overridden) { state.onResetPerfKey?.accept(key) }
     }
 }
 
@@ -2907,7 +2943,6 @@ private fun RootPerformanceSection(state: XServerDrawerState) {
     RootToggleRow(PerfRootApplier.KEY_CPU_GOVERNOR, "CPU governor → performance", state, toggles, granted, harnessProven, overridden)
     RootToggleRow(PerfRootApplier.KEY_CPU_FREQ_LOCK, "Lock CPU frequency to max", state, toggles, granted, harnessProven, overridden)
     RootToggleRow(PerfRootApplier.KEY_CORES_ONLINE, "Keep all cores online", state, toggles, granted, harnessProven, overridden)
-    RootToggleRow(PerfRootApplier.KEY_GPU_CLOCK_LOCK, "Lock GPU to max clock", state, toggles, granted, harnessProven, overridden)
     RootToggleRow(PerfRootApplier.KEY_THERMAL_DISABLE, "Disable thermal throttling", state, toggles, granted, harnessProven, overridden)
     RootToggleRow(PerfRootApplier.KEY_FAN_MAX, "Fan to maximum", state, toggles, granted, harnessProven, overridden)
 

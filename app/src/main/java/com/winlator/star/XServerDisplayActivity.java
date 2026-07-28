@@ -1130,9 +1130,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
         XServerDrawerState.INSTANCE.setPreferBigCores(preferBig);
         getWindow().setSustainedPerformanceMode(sustainedPerf);
 
-        // Root-tier toggles: seed the drawer with the effective (override ?? global) values and apply
-        // the effective state now (no-op unless root is granted). Auto-revert on exit/background/crash
-        // restores everything (PerfRevertRegistry).
+        // PerfRootApplier-owned toggles: seed the drawer with the effective (override ?? global) values
+        // and apply the effective state now. The five root-only ones no-op unless root is granted; the
+        // GPU max-clock pin also applies without root on Adreno (KGSL turbo). Auto-revert on
+        // exit/background/crash restores everything (PerfRevertRegistry).
         java.util.Map<String, Boolean> rootEffective = new java.util.HashMap<>();
         for (String rk : com.winlator.star.perf.PerfRootApplier.INSTANCE.getROOT_KEYS()) {
             rootEffective.put(rk, resolvedRootBool(rk));

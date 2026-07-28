@@ -30,6 +30,7 @@ add_library(winlator SHARED
         winlator/xconnector_epoll.c
         winlator/alsa_client.c
         winlator/vulkan.c
+        winlator/perf_turbo.c
 )
 
 target_compile_options(winlator PRIVATE -Wall -Wextra)

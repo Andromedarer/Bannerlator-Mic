@@ -39,6 +39,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.winlator.star.perf.PerfGpuTurbo
 import com.winlator.star.perf.PerfRootApplier
 import com.winlator.star.perf.PerformanceSettings
 import com.winlator.star.perf.RootManager
@@ -105,6 +106,14 @@ fun PerformanceSettingsScreen(onClose: () -> Unit) {
                     onInfo = { info = "Thread Priority Boost" to PerfCopy.PRIORITY }) { PerformanceSettings.setPerfPriorityBoost(it) }
                 PerfToggle("Prefer Big Cores", bigCores,
                     onInfo = { info = "Prefer Big Cores" to PerfCopy.BIG_CORES }) { PerformanceSettings.setPreferBigCores(it) }
+                // GPU pin lives here (not in the root card) because it now has a non-root path on
+                // Adreno. It still upgrades itself to the stronger sysfs pin when root is granted.
+                RootToggle(PerfRootApplier.KEY_GPU_CLOCK_LOCK, "Lock GPU to max clock", granted, harnessProven,
+                    onInfo = { info = "Lock GPU to max clock" to PerfCopy.GPU_CLOCK })
+                if (!granted && !PerfGpuTurbo.isSupported) {
+                    Text("Lock GPU to max clock needs an Adreno (Qualcomm) GPU, or root on other GPUs.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                }
             }
 
             // ── Root tier ──
@@ -134,8 +143,6 @@ fun PerformanceSettingsScreen(onClose: () -> Unit) {
                     onInfo = { info = "Lock CPU frequency to max" to PerfCopy.CPU_FREQ })
                 RootToggle(PerfRootApplier.KEY_CORES_ONLINE, "Keep all cores online", granted, harnessProven,
                     onInfo = { info = "Keep all cores online" to PerfCopy.CORES_ONLINE })
-                RootToggle(PerfRootApplier.KEY_GPU_CLOCK_LOCK, "Lock GPU to max clock", granted, harnessProven,
-                    onInfo = { info = "Lock GPU to max clock" to PerfCopy.GPU_CLOCK })
                 RootToggle(PerfRootApplier.KEY_THERMAL_DISABLE, "Disable thermal throttling", granted, harnessProven,
                     onInfo = { info = "Disable thermal throttling" to PerfCopy.THERMAL })
                 RootToggle(PerfRootApplier.KEY_FAN_MAX, "Fan to maximum", granted, harnessProven,
@@ -205,12 +212,14 @@ fun PerformanceSettingsScreen(onClose: () -> Unit) {
     }
 }
 
-/** A root toggle bound to its global default; applies live via PerfRootApplier. */
+/** A PerfRootApplier-owned toggle bound to its global default; applies live via PerfRootApplier. */
 @Composable
 private fun RootToggle(key: String, label: String, granted: Boolean, harnessProven: Boolean, onInfo: () -> Unit) {
     val checked by PerformanceSettings.rootDefaultFlow(key).collectAsState()
     val gated = PerfRootApplier.isHarnessGated(key) && !harnessProven
-    val enabled = granted && !gated
+    // The GPU pin is usable without root on Adreno (KGSL turbo); everything else needs the grant.
+    val usableWithoutRoot = key == PerfRootApplier.KEY_GPU_CLOCK_LOCK && PerfGpuTurbo.isSupported
+    val enabled = (granted || usableWithoutRoot) && !gated
     PerfToggle(label, checked, enabled = enabled, onInfo = onInfo) { on ->
         PerformanceSettings.setRootDefault(key, on)
         PerfRootApplier.apply(key, on)
@@ -283,7 +292,16 @@ private object PerfCopy {
     const val CPU_GOV = "Forces the CPU to run fast instead of ramping on demand. Faster, more heat and battery. (Root)"
     const val CPU_FREQ = "Pins the CPU at max clock so it never slows down. Top performance, highest heat/battery. (Root)"
     const val CORES_ONLINE = "Stops cores being put to sleep, keeping every core available. (Root)"
-    const val GPU_CLOCK = "Pins the GPU at top speed so it stops dropping clocks to save power. Smoother, hotter. (Root)"
+    const val GPU_CLOCK =
+        "Pins the GPU at top speed so it stops dropping clocks to save power. Smoother and more " +
+        "consistent, but hotter and heavier on battery.\n\n" +
+        "No root needed on Adreno (Qualcomm) GPUs — this is the same \"Adreno turbo\" trick Switch " +
+        "emulators use: it asks the GPU driver directly to stop scaling clocks down, through a device " +
+        "file the app is already allowed to open.\n\n" +
+        "With root granted, it switches to a stronger system-level clock pin instead. Either way your " +
+        "device's own heat protection still applies, and the setting is undone when you exit the game, " +
+        "background the app, or it crashes.\n\n" +
+        "On non-Adreno GPUs (Mali, Xclipse, PowerVR) this toggle needs root."
     const val THERMAL = "Removes your device's built-in heat protection. ⚠️ Can overheat — the Temperature Watchdog is your only safety net with this on. (Root)"
     const val FAN = "Runs the fan at full speed for max cooling (devices with a fan). (Root)"
     const val FREE_MEM = "Clears cached memory to free RAM. One-time action — tap before a heavy game."
@@ -295,11 +313,11 @@ private fun explainAllBody(): String = buildString {
     append("• Sustained Performance Mode\n${PerfCopy.SUSTAINED}\n\n")
     append("• Thread Priority Boost\n${PerfCopy.PRIORITY}\n\n")
     append("• Prefer Big Cores\n${PerfCopy.BIG_CORES}\n\n")
+    append("• Lock GPU to max clock\n${PerfCopy.GPU_CLOCK}\n\n")
     append("\nRequires root\n\n")
     append("• CPU governor → performance\n${PerfCopy.CPU_GOV}\n\n")
     append("• Lock CPU frequency to max\n${PerfCopy.CPU_FREQ}\n\n")
     append("• Keep all cores online\n${PerfCopy.CORES_ONLINE}\n\n")
-    append("• Lock GPU to max clock\n${PerfCopy.GPU_CLOCK}\n\n")
     append("• Disable thermal throttling\n${PerfCopy.THERMAL}\n\n")
     append("• Fan to maximum\n${PerfCopy.FAN}\n\n")
     append("• Free memory now\n${PerfCopy.FREE_MEM}\n")
