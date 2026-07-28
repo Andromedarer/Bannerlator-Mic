@@ -210,11 +210,12 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
         editor.putBoolean("use_dri3", useDRI3)
         editor.putBoolean("use_xr", useXR)
         editor.putFloat("cursor_speed", cursorSpeed)
-        editor.putBoolean("enable_wine_debug", enableWineDebug)
-        editor.putString("wine_debug_channels", wineDebugChannels.joinToString(","))
-        editor.putBoolean("enable_box64_logs", enableBox64Logs)
-        editor.putString(LogLocation.PREF_MODE, logLocationMode)
-        editor.putString(LogLocation.PREF_CUSTOM_PATH, logLocationCustomPath)
+        // NOTE: enable_wine_debug / wine_debug_channels / enable_box64_logs / log_location_mode /
+        // log_location_custom_path are owned by the Log Manager now and are deliberately NOT saved
+        // here. This screen snapshots preferences into state at first composition and writes them
+        // back on the Save FAB; the Log Manager (opened as a dialog from this very screen, so this
+        // composition is never disposed) writes immediately. Saving them here would write the stale
+        // pre-dialog snapshot back over whatever the user just changed in the manager.
         editor.putBoolean("enable_file_provider", enableFileProvider)
         editor.putBoolean("open_with_android_browser", openWithBrowser)
         editor.putBoolean("share_android_clipboard", shareClipboard)
@@ -841,85 +842,24 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
         }
 
         // ── Logs ─────────────────────────────────────────────────────
+        // Everything logging now lives in the Log Manager: location, which types to record, the
+        // Wine channel chips, retention, and what is on disk per game. Deliberately NOT duplicated
+        // here — the toggles used to exist in both places writing the same preferences, and this
+        // screen saves on the FAB while the manager writes immediately, so one would silently
+        // overwrite the other.
         FieldSetLabel("Logs")
         FieldSet {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(checked = enableWineDebug, onCheckedChange = { enableWineDebug = it })
-                Text("Enable Wine Debug", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
-            }
-            Spacer(Modifier.height(4.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                for ((i, channel) in wineDebugChannels.withIndex()) {
-                    Row(verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(4.dp)).padding(horizontal = 8.dp, vertical = 4.dp)) {
-                        Text(channel, color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp)
-                        IconButton(onClick = {
-                            wineDebugChannels = wineDebugChannels.toMutableList().also { it.removeAt(i) }
-                        }, modifier = Modifier.size(20.dp)) {
-                            Icon(Icons.Default.Close, "Remove", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
-                        }
-                    }
-                }
-                IconButton(onClick = { showDebugChannelDialog = true }) {
-                    Icon(Icons.Default.Add, "Add", tint = MaterialTheme.colorScheme.onSurface)
-                }
-                IconButton(onClick = {
-                    wineDebugChannels = SettingsFragment.DEFAULT_WINE_DEBUG_CHANNELS.split(",").toMutableList()
-                }) {
-                    Icon(Icons.Default.Refresh, "Reset", tint = MaterialTheme.colorScheme.onSurface)
-                }
-            }
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(checked = enableBox64Logs, onCheckedChange = { enableBox64Logs = it })
-                Text("Enable Box64 Logs", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
-            }
-            Spacer(Modifier.height(12.dp))
-            // ── Log location (issue #70): where wine_debug.log + DXVK/DXGI/VKD3D logs are written ──
-            Text("Log location", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
-            Spacer(Modifier.height(8.dp))
-            Box {
-                Button(onClick = { showLogLocationDropdown = true },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-                    modifier = Modifier.fillMaxWidth()) {
-                    val label = when (logLocationMode) {
-                        LogLocation.MODE_DOWNLOAD -> "Download (/sdcard/Download/bannerlator)"
-                        LogLocation.MODE_DOCUMENTS -> "Documents (/sdcard/Documents/bannerlator)"
-                        LogLocation.MODE_CUSTOM ->
-                            if (logLocationCustomPath.isNotEmpty()) logLocationCustomPath else "Choose folder…"
-                        else -> "App data (default)"
-                    }
-                    Text(label, color = MaterialTheme.colorScheme.onSurface)
-                }
-                DropdownMenu(
-                    expanded = showLogLocationDropdown,
-                    onDismissRequest = { showLogLocationDropdown = false },
-                    modifier = Modifier.outlinedMenuCard()
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("App data (default)") },
-                        onClick = { logLocationMode = LogLocation.MODE_APP_DATA; showLogLocationDropdown = false }
-                    )
-                    MenuItemDivider()
-                    DropdownMenuItem(
-                        text = { Text("Download") },
-                        onClick = { logLocationMode = LogLocation.MODE_DOWNLOAD; showLogLocationDropdown = false }
-                    )
-                    MenuItemDivider()
-                    DropdownMenuItem(
-                        text = { Text("Documents") },
-                        onClick = { logLocationMode = LogLocation.MODE_DOCUMENTS; showLogLocationDropdown = false }
-                    )
-                    MenuItemDivider()
-                    DropdownMenuItem(
-                        text = { Text("Choose folder…") },
-                        onClick = {
-                            showLogLocationDropdown = false
-                            logLocationDirLauncher.launch(InAppFilePicker.buildDirIntent(context, "Select log folder"))
-                        }
-                    )
-                }
-            }
+            Text(
+                "Where logs are saved, which ones to record, how many past runs to keep, and what is " +
+                "on disk for each game. Two log types slow games down while enabled — the manager " +
+                "says which.",
+                color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp,
+                modifier = Modifier.padding(bottom = 6.dp)
+            )
+            Button(
+                onClick = { showLogManager = true },
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+            ) { Text("Open Log Manager", color = MaterialTheme.colorScheme.onPrimary) }
         }
 
         // ── Experimental ──────────────────────────────────────────────
@@ -1026,22 +966,6 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
                 onClick = { showPerformanceMenu = true },
                 modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
             ) { Text("Open Performance settings", color = MaterialTheme.colorScheme.onPrimary) }
-        }
-
-        // ── Log Manager ──────────────────────────────────────────────────
-        FieldSetLabel("Logs")
-        FieldSet {
-            Text(
-                "Where logs go, which ones are produced, how many past runs to keep, and what is on " +
-                "disk right now for each game. Two log types slow games down while enabled — the " +
-                "manager says which.",
-                color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp,
-                modifier = Modifier.padding(bottom = 6.dp)
-            )
-            Button(
-                onClick = { showLogManager = true },
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-            ) { Text("Open Log Manager", color = MaterialTheme.colorScheme.onPrimary) }
         }
 
         Spacer(Modifier.height(72.dp))

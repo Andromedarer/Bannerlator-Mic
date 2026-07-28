@@ -921,7 +921,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
         };
         state.onMagnifier              = () -> showMagnifierOverlay();
         state.onLogs                   = () -> XServerDialogState.INSTANCE.show(XServerDialogState.ActiveDialog.DEBUG);
-        state.onLogManager             = () -> XServerDialogState.INSTANCE.show(XServerDialogState.ActiveDialog.LOG_MANAGER);
         state.onExit                   = () -> exit();
         // Seed the drawer chip from the persisted preference so it reflects reality on open
         // (state.reset() above zeroes it, so this has to come after).
@@ -2545,8 +2544,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
             File logDir = com.winlator.star.core.LogLocation.resolveGameLogDir(this, currentLogGameName());
             if (logDir != null) {
                 logDir.mkdirs();
-                com.winlator.star.core.LogRotation.rotate(
-                        logDir, com.winlator.star.core.LogLocation.keepLastRuns(this));
+                // Only rotate inside a folder WE created for this game. With per-game folders off,
+                // resolveGameLogDir returns the flat log root — which on the default location holds
+                // other subsystems' debug files, and on a custom location is a folder the user
+                // chose. Archiving and pruning in there would delete files that aren't ours.
+                if (com.winlator.star.core.LogLocation.isPerGameEnabled(this)) {
+                    com.winlator.star.core.LogRotation.rotate(
+                            logDir, com.winlator.star.core.LogLocation.keepLastRuns(this));
+                }
                 File logFile = new File(logDir, "wine_debug.log");
                 wineDebugWriter = new java.io.PrintWriter(
                         new java.io.BufferedWriter(new java.io.FileWriter(logFile, false)), true);

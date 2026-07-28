@@ -136,6 +136,19 @@ public final class LogLocation {
         return (dir.isDirectory() && dir.canWrite()) ? dir : base;
     }
 
+    /**
+     * Whether logs are being filed into a folder per game. Callers that DELETE or MOVE files must
+     * check this: with it off, the "game log dir" is the shared log root, which may contain other
+     * subsystems' files or, on a custom location, the user's own.
+     */
+    public static boolean isPerGameEnabled(Context context) {
+        try {
+            return PreferenceManager.getDefaultSharedPreferences(context).getBoolean(PREF_PER_GAME, true);
+        } catch (Exception e) {
+            return false; // unknown => treat as shared, i.e. do not touch anything
+        }
+    }
+
     /** Configured number of past runs to keep per game. */
     public static int keepLastRuns(Context context) {
         try {

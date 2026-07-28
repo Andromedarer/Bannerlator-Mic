@@ -191,7 +191,6 @@ object XServerDrawerState {
     @JvmField var onTaskManager:            Runnable? = null
     @JvmField var onMagnifier:              Runnable? = null
     @JvmField var onLogs:                   Runnable? = null
-    @JvmField var onLogManager:             Runnable? = null
     @JvmField var onExit:                   Runnable? = null
     @JvmField var onMoveCursorToTouchpoint: Runnable? = null
     // Fired when any gesture chip/slider under the Cursor to Touch cog changes; the activity reads
@@ -411,7 +410,7 @@ object XServerDrawerState {
         onScreenEffects = null; onGraphicEngine = null; onVibration = null
         onToggleFullscreen = null; onSetFullscreenMode = null; onPauseResume = null; onPipMode = null
         onActiveWindows = null; onTaskManager = null; onMagnifier = null
-        onLogs = null; onLogManager = null; onExit = null; onMoveCursorToTouchpoint = null; onGestureConfigChange = null
+        onLogs = null; onExit = null; onMoveCursorToTouchpoint = null; onGestureConfigChange = null
         onRelativeMouseMovement = null; onDisableMouse = null
         onNativeRenderingToggle = null; onFpsConfigApply = null
         onBionicFgConfigChange = null; onFpsLimitChange = null

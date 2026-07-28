@@ -56,9 +56,14 @@ public final class LogInventory {
         File[] kids = base.listFiles();
         if (kids == null) return out;
 
+        // Only list folders that actually contain logs WE wrote. The log root is shared: on the
+        // default app-data location it also holds ReShade/, and on a custom location every folder
+        // the user happens to have. Listing those as "games" would be wrong, and would hand a
+        // future delete button a path to something we never created.
         boolean sawFolder = false;
         for (File f : kids) {
             if (!f.isDirectory()) continue;
+            if (!containsOurLogs(f)) continue;
             sawFolder = true;
             out.add(describe(f, LogLocation.APP_FOLDER.equals(f.getName())));
         }
@@ -81,6 +86,21 @@ public final class LogInventory {
             }
         });
         return out;
+    }
+
+    /**
+     * True when a directory holds at least one file this app produced — a current-run log, a crash
+     * report, or an archived run. Cheap and shallow on purpose: it runs for every folder in the log
+     * root each time the screen opens.
+     */
+    private static boolean containsOurLogs(File dir) {
+        File[] files = dir.listFiles();
+        if (files == null) return false;
+        for (File f : files) {
+            if (f.isFile() && (isLog(f.getName()) || f.getName().startsWith("crash_"))) return true;
+            if (f.isDirectory() && LogRotation.ARCHIVE_DIR.equals(f.getName())) return true;
+        }
+        return false;
     }
 
     private static Entry describe(File dir, boolean appBucket) {
@@ -116,21 +136,11 @@ public final class LogInventory {
         return out;
     }
 
-    /** Delete one group's logs, archives included. Returns true when the folder is gone or emptied. */
-    public static boolean delete(Entry entry) {
-        if (entry == null || entry.dir == null) return false;
-        // A flat "All logs"/"Older logs" entry points at the log ROOT — deleting the directory itself
-        // would take every game folder with it, so only the loose files are removed in that case.
-        boolean isRoot = entry.fileCount > 0 && !entry.isAppBucket
-                && (entry.name.equals("All logs") || entry.name.equals("Older logs"));
-        if (isRoot) {
-            File[] files = entry.dir.listFiles();
-            if (files != null) for (File f : files) if (f.isFile() && isLog(f.getName())) //noinspection ResultOfMethodCallIgnored
-                f.delete();
-            return true;
-        }
-        return deleteTree(entry.dir);
-    }
+    // NOTE: there is deliberately NO delete() here. Deleting is done through the File Manager,
+    // which the Log Manager opens at the folder in question. An earlier version had one, but it
+    // deleteTree()'d whatever directory an Entry pointed at — safe only for as long as scan() never
+    // returned a folder the app did not create. That is too sharp an edge to leave lying around for
+    // a future caller to pick up.
 
     public static long totalBytes(List<Entry> entries) {
         long t = 0;
@@ -152,13 +162,6 @@ public final class LogInventory {
         long t = 0;
         if (kids != null) for (File k : kids) t += sizeOfTree(k);
         return t;
-    }
-
-    private static boolean deleteTree(File f) {
-        if (f == null) return false;
-        File[] kids = f.listFiles();
-        if (kids != null) for (File k : kids) deleteTree(k);
-        return f.delete();
     }
 
     private static boolean isLog(String name) {

@@ -2784,12 +2784,6 @@ private fun AdvancedContent(state: XServerDrawerState) {
     AdvancedActionRow("Debug Logs", R.drawable.icon_debug) {
         state.onClose?.run(); state.onLogs?.run()
     }
-    // Log Manager in-game too: the toggles that matter mid-session (turn Wine debug ON to
-    // capture a bug that is happening right now, or OFF once captured) are the ones you only
-    // think of while playing. Same screen as App Settings, one shared source of truth.
-    AdvancedActionRow("Log Manager", R.drawable.icon_debug) {
-        state.onClose?.run(); state.onLogManager?.run()
-    }
     AdvancedActionRow("Picture-in-Picture", R.drawable.ic_picture_in_picture_alt) {
         state.onClose?.run(); state.onPipMode?.run()
     }

@@ -35,8 +35,6 @@ fun XServerDialogHost() {
         XServerDialogState.ActiveDialog.SCREEN_EFFECTS -> ScreenEffectsDialog(state)
         XServerDialogState.ActiveDialog.ACTIVE_WINDOWS -> ActiveWindowsDialog(state)
         XServerDialogState.ActiveDialog.NEW_TASK       -> NewTaskDialog(state)
-        XServerDialogState.ActiveDialog.LOG_MANAGER    ->
-            com.winlator.star.ui.screens.LogManagerScreen(onClose = { state.dismiss() })
         XServerDialogState.ActiveDialog.NONE           -> Unit
     }
 

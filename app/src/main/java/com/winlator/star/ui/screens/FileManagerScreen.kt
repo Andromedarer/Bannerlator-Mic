@@ -293,7 +293,12 @@ fun FileManagerScreen(
                 ?: remembered
                 ?: File("/sdcard/Download/").takeIf { it.isDirectory }
                 ?: File("/storage/emulated/0")
-        } else File("/storage/emulated/0")
+        } else {
+            // Browse mode used to ignore initialDir entirely and always open at internal storage.
+            // The Log Manager passes a game's log folder here, so honour it in both modes; falling
+            // back to internal storage keeps the plain File Manager destination unchanged.
+            initialDir?.takeIf { it.isDirectory } ?: File("/storage/emulated/0")
+        }
     }
 
     var currentDir by remember { mutableStateOf(rootDir) }

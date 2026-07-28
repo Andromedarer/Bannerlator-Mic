@@ -99,12 +99,28 @@ public final class LogRotation {
     }
 
     /**
-     * Whether a file in a game folder is one of ours. Deliberately permissive about the stem (DXVK
-     * derives its own names from the executable) but strict about the extension, so an unrelated
-     * file a user parked in the folder is left alone.
+     * Whether a file is one THIS APP wrote for a game run, and may therefore archive or delete.
+     *
+     * Matching any {@code .log}/{@code .txt} was wrong and destructive: rotate() runs on whatever
+     * resolveGameLogDir() returns, which with per-game folders OFF is the flat log root. On the
+     * default app-data location that root already holds other subsystems' files — steam_debug.txt,
+     * steam_session.txt, bh_epic_debug.txt, bh_gog_debug.txt, bh_amazon_debug.txt — and with a
+     * CUSTOM location it is a folder the user chose, which may be full of their own documents.
+     * Every launch would have archived them and pruning would then have deleted them for good.
+     *
+     * So: an explicit allowlist of the names we actually produce. DXVK derives its filenames from
+     * the executable, hence the suffix forms rather than exact matches.
      */
     private static boolean looksLikeLog(String name) {
         String n = name.toLowerCase(Locale.US);
-        return n.endsWith(".log") || n.endsWith(".txt");
+        if (!n.endsWith(".log")) return false;              // never .txt — that is other people's
+        return n.equals("wine_debug.log")
+                || n.equals("logcat.log")
+                || n.equals("vkd3d-proton.log")
+                || n.endsWith("_d3d9.log")
+                || n.endsWith("_d3d10.log")
+                || n.endsWith("_d3d11.log")
+                || n.endsWith("_d3d12.log")
+                || n.endsWith("_dxgi.log");
     }
 }

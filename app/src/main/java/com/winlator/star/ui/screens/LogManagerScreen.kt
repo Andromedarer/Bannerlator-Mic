@@ -5,12 +5,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -18,9 +21,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -40,9 +49,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.preference.PreferenceManager
+import com.winlator.star.core.FileUtils
+import com.winlator.star.core.InAppFilePicker
 import com.winlator.star.core.LogInventory
 import com.winlator.star.core.LogLocation
 import com.winlator.star.core.LogcatCapture
+import kotlinx.coroutines.launch
 import java.io.File
 
 /**
@@ -53,10 +65,12 @@ import java.io.File
  * on every toggle. Here the help copy leads with the PERFORMANCE COST, because two of these
  * genuinely slow games down and users need to know that before leaving one on.
  */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun LogManagerScreen(onClose: () -> Unit) {
     val context = LocalContext.current
     val prefs = remember { PreferenceManager.getDefaultSharedPreferences(context) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     var perGame by remember { mutableStateOf(prefs.getBoolean(LogLocation.PREF_PER_GAME, true)) }
     var keepLast by remember {
@@ -68,10 +82,55 @@ fun LogManagerScreen(onClose: () -> Unit) {
     var logcat by remember { mutableStateOf(prefs.getBoolean("enable_logcat", true)) }
     var crashReports by remember { mutableStateOf(prefs.getBoolean("enable_crash_reports", true)) }
 
+    // Location + channels moved here from the old Settings › Logs section, which this screen
+    // replaces. They used to be saved by the Settings "Save" FAB; here every change is written
+    // immediately, matching the Performance screen and removing the risk of two screens holding
+    // the same preference and one overwriting the other on save.
+    var locationMode by remember {
+        mutableStateOf(prefs.getString(LogLocation.PREF_MODE, LogLocation.MODE_APP_DATA) ?: LogLocation.MODE_APP_DATA)
+    }
+    var customPath by remember {
+        mutableStateOf(prefs.getString(LogLocation.PREF_CUSTOM_PATH, "") ?: "")
+    }
+    var showLocationMenu by remember { mutableStateOf(false) }
+    var channels by remember {
+        mutableStateOf(
+            (prefs.getString("wine_debug_channels", com.winlator.star.SettingsFragment.DEFAULT_WINE_DEBUG_CHANNELS)
+                ?: com.winlator.star.SettingsFragment.DEFAULT_WINE_DEBUG_CHANNELS)
+                .split(",").filter { it.isNotBlank() }
+        )
+    }
+    var showChannelPicker by remember { mutableStateOf(false) }
+
+    // Bumped after any destructive/refreshing action to force a re-scan of the filesystem.
+    // Declared before saveMode() below, which increments it — a Kotlin local function can only
+    // capture locals declared above it.
+    var refreshTick by remember { mutableStateOf(0) }
+
+    fun saveMode(mode: String) {
+        locationMode = mode
+        prefs.edit().putString(LogLocation.PREF_MODE, mode).apply()
+        refreshTick++
+    }
+    fun saveChannels(list: List<String>) {
+        channels = list
+        prefs.edit().putString("wine_debug_channels", list.joinToString(",")).apply()
+    }
+
+    val dirLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            InAppFilePicker.pickedPath(result.data)?.let { path ->
+                customPath = path
+                prefs.edit().putString(LogLocation.PREF_CUSTOM_PATH, path).apply()
+                saveMode(LogLocation.MODE_CUSTOM)
+            }
+        }
+    }
+
     var info by remember { mutableStateOf<Pair<String, String>?>(null) }
     var showExplainAll by remember { mutableStateOf(false) }
-    // Bumped after any destructive/refreshing action to force a re-scan of the filesystem.
-    var refreshTick by remember { mutableStateOf(0) }
     // Folder the embedded File Manager is showing, or null when it is closed.
     var browseDir by remember { mutableStateOf<File?>(null) }
     val entries = remember(refreshTick, perGame) { LogInventory.scan(context) }
@@ -106,12 +165,45 @@ fun LogManagerScreen(onClose: () -> Unit) {
 
             // ── Where logs go ──
             LogCard(title = "Where logs go") {
+                Box {
+                    Button(
+                        onClick = { showLocationMenu = true },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            when (locationMode) {
+                                LogLocation.MODE_DOWNLOAD -> "Download (/sdcard/Download/bannerlator)"
+                                LogLocation.MODE_DOCUMENTS -> "Documents (/sdcard/Documents/bannerlator)"
+                                LogLocation.MODE_CUSTOM ->
+                                    if (customPath.isNotEmpty()) customPath else "Choose folder…"
+                                else -> "App data (default)"
+                            },
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = showLocationMenu,
+                        onDismissRequest = { showLocationMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("App data (default)") },
+                            onClick = { saveMode(LogLocation.MODE_APP_DATA); showLocationMenu = false })
+                        DropdownMenuItem(
+                            text = { Text("Download") },
+                            onClick = { saveMode(LogLocation.MODE_DOWNLOAD); showLocationMenu = false })
+                        DropdownMenuItem(
+                            text = { Text("Documents") },
+                            onClick = { saveMode(LogLocation.MODE_DOCUMENTS); showLocationMenu = false })
+                        DropdownMenuItem(
+                            text = { Text("Choose folder…") },
+                            onClick = {
+                                showLocationMenu = false
+                                dirLauncher.launch(InAppFilePicker.buildDirIntent(context, "Select log folder"))
+                            })
+                    }
+                }
                 Text(
                     LogLocation.resolveLogDir(context)?.absolutePath ?: "—",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp
-                )
-                Text(
-                    "Change the location in Settings › Logs.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp
                 )
                 Spacer(Modifier.height(4.dp))
@@ -128,11 +220,44 @@ fun LogManagerScreen(onClose: () -> Unit) {
                     wineDebug = it; putBool("enable_wine_debug", it)
                 }
                 if (wineDebug) {
-                    Text(
-                        "Channels: " + prefs.getString("wine_debug_channels", "seh,err,warn,fixme"),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp,
-                        modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
-                    )
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp)
+                    ) {
+                        channels.forEachIndexed { i, ch ->
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        RoundedCornerShape(4.dp))
+                                    .padding(start = 8.dp, end = 2.dp, top = 2.dp, bottom = 2.dp)
+                            ) {
+                                Text(ch, color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp)
+                                IconButton(
+                                    onClick = { saveChannels(channels.toMutableList().also { it.removeAt(i) }) },
+                                    modifier = Modifier.size(20.dp)
+                                ) {
+                                    Icon(Icons.Default.Close, "Remove",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(14.dp))
+                                }
+                            }
+                        }
+                        IconButton(onClick = { showChannelPicker = true }, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Default.Add, "Add",
+                                tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                        }
+                        IconButton(
+                            onClick = {
+                                saveChannels(com.winlator.star.SettingsFragment.DEFAULT_WINE_DEBUG_CHANNELS
+                                    .split(",").filter { it.isNotBlank() })
+                            },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(Icons.Default.Refresh, "Reset",
+                                tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                        }
+                    }
                 }
                 LogToggle("Box64 / FEXCore", box64Logs,
                     onInfo = { info = "Box64 / FEXCore" to LogCopy.BOX64 }) {
@@ -155,8 +280,14 @@ fun LogManagerScreen(onClose: () -> Unit) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                     Button(
                         onClick = {
-                            LogcatCapture.captureToFile(context, LogcatCapture.DEFAULT_LINES)
-                            refreshTick++
+                            // Runtime.exec + 1000 lines + a redaction pass + a file write: far too
+                            // much for the UI thread (its own docs say so). Off to IO, refresh when done.
+                            scope.launch {
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    LogcatCapture.captureToFile(context, LogcatCapture.DEFAULT_LINES)
+                                }
+                                refreshTick++
+                            }
                         },
                         // Disabled rather than hidden when logcat is off, so the switch above visibly
                         // controls something instead of being a preference that does nothing.
@@ -234,8 +365,57 @@ fun LogManagerScreen(onClose: () -> Unit) {
             onDismissRequest = { browseDir = null; refreshTick++ },
             properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
         ) {
-            FileManagerScreen(initialDir = dir)
+            // A Dialog window is transparent by default and FileManagerScreen draws no background
+            // of its own (it normally sits inside the nav host's scaffold), so without this the Log
+            // Manager shows through the file list.
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = MaterialTheme.colorScheme.background
+            ) {
+                FileManagerScreen(initialDir = dir)
+            }
         }
+    }
+
+    if (showChannelPicker) {
+        val allChannels = remember {
+            try {
+                val arr = org.json.JSONArray(FileUtils.readString(context, "wine_debug_channels.json"))
+                (0 until arr.length()).map { arr.getString(it) }
+            } catch (_: Exception) { emptyList() }
+        }
+        val selected = remember { mutableStateOf(channels.toSet()) }
+        OutlinedAlertDialog(
+            onDismissRequest = { showChannelPicker = false },
+            title = { Text("Wine debug channels") },
+            text = {
+                // Hundreds of channels — bound the height and scroll, same as the old dialog.
+                Column(modifier = Modifier
+                    .heightIn(max = 400.dp)
+                    .verticalScroll(rememberScrollState())) {
+                    allChannels.forEach { ch ->
+                        val checked = ch in selected.value
+                        Row(verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.clickable {
+                                selected.value = if (checked) selected.value - ch else selected.value + ch
+                            }) {
+                            Checkbox(checked = checked, onCheckedChange = {
+                                selected.value = if (it) selected.value + ch else selected.value - ch
+                            })
+                            Text(ch)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    saveChannels(selected.value.toList()); showChannelPicker = false
+                }) { Text("OK") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showChannelPicker = false }) { Text("Cancel") }
+            }
+        )
     }
 
     info?.let { (title, body) -> PerfInfoDialog(title = title, body = body, onDismiss = { info = null }) }
