@@ -192,6 +192,26 @@ jobs:
     - name: Grant execute permission for build script
       run: chmod +x build-lsfg-android.sh
 
+    # The base rootfs is a 193 MB download on every build and was the single flakiest step in the
+    # pipeline (HTTP 504s, and a Connection reset that failed the standard flavor on 2026-07-28).
+    # Cache it so only the first build after a change fetches it; a cache hit means no external
+    # request at all. Keyed on the sha256 pinned in app/build.gradle, so publishing a new rootfs
+    # (new release tag + new hash) invalidates the cache automatically — nothing to remember.
+    # NOT committed to the repo: at 193 MB it exceeds GitHub's 100 MB per-file limit, and in LFS it
+    # would burn the bandwidth quota and bloat every clone forever.
+    - name: Resolve pinned imagefs hash
+      id: imagefs-pin
+      run: |
+        SHA=$(grep -oP 'imageFSSha256\s*=\s*"\K[0-9a-f]{64}' app/build.gradle)
+        if [ -z "$SHA" ]; then echo "could not read imageFSSha256 from app/build.gradle" >&2; exit 1; fi
+        echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+    - name: Cache base imagefs
+      uses: actions/cache@v4
+      with:
+        path: app/src/main/assets/imagefs.tar.zst
+        key: imagefs-${{ steps.imagefs-pin.outputs.sha }}
+
     - name: Cache LSFG native library
       id: cache-lsfg
       uses: actions/cache@v4
