@@ -1,5 +1,24 @@
 # Star-Compose — Progress Log
 
+## 🔖 NEXT RELEASE NOTES — carry these into the next release body
+
+> **📥 Proton 9 is no longer bundled — link it in every release from now on.** A fresh install now ships with **NO Wine at all**; the user installs one from the in-app catalog on first run (the create-container guard says so). Add to the release body, next to the APK assets:
+>
+> > **Proton 9.0 arm64ec** — not bundled, download if you want it:
+> > `https://github.com/The412Banner/Nightlies/releases/download/Proton/wine/proton-9.0-arm64ec.wcp`
+> > 66.7 MB · sha256 `f8a99fed387f1b097009129dc49368c8f500927640a9d4c7a192d850b1b2068c` · installs as `Proton-9.0-arm64ec-0` · built by **Xnick417x**
+> > Install in-app: Containers → download icon → pick the `.wcp`. It is also in the in-app catalog.
+>
+> Bundling that `.wcp` was built and CI-green on `feat/bundle-p9-wcp` (`dcb9b479`, APK 546 MB) but **deliberately not merged** — the APK stays at 476 MB and P9 is download-only. Branch deleted. → [[feedback_release_include_proton9_link]]
+
+## 2026-07-28 — 🔒 **imagefs pinned to our own release + CI-cached** (merged `ead0d5f5`)
+
+> `app/build.gradle` fetched the 193 MB base rootfs from **`star-emu/contents` at `refs/heads/main`** — a third party's moving branch with no tag, version or checksum. Whatever sat there at build time was baked into the APK, and an outage there simply broke the build: HTTP 504s before, and a **`java.net.SocketException: Connection reset` that failed main's `standard` flavor today** (run `30366997708`; the rerun passed, proving it was purely the fetch).
+>
+> Now points at **`base-assets-v1` on our own `winlator-contents`** — uploaded 2026-07-24 for exactly this and sitting unused until now. **Verified byte-identical, not assumed:** both our pinned copy and the current upstream file hash to `7838756e6a05c91afff68f4bf12aa2780f815877753f8dd354e203e99b9caf8a`, so the APK gets exactly the bytes 2.9 shipped with. The build now verifies that sha after download and **deletes the file on mismatch**, so a swapped or truncated asset fails loudly instead of shipping silently.
+>
+> **CI caches it** (`_build.yml`, keyed `imagefs-<sha>` read out of `app/build.gradle`), so publishing a new rootfs — new tag + new hash — invalidates the cache by itself; there is no separate cache version to bump. Cache entry confirmed live at 184 MiB; main build after the merge ran 6m17s. **Not committed to the repo instead:** at 193 MB it exceeds GitHub's 100 MB per-file limit, and in LFS it would burn the bandwidth quota and weigh down every clone permanently.
+
 ## 2026-07-28 — 📦 **Bundled Proton 9 DROPPED — APK ~103 MB smaller; first run now installs a Proton from the catalog** (branch `feat/drop-bundled-proton9` @ `761a91ae`, run `30363048862` green ×3) ✅ **DEVICE-VERIFIED**
 
 > **The bundled `proton-9.0-arm64ec` never launched.** User report: a new container on the bundled layer fails, while the same Proton downloaded from our catalog works. Dialog = "Failed · Launching Windows / The game exited before rendering / exit code 5"; `wine_debug.log` = `_r_debug not found in ld.so` then `c0000005` (EXCEPTION_ACCESS_VIOLATION) in `kernelbase.dll+0x29E98` during `loader_init` — **identically for both `wineboot.exe` and `start.exe`**, i.e. every PE process dies at DLL init.
