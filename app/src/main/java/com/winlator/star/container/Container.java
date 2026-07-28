@@ -496,6 +496,11 @@ public class Container {
         putExtra("lsfgPerformanceMode", performanceMode ? "1" : "0");
     }
 
+    // NOTE: the power-user performance toggles (sustainedPerfMode / perfPriorityBoost / preferBigCores)
+    // are deliberately NOT container-level. The locked resolution model is two levels only —
+    // per-game shortcut override -> global default (com.winlator.star.perf.PerformanceSettings).
+    // Shortcuts still store their own override under these extraData keys; the container is not a base.
+
     // Controller vibration (PC-accurate dual-motor rumble), per-container. Mode gates WHERE rumble
     // goes: 0=Off 1=Controller(default, matches the pre-existing hardcoded behavior) 2=Device(phone)
     // 3=Both. Intensity (0..100) scales amplitude on top of the master/per-slot toggles in WinHandler.

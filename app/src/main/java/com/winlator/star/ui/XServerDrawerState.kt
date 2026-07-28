@@ -1,7 +1,14 @@
 package com.winlator.star.ui
 
+import com.winlator.star.perf.PerfRootApplier
+import com.winlator.star.perf.PerformanceSettings
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 
 enum class TabType {
     GRAPHICS, HUD, RESHADE, CONTROLS, ADVANCED, TASK_MANAGER
@@ -152,6 +159,18 @@ object XServerDrawerState {
     private val _controlsAccentColor = MutableStateFlow(0xFF0055FF.toInt())
     val controlsAccentColor: StateFlow<Int> = _controlsAccentColor
 
+    // ── Power-user performance toggles (non-root; live-toggleable in-game) ──
+    // Seeded from the resolved container/shortcut config in setupUI; each has an onXxx callback the
+    // Activity assigns to apply + persist live.
+    private val _sustainedPerfMode = MutableStateFlow(false)
+    val sustainedPerfMode: StateFlow<Boolean> = _sustainedPerfMode
+
+    private val _perfPriorityBoost = MutableStateFlow(false)
+    val perfPriorityBoost: StateFlow<Boolean> = _perfPriorityBoost
+
+    private val _preferBigCores = MutableStateFlow(false)
+    val preferBigCores: StateFlow<Boolean> = _preferBigCores
+
     // Callbacks wired by XServerDisplayActivity.
     // @JvmField exposes these as public fields so Java can assign them directly.
     // Runnable avoids the kotlin.Unit return-type mismatch for Java void lambdas.
@@ -213,6 +232,12 @@ object XServerDrawerState {
     // saves it, and invalidates the InputControlsView for a live redraw.
     @JvmField var onControlsColorChange: Runnable? = null
 
+    // Fired when a power-user performance toggle changes in the drawer; the Activity reads the flow,
+    // applies it live (sustained-perf window flag / thread priority / big-core affinity) and persists.
+    @JvmField var onSustainedPerfModeChange: Runnable? = null
+    @JvmField var onPerfPriorityBoostChange: Runnable? = null
+    @JvmField var onPreferBigCoresChange:    Runnable? = null
+
     var onCursorExpandedChanged: ((Boolean) -> Unit)? = null
 
     // Setters called from Java
@@ -266,6 +291,75 @@ object XServerDrawerState {
     fun getControlsFollowThemeValue(): Boolean = _controlsFollowTheme.value
     fun setControlsAccentColor(v: Int) { _controlsAccentColor.value = v }
     fun getControlsAccentColorValue(): Int = _controlsAccentColor.value
+
+    fun setSustainedPerfMode(v: Boolean) { _sustainedPerfMode.value = v }
+    fun setPerfPriorityBoost(v: Boolean) { _perfPriorityBoost.value = v }
+    fun setPreferBigCores(v: Boolean)    { _preferBigCores.value = v }
+
+    // ── Two-way sync + per-game override tracking (unified for all 9 perf keys) ──
+    // overriddenKeys = the perf keys the running game overrides per-game (shortcut.hasExtra at launch,
+    // updated as the user flips/resets). A key IN the set is pinned to its per-game value; a key NOT in
+    // the set mirrors the App Settings global default live. Drives the override/global indicator +
+    // reset affordance in the drawer, and gates the global->drawer mirror so an override isn't clobbered.
+    private val syncScope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
+    private var perfSyncJob: Job? = null
+    private val _overriddenKeys = MutableStateFlow<Set<String>>(emptySet())
+    val overriddenKeys: StateFlow<Set<String>> = _overriddenKeys
+    fun isOverridden(key: String): Boolean = key in _overriddenKeys.value
+
+    fun startPerfSync(overridden: Set<String>) {
+        _overriddenKeys.value = overridden
+        perfSyncJob?.cancel()
+        perfSyncJob = syncScope.launch {
+            launch { PerformanceSettings.sustainedPerfMode.collect { if ("sustainedPerfMode" !in _overriddenKeys.value) _sustainedPerfMode.value = it } }
+            launch { PerformanceSettings.perfPriorityBoost.collect { if ("perfPriorityBoost" !in _overriddenKeys.value) _perfPriorityBoost.value = it } }
+            launch { PerformanceSettings.preferBigCores.collect { if ("preferBigCores" !in _overriddenKeys.value) _preferBigCores.value = it } }
+            for (key in PerfRootApplier.ROOT_KEYS) {
+                launch { PerformanceSettings.rootDefaultFlow(key).collect { v -> if (key !in _overriddenKeys.value) _rootToggles.value = _rootToggles.value + (key to v) } }
+            }
+        }
+    }
+
+    fun markOverridden(key: String) { _overriddenKeys.value = _overriddenKeys.value + key }
+
+    // A key re-inherits the global default: drop it from the overridden set AND immediately reflect the
+    // current global value in the drawer flow/map so the UI updates without waiting for the next emit.
+    fun markInherited(key: String) {
+        _overriddenKeys.value = _overriddenKeys.value - key
+        when (key) {
+            "sustainedPerfMode" -> _sustainedPerfMode.value = PerformanceSettings.sustainedPerfMode.value
+            "perfPriorityBoost" -> _perfPriorityBoost.value = PerformanceSettings.perfPriorityBoost.value
+            "preferBigCores"    -> _preferBigCores.value = PerformanceSettings.preferBigCores.value
+            else -> _rootToggles.value = _rootToggles.value + (key to PerformanceSettings.rootDefaultValue(key))
+        }
+    }
+
+    // ── Root-tier toggles (in-game). Keyed by PerfRootApplier.ROOT_KEYS. The Activity seeds the
+    // effective values and applies live; the drawer displays this map and fires onRootToggleChange. ──
+    private val _rootToggles = MutableStateFlow<Map<String, Boolean>>(emptyMap())
+    val rootToggles: StateFlow<Map<String, Boolean>> = _rootToggles
+    fun setRootToggles(m: Map<String, Boolean>) { _rootToggles.value = m }
+    fun setRootToggle(key: String, v: Boolean) { _rootToggles.value = _rootToggles.value + (key to v) }
+
+    // Live readouts (governor / GPU MHz / SoC temp / fan RPM), refreshed by the Activity while the
+    // root section is open. Keyed by a small readout id.
+    private val _rootReadouts = MutableStateFlow<Map<String, String>>(emptyMap())
+    val rootReadouts: StateFlow<Map<String, String>> = _rootReadouts
+    fun setRootReadouts(m: Map<String, String>) { _rootReadouts.value = m }
+
+    // Fired when a root toggle flips: the Activity writes the per-game override (or the global default
+    // for a container-direct launch) and applies it live via PerfRootApplier.
+    @JvmField var onRootToggleChange: java.util.function.BiConsumer<String, Boolean>? = null
+    // One-shot free-memory action (drop_caches).
+    @JvmField var onFreeMemory: Runnable? = null
+    // Drawer asks the Activity to refresh the live readouts (cheap sysfs/HudMetrics reads).
+    @JvmField var onRootReadoutPoll: Runnable? = null
+    // Reset ONE perf key's per-game override so it re-inherits the global default (Activity removes the
+    // shortcut extra, marks inherited, re-applies the global value live).
+    @JvmField var onResetPerfKey: java.util.function.Consumer<String>? = null
+    // Reset ALL 9 perf keys for this game so it fully re-inherits.
+    @JvmField var onResetAllPerf: Runnable? = null
+
     fun toggleFpsExpanded() { _fpsExpanded.value = !_fpsExpanded.value }
 
     fun reset() {
@@ -303,6 +397,15 @@ object XServerDrawerState {
         _overlayOpacity.value = 0.75f
         _controlsFollowTheme.value = true
         _controlsAccentColor.value = 0xFF0055FF.toInt()
+        _sustainedPerfMode.value = false
+        _perfPriorityBoost.value = false
+        _preferBigCores.value = false
+        perfSyncJob?.cancel(); perfSyncJob = null
+        _overriddenKeys.value = emptySet()
+        _rootToggles.value = emptyMap()
+        _rootReadouts.value = emptyMap()
+        onRootToggleChange = null; onFreeMemory = null; onRootReadoutPoll = null
+        onResetPerfKey = null; onResetAllPerf = null
         onClose = null; onKeyboard = null; onInputControls = null
         onScreenEffects = null; onGraphicEngine = null; onVibration = null
         onToggleFullscreen = null; onSetFullscreenMode = null; onPauseResume = null; onPipMode = null
@@ -316,6 +419,9 @@ object XServerDrawerState {
         onRefreshRatePoll = null
         onOverlayOpacityChange = null
         onControlsColorChange = null
+        onSustainedPerfModeChange = null
+        onPerfPriorityBoostChange = null
+        onPreferBigCoresChange = null
         onCursorExpandedChanged = null
     }
 }

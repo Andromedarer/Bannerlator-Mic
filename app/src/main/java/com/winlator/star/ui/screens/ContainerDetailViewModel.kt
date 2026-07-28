@@ -143,6 +143,9 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     // lsfg-vk performance_mode (per-container): lower interpolation quality for higher FPS. Also
     // live-toggleable from the in-game FG menu. Only meaningful when frameGenEngine == "lsfg".
     var lsfgPerformanceMode by mutableStateOf(false)
+    // NOTE: the power-user performance toggles are intentionally NOT edited here. Their model is
+    // global-default (App Settings > Performance, com.winlator.star.perf.PerformanceSettings) +
+    // optional per-game override (ShortcutsScreen / in-game drawer) — no container level.
     // FPS limiter on/off (loads the layer); the cap value is set live in-game.
     var fpsLimiterEnabled by mutableStateOf(false)
     // VRR: match the display panel refresh rate to the game's FPS. Default ON (safe — no-op unless

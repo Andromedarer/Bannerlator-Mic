@@ -4919,6 +4919,43 @@ private fun DpCheck(dp: SettingsDpad, id: String, checked: Boolean, onCheckedCha
     DpadHighlight(focused = dp.isFocused(id), modifier = Modifier.dpadBringIntoView(dp, id)) { Checkbox(checked = checked, onCheckedChange = onCheckedChange) }
 }
 
+// Labels for the six root perf keys (extraData name -> display label), matching PerfRootApplier.KEY_*.
+private val ROOT_PERF_LABELS = mapOf(
+    "rootCpuGovernorPerf" to "CPU governor → performance",
+    "rootCpuFreqLockMax" to "Lock CPU frequency to max",
+    "rootAllCoresOnline" to "Keep all cores online",
+    "rootGpuMaxClockLock" to "Lock GPU to max clock",
+    "rootThermalDisable" to "Disable thermal throttling",
+    "rootFanMax" to "Fan to maximum",
+)
+
+/** Per-game override value to persist, or null (clear the extra) when it equals the global default. */
+private fun perfExtraOrNull(value: Boolean, global: Boolean): String? =
+    if (value == global) null else if (value) "1" else "0"
+
+/** A per-game perf toggle row with an override/inherit indicator and a per-toggle Reset. */
+@Composable
+private fun PerfEditRow(dp: SettingsDpad, id: String, label: String, checked: Boolean, global: Boolean, onChange: (Boolean) -> Unit) {
+    val overridden = checked != global
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            DpSwitch(dp, id, checked = checked, onCheckedChange = onChange)
+            Spacer(Modifier.width(8.dp))
+            Text(label, modifier = Modifier.weight(1f))
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 44.dp, bottom = 2.dp)) {
+            Text(
+                if (overridden) "● Per-game override" else "○ Using global default",
+                fontSize = 10.sp,
+                color = if (overridden) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f)
+            )
+            if (overridden) Text("Reset", fontSize = 10.sp, color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.clickable { onChange(global) })
+        }
+    }
+}
+
 @Composable
 private fun DpSlider(
     dp: SettingsDpad, id: String, value: Float, onValueChange: (Float) -> Unit,
@@ -5123,6 +5160,30 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
         mutableStateOf(
             shortcut.getExtra("fpsLimiterEnabled", if (shortcut.container.isFpsLimiterEnabled) "1" else "0") == "1"
         )
+    }
+
+    // Power-user performance toggles — per-game overrides. Effective seed = per-game override (if the
+    // shortcut already has the key) else the GLOBAL default (App Settings > Performance). No container
+    // level. Saving writes the key ONLY when it DIFFERS from the global default, else clears it so the
+    // game re-inherits (see the save block below).
+    var sustainedPerfMode by remember {
+        mutableStateOf(shortcut.getExtra("sustainedPerfMode",
+            if (com.winlator.star.perf.PerformanceSettings.sustainedPerfMode.value) "1" else "0") == "1")
+    }
+    var perfPriorityBoost by remember {
+        mutableStateOf(shortcut.getExtra("perfPriorityBoost",
+            if (com.winlator.star.perf.PerformanceSettings.perfPriorityBoost.value) "1" else "0") == "1")
+    }
+    var preferBigCores by remember {
+        mutableStateOf(shortcut.getExtra("preferBigCores",
+            if (com.winlator.star.perf.PerformanceSettings.preferBigCores.value) "1" else "0") == "1")
+    }
+    // Root six — same override/inherit treatment, kept in an observable map keyed by extraData name.
+    val rootOverrides = remember {
+        mutableStateMapOf<String, Boolean>().apply {
+            for (k in com.winlator.star.perf.PerfRootApplier.ROOT_KEYS)
+                put(k, shortcut.getExtra(k, if (com.winlator.star.perf.PerformanceSettings.rootDefaultValue(k)) "1" else "0") == "1")
+        }
     }
 
     // Audio driver
@@ -5439,6 +5500,13 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
             putExtra("unlockGameRefreshRate", unlockGameRefreshRate.ifEmpty { null })
             putExtra("frameGenEngine", frameGenEngine)
             putExtra("fpsLimiterEnabled", if (fpsLimiterEnabled) "1" else "0")
+            // Override-when-different: write the per-game key only when it differs from the global
+            // default; otherwise null clears the extra so the game re-inherits (hasExtra=false).
+            putExtra("sustainedPerfMode", perfExtraOrNull(sustainedPerfMode, com.winlator.star.perf.PerformanceSettings.sustainedPerfMode.value))
+            putExtra("perfPriorityBoost", perfExtraOrNull(perfPriorityBoost, com.winlator.star.perf.PerformanceSettings.perfPriorityBoost.value))
+            putExtra("preferBigCores", perfExtraOrNull(preferBigCores, com.winlator.star.perf.PerformanceSettings.preferBigCores.value))
+            for (rk in com.winlator.star.perf.PerfRootApplier.ROOT_KEYS)
+                putExtra(rk, perfExtraOrNull(rootOverrides[rk] ?: false, com.winlator.star.perf.PerformanceSettings.rootDefaultValue(rk)))
             putExtra("dxwrapper", StringUtils.parseIdentifier(selectedDxWrapper))
             putExtra("dxwrapperConfig", dxWrapperConfig)
             putExtra("audioDriver", StringUtils.parseIdentifier(selectedAudioDriver))
@@ -5832,6 +5900,37 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                         DpSwitch(dp, "fpsLimiter", checked = fpsLimiterEnabled, onCheckedChange = { fpsLimiterEnabled = it })
                         Spacer(Modifier.width(8.dp))
                         Text(stringResource(R.string.fps_limiter), modifier = Modifier.weight(1f))
+                    }
+
+                    // Power-user performance toggles — per-game overrides. A row shows "override" vs
+                    // "using global default" and offers a per-toggle Reset; a per-game toggle is only
+                    // saved when it differs from the App Settings global default.
+                    PerfEditRow(dp, "sustainedPerf", "Sustained Performance Mode", sustainedPerfMode,
+                        com.winlator.star.perf.PerformanceSettings.sustainedPerfMode.value) { sustainedPerfMode = it }
+                    PerfEditRow(dp, "perfPriority", "Thread Priority Boost", perfPriorityBoost,
+                        com.winlator.star.perf.PerformanceSettings.perfPriorityBoost.value) { perfPriorityBoost = it }
+                    PerfEditRow(dp, "preferBigCores", "Prefer Big Cores", preferBigCores,
+                        com.winlator.star.perf.PerformanceSettings.preferBigCores.value) { preferBigCores = it }
+                    // Root six (per-game overrides; only take effect with root, honored at launch).
+                    for (rk in com.winlator.star.perf.PerfRootApplier.ROOT_KEYS) {
+                        PerfEditRow(dp, rk, ROOT_PERF_LABELS[rk] ?: rk, rootOverrides[rk] ?: false,
+                            com.winlator.star.perf.PerformanceSettings.rootDefaultValue(rk)) { rootOverrides[rk] = it }
+                    }
+                    // Reset ALL 9 perf keys to the global defaults (visible when this game overrides any).
+                    val anyPerfOverride = sustainedPerfMode != com.winlator.star.perf.PerformanceSettings.sustainedPerfMode.value ||
+                        perfPriorityBoost != com.winlator.star.perf.PerformanceSettings.perfPriorityBoost.value ||
+                        preferBigCores != com.winlator.star.perf.PerformanceSettings.preferBigCores.value ||
+                        com.winlator.star.perf.PerfRootApplier.ROOT_KEYS.any { (rootOverrides[it] ?: false) != com.winlator.star.perf.PerformanceSettings.rootDefaultValue(it) }
+                    if (anyPerfOverride) {
+                        Text("↺ Reset all performance toggles to global",
+                            fontSize = 12.sp, color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.fillMaxWidth().clickable {
+                                sustainedPerfMode = com.winlator.star.perf.PerformanceSettings.sustainedPerfMode.value
+                                perfPriorityBoost = com.winlator.star.perf.PerformanceSettings.perfPriorityBoost.value
+                                preferBigCores = com.winlator.star.perf.PerformanceSettings.preferBigCores.value
+                                for (rk in com.winlator.star.perf.PerfRootApplier.ROOT_KEYS)
+                                    rootOverrides[rk] = com.winlator.star.perf.PerformanceSettings.rootDefaultValue(rk)
+                            }.padding(vertical = 6.dp))
                     }
 
                     // Audio driver

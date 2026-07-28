@@ -1,0 +1,66 @@
+[
+  {
+    "id": "2026-07-27T18-56-17-e60fb6",
+    "created": "2026-07-27T18:56:17.126Z",
+    "reporter": "",
+    "device": "Poco X6 pro",
+    "gpu": "Mali-G615 MC 6",
+    "game": "God of War",
+    "symptom": "Runs but very low FPS",
+    "logs": 0
+  },
+  {
+    "id": "2026-07-27T18-25-39-48f3ae",
+    "created": "2026-07-27T18:25:39.727Z",
+    "device": "Daria Bond 1",
+    "gpu": "MALi _ g68 mc4",
+    "game": "GTA V",
+    "symptom": "Runs but very low FPS",
+    "logs": 0
+  },
+  {
+    "id": "2026-07-27T16-55-36-99eb48",
+    "created": "2026-07-27T16:55:36.294Z",
+    "device": "Poco X6 Pro / Redmi K70E",
+    "gpu": "Mali G615 Mc-6",
+    "game": "Grand Theft Auto V",
+    "symptom": "Other",
+    "logs": 1
+  },
+  {
+    "id": "2026-07-27T14-40-42-485d83",
+    "created": "2026-07-27T14:40:42.481Z",
+    "device": "Poco x6 pro",
+    "gpu": "Malig615mc6",
+    "game": "Resident evil 2 remake",
+    "symptom": "Graphical glitches (corruption, flicker, missing textures)",
+    "logs": 1
+  },
+  {
+    "id": "2026-07-27T14-09-33-edd8f6",
+    "created": "2026-07-27T14:09:33.921Z",
+    "device": "Realme 12 5g",
+    "gpu": "Mail G57 Mc2 in",
+    "game": "FNAF 1",
+    "symptom": "Crashes / closes to home",
+    "logs": 0
+  },
+  {
+    "id": "2026-07-27T13-58-49-9eda2a",
+    "created": "2026-07-27T13:58:49.931Z",
+    "device": "Tecno pova le8",
+    "gpu": "Mali-g68 cm4",
+    "game": "Need for speed rivals",
+    "symptom": "Runs but very low FPS",
+    "logs": 0
+  },
+  {
+    "id": "2026-07-27T13-56-36-56acad",
+    "created": "2026-07-27T13:56:36.448Z",
+    "device": "Tecno pova le8",
+    "gpu": "Mali-G68 mc4",
+    "game": "Xenia",
+    "symptom": "Other",
+    "logs": 2
+  }
+]
