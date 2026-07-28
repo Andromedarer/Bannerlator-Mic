@@ -55,6 +55,10 @@ object PerfRevertRegistry {
         _harnessProven.value = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getBoolean(KEY_HARNESS, true) // default TRUE — harness device-verified 2026-07-27 (Pocket FIT)
         installSafetyNets()
+        // The non-root KGSL turbo pin is a device-global driver property with no snapshot file — a
+        // hard kill can leave it set. Clear it unconditionally rather than trusting it to have
+        // unwound itself. Cheap (one ioctl) and a no-op off Adreno.
+        PerfGpuTurbo.clearOnStartup()
         // Repair a snapshot left dirty by a hard kill last session, off the main thread (may need su).
         val file = snapshotFile ?: return
         if (fileLooksDirty(file)) {
@@ -97,6 +101,9 @@ object PerfRevertRegistry {
      */
     @Synchronized
     fun revertAll() {
+        // Non-root GPU turbo isn't a sysfs node so it has no snapshot entry — unwind it here so the
+        // always-on exit/background/crash paths cover it too.
+        PerfGpuTurbo.revert()
         if (originals.isEmpty()) {
             clearPersisted()
             return
