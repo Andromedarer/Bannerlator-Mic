@@ -12,7 +12,7 @@ import java.nio.channels.FileChannel;
 public class FakeInputWriter {
     private static final String TAG = "FakeInputWriter";
     private static final int EVENT_SIZE = 24;
-    private static final int MAX_EVENTS_PER_UPDATE = 20; // Buttons + axes + sync
+    static final int MAX_EVENTS_PER_UPDATE = 29; // 10 buttons * 2 + 4 sticks + 2 triggers + 2 D-pad + SYN
     private static final int BUFFER_SIZE = EVENT_SIZE * MAX_EVENTS_PER_UPDATE;
 
     // Event types
@@ -220,13 +220,6 @@ public class FakeInputWriter {
         prevButtonStates[idx] = pressed;
         writeEvent(EV_MSC, MSC_SCAN, BUTTON_MAP[idx]);
         writeEvent(EV_KEY, BUTTON_MAP[idx], pressed ? 1 : 0);
-    }
-
-    private void writeAxis(short code, int value, int[] prevRef, int index) {
-        if (prevRef[index] == value)
-            return;
-        prevRef[index] = value;
-        writeEvent(EV_ABS, code, value);
     }
 
     public void writeGamepadState(GamepadState state) {

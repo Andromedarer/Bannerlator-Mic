@@ -34,18 +34,23 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Gamepad
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -56,6 +61,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -63,7 +69,6 @@ import com.winlator.star.R
 import com.winlator.star.ControlsEditorActivity
 import com.winlator.star.ExternalControllerBindingsActivity
 import com.winlator.star.MainActivity
-import com.winlator.star.contentdialog.ContentDialog
 import com.winlator.star.core.AppUtils
 import com.winlator.star.core.FileUtils
 import com.winlator.star.core.GyroCalibrator
@@ -76,6 +81,7 @@ import org.json.JSONObject
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.abs
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InputControlsScreen() {
     val context = LocalContext.current
@@ -93,6 +99,7 @@ fun InputControlsScreen() {
     var importProfileCallback by remember { mutableStateOf<((ControlsProfile) -> Unit)?>(null) }
     var promptCreateName by remember { mutableStateOf(false) }
     var promptRenameOldName by remember { mutableStateOf<String?>(null) }
+    var pendingConfirmation by remember { mutableStateOf<Pair<Int, () -> Unit>?>(null) }
 
     fun refreshProfiles() {
         profiles = manager.getProfiles()
@@ -127,6 +134,7 @@ fun InputControlsScreen() {
             try {
                 val json = FileUtils.readString(context, uri)
                 val imported = manager.importProfile(JSONObject(json))
+                    ?: throw IllegalArgumentException("Unsupported control profile version")
                 importProfileCallback!!(imported)
             } catch (_: Exception) {
                 AppUtils.showToast(context, R.string.unable_to_import_profile)
@@ -204,6 +212,24 @@ fun InputControlsScreen() {
         )
     }
 
+    pendingConfirmation?.let { (messageRes, action) ->
+        OutlinedAlertDialog(
+            onDismissRequest = { pendingConfirmation = null },
+            text = { Text(stringResource(messageRes)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingConfirmation = null
+                    action()
+                }) { Text(stringResource(R.string.ok)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingConfirmation = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    }
+
     if (showDownloadDialog) {
         var items by remember { mutableStateOf(listOf<String>()) }
         var selectedItems by remember { mutableStateOf(setOf<Int>()) }
@@ -264,18 +290,30 @@ fun InputControlsScreen() {
                             val positions = selectedItems.toList()
                             currentProfile = null
                             val processedCount = AtomicInteger()
+                            val failedCount = AtomicInteger()
                             for (position in positions) {
                                 HttpUtils.download(
                                     "https://raw.githubusercontent.com/brunodev85/winlator/main/input_controls/${items[position]}"
                                 ) { content ->
-                                    if (content != null) {
-                                        try { manager.importProfile(JSONObject(content)) } catch (_: Exception) { }
-                                    }
+                                    val imported = if (content != null) {
+                                        try { manager.importProfile(JSONObject(content)) } catch (_: Exception) { null }
+                                    } else null
+                                    if (imported == null) failedCount.incrementAndGet()
                                     if (processedCount.incrementAndGet() == positions.size) {
                                         (context as? Activity)?.runOnUiThread {
                                             isDownloading = false
                                             refreshProfiles()
                                             refreshControllers()
+                                            if (failedCount.get() > 0) {
+                                                AppUtils.showToast(
+                                                    context,
+                                                    context.resources.getQuantityString(
+                                                        R.plurals.profiles_not_imported,
+                                                        failedCount.get(),
+                                                        failedCount.get(),
+                                                    ),
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -330,18 +368,20 @@ fun InputControlsScreen() {
                     else AppUtils.showToast(context, R.string.no_profile_selected)
                 }) { Icon(Icons.Default.Edit, "Edit", tint = MaterialTheme.colorScheme.onSurface) }
                 IconButton(onClick = {
-                    if (currentProfile != null) {
-                        ContentDialog.confirm(context, R.string.do_you_want_to_duplicate_this_profile) {
-                            currentProfile = manager.duplicateProfile(currentProfile!!)
+                    val profile = currentProfile
+                    if (profile != null) {
+                        pendingConfirmation = R.string.do_you_want_to_duplicate_this_profile to {
+                            currentProfile = manager.duplicateProfile(profile)
                             refreshProfiles()
                             refreshControllers()
                         }
                     } else AppUtils.showToast(context, R.string.no_profile_selected)
                 }) { Icon(Icons.Default.ContentCopy, "Duplicate", tint = MaterialTheme.colorScheme.onSurface) }
                 IconButton(onClick = {
-                    if (currentProfile != null) {
-                        ContentDialog.confirm(context, R.string.do_you_want_to_remove_this_profile) {
-                            manager.removeProfile(currentProfile!!)
+                    val profile = currentProfile
+                    if (profile != null) {
+                        pendingConfirmation = R.string.do_you_want_to_remove_this_profile to {
+                            manager.removeProfile(profile)
                             currentProfile = null
                             refreshProfiles()
                             refreshControllers()
@@ -377,7 +417,11 @@ fun InputControlsScreen() {
                                 0 -> {
                                     setCallback()
                                     importInAppLauncher.launch(
-                                        InAppFilePicker.buildIntent(act, InAppFilePicker.ICP, "Select control profile")
+                                        InAppFilePicker.buildIntent(
+                                            act,
+                                            InAppFilePicker.ICP,
+                                            act.getString(R.string.select_control_profile),
+                                        )
                                     )
                                 }
                                 1 -> {
@@ -392,7 +436,7 @@ fun InputControlsScreen() {
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest),
                 modifier = Modifier.weight(1f)
-            ) { Text("Import Profile", color = MaterialTheme.colorScheme.onBackground, fontSize = 12.sp) }
+            ) { Text(stringResource(R.string.import_control_profile), color = MaterialTheme.colorScheme.onBackground, fontSize = 12.sp) }
             Button(
                 onClick = {
                     if (currentProfile != null) {
@@ -403,7 +447,29 @@ fun InputControlsScreen() {
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest),
                 modifier = Modifier.weight(1f)
-            ) { Text("Export Profile", color = MaterialTheme.colorScheme.onBackground, fontSize = 12.sp) }
+            ) { Text(stringResource(R.string.export_control_profile_icpx), color = MaterialTheme.colorScheme.onBackground, fontSize = 12.sp) }
+        }
+        TooltipBox(
+            positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+            tooltip = {
+                PlainTooltip {
+                    Text(stringResource(R.string.export_control_profile_icp_tooltip))
+                }
+            },
+            state = rememberTooltipState(),
+        ) {
+            OutlinedButton(
+                onClick = {
+                    if (currentProfile != null) {
+                        val exported = manager.exportLegacyProfile(currentProfile!!)
+                        if (exported != null) AppUtils.showToast(context,
+                            "${context.getString(R.string.profile_exported_to)} ${exported.path}")
+                    } else AppUtils.showToast(context, R.string.no_profile_selected)
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.export_control_profile_icp_legacy), fontSize = 12.sp)
+            }
         }
 
         // ── Controls Editor ─────────────────────────────────────────
@@ -459,7 +525,7 @@ fun InputControlsScreen() {
                         }
                         if (bindingsCount > 0) {
                             IconButton(onClick = {
-                                ContentDialog.confirm(context, R.string.do_you_want_to_remove_this_controller) {
+                                pendingConfirmation = R.string.do_you_want_to_remove_this_controller to {
                                     currentProfile?.removeController(controller)
                                     currentProfile?.save()
                                     refreshControllers()

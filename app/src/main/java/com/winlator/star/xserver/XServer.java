@@ -179,6 +179,13 @@ public class XServer {
         }
     }
 
+    public void injectPointerButtonPulse(Pointer.Button buttonCode) {
+        try (XLock lock = lock(Lockable.WINDOW_MANAGER, Lockable.INPUT_DEVICE)) {
+            pointer.setButton(buttonCode, true);
+            pointer.setButton(buttonCode, false);
+        }
+    }
+
     public void injectKeyPress(XKeycode xKeycode) {
         injectKeyPress(xKeycode, 0);
     }
