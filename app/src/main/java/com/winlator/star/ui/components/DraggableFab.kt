@@ -2,8 +2,10 @@ package com.winlator.star.ui.components
 
 import android.content.Context
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.drag
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -19,7 +21,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -92,25 +96,41 @@ fun BoxScope.DraggableAddButton(
                 .scale(lift)
                 .then(buttonModifier)
                 .onSizeChanged { buttonPx = it.width.toFloat() }
-                // Drag detector FIRST so it can claim the gesture, tap detector second. The tap
-                // detector declares an (empty) onLongPress on purpose: without one, a long hold
-                // still counts as a tap on release, and picking the button up would also fire it.
+                // ONE detector handling both tap and drag, deliberately.
+                //
+                // Two separate pointerInput blocks did not work: the later modifier in a chain is
+                // the inner node and receives pointer events FIRST, so the tap detector — which
+                // needs an onLongPress to avoid firing on a held press — consumed the long press
+                // before the drag detector could claim it, and the button never picked up.
+                //
+                // Doing it in one gesture removes the ordering question entirely: wait for the
+                // press, and whichever happens first (release, or the long-press timeout) decides
+                // whether this was a tap or a pick-up.
                 .pointerInput(travel) {
-                    detectDragGesturesAfterLongPress(
-                        onDragStart = {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        var up: PointerInputChange? = null
+                        val releasedInTime = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                            up = waitForUpOrCancellation()
+                        } != null
+
+                        if (releasedInTime) {
+                            // Null means the gesture was cancelled rather than released — a scroll
+                            // taking over, say — which is not a tap.
+                            if (up != null) onClick()
+                        } else {
                             dragging = true
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        },
-                        onDragEnd = { commit() },
-                        onDragCancel = { commit() },
-                        onDrag = { change, drag ->
-                            change.consume()
-                            if (travel > 0f) fraction = (fraction + drag.x / travel).coerceIn(0f, 1f)
-                        },
-                    )
-                }
-                .pointerInput(Unit) {
-                    detectTapGestures(onLongPress = { }, onTap = { onClick() })
+                            drag(down.id) { change ->
+                                if (travel > 0f) {
+                                    fraction = (fraction + change.positionChange().x / travel)
+                                        .coerceIn(0f, 1f)
+                                }
+                                change.consume()
+                            }
+                            commit()
+                        }
+                    }
                 },
             contentAlignment = Alignment.Center,
         ) { content() }
