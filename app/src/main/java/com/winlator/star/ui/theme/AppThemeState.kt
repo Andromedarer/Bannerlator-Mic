@@ -26,6 +26,13 @@ object AppThemeState {
     private val _showStores = MutableStateFlow(true)
     val showStores: StateFlow<Boolean> = _showStores
 
+    /** The two drawer storage cards, toggled independently. */
+    private val _showInternalStorage = MutableStateFlow(true)
+    val showInternalStorage: StateFlow<Boolean> = _showInternalStorage
+
+    private val _showSdStorage = MutableStateFlow(true)
+    val showSdStorage: StateFlow<Boolean> = _showSdStorage
+
     // The preset whose background/surface colors back the custom accent
     private val _customBaseIndex = MutableStateFlow(0)
 
@@ -74,12 +81,24 @@ object AppThemeState {
         _customBaseIndex.value = themePrefs.getInt("custom_base_index", 1).coerceIn(0, CUSTOM_PRESET_INDEX)
         _isDarkMode.value = true
         _showStores.value = themePrefs.getBoolean("show_stores", true)
+        _showInternalStorage.value = themePrefs.getBoolean("show_internal_storage", true)
+        _showSdStorage.value = themePrefs.getBoolean("show_sd_storage", true)
     }
 
     /** Show or hide the drawer's Stores section. Default on, so nothing changes until asked. */
     fun setShowStores(show: Boolean) {
         _showStores.value = show
         themePrefs.edit().putBoolean("show_stores", show).apply()
+    }
+
+    fun setShowInternalStorage(show: Boolean) {
+        _showInternalStorage.value = show
+        themePrefs.edit().putBoolean("show_internal_storage", show).apply()
+    }
+
+    fun setShowSdStorage(show: Boolean) {
+        _showSdStorage.value = show
+        themePrefs.edit().putBoolean("show_sd_storage", show).apply()
     }
 
     fun setPreset(index: Int) {

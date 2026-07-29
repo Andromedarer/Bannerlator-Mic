@@ -144,7 +144,6 @@ fun AppDrawerContent(
             onClick = { showHelp = true },
         )
 
-        Spacer(Modifier.height(8.dp))
         StorageWidget()
         Spacer(Modifier.height(12.dp))
     }
@@ -278,9 +277,19 @@ private fun StorageWidget() {
         }
     }
 
-    StorageCard("Internal Storage", usedBytes, totalBytes)
-    removable.forEach { (label, used, total) ->
-        Spacer(Modifier.height(4.dp))
+    val showInternal by AppThemeState.showInternalStorage.collectAsState()
+    val showSd by AppThemeState.showSdStorage.collectAsState()
+    val sdCards = if (showSd) removable else emptyList()
+    val anyShown = (showInternal && totalBytes > 0) || sdCards.isNotEmpty()
+
+    // Leading spacer lives here rather than at the call site, so turning both cards off leaves no
+    // dead gap at the bottom of the drawer.
+    if (anyShown) Spacer(Modifier.height(8.dp))
+    if (showInternal) {
+        StorageCard("Internal Storage", usedBytes, totalBytes)
+    }
+    sdCards.forEachIndexed { index, (label, used, total) ->
+        if (showInternal || index > 0) Spacer(Modifier.height(4.dp))
         StorageCard(label, used, total)
     }
 }
