@@ -1,5 +1,31 @@
 # Star-Compose — Progress Log
 
+## 2026-07-29 — 🏁 **2.9.1 SHIPPED as stable** (tag `2.9.1` → built commit `43932724`, run `30420489783`, vc53)
+
+> Cut through `release.yml` with `make_prerelease=false` — the only workflow that publishes a release and `update.json`. ✅ Verified after the cut: `releases/latest`→2.9.1, isPrerelease=false, isDraft=false, **tag→built commit** (main HEAD == built commit, so the known default-branch quirk was harmless), `update.json` vc53 + all 3 APK names, 3 APKs + update.json attached.
+>
+> Full 80-line body applied post-cut via `gh release edit --notes-file`, in 2.9's layout and voice, covering **all 43 commits since 2.9**. Carries the **Proton 9 arm64ec `.wcp` download link** (size, sha256, Xnick417x credit) per the standing rule, plus the warning that a fresh install now ships with **no Wine at all**. README updated to match in `9a167ba4` — version row to 2.9.1/vc53, a new What's New section, the 2.9 section kept below rather than overwritten. 📌 That commit lands *after* the tag, so it is not in the tagged tree; same as 2.9.
+>
+> 🔖 Revert point: tag `checkpoint-pre-ui-tweaks-20260729` → `b407787c`.
+
+## 2026-07-29 — 🎛️ **Drawer & library tweaks — merged `88bfb9e0`, all device-verified** (branch `feat/ui-tweaks`)
+
+> Five asks, delivered as one branch off `b407787c`.
+>
+> **Hideable drawer sections.** Appearance gains a **Side Menu** block with three independent switches: game stores, internal storage, SD card storage. Each hides its whole block — header included — so turning one off leaves no orphaned divider.
+>
+> **SD card storage card.** The drawer's bar is now labelled **Internal Storage**, and a removable volume present at open gets its own card beneath it. 🔑 Detection goes through **`StorageRoots`**, not a fresh `/storage` listing — a card can be mounted and healthy yet absent from this process's mount view, which is exactly what defeated four earlier SD fixes. A volume we cannot stat is dropped rather than shown as "0 B / 0 B", and the enumeration runs on IO because it crosses Binder while the drawer is opening.
+>
+> **Draggable + button** on Games *and* Containers — long-press, slide along the bottom, position remembered per screen as a 0..1 fraction of free travel so it survives rotation and other screen sizes.
+>
+> **Multi-select removal** on Games (list *and* grid) and a **third view mode**: list / original adaptive grid / **4-across compact**. 🔑 Selection is keyed by `file.path`, not by `Shortcut` — `refresh()` rebuilds those objects and a set of stale instances would quietly stop matching. The old `is_grid_view` boolean can't express three states, so it seeds the new `view_mode` int; existing grid users stay on grid.
+>
+> ### 🐛🔑 Two bugs in the drag button, both mine, both worth remembering
+> 1. **It drew its frame and its contents apart** — an empty bordered square stuck hard left, untappable. `graphicsLayer` sat **after** the caller's `border`/`background`. Compose modifiers nest outside-in, so the transform moved only what was nested inside it: the icon and the hit box slid ~830px right while the frame stayed at the layout position. 📌 **A component that takes a styling `Modifier` from its caller and also transforms must wrap that modifier, not follow it.**
+> 2. **The long press registered but it would not move.** Two `pointerInput` blocks: the **later** modifier is the **inner** node and gets pointer events **first**, so the tap detector — which needs an `onLongPress` to avoid firing on a held press — consumed the press before the drag detector could claim it. The drag loop then found no unconsumed moves and ended instantly. Replaced both with **one `awaitEachGesture`**: whichever comes first, release or the long-press timeout, decides tap vs pick-up. 📌 **"First in the chain gets events first" is backwards for pointer input; when tap and drag must coexist, use one detector.**
+>
+> ⚠️ A momentary "the toggles are inverted" reading was **my own artifact** — I read prefs and screenshotted at different moments while the user was actively flipping switches. No bug. Worth remembering before reporting one against a live device.
+
 ## 2026-07-28 — 🔒 **Five defects in the merged Log Manager's report builder** (branch `fix/log-report-safety` off main `e7a05765`)
 
 > Found by reading the Log Manager surface after issue **#191** (PRAGMATA crash) came in with a report whose useful half had been thrown away. The Log Manager itself held up — folders, rotation, the delete allowlist — every defect is in the **report builder**, the part added last (`340f2a40`) and exercised least by the device test. None was device-reproduced; all five are read off the code.
