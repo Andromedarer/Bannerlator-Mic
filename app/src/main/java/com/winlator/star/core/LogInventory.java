@@ -80,7 +80,7 @@ public final class LogInventory {
         // logs from before the folders existed. Either way they are real and must be listable — we
         // deliberately do not migrate or delete anything a previous version wrote.
         List<File> loose = new ArrayList<>();
-        for (File f : kids) if (f.isFile() && isLog(f.getName())) loose.add(f);
+        for (File f : kids) if (f.isFile() && isOurs(f.getName())) loose.add(f);
         if (!loose.isEmpty()) {
             long bytes = 0, newest = 0;
             for (File f : loose) { bytes += f.length(); newest = Math.max(newest, f.lastModified()); }
@@ -126,7 +126,7 @@ public final class LogInventory {
         File[] files = dir.listFiles();
         if (files == null) return false;
         for (File f : files) {
-            if (f.isFile() && (isLog(f.getName()) || f.getName().startsWith("crash_"))) return true;
+            if (f.isFile() && isOurs(f.getName())) return true;   // isOurs covers crash reports too
             if (f.isDirectory() && LogRotation.ARCHIVE_DIR.equals(f.getName())) return true;
         }
         return false;
@@ -147,7 +147,7 @@ public final class LogInventory {
                     }
                     continue;
                 }
-                if (!isLog(f.getName())) continue;
+                if (!isOurs(f.getName())) continue;
                 count++;
                 bytes += f.length();
                 newest = Math.max(newest, f.lastModified());
@@ -208,7 +208,7 @@ public final class LogInventory {
     public static List<File> filesIn(File dir) {
         List<File> out = new ArrayList<>();
         File[] files = dir == null ? null : dir.listFiles();
-        if (files != null) for (File f : files) if (f.isFile() && isLog(f.getName())) out.add(f);
+        if (files != null) for (File f : files) if (f.isFile() && isOurs(f.getName())) out.add(f);
         Collections.sort(out, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
         return out;
     }
@@ -265,7 +265,18 @@ public final class LogInventory {
         return n;
     }
 
-    /** The only names any delete in this class will touch. */
+    /**
+     * A file THIS APP wrote — and the ONLY definition of that in this class. Every delete, every
+     * listing, and everything {@link #filesIn} hands to {@code LogReport} for zipping goes through
+     * here.
+     *
+     * There used to be a second, looser one: {@code isLog}, matching any {@code .log} or
+     * {@code .txt}. That is precisely the shape {@link LogRotation#isOurRunLog} was made public to
+     * prevent — its javadoc says so — and it had been fixed on the delete path but not on the
+     * listing or the report path. Since the report path zips what it finds for the user to attach
+     * to a PUBLIC issue, on a shared log root that meant other subsystems' {@code .txt} files, and
+     * on a user-chosen one the user's own documents, going into a bundle we called safe to post.
+     */
     private static boolean isOurs(String name) {
         String n = name.toLowerCase(Locale.US);
         if (LogRotation.isOurRunLog(n)) return true;
@@ -315,8 +326,4 @@ public final class LogInventory {
         return t;
     }
 
-    private static boolean isLog(String name) {
-        String n = name.toLowerCase(Locale.US);
-        return n.endsWith(".log") || n.endsWith(".txt");
-    }
 }

@@ -26,7 +26,8 @@ import java.util.Arrays;
 public final class CrashReporter implements Thread.UncaughtExceptionHandler {
 
     private static final String TAG = "CrashReporter";
-    private static final String PREFIX = "crash_";
+    /** Public so LogInventory and LogReport recognise our crash reports without re-spelling this. */
+    public static final String PREFIX = "crash_";
     /** Fewer lines than a manual capture: a crash report is read by a human, not grepped. */
     private static final int CRASH_LOGCAT_LINES = 400;
 

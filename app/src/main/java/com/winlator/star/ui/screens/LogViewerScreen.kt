@@ -372,8 +372,11 @@ private fun ReportDialog(entry: LogInventory.Entry, runDir: File, onDismiss: () 
                         color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp)
                 }
                 Text(
-                    "The logs are saved as a zip in Downloads and redacted first. GitHub can't " +
-                        "receive a file from a link, so attach the zip with 📎 once the form opens.",
+                    "Saved as a zip in Downloads. E-mail addresses, auth tokens and your Steam " +
+                        "account name are stripped; file paths are kept so they stay useful for " +
+                        "debugging, so glance over them if a folder name identifies you. GitHub " +
+                        "can't receive a file from a link, so attach the zip with 📎 once the " +
+                        "form opens.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp,
                     modifier = Modifier.padding(top = 8.dp)
                 )

@@ -1,5 +1,51 @@
 # Star-Compose — Progress Log
 
+## 2026-07-28 — 🔒 **Five defects in the merged Log Manager's report builder** (branch `fix/log-report-safety` off main `e7a05765`)
+
+> Found by reading the Log Manager surface after issue **#191** (PRAGMATA crash) came in with a report whose useful half had been thrown away. The Log Manager itself held up — folders, rotation, the delete allowlist — every defect is in the **report builder**, the part added last (`340f2a40`) and exercised least by the device test. None was device-reproduced; all five are read off the code.
+>
+> **1. The loose predicate came back, on the publish path.** `LogInventory.isLog` was still `.log || .txt` — the exact "second, looser definition of a log file" that `LogRotation.isOurRunLog`'s javadoc was written to prevent. It was fixed for *delete* and missed for *listing* and *report*, and it feeds `filesIn()`, which is what `LogReport` zips for the user to attach to a **public** issue. On a shared root that means other subsystems' `.txt`; on a user-chosen root, the user's own files. `isLog` is now **deleted** — the class already had `isOurs`, the delete path's allowlist, and every call site goes through that one. Two names for one predicate is what caused this.
+> ⚠️ Live exposure at the time was **nil**: the active root (`Download/bannerlator`) had zero `.txt`, and app-data's only one is a benign 118-byte `steam_session.txt`. Real defect, no incident.
+>
+> **2. The safety claim published on the tracker wasn't true.** Every generated issue said *"redacted of usernames, e-mail addresses and tokens **before they are written**"*. Neither half held: `XServerDisplayActivity` wrote Wine output **raw** (redaction happened only when a report was built, so the file on disk — which #70 exists to make shareable — was unredacted), and the only username strippable is the Steam account name via `SteamRepository`-registered secrets, which is **empty when nobody has signed in**. No path/username pattern exists in the redactor at all. Fixed **both ways**: redaction moved to write time so the claim is now true, and the wording says what the code actually does — e-mails, tokens, Steam account name — and warns that paths are kept on purpose.
+> 🔑 Write-time redaction on a per-line callback is a hot path (a `+seh` run emits tens of millions of lines), so `SteamLogRedactor.redact` got a `maybeHasPattern` pre-check: one linear scan rules out all four regexes unless the line holds `@`, `ey`, `76561`, or an 88-char run. The dominant `+seh` spam line hits none of them.
+>
+> **3. The report threw away the evidence.** `MAX_FILE_BYTES` was 2 MB, **tail only**. #191's log was **72 MB** → 97% binned, and what survived was ~12,900 copies of one trace line. The head went too — including the `WINEDEBUG`/`WINEPREFIX`/container/shortcut block written at the top precisely so a report explains its own setup. The cap bought nothing: 2 MB of that text zipped to **15 KB**, ~140:1. Now **head + tail** with the omitted middle called out, cap **2 → 8 MB**.
+>
+> **4. A per-line failure handler was being handed whole files.** `LogcatCapture.redact` answers a throw with `"[line withheld]"` — right for its per-line caller, catastrophic on a blob: one failure collapsed megabytes into a single sentence and the report still looked complete. Now redacted line by line. `readContentRedacted` also catches `Throwable`, not `Exception`, since an 8 MB cap plus a redacted copy can OOM a low-RAM device and logging must never take the app down.
+>
+> **5. Rotation guard asked the wrong question.** It gated on the `isPerGameEnabled` **preference**, but `resolveGameLogDir` silently falls back to the flat root when the per-game folder can't be created or written — preference still reading "on". It now compares the directory it actually got against `resolveLogDir`. Bounded by the allowlist, so this could only ever have eaten our own logs, not the user's.
+>
+> ### ✅ DEVICE-TESTED on the AYANEO Pocket FIT (build `0bb06a3e`, run `30412524817`, installed sha verified against the staged APK)
+>
+> Real log folder backed up first (`bannerlator-BACKUP-b-20260728`, 64 entries) and re-verified after: **nothing in the backup is missing from the live folder.**
+>
+> **🟢 #1 — allowlist on the publish path.** Planted three decoys in the log root: `zz_private_notes.txt` (a user file), `steam_debug.txt` (another subsystem's), `important.log` (a foreign `.log`, to prove the extension alone is not enough). Log Manager listed **"Older logs — 56 files"**, matching `find`'s count of allowlist-shaped files exactly; the old `.log || .txt` predicate would have said **61**. Built the report: **57 entries, zero `.txt`, all three decoys absent**, and all three byte-identical on disk afterwards.
+>
+> **🟢 #3 — head+tail.** Reported the real 70.6 MB PRAGMATA log from #191. Zip contains **8,388,544 bytes** carrying: the full `=== Wine Debug Log ===` header (`WINEDEBUG: +seh,+err,+warn,+fixme`, WINEPREFIX, container, shortcut, DX wrapper state), the marker `[… 64075 KB of 72267 KB omitted from the middle — keeps the first 1024 KB and the last 7168 KB …]`, and the tail. 🔑 **Both crash facts survive**: the `EXCEPTION_ACCESS_VIOLATION` (line 51569) and the `icuuc68` forward failure + `raise (22)` (53240/53241) — the exact evidence the old tail-only rule threw away. Cost: **47,233-byte zip** vs 14,919 before, i.e. 4× the log for 32 KB.
+>
+> **🟢 #2 — wording, all three copies.** The corrected text is live on device in the report dialog. 🔴 **Device screenshots caught a THIRD copy I had missed** — `LogManagerScreen.kt:363`, and the worst of them ("so they are safe to share"). Fixed in `0bb06a3e`.
+>
+> **🟢 #2 — write-time redaction.** A fresh `+seh` launch writes a complete, well-formed log with header, and rotation into `previous/` still works, so the added per-line `redact()` neither garbles nor stalls logging. ⚠️ Neither log contained anything pattern-shaped, so the device could not positively prove the redactor still fires — the genuinely new logic is the `maybeHasPattern` fast path, where a bug means silently NO redaction. Proved it instead by compiling `SteamLogRedactor` standalone and running **11 assertions: all pass** — email / email-inside-a-Windows-path / JWT / SteamID64 / 88-char run / registered secret all redact; the `+seh` spam line, an 87-char run, a 40-hex depot chunk, a 19-digit manifest and a plain wine `err:` are all left untouched.
+>
+> **⚪ #4, #5 — not reproduced.** Both need a failure the device would not produce on demand (a redaction throw; a per-game mkdir failing). Code-verified only.
+>
+> ### ✅ CONFIRMED ON A REAL SUBMITTED REPORT — issue #193 (build `c20320ec`, installed sha verified)
+> A genuine PRAGMATA relaunch + crash + Report, filed as a real issue. Three reports of the same crash now exist across three builds, which is as clean an A/B/C as this gets: **#191** (old builder), **#192** (fixed builder, same 18:14 log — controlled A/B), **#193** (fixed builder + VKD3D fix, fresh 65 MB log).
+> - **`VKD3D: 2.14.1` now appears** in the `### From the logs` block — absent from both #191 and #192.
+> - **Rotation fired on a real launch** (the #5 guard's first real exercise): `previous/` 1 → 2 archives, the 18:14 log filed as `2026-07-28_18-14-45`, fresh log written.
+> - **Head+tail on a brand-new log**: marker reads `[… 58401 KB of 66593 KB omitted …]` — different numbers from #192's 72267 KB, proving a genuinely new source. Header intact; crash evidence at **51573** (the AV) and **53244/53245** (the `icuuc68` forward failure + `raise (22)`).
+> - Zip **47,149 B** for 8,388,512 B of log — matches the ~47 KB predicted from #192.
+> - 🔑 **The crash reproduced identically** — same access violation at `PRAGMATA.exe + 0x4CCB9FA`, same ICU abort. Confirms the reporting fixes changed nothing about the underlying failure.
+> - ⚪ **Redaction: a third null result.** The fresh log was written BY the fixed build, and it contains **0 redaction markers and 0 leftover plaintext patterns** — i.e. genuinely nothing to strip, not a failure to strip it. Wine's `+seh` output simply carries no emails, SteamID64s or token-shaped blobs. **Calling this settled on the 11 standalone assertions rather than relaunching hoping a secret appears.**
+>
+> ### 🐛 Two more found BY testing
+> 1. **`_d3d8.log` was missing from the allowlist** — DXVK writes it for D3D8 titles and a real folder had `AIO-Graphics-Test-32bit_d3d8.log` in it: ours, but invisible to every allowlist path. Added.
+> 2. **The third "safe to share" claim**, above.
+>
+> ### ⚠️ Observed, NOT caused by this branch, NOT fixed
+> A hand-written `.desktop` with an `Exec=` line the parser dislikes takes the **whole app down at startup** — `StringIndexOutOfBoundsException` at `Shortcut.java:92`, via `ContainerManager.loadShortcuts` → `ShortcutsViewModel.<init>`, so the games list never loads and the app is unusable until the file is removed by hand. I hit it planting a synthetic canary shortcut; the app never writes a file in that shape itself, so this is a robustness gap rather than a live bug. 🔑 The Log Manager's own crash reporter behaved perfectly throughout — five `crash_*.txt` with full cause and logcat. Test artifacts (decoys, canary `.desktop`, both test zips, the five crash reports) all removed.
+
 ## 2026-07-28 — ✅ **Log Manager DEVICE-TESTED end to end — the two blocking tests PASS, five defects found and fixed** (branch `feat/log-manager` @ `6f89ed63`, run `30408135473`)
 
 > Drove the whole suite on the AYANEO Pocket FIT via the root bridge (prefs edited directly in `shared_prefs`, UI driven with `input tap/swipe` + screenshot verification). **Backed the real log folder up first** (`bannerlator-BACKUP-20260728`, 82 files, manifest-verified byte-identical) and ran every destructive test against a throwaway folder — a data-loss test must not be run on real data to find out whether the data-loss bug is fixed.
