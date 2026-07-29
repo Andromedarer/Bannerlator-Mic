@@ -1,5 +1,25 @@
 # Star-Compose — Progress Log
 
+## 2026-07-29 — 🔇 **The Log Manager's switches never actually stopped logging** (branch `fix/log-manager-off-state` off main `b16f6dfd`)
+
+> Reported by a community tester: *"I can't completely disable the logs, even after disabling all the options in the log manager, it continues to log, even when using `WINEDEBUG=-all`."* Correct on every count, and worse than it reads.
+>
+> **The bug.** `XServerDisplayActivity.setupXEnvironment()` opened `wine_debug.log` and called `ProcessHelper.addDebugCallback(...)` **unconditionally** — there was no test of any preference anywhere in that block. `enable_wine_debug` only chose the WINEDEBUG **channel string**; nothing gated the file. The switches turned the volume down, not the recorder off.
+>
+> **Why `WINEDEBUG=-all` couldn't save them.** Their env var *does* win (container/shortcut vars are `putAll`'d after ours, and `EnvVars.putAll` overwrites). But `wine_debug.log` is not a Wine-written file — it is ours, fed from `ProcessHelper`'s debug callback, which carries the stdout/stderr of **everything we spawn**: Box64/FEXCore, wineserver, the preloader, DXVK. Silencing Wine cannot empty a file that captures the rest, plus the ~20-line header we write into it ourselves.
+>
+> **🔑 The part that matters more than the complaint.** `ProcessHelper.execGuestProgram` redirects a process's stdout/stderr to `/dev/null` and spawns **no reader threads** — but only while `debugCallbacks` is empty. Registering one unconditionally made that branch unreachable, so **every user on 2.9.1, on every launch**, paid for a reader-thread pair per process, a `redact()` pass per line and a disk write per line. Under a screen whose `?` copy sells that cost as opt-in. This was a shipped perf regression, not just a UX complaint.
+>
+> ### Fix
+> - **`wine_debug.log` is opt-in.** `File logDir = isLaunchLoggingEnabled() ? resolveGameLogDir(…) : null;` — the whole body already sat inside `if (logDir != null)`, so off now means no folder, no rotation, no file, and critically **no callback**, which lets the `/dev/null` path fire again. Gated on the existing `isLaunchLoggingEnabled()` (Wine debug **OR** Box64/FEXCore) because both write to that one stream, and it is the same predicate the in-game Logs drawer and the launch-failure card already use — the three stay consistent.
+> - **No more empty per-game folders.** Both DXVK call sites called `resolveGameLogDir(…)` eagerly, and 🔑 **resolving CREATES the folder**, so even with DXVK logs off every launch littered one. New `dxvkLogDir()` returns null when the switch is off, and `DXVKConfigDialog.setEnvVars` now reads the pref **before** resolving a path instead of after.
+> - **The off-state `WINEDEBUG` now says what it does:** `+err,+warn,+fixme,-all` → `-all`. Same effective value — Wine parses left to right and the unprefixed trailing `-all` clears every class on every channel, so it already overrode the three before it, which were themselves written where Wine expects a *channel* name rather than the err/warn/fixme *classes* they meant to name. The comment claiming "errors still surface" was wrong; nothing that currently works is lost.
+>
+> ⚠️ **Behaviour change to announce:** with everything switched off, a crash now leaves no `wine_debug.log`. That is the point of the fix, and the failure card already detects the state and says to turn logging on — but anyone relying on the file always being there will not find it.
+>
+> ### 📌 How this got through the device test
+> The 2026-07-28 test was thorough on every ON path — rotation created `previous/`, Delete offered the right count, Clear all spared foreign files, the Report button carried the right GPU string — and **every one of those asserted presence. None asserted absence.** TEST 1 even ran per-game OFF + custom location + keep=0, but its assertion was *"the decoy files are byte-identical"*, because it was built to catch the data-loss bug; `wine_debug.log` was being written throughout it and nobody looked, because a log file existing is what we expected everywhere else. The five switches were only ever verified to **save**, which is settings plumbing, not behaviour. 📌 **For any feature with an off-switch, one pass must prove the off state produces nothing.** Same shape as the `hasDetail` sorting fix from that session: it compiled, it read correctly, and it changed nothing.
+
 ## 2026-07-29 — 🏁 **2.9.1 SHIPPED as stable** (tag `2.9.1` → built commit `43932724`, run `30420489783`, vc53)
 
 > Cut through `release.yml` with `make_prerelease=false` — the only workflow that publishes a release and `update.json`. ✅ Verified after the cut: `releases/latest`→2.9.1, isPrerelease=false, isDraft=false, **tag→built commit** (main HEAD == built commit, so the known default-branch quirk was harmless), `update.json` vc53 + all 3 APK names, 3 APKs + update.json attached.
