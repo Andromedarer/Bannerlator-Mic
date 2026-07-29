@@ -58,6 +58,12 @@ import java.util.Collections
 
 enum class ShortcutSortOrder { NAME_ASC, NAME_DESC, CONTAINER }
 
+/**
+ * How the games library is laid out. GRID is the original adaptive grid; GRID_COMPACT fixes four
+ * columns so more covers fit at once. Ordinals are persisted — append, never reorder.
+ */
+enum class ShortcutViewMode { LIST, GRID, GRID_COMPACT }
+
 sealed class ImportResult {
     /** [appId] = the Steam appId identified on disk (if any), so the confirm dialog can seed
      *  its "Search Steam" box and apply the right cover art. */
@@ -165,8 +171,18 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
     )
     val sortOrder: StateFlow<ShortcutSortOrder> = _sortOrder
 
-    private val _isGridView = MutableStateFlow(prefs.getBoolean("is_grid_view", false))
-    val isGridView: StateFlow<Boolean> = _isGridView
+    // Three layouts now, so the old is_grid_view boolean cannot express it. Read the boolean once
+    // to seed the new key, so anyone already on grid stays on grid instead of being reset to list.
+    private val _viewMode = MutableStateFlow(
+        ShortcutViewMode.entries[
+            prefs.getInt(
+                "view_mode",
+                if (prefs.getBoolean("is_grid_view", false)) ShortcutViewMode.GRID.ordinal
+                else ShortcutViewMode.LIST.ordinal
+            ).coerceIn(0, ShortcutViewMode.entries.size - 1)
+        ]
+    )
+    val viewMode: StateFlow<ShortcutViewMode> = _viewMode
 
     val shortcuts: kotlinx.coroutines.flow.Flow<List<Shortcut>> =
         combine(_shortcuts, _sortOrder) { list, order ->
@@ -927,9 +943,15 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
         prefs.edit().putInt("sort_order", order.ordinal).apply()
     }
 
-    fun setGridView(grid: Boolean) {
-        _isGridView.value = grid
-        prefs.edit().putBoolean("is_grid_view", grid).apply()
+    fun setViewMode(mode: ShortcutViewMode) {
+        _viewMode.value = mode
+        prefs.edit().putInt("view_mode", mode.ordinal).apply()
+    }
+
+    /** Cycles list → grid → compact grid → list, driven by the single header button. */
+    fun cycleViewMode() {
+        val next = ShortcutViewMode.entries[(_viewMode.value.ordinal + 1) % ShortcutViewMode.entries.size]
+        setViewMode(next)
     }
 
     // Only containers still present on disk (with a ".container" config). A deleted container can
