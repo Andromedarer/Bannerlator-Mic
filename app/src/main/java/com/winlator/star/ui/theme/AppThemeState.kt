@@ -22,6 +22,10 @@ object AppThemeState {
     private val _isDarkMode = MutableStateFlow(true)
     val isDarkMode: StateFlow<Boolean> = _isDarkMode
 
+    /** Whether the drawer's "Stores" section (GOG, Epic, Amazon, Steam) is shown. */
+    private val _showStores = MutableStateFlow(true)
+    val showStores: StateFlow<Boolean> = _showStores
+
     // The preset whose background/surface colors back the custom accent
     private val _customBaseIndex = MutableStateFlow(0)
 
@@ -69,6 +73,13 @@ object AppThemeState {
         _customAccent.value = Color(savedAccent)
         _customBaseIndex.value = themePrefs.getInt("custom_base_index", 1).coerceIn(0, CUSTOM_PRESET_INDEX)
         _isDarkMode.value = true
+        _showStores.value = themePrefs.getBoolean("show_stores", true)
+    }
+
+    /** Show or hide the drawer's Stores section. Default on, so nothing changes until asked. */
+    fun setShowStores(show: Boolean) {
+        _showStores.value = show
+        themePrefs.edit().putBoolean("show_stores", show).apply()
     }
 
     fun setPreset(index: Int) {

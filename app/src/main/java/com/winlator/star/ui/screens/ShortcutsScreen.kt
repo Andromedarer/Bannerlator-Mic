@@ -211,6 +211,7 @@ import com.winlator.star.core.DefaultVersion
 import com.winlator.star.core.FileUtils
 import com.winlator.star.core.GameFolderScanner
 import com.winlator.star.core.KeyValueSet
+import com.winlator.star.ui.components.DraggableAddButton
 import com.winlator.star.core.LogInventory
 import com.winlator.star.core.LogLocation
 import com.winlator.star.core.StringUtils
@@ -757,16 +758,16 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                     }
                 }
             }
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(16.dp)
+            // Long-press and slide along the bottom to move it off a card's buttons.
+            DraggableAddButton(
+                prefKey = "games",
+                onClick = { showImportContainerPicker = true },
+                outerPadding = 16.dp,
+                buttonModifier = Modifier
                     .size(56.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .border(1.5.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surface)
-                    .clickable { showImportContainerPicker = true },
-                contentAlignment = Alignment.Center,
+                    .background(MaterialTheme.colorScheme.surface),
             ) {
                 Icon(
                     Icons.Filled.Add,

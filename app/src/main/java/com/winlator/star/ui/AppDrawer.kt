@@ -37,6 +37,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -54,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.winlator.star.R
 import com.winlator.star.communityconfigs.AccountManager
+import com.winlator.star.ui.theme.AppThemeState
 import com.winlator.star.ui.theme.LocalAccentDim
 
 private fun iconFor(screen: Screen): Int = when (screen) {
@@ -113,9 +115,14 @@ fun AppDrawerContent(
         DrawerItem(Screen.InputControls, currentRoute, onNavigate)
         DrawerItem(Screen.AdrenoTools,   currentRoute, onNavigate)
 
-        DrawerSectionHeader("Stores", note = "· unchanged", showDivider = true)
-        Screen.storeItems.forEach { screen ->
-            DrawerStoreItem(screen, onLaunchStore)
+        // Hideable from Appearance — the whole section, header included, so turning it off
+        // leaves no orphaned divider behind.
+        val showStores by AppThemeState.showStores.collectAsState()
+        if (showStores) {
+            DrawerSectionHeader("Stores", note = "· unchanged", showDivider = true)
+            Screen.storeItems.forEach { screen ->
+                DrawerStoreItem(screen, onLaunchStore)
+            }
         }
 
         HorizontalDivider(

@@ -62,6 +62,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import com.winlator.star.ui.components.DraggableAddButton
 import com.winlator.star.ui.LocalTopBarActions
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
@@ -225,15 +226,17 @@ fun ContainersScreen(
             }
         }
 
-        // FAB
-        FloatingActionButton(
+        // FAB — long-press and slide it along the bottom to get it off a card's play/overflow
+        // buttons. Position is remembered per screen.
+        DraggableAddButton(
+            prefKey = "containers",
             onClick = {
                 if (ImageFs.find(context).isValid()) onNavigateToDetail(null)
             },
-            containerColor = MaterialTheme.colorScheme.primary,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(20.dp),
+            buttonModifier = Modifier
+                .size(56.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primary),
         ) {
             Icon(imageVector = Icons.Filled.Add, contentDescription = "Add container", tint = MaterialTheme.colorScheme.onPrimary)
         }
