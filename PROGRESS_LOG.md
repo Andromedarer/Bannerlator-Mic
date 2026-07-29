@@ -7,6 +7,12 @@
 > Full body applied post-cut via `gh release edit --notes-file`, in 2.9.1's exact layout and voice — centred logo, three badges, the `⚠️`/`>` callout idiom, the Mali report badge pair, the standing **Proton 9 arm64ec `.wcp`** section (link + size + sha256 + Xnick417x credit) and the fresh-install-has-no-Wine warning, then Credits and the root footnote. README updated to match: version row → 2.9.2/vc54, a new What's New section above 2.9.1's rather than overwriting it.
 >
 > 🙏 **Credits lead with @D4V1Z0N** — he found it, reported it, and device-confirmed the fix across off/on/off/on cycles before it shipped. The notes say so plainly ("This release is his"), and close the credits with a line about small-looking reports, because this one looked small and was not.
+>
+> ### ⚠️ Two post-cut corrections, both caught by the standing verify steps
+> 1. **The tag came out on the wrong commit — again.** `release.yml` tagged `c6864d2c` (the README/PROGRESS_LOG commit) rather than the built `0a8d3286`, because main moved between the version bump and the docs commit. Force-repointed to the built commit and re-verified via `git ls-remote`. 📌 The known default-branch quirk is harmless only when main HEAD *is* the built commit — which is exactly what stops being true the moment docs land after the bump. **Either push docs before dispatching, or expect to repoint every time.**
+> 2. **`update.json` shipped the dispatch placeholder.** Its `notes` field is the blurb the **in-app updater** shows users, and it had gone out reading *"Full notes applied after the cut"* — internal process language, live to every updating device. Re-uploaded with `--clobber` as *"Hotfix over 2.9.1 — turning logging off in the Log Manager now actually stops logging. Full notes below."*, matching 2.9.1's convention. 📌 **Write the real user-facing one-liner at dispatch time; that input is not scratch.**
+>
+> ✅ Final verified state: `releases/latest`→2.9.2, isPrerelease=false, isDraft=false, tag→`0a8d3286`, `update.json` vc54 + all 3 APK names, 3 APKs + update.json attached, working tree clean and `main` == `origin/main` at `c6864d2c`.
 
 ## 2026-07-29 — 🔇 **The Log Manager's switches never actually stopped logging** (branch `fix/log-manager-off-state` off main `b16f6dfd`)
 
