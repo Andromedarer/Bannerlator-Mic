@@ -16,7 +16,26 @@
 >
 > **5. Rotation guard asked the wrong question.** It gated on the `isPerGameEnabled` **preference**, but `resolveGameLogDir` silently falls back to the flat root when the per-game folder can't be created or written — preference still reading "on". It now compares the directory it actually got against `resolveLogDir`. Bounded by the allowlist, so this could only ever have eaten our own logs, not the user's.
 >
-> ⏭️ NOT yet built, NOT device-tested. The check worth running: drop a junk `.txt` in the log root, hit Report on "All logs", confirm it is absent from the zip; then a `+seh` run to confirm head+tail and that write-time redaction hasn't cost frame time.
+> ### ✅ DEVICE-TESTED on the AYANEO Pocket FIT (build `0bb06a3e`, run `30412524817`, installed sha verified against the staged APK)
+>
+> Real log folder backed up first (`bannerlator-BACKUP-b-20260728`, 64 entries) and re-verified after: **nothing in the backup is missing from the live folder.**
+>
+> **🟢 #1 — allowlist on the publish path.** Planted three decoys in the log root: `zz_private_notes.txt` (a user file), `steam_debug.txt` (another subsystem's), `important.log` (a foreign `.log`, to prove the extension alone is not enough). Log Manager listed **"Older logs — 56 files"**, matching `find`'s count of allowlist-shaped files exactly; the old `.log || .txt` predicate would have said **61**. Built the report: **57 entries, zero `.txt`, all three decoys absent**, and all three byte-identical on disk afterwards.
+>
+> **🟢 #3 — head+tail.** Reported the real 70.6 MB PRAGMATA log from #191. Zip contains **8,388,544 bytes** carrying: the full `=== Wine Debug Log ===` header (`WINEDEBUG: +seh,+err,+warn,+fixme`, WINEPREFIX, container, shortcut, DX wrapper state), the marker `[… 64075 KB of 72267 KB omitted from the middle — keeps the first 1024 KB and the last 7168 KB …]`, and the tail. 🔑 **Both crash facts survive**: the `EXCEPTION_ACCESS_VIOLATION` (line 51569) and the `icuuc68` forward failure + `raise (22)` (53240/53241) — the exact evidence the old tail-only rule threw away. Cost: **47,233-byte zip** vs 14,919 before, i.e. 4× the log for 32 KB.
+>
+> **🟢 #2 — wording, all three copies.** The corrected text is live on device in the report dialog. 🔴 **Device screenshots caught a THIRD copy I had missed** — `LogManagerScreen.kt:363`, and the worst of them ("so they are safe to share"). Fixed in `0bb06a3e`.
+>
+> **🟢 #2 — write-time redaction.** A fresh `+seh` launch writes a complete, well-formed log with header, and rotation into `previous/` still works, so the added per-line `redact()` neither garbles nor stalls logging. ⚠️ Neither log contained anything pattern-shaped, so the device could not positively prove the redactor still fires — the genuinely new logic is the `maybeHasPattern` fast path, where a bug means silently NO redaction. Proved it instead by compiling `SteamLogRedactor` standalone and running **11 assertions: all pass** — email / email-inside-a-Windows-path / JWT / SteamID64 / 88-char run / registered secret all redact; the `+seh` spam line, an 87-char run, a 40-hex depot chunk, a 19-digit manifest and a plain wine `err:` are all left untouched.
+>
+> **⚪ #4, #5 — not reproduced.** Both need a failure the device would not produce on demand (a redaction throw; a per-game mkdir failing). Code-verified only.
+>
+> ### 🐛 Two more found BY testing
+> 1. **`_d3d8.log` was missing from the allowlist** — DXVK writes it for D3D8 titles and a real folder had `AIO-Graphics-Test-32bit_d3d8.log` in it: ours, but invisible to every allowlist path. Added.
+> 2. **The third "safe to share" claim**, above.
+>
+> ### ⚠️ Observed, NOT caused by this branch, NOT fixed
+> A hand-written `.desktop` with an `Exec=` line the parser dislikes takes the **whole app down at startup** — `StringIndexOutOfBoundsException` at `Shortcut.java:92`, via `ContainerManager.loadShortcuts` → `ShortcutsViewModel.<init>`, so the games list never loads and the app is unusable until the file is removed by hand. I hit it planting a synthetic canary shortcut; the app never writes a file in that shape itself, so this is a robustness gap rather than a live bug. 🔑 The Log Manager's own crash reporter behaved perfectly throughout — five `crash_*.txt` with full cause and logcat. Test artifacts (decoys, canary `.desktop`, both test zips, the five crash reports) all removed.
 
 ## 2026-07-28 — ✅ **Log Manager DEVICE-TESTED end to end — the two blocking tests PASS, five defects found and fixed** (branch `feat/log-manager` @ `6f89ed63`, run `30408135473`)
 
