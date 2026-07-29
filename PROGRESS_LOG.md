@@ -30,6 +30,15 @@
 >
 > **⚪ #4, #5 — not reproduced.** Both need a failure the device would not produce on demand (a redaction throw; a per-game mkdir failing). Code-verified only.
 >
+> ### ✅ CONFIRMED ON A REAL SUBMITTED REPORT — issue #193 (build `c20320ec`, installed sha verified)
+> A genuine PRAGMATA relaunch + crash + Report, filed as a real issue. Three reports of the same crash now exist across three builds, which is as clean an A/B/C as this gets: **#191** (old builder), **#192** (fixed builder, same 18:14 log — controlled A/B), **#193** (fixed builder + VKD3D fix, fresh 65 MB log).
+> - **`VKD3D: 2.14.1` now appears** in the `### From the logs` block — absent from both #191 and #192.
+> - **Rotation fired on a real launch** (the #5 guard's first real exercise): `previous/` 1 → 2 archives, the 18:14 log filed as `2026-07-28_18-14-45`, fresh log written.
+> - **Head+tail on a brand-new log**: marker reads `[… 58401 KB of 66593 KB omitted …]` — different numbers from #192's 72267 KB, proving a genuinely new source. Header intact; crash evidence at **51573** (the AV) and **53244/53245** (the `icuuc68` forward failure + `raise (22)`).
+> - Zip **47,149 B** for 8,388,512 B of log — matches the ~47 KB predicted from #192.
+> - 🔑 **The crash reproduced identically** — same access violation at `PRAGMATA.exe + 0x4CCB9FA`, same ICU abort. Confirms the reporting fixes changed nothing about the underlying failure.
+> - ⚪ **Redaction: a third null result.** The fresh log was written BY the fixed build, and it contains **0 redaction markers and 0 leftover plaintext patterns** — i.e. genuinely nothing to strip, not a failure to strip it. Wine's `+seh` output simply carries no emails, SteamID64s or token-shaped blobs. **Calling this settled on the 11 standalone assertions rather than relaunching hoping a secret appears.**
+>
 > ### 🐛 Two more found BY testing
 > 1. **`_d3d8.log` was missing from the allowlist** — DXVK writes it for D3D8 titles and a real folder had `AIO-Graphics-Test-32bit_d3d8.log` in it: ours, but invisible to every allowlist path. Added.
 > 2. **The third "safe to share" claim**, above.
