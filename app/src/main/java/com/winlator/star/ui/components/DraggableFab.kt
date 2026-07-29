@@ -81,10 +81,17 @@ fun BoxScope.DraggableAddButton(
             .onSizeChanged { trackPx = it.width.toFloat() },
     ) {
         Box(
-            modifier = buttonModifier
-                .onSizeChanged { buttonPx = it.width.toFloat() }
+            // Order is load-bearing. graphicsLayer must come BEFORE the caller's border/background,
+            // because modifiers nest outside-in: a transform only moves what is nested inside it.
+            // With it after, the border and fill drew at the layout position while the icon and the
+            // touch target slid away — an empty square stuck at the left with its hit box somewhere
+            // off to the right. onSizeChanged goes after buttonModifier so it measures the sized
+            // button rather than the incoming constraints.
+            modifier = Modifier
                 .graphicsLayer { translationX = travel * fraction }
                 .scale(lift)
+                .then(buttonModifier)
+                .onSizeChanged { buttonPx = it.width.toFloat() }
                 // Drag detector FIRST so it can claim the gesture, tap detector second. The tap
                 // detector declares an (empty) onLongPress on purpose: without one, a long hold
                 // still counts as a tap on release, and picking the button up would also fire it.
