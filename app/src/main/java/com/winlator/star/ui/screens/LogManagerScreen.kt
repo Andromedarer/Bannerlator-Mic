@@ -70,6 +70,7 @@ import com.winlator.star.util.InAppFilePicker
 import com.winlator.star.core.LogInventory
 import com.winlator.star.core.LogLocation
 import com.winlator.star.core.LogcatCapture
+import com.winlator.star.ui.theme.DangerRed
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -1000,7 +1001,6 @@ private fun CardAction(
 }
 
 /** The design's one non-theme colour: destructive actions read as red in both light and dark. */
-private val DangerRed = androidx.compose.ui.graphics.Color(0xFFE05C4A)
 
 /** "12 min ago" / "yesterday" — a timestamp is not what anyone is looking for in this list. */
 private fun relativeTime(millis: Long): String {

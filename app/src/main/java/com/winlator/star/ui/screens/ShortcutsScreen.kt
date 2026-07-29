@@ -67,8 +67,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.AddToHomeScreen
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.SwapVert
@@ -86,6 +89,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Download
@@ -211,6 +215,8 @@ import com.winlator.star.core.DefaultVersion
 import com.winlator.star.core.FileUtils
 import com.winlator.star.core.GameFolderScanner
 import com.winlator.star.core.KeyValueSet
+import com.winlator.star.ui.components.DraggableAddButton
+import com.winlator.star.ui.theme.DangerRed
 import com.winlator.star.core.LogInventory
 import com.winlator.star.core.LogLocation
 import com.winlator.star.core.StringUtils
@@ -255,11 +261,16 @@ import org.json.JSONObject
 fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     val shortcuts by vm.shortcuts.collectAsState(initial = emptyList())
     val sortOrder by vm.sortOrder.collectAsState()
-    val isGridView by vm.isGridView.collectAsState()
+    val viewMode by vm.viewMode.collectAsState()
     val context = LocalContext.current
     val activity = context as Activity
 
     var confirmRemove by remember { mutableStateOf<Shortcut?>(null) }
+    // Multi-select. Keyed by file path rather than by Shortcut because refresh() rebuilds the
+    // objects, and a set of stale instances would silently stop matching anything.
+    var selectionMode by remember { mutableStateOf(false) }
+    var selectedPaths by remember { mutableStateOf(setOf<String>()) }
+    var confirmRemoveSelected by remember { mutableStateOf(false) }
     var cloneTarget by remember { mutableStateOf<Shortcut?>(null) }
     var settingsShortcut by remember { mutableStateOf<Shortcut?>(null) }
     var gameDetailsShortcut by remember { mutableStateOf<Shortcut?>(null) }
@@ -638,7 +649,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     // first and runs first (clears); we enqueue second and run after (sets). A
     // SideEffect would run synchronously during commit, getting steamrolled by the
     // parent's clear when it fires post-commit.
-    LaunchedEffect(isGridView) {
+    LaunchedEffect(viewMode, selectionMode, selectedPaths) {
         topBarActions.value = {
             IconButton(onClick = { showCommunityBrowser = true }) {
                 Icon(
@@ -647,10 +658,49 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                     tint = androidx.compose.ui.graphics.Color.White,
                 )
             }
-            IconButton(onClick = { vm.setGridView(!isGridView) }) {
+            if (selectionMode) {
+                Text(
+                    "${selectedPaths.size}",
+                    color = androidx.compose.ui.graphics.Color.White,
+                    modifier = Modifier.padding(end = 2.dp),
+                )
+                IconButton(
+                    onClick = { confirmRemoveSelected = true },
+                    enabled = selectedPaths.isNotEmpty(),
+                ) {
+                    Icon(
+                        Icons.Filled.Delete,
+                        contentDescription = "Remove selected",
+                        tint = if (selectedPaths.isEmpty())
+                            androidx.compose.ui.graphics.Color.White.copy(alpha = 0.4f)
+                        else DangerRed,
+                    )
+                }
+            }
+            IconButton(onClick = {
+                selectionMode = !selectionMode
+                if (!selectionMode) selectedPaths = emptySet()
+            }) {
                 Icon(
-                    imageVector = if (isGridView) Icons.Filled.ViewList else Icons.Filled.GridView,
-                    contentDescription = if (isGridView) "List view" else "Grid view",
+                    imageVector = if (selectionMode) Icons.Filled.Close else Icons.Filled.Checklist,
+                    contentDescription = if (selectionMode) "Cancel selection" else "Select shortcuts",
+                    tint = androidx.compose.ui.graphics.Color.White,
+                )
+            }
+            // One button cycling list → grid → compact grid. The icon shows what you get NEXT,
+            // matching how the two-state version behaved.
+            IconButton(onClick = { vm.cycleViewMode() }) {
+                Icon(
+                    imageVector = when (viewMode) {
+                        ShortcutViewMode.LIST -> Icons.Filled.GridView
+                        ShortcutViewMode.GRID -> Icons.Filled.Apps
+                        ShortcutViewMode.GRID_COMPACT -> Icons.Filled.ViewList
+                    },
+                    contentDescription = when (viewMode) {
+                        ShortcutViewMode.LIST -> "Grid view"
+                        ShortcutViewMode.GRID -> "Compact grid view"
+                        ShortcutViewMode.GRID_COMPACT -> "List view"
+                    },
                     tint = androidx.compose.ui.graphics.Color.White,
                 )
             }
@@ -702,10 +752,13 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                     modifier = Modifier.align(Alignment.Center),
                 )
             } else {
-                AnimatedContent(targetState = isGridView, label = "layout") { grid ->
-                    if (grid) {
+                AnimatedContent(targetState = viewMode, label = "layout") { mode ->
+                    if (mode != ShortcutViewMode.LIST) {
                         LazyVerticalGrid(
-                            columns = GridCells.Adaptive(minSize = 120.dp),
+                            // Compact fixes four columns; the original stays adaptive so it keeps
+                            // whatever column count each screen size was already giving.
+                            columns = if (mode == ShortcutViewMode.GRID_COMPACT) GridCells.Fixed(4)
+                                      else GridCells.Adaptive(minSize = 120.dp),
                             modifier = Modifier.fillMaxSize(),
                             contentPadding = PaddingValues(8.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -714,7 +767,12 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                             items(shortcuts, key = { it.file.path }) { shortcut ->
                                 ShortcutGridItem(
                                     shortcut = shortcut,
-                                    onRun = { runShortcut(activity, shortcut) },
+                                    selectionMode = selectionMode,
+                                    selected = shortcut.file.path in selectedPaths,
+                                    onRun = {
+                                        if (selectionMode) selectedPaths = selectedPaths.toggle(shortcut.file.path)
+                                        else runShortcut(activity, shortcut)
+                                    },
                                     onSettings = { settingsShortcut = shortcut },
                                     onRemove = { confirmRemove = shortcut },
                                     onClone = { cloneTarget = shortcut },
@@ -731,7 +789,10 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                     } else {
                         LazyColumn(modifier = Modifier.fillMaxSize()) {
                             items(shortcuts, key = { it.file.path }) { shortcut ->
-                                val itemRun = { runShortcut(activity, shortcut) }
+                                val itemRun = {
+                                    if (selectionMode) selectedPaths = selectedPaths.toggle(shortcut.file.path)
+                                    else runShortcut(activity, shortcut)
+                                }
                                 val itemSettings = { settingsShortcut = shortcut }
                                 val itemRemove = { confirmRemove = shortcut }
                                 val itemClone = { cloneTarget = shortcut }
@@ -740,6 +801,8 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                 val itemProperties = { propertiesShortcut = shortcut }
                                 ShortcutItemLayoutL(
                                     shortcut = shortcut,
+                                    selectionMode = selectionMode,
+                                    selected = shortcut.file.path in selectedPaths,
                                     onRun = itemRun,
                                     onSettings = itemSettings,
                                     onRemove = itemRemove,
@@ -757,16 +820,16 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                     }
                 }
             }
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(16.dp)
+            // Long-press and slide along the bottom to move it off a card's buttons.
+            DraggableAddButton(
+                prefKey = "games",
+                onClick = { showImportContainerPicker = true },
+                outerPadding = 16.dp,
+                buttonModifier = Modifier
                     .size(56.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .border(1.5.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surface)
-                    .clickable { showImportContainerPicker = true },
-                contentAlignment = Alignment.Center,
+                    .background(MaterialTheme.colorScheme.surface),
             ) {
                 Icon(
                     Icons.Filled.Add,
@@ -1266,6 +1329,41 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                 }) { Text("Remove") }
             },
             dismissButton = { TextButton(onClick = { confirmRemove = null }) { Text("Cancel") } },
+        )
+    }
+
+    // Bulk remove. Counts rather than names: a list of twenty titles is not something anyone
+    // reads, and the number is the part that decides whether you meant it.
+    if (confirmRemoveSelected) {
+        val targets = shortcuts.filter { it.file.path in selectedPaths }
+        OutlinedAlertDialog(
+            onDismissRequest = { confirmRemoveSelected = false },
+            title = { Text("Remove ${targets.size} shortcut${if (targets.size == 1) "" else "s"}?") },
+            text = {
+                Text(
+                    if (targets.size == 1) "Remove \"${targets.first().name}\"?"
+                    else "Remove these ${targets.size} shortcuts? The games themselves are left " +
+                         "on disk — only the shortcuts go."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    var ok = 0
+                    targets.forEach { if (vm.remove(it, context)) ok++ }
+                    confirmRemoveSelected = false
+                    selectedPaths = emptySet()
+                    selectionMode = false
+                    Toast.makeText(
+                        context,
+                        if (ok == targets.size) "Removed $ok shortcut${if (ok == 1) "" else "s"}."
+                        else "Removed $ok of ${targets.size} — the rest could not be deleted.",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }) { Text("Remove", color = DangerRed) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmRemoveSelected = false }) { Text("Cancel") }
+            },
         )
     }
 
@@ -4195,6 +4293,8 @@ private fun CommunityConfigDetailDialog(
 @Composable
 private fun ShortcutItemLayoutL(
     shortcut: Shortcut,
+    selectionMode: Boolean,
+    selected: Boolean,
     onRun: () -> Unit,
     onSettings: () -> Unit,
     onRemove: () -> Unit,
@@ -4231,7 +4331,10 @@ private fun ShortcutItemLayoutL(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant,
         ),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        border = BorderStroke(
+            if (selected) 2.dp else 1.dp,
+            if (selected) DangerRed else MaterialTheme.colorScheme.outline,
+        ),
     ) {
       Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -4239,6 +4342,16 @@ private fun ShortcutItemLayoutL(
             .fillMaxWidth()
             .padding(start = 12.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
     ) {
+        // Checkbox replaces nothing — it is inserted ahead of the cover, so the row keeps its
+        // shape and the cover does not jump when selection mode turns on.
+        if (selectionMode) {
+            Icon(
+                imageVector = if (selected) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
+                contentDescription = null,
+                tint = if (selected) DangerRed else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(end = 8.dp).size(22.dp),
+            )
+        }
         // 3:4 poster cover (same as layout A); fall back to a glyph tile.
         Box(
             modifier = Modifier
@@ -4406,6 +4519,8 @@ private fun ShortcutOverflowButton(
 @Composable
 private fun ShortcutGridItem(
     shortcut: Shortcut,
+    selectionMode: Boolean,
+    selected: Boolean,
     onRun: () -> Unit,
     onSettings: () -> Unit,
     onRemove: () -> Unit,
@@ -4426,8 +4541,10 @@ private fun ShortcutGridItem(
             .clip(RoundedCornerShape(8.dp))
             .background(SurfaceColor)
             .border(
-                width = 2.dp,
-                brush = Brush.linearGradient(
+                width = if (selected) 3.dp else 2.dp,
+                brush = if (selected)
+                    Brush.linearGradient(listOf(DangerRed, DangerRed))
+                else Brush.linearGradient(
                     // accent-family gradient: dim → accent → accent, so the grid-tile border follows the theme
                     colors = listOf(LocalAccentDim.current, MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primary),
                 ),
@@ -4491,6 +4608,32 @@ private fun ShortcutGridItem(
                         color = Color.White.copy(alpha = 0.7f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+
+        // Selection badge. Only while selecting — a permanent empty circle on every tile would
+        // read as part of the artwork.
+        if (selectionMode) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(6.dp)
+                    .size(22.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (selected) DangerRed
+                        else androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.55f)
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (selected) {
+                    Icon(
+                        Icons.Filled.Check,
+                        contentDescription = null,
+                        tint = androidx.compose.ui.graphics.Color.White,
+                        modifier = Modifier.size(15.dp),
                     )
                 }
             }
@@ -6721,6 +6864,10 @@ private fun renameShortcut(shortcut: Shortcut, newName: String) {
         if (lnk.isFile) lnk.renameTo(File(parent, "$newName.lnk"))
     }
 }
+
+/** Add if absent, drop if present — the whole of what tapping a card in selection mode does. */
+private fun Set<String>.toggle(path: String): Set<String> =
+    if (path in this) this - path else this + path
 
 private fun runShortcut(activity: Activity, shortcut: Shortcut) {
     if (!XrActivity.isEnabled(activity)) {

@@ -27,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -107,7 +108,63 @@ fun AppearanceScreen() {
             onColorChanged = { AppThemeState.setCustomAccent(it) }
         )
 
+        Spacer(Modifier.height(4.dp))
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Divider))
+
+        // ── Side menu ────────────────────────────────────────────────────
+        SectionLabel("Side Menu")
+        val showStores by AppThemeState.showStores.collectAsState()
+        val showInternal by AppThemeState.showInternalStorage.collectAsState()
+        val showSd by AppThemeState.showSdStorage.collectAsState()
+
+        DrawerToggleRow(
+            title = "Show game stores",
+            subtitle = "The GOG, Epic, Amazon and Steam shortcuts in the drawer",
+            checked = showStores,
+            onCheckedChange = { AppThemeState.setShowStores(it) },
+        )
+        DrawerToggleRow(
+            title = "Show internal storage",
+            subtitle = "The storage bar at the bottom of the drawer",
+            checked = showInternal,
+            onCheckedChange = { AppThemeState.setShowInternalStorage(it) },
+        )
+        DrawerToggleRow(
+            title = "Show SD card storage",
+            subtitle = "Only appears when a card is in the device",
+            checked = showSd,
+            onCheckedChange = { AppThemeState.setShowSdStorage(it) },
+        )
+
         Spacer(Modifier.height(16.dp))
+    }
+}
+
+/** One labelled switch. Three of these now, so they share a shape rather than drift apart. */
+@Composable
+private fun DrawerToggleRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontSize = 14.sp,
+            )
+            Text(
+                text = subtitle,
+                color = OnSurfaceVariant,
+                fontSize = 12.sp,
+            )
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
 
