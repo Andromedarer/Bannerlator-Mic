@@ -128,7 +128,13 @@ public final class LogReport {
         String gpu = firstMatch(scanned, "(?m)^info: +Device *: *(\\S.*?) *$");
         String driver = firstMatch(scanned, "(?m)^info: +Driver *: *(\\S.*?) *$");
         String dxvk = firstMatch(scanned, "(?m)^info: +DXVK: *v([\\w.\\-]+)");
-        String vkd3d = firstMatch(scanned, "vkd3d-proton *-? *applicationVersion: *([\\d][\\w.\\-]*?)\\.?\\s*$");
+        // (?m) is load-bearing and was missing here while the three above had it: without it, `$`
+        // anchors to the end of the ENTIRE concatenated scan buffer rather than end-of-line, so a
+        // version sitting on line 4 of vkd3d-proton.log could never match. Issues #191 and #192
+        // both went out with no VKD3D line despite the log being attached and holding the version
+        // — and on a D3D12 title like PRAGMATA that is the single most relevant field.
+        String vkd3d = firstMatch(scanned,
+                "(?m)^.*vkd3d-proton *-? *applicationVersion: *([\\d][\\w.\\-]*?)\\.? *$");
 
         // No DXVK log in the bundle (a native-Vulkan or wined3d run, or an app-only report) still
         // deserves a real GPU line — ask the driver directly rather than leaving it out.
