@@ -150,18 +150,23 @@ public class DXVKConfigDialog {
         // Co-locate the DXVK/DXGI (and VKD3D-Proton) logs in the same user-chosen folder as
         // wine_debug.log (issue #70). These stay SEPARATE files (<app>_d3d11.log / <app>_dxgi.log /
         // vkd3d-proton.log), just written next to the wine log instead of the game working dir.
-        java.io.File logDir = logDirOverride != null
-                ? logDirOverride
-                : com.winlator.star.core.LogLocation.resolveLogDir(context);
-        if (logDir != null) {
-            // Honour the Log Manager's "DXVK & VKD3D" switch. DXVK logs unless told otherwise, so
-            // turning it off means silencing it explicitly rather than just not choosing a path.
-            boolean dxvkLogs = androidx.preference.PreferenceManager
-                    .getDefaultSharedPreferences(context).getBoolean("enable_dxvk_logs", true);
-            if (!dxvkLogs) {
-                envVars.put("DXVK_LOG_LEVEL", "none");
-                envVars.put("VKD3D_DEBUG", "none");
-            } else {
+        // Honour the Log Manager's "DXVK & VKD3D" switch. DXVK logs unless told otherwise, so
+        // turning it off means silencing it explicitly rather than just not choosing a path.
+        //
+        // Check the switch BEFORE resolving a directory: resolving one CREATES it, so asking first
+        // is what keeps a switched-off Log Manager from still littering an empty folder per game on
+        // every launch. Callers pass null for logDirOverride when logging is off, for the same
+        // reason — see XServerDisplayActivity.dxvkLogDir().
+        boolean dxvkLogs = androidx.preference.PreferenceManager
+                .getDefaultSharedPreferences(context).getBoolean("enable_dxvk_logs", true);
+        if (!dxvkLogs) {
+            envVars.put("DXVK_LOG_LEVEL", "none");
+            envVars.put("VKD3D_DEBUG", "none");
+        } else {
+            java.io.File logDir = logDirOverride != null
+                    ? logDirOverride
+                    : com.winlator.star.core.LogLocation.resolveLogDir(context);
+            if (logDir != null) {
                 envVars.put("DXVK_LOG_PATH", logDir.getAbsolutePath());
                 envVars.put("VKD3D_LOG_FILE", new java.io.File(logDir, "vkd3d-proton.log").getAbsolutePath());
             }

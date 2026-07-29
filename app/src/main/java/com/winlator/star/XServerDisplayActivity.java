@@ -2246,10 +2246,23 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }, 1000);
     }
 
-    // Whether Wine/box64 logging is on — the single source of truth for the failure card's guidance.
+    // Whether Wine/box64 logging is on — the single source of truth for the failure card's guidance
+    // and for whether we open wine_debug.log at all (see setupXEnvironment).
     private boolean isLaunchLoggingEnabled() {
         return preferences.getBoolean("enable_wine_debug", false)
                 || preferences.getBoolean("enable_box64_logs", false);
+    }
+
+    // Where DXVK/VKD3D should write, or null when the Log Manager's "DXVK & VKD3D" switch is off.
+    // Deliberately returns null instead of resolving a path the callee will then ignore: resolving
+    // CREATES the folder, so the old unconditional call left an empty per-game folder behind on
+    // every launch even with logging fully switched off. DXVKConfigDialog silences DXVK explicitly
+    // when the switch is off, so a null here loses nothing.
+    private File dxvkLogDir() {
+        boolean dxvkLogs = preferences.getBoolean("enable_dxvk_logs", true);
+        return dxvkLogs
+                ? com.winlator.star.core.LogLocation.resolveGameLogDir(this, currentLogGameName())
+                : null;
     }
 
     // Arm/cancel the two "not-frozen" reassurance timers.
@@ -2520,28 +2533,53 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         boolean enableWineDebug = preferences.getBoolean("enable_wine_debug", false);
         String wineDebugChannels = preferences.getString("wine_debug_channels", SettingsFragment.DEFAULT_WINE_DEBUG_CHANNELS);
-        // Always include +err,+warn so the debug log captures crash info even when verbose debug is off.
-        // Prepend them to whatever the user has selected; "-all" baseline is dropped so errors surface.
+        // With debug off, say "-all" and mean it. The old value was "+err,+warn,+fixme,-all", whose
+        // comment claimed errors still surfaced — they did not. Wine parses WINEDEBUG left to right
+        // and an unprefixed "-all" clears every class on every channel, so the trailing entry
+        // overrode the three before it; those three were also written where Wine expects a CHANNEL
+        // name, not the err/warn/fixme classes they were meant to name. So this is what the old
+        // string already resolved to, now stated honestly — and with logging off nothing reads
+        // Wine's output anyway (see the guarded block below), so it just stops Wine formatting
+        // messages that are thrown away.
+        //
+        // A WINEDEBUG set by the user on the container or shortcut still wins: those env vars are
+        // merged further down and overwrite this one.
         String wineDebugValue;
         if (enableWineDebug && !wineDebugChannels.isEmpty()) {
             wineDebugValue = "+" + wineDebugChannels.replace(",", ",+");
         } else {
-            wineDebugValue = "+err,+warn,+fixme,-all";
+            wineDebugValue = "-all";
         }
         envVars.put("WINEDEBUG", wineDebugValue);
 
-        // ── Wine debug file log ────────────────────────────────────────────────
+        // ── Wine debug file log (OPT-IN) ───────────────────────────────────────
         // Writes all Wine stdout/stderr to a readable file, in the user-chosen log folder
-        // (Settings › Logs › Log location, issue #70). Defaults to
+        // (Settings › Log Manager, issue #70). Defaults to
         // /sdcard/Android/data/com.winlator.star/files/wine_debug.log; falls back there if the
         // chosen dir is missing/unwritable.
         try {
+            // Only when the user actually asked for logs. While no debug callback is registered,
+            // ProcessHelper points a process's stdout/stderr at /dev/null and spawns no reader
+            // threads at all (ProcessHelper.execGuestProgram) — so registering one unconditionally,
+            // as this block used to, quietly defeated every switch in the Log Manager AND made
+            // every launch pay for a reader thread pair, a redaction pass and a disk write per line
+            // of output, for every user, forever. Turning the switches off has to mean off.
+            //
+            // Setting WINEDEBUG cannot substitute for this gate: what lands here is the output of
+            // everything we spawn — Box64/FEXCore, wineserver, the preloader, DXVK — not just Wine.
+            //
+            // Gate on the same predicate the launch-failure card uses (Wine debug OR Box64/FEXCore),
+            // because both of those write to this one stream: either switch on means we must capture
+            // it, both off means nothing below runs — no folder, no rotation, no file, no callback.
+            //
             // Per-game folder (Settings › Log Manager). The name comes from the shortcut so the
             // folder is recognisable; a container launched with no shortcut uses the container name.
             // Rotate BEFORE opening the writer: the previous run's files move into previous/<stamp>/
             // and the oldest beyond the keep-count are pruned, so this run starts on a clean slate
             // without destroying the log of a crash the user may still want.
-            File logDir = com.winlator.star.core.LogLocation.resolveGameLogDir(this, currentLogGameName());
+            File logDir = isLaunchLoggingEnabled()
+                    ? com.winlator.star.core.LogLocation.resolveGameLogDir(this, currentLogGameName())
+                    : null;
             if (logDir != null) {
                 logDir.mkdirs();
                 // Only rotate inside a folder WE created for this game. With per-game folders off,
@@ -4034,8 +4072,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     // Original logic for DXWrapper and environment variables
     if (dxwrapper.contains("dxvk")) {
-        DXVKConfigDialog.setEnvVars(this, dxwrapperConfig, envVars,
-                com.winlator.star.core.LogLocation.resolveGameLogDir(this, currentLogGameName()));
+        DXVKConfigDialog.setEnvVars(this, dxwrapperConfig, envVars, dxvkLogDir());
         String version = dxwrapperConfig.get("version");
         if (version != null && version.equals("1.11.1-sarek")) {
             Log.d("GraphicsDriverExtraction", "Disabling Wrapper PATCH_OPCONSTCOMP SPIR-V pass");
@@ -4043,8 +4080,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
     }
     else if (dxwrapper.contains("vegas")) {
-        DXVKConfigDialog.setEnvVars(this, dxwrapperConfig, envVars,
-                com.winlator.star.core.LogLocation.resolveGameLogDir(this, currentLogGameName()));
+        DXVKConfigDialog.setEnvVars(this, dxwrapperConfig, envVars, dxvkLogDir());
     }
     else {
         WineD3DConfigDialog.setEnvVars(this, dxwrapperConfig, envVars);
