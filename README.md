@@ -60,7 +60,7 @@
 |---|---|
 | **App label** | `Bannerlator Bionic` (standard) · `Bannerlator Bionic PuBG` (pubg) · `Bannerlator Bionic Ludashi` (ludashi) |
 | **Packages** | `com.winlator.banner` (standard) · `com.tencent.ig` (pubg) · `com.ludashi.benchmark` (ludashi) |
-| **Version** | Bannerlator **V 2.9.1** — built from Star **marcescence** (`versionName 2.9.1`, `versionCode 53`) |
+| **Version** | Bannerlator **V 2.9.2** — built from Star **marcescence** (`versionName 2.9.2`, `versionCode 54`) |
 | **Android SDK** | `compileSdk 34` · `targetSdk 28` · `minSdk 26` (Android 8.0+) |
 | **Lineage** | Winlator → cmod → Bionic Nightly → Star Bionic → **marcescence** → **Bannerlator** |
 
@@ -91,6 +91,7 @@ Every report gets its own **public discussion thread**. You can reply as the ori
 - [📌 Project Notice](#-project-notice)
 - [ℹ️ Information](#ℹ️-information)
 - [🐛 Report a Mali GPU Issue](#-report-a-mali-gpu-game-issue)
+- [🆕 What's New in 2.9.2](#-whats-new-in-292)
 - [🆕 What's New in 2.9.1](#-whats-new-in-291)
 - [🆕 What's New in 2.9](#-whats-new-in-29)
 - [✨ Full Features](#-full-features)
@@ -101,6 +102,14 @@ Every report gets its own **public discussion thread**. You can reply as the ori
 - [🙏 Credits](#-credits)
 - [⚖️ Disclaimer](#️-disclaimer)
 - [📄 License](#-license)
+
+---
+
+## 🆕 What's New in 2.9.2
+
+2.9.2 is a **hotfix over 2.9.1**. It fixes one thing, and it affected everyone. Like the releases before it it's **entirely app-side** — **no ImageFS reinstall** — just install over 2.9.1.
+
+**🔇 Turning logging off now actually turns logging off.** In 2.9.1, switching every toggle in the Log Manager off did **not** stop Bannerlator writing a log, and setting `WINEDEBUG=-all` yourself didn't either. The switches chose *how chatty* Wine was; nothing told the app to stop **writing the file**, so it kept filling from everything else running underneath — the x86 translator, the Wine server, the loader, DXVK. That had a cost beyond the annoyance: when nothing is listening, Bannerlator normally discards that output without reading it, and because it was always listening, **every 2.9.1 install was writing to disk line by line on every launch**, whether you wanted logs or not. Now, with the recording switches off, no file is opened, nothing is written, no empty per-game folders are left behind, and the output is thrown away untouched. **Viewing is unaffected** — the Log Manager, viewer, per-game **View logs**, File Manager, sharing and **Report a problem** all still work on whatever is already on disk. ⚠️ With everything off a crash now leaves **no Wine log**, which is the point: to report a bug, turn **Wine debug** on, reproduce once, then use **Report a problem**. Found, reported and device-confirmed by **D4V1Z0N**.
 
 ---
 

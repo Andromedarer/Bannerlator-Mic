@@ -1,5 +1,13 @@
 # Star-Compose — Progress Log
 
+## 2026-07-29 — 🏁 **2.9.2 SHIPPED as stable — hotfix** (tag `2.9.2`, run `30456942457`, vc54, main `0a8d3286`)
+
+> Cut immediately after the off-state fix merged (`1af856db`), because the bug was live for every 2.9.1 user and cost them a per-line disk write on every launch. Version bump `0a8d3286` (vc 53→54, vn 2.9.1→2.9.2), dispatched `release.yml` with `make_prerelease=false`. ✅ Dispatch verified: run headSha == the pushed SHA.
+>
+> Full body applied post-cut via `gh release edit --notes-file`, in 2.9.1's exact layout and voice — centred logo, three badges, the `⚠️`/`>` callout idiom, the Mali report badge pair, the standing **Proton 9 arm64ec `.wcp`** section (link + size + sha256 + Xnick417x credit) and the fresh-install-has-no-Wine warning, then Credits and the root footnote. README updated to match: version row → 2.9.2/vc54, a new What's New section above 2.9.1's rather than overwriting it.
+>
+> 🙏 **Credits lead with @D4V1Z0N** — he found it, reported it, and device-confirmed the fix across off/on/off/on cycles before it shipped. The notes say so plainly ("This release is his"), and close the credits with a line about small-looking reports, because this one looked small and was not.
+
 ## 2026-07-29 — 🔇 **The Log Manager's switches never actually stopped logging** (branch `fix/log-manager-off-state` off main `b16f6dfd`)
 
 > Reported by a community tester: *"I can't completely disable the logs, even after disabling all the options in the log manager, it continues to log, even when using `WINEDEBUG=-all`."* Correct on every count, and worse than it reads.
