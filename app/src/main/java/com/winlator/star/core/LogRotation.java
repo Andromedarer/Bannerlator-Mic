@@ -120,6 +120,10 @@ public final class LogRotation {
         return n.equals("wine_debug.log")
                 || n.equals("logcat.log")
                 || n.equals("vkd3d-proton.log")
+                // _d3d8 was missing until a real log folder was inspected on device: DXVK writes
+                // AIO-Graphics-Test-32bit_d3d8.log for a D3D8 title, and without this the file is
+                // ours but invisible — never listed, never rotated, never in a report.
+                || n.endsWith("_d3d8.log")
                 || n.endsWith("_d3d9.log")
                 || n.endsWith("_d3d10.log")
                 || n.endsWith("_d3d11.log")

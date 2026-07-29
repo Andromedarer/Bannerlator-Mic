@@ -360,8 +360,14 @@ fun LogManagerScreen(onClose: () -> Unit) {
                     .padding(vertical = 6.dp, horizontal = 4.dp)
             )
             Text(
-                "Logs are scrubbed of usernames, e-mail addresses and tokens before they are written, " +
-                    "so they are safe to share. Logcat only ever contains Bannerlator's own output.",
+                // Third copy of this claim, and the one that overstated it most — "safe to share"
+                // full stop. Same correction as LogReport and LogViewerScreen: name what is actually
+                // stripped, and say plainly that paths are kept, because a path is often the thing
+                // that makes a log worth having.
+                "E-mail addresses, auth tokens and your Steam account name are scrubbed as logs are " +
+                    "written. File paths are kept so they stay useful for debugging — glance over " +
+                    "them before sharing if a folder name identifies you. Logcat only ever contains " +
+                    "Bannerlator's own output.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp,
                 modifier = Modifier.padding(top = 4.dp)
             )
