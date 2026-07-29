@@ -2548,7 +2548,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 // resolveGameLogDir returns the flat log root — which on the default location holds
                 // other subsystems' debug files, and on a custom location is a folder the user
                 // chose. Archiving and pruning in there would delete files that aren't ours.
-                if (com.winlator.star.core.LogLocation.isPerGameEnabled(this)) {
+                //
+                // Test the folder we ACTUALLY got, not the preference. resolveGameLogDir falls back
+                // to that same flat root whenever the per-game folder can't be created or isn't
+                // writable, and it does so silently — with the preference still reading "on". Asking
+                // the preference therefore answers a different question than the one that matters.
+                File flatLogRoot = com.winlator.star.core.LogLocation.resolveLogDir(this);
+                if (!logDir.equals(flatLogRoot)) {
                     com.winlator.star.core.LogRotation.rotate(
                             logDir, com.winlator.star.core.LogLocation.keepLastRuns(this));
                 }
@@ -2585,9 +2591,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 }
                 wineDebugWriter.println("--- End DX Wrapper State ---");
                 wineDebugWriter.println("=== Wine output below ===");
+                // Redact HERE, not when a report is built. This file lands somewhere the user can
+                // reach and share directly (issue #70's whole point), so it has to be safe on disk
+                // and not merely safe when it happens to leave via the Report button. The redactor
+                // short-circuits on a single cheap scan for lines no pattern could match, which is
+                // almost all Wine output, so this stays affordable on a per-line callback.
                 wineDebugLogCallback = line -> {
                     if (wineDebugWriter != null) {
-                        wineDebugWriter.println(line);
+                        wineDebugWriter.println(com.winlator.star.core.LogcatCapture.redact(line));
                     }
                 };
                 ProcessHelper.addDebugCallback(wineDebugLogCallback);

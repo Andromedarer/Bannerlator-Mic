@@ -25,16 +25,30 @@ import java.util.zip.ZipOutputStream;
  * and body and nothing else. So the app writes the zip somewhere the browser's file picker can
  * reach, prefills everything it knows, and the attach itself is one tap in the GitHub form.
  *
- * Everything in the zip goes through {@link LogcatCapture#redact} first. That matters more here
- * than anywhere else in the app: {@code wine_debug.log} is full of Windows paths, and those paths
- * routinely contain the user's account name.
+ * Everything in the zip goes through {@link LogcatCapture#redact}, line by line. Be precise about
+ * what that buys, because this bundle is destined for a PUBLIC tracker and the wording we show the
+ * user has to match the code: it strips e-mail addresses, token-shaped blobs, SteamID64s and any
+ * secret {@code SteamRepository} registered — which is the signed-in account name and refresh
+ * token, and nothing when no one has signed in. It does NOT strip a person's name out of a file
+ * path, and deliberately so; paths are usually what makes a log diagnosable. The user-facing note
+ * this class emits says exactly that rather than promising "usernames" wholesale.
+ *
+ * What goes IN the zip is decided by {@link LogInventory#filesIn}, which is allowlist-driven. It
+ * must stay that way: the log root can be a folder the user chose, full of files that are none of
+ * our business.
  */
 public final class LogReport {
 
     private static final String TAG = "LogReport";
     private static final String REPO = "The412Banner/Bannerlator";
-    /** Per-file cap. A seh-enabled Wine log can be tens of MB; the tail is the part that matters. */
-    private static final long MAX_FILE_BYTES = 2L * 1024 * 1024;
+    /**
+     * Per-file cap. A {@code +seh} Wine log runs to tens of MB, but it is also extremely uniform,
+     * so it compresses at roughly 140:1 in the zip — 8 MB of it lands as tens of KB. Being stingy
+     * here costs diagnosis and saves nothing.
+     */
+    private static final long MAX_FILE_BYTES = 8L * 1024 * 1024;
+    /** How much of an over-cap file is taken from the front: config header + startup sequence. */
+    private static final long HEAD_BYTES = 1L * 1024 * 1024;
     /** GitHub prefills through a GET; a body far past this starts getting refused by browsers. */
     private static final int MAX_BODY_CHARS = 6000;
 
@@ -72,7 +86,7 @@ public final class LogReport {
 
         try (ZipOutputStream out = new ZipOutputStream(new FileOutputStream(zip))) {
             for (File f : LogInventory.filesIn(runDir)) {
-                String text = readTailRedacted(f);
+                String text = readContentRedacted(f);
                 addEntry(out, stem + "/" + f.getName(), text);
                 included.add(f.getName());
                 scanned.append(text.length() > 8000 ? text.substring(0, 8000) : text).append('\n');
@@ -81,10 +95,11 @@ public final class LogReport {
                 File appDir = LogLocation.resolveAppLogDir(context);
                 if (appDir != null && !appDir.equals(runDir)) {
                     File[] appFiles = appDir.listFiles(f -> f.isFile()
-                            && (f.getName().equals("logcat.log") || f.getName().startsWith("crash_")));
+                            && (f.getName().equals("logcat.log")
+                                || f.getName().startsWith(CrashReporter.PREFIX)));
                     if (appFiles != null) {
                         for (File f : appFiles) {
-                            addEntry(out, "_app/" + f.getName(), readTailRedacted(f));
+                            addEntry(out, "_app/" + f.getName(), readContentRedacted(f));
                             included.add(f.getName());
                         }
                     }
@@ -146,8 +161,15 @@ public final class LogReport {
 
         b.append("### Attached\n\n");
         for (String name : included) b.append("- `").append(name).append("`\n");
-        b.append("\n_Logs are redacted of usernames, e-mail addresses and tokens before they are " +
-                "written. Attach the zip below — it is at `Download/bannerlator/reports/")
+        // Say what the redactor ACTUALLY does. The old wording promised "usernames" — but the only
+        // username it can strip is the signed-in Steam account name, and only once SteamRepository
+        // has registered it; a Windows or Android path with a person's name in it is untouched,
+        // deliberately, because those paths are usually the thing that makes a log diagnosable.
+        // Overstating this on a public tracker is worse than saying nothing.
+        b.append("\n_Scrubbed as they are written: e-mail addresses, auth tokens, and the " +
+                "signed-in Steam account name. File paths are left intact so they stay useful — " +
+                "give them a glance if one of your folder names identifies you. " +
+                "Attach the zip below — it is at `Download/bannerlator/reports/")
          .append(zip.getName()).append("`._\n");
         return b.toString();
     }
@@ -173,28 +195,82 @@ public final class LogReport {
         out.closeEntry();
     }
 
-    /** Last {@link #MAX_FILE_BYTES} of a file, redacted, with a note when it was truncated. */
-    private static String readTailRedacted(File f) {
+    /**
+     * A file's content for the bundle: redacted, and trimmed from the MIDDLE if it is huge.
+     *
+     * This used to keep the tail alone, which lost the two things a triager reads first. Issue #191
+     * is the proof: a {@code +seh} run produced a 72 MB wine_debug.log, the tail-2 MB rule threw
+     * away 97% of it, and what survived was ~12,900 copies of one repeated trace line. Gone with
+     * the head were the {@code WINEDEBUG}/{@code WINEPREFIX}/container/shortcut fields that
+     * XServerDisplayActivity writes at the top precisely so a report explains its own setup.
+     *
+     * So: keep the head AND the tail. The head carries the configuration and the startup sequence,
+     * the tail carries the failure. What goes missing is the repetitive middle, which is where the
+     * bulk lives and the least information is.
+     *
+     * The cap is also far more generous than it was, because the old one bought nothing: #191's
+     * 2 MB of repeated text compressed to a 15 KB zip entry, about 140:1. Log text this uniform
+     * costs almost nothing to carry.
+     */
+    private static String readContentRedacted(File f) {
         try {
             long len = f.length();
-            long from = len > MAX_FILE_BYTES ? len - MAX_FILE_BYTES : 0;
-            byte[] bytes = new byte[(int) (len - from)];
-            try (RandomAccessFile raf = new RandomAccessFile(f, "r")) {
-                raf.seek(from);
-                raf.readFully(bytes);
-            }
-            String text = new String(bytes);
-            if (from > 0) {
-                int nl = text.indexOf('\n');
-                if (nl >= 0) text = text.substring(nl + 1);
-                text = String.format(Locale.US,
-                        "[truncated — showing the last %d KB of %d KB]\n", MAX_FILE_BYTES / 1024, len / 1024)
-                        + text;
-            }
-            return LogcatCapture.redact(text);
-        } catch (Exception e) {
-            return "(could not read " + f.getName() + ": " + e.getMessage() + ")";
+            if (len <= MAX_FILE_BYTES) return redactByLine(readRange(f, 0, (int) len));
+
+            String head = readRange(f, 0, (int) HEAD_BYTES);
+            String tail = readRange(f, len - (MAX_FILE_BYTES - HEAD_BYTES),
+                    (int) (MAX_FILE_BYTES - HEAD_BYTES));
+            // Both cuts land mid-line; drop the partial so neither section starts or ends ragged.
+            int lastNl = head.lastIndexOf('\n');
+            if (lastNl >= 0) head = head.substring(0, lastNl + 1);
+            int firstNl = tail.indexOf('\n');
+            if (firstNl >= 0) tail = tail.substring(firstNl + 1);
+
+            String note = String.format(Locale.US,
+                    "\n[… %d KB of %d KB omitted from the middle — this report keeps the first "
+                            + "%d KB and the last %d KB …]\n\n",
+                    (len - MAX_FILE_BYTES) / 1024, len / 1024,
+                    HEAD_BYTES / 1024, (MAX_FILE_BYTES - HEAD_BYTES) / 1024);
+            return redactByLine(head) + note + redactByLine(tail);
+        } catch (Throwable t) {
+            // Throwable, not Exception: the cap is 8 MB and redacting builds a second copy, so a
+            // low-RAM device can OOM here. That must produce a report with one explanatory entry
+            // in it, not take the app down — same principle as the rest of this feature, where
+            // logging is never allowed to break the thing it is logging.
+            return "(could not read " + f.getName() + ": " + t + ")";
         }
+    }
+
+    private static String readRange(File f, long from, int count) throws Exception {
+        byte[] bytes = new byte[Math.max(count, 0)];
+        try (RandomAccessFile raf = new RandomAccessFile(f, "r")) {
+            raf.seek(Math.max(from, 0));
+            raf.readFully(bytes);
+        }
+        return new String(bytes);
+    }
+
+    /**
+     * Redact line by line, never as one blob.
+     *
+     * {@link LogcatCapture#redact} answers a failure by returning "[line withheld]" — correct for
+     * the per-line caller it was written for, catastrophic when handed a whole file, because one
+     * throw would collapse megabytes of log into a single sentence and the report would look
+     * complete. Splitting first bounds the blast radius of a failure to the line that caused it,
+     * and it is what LogcatCapture's own comment argues for on speed grounds anyway.
+     */
+    private static String redactByLine(String text) {
+        StringBuilder sb = new StringBuilder(text.length() + 64);
+        int start = 0;
+        while (start <= text.length()) {
+            int nl = text.indexOf('\n', start);
+            int end = nl < 0 ? text.length() : nl;
+            sb.append(LogcatCapture.redact(text.substring(start, end)));
+            if (nl < 0) break;
+            sb.append('\n');
+            start = nl + 1;
+        }
+        return sb.toString();
     }
 
     private static String firstMatch(String haystack, String regex) {
