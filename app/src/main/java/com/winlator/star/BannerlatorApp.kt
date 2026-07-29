@@ -22,6 +22,19 @@ class BannerlatorApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+
+        // Crash reporting first and on its own: it must be installed before anything below can throw,
+        // and it must not be inside the try/catch that swallows perf-init failures. It chains to the
+        // handler already in place, so the perf safety nets installed just after still run.
+        try {
+            if (androidx.preference.PreferenceManager.getDefaultSharedPreferences(this)
+                    .getBoolean("enable_crash_reports", true)) {
+                com.winlator.star.core.CrashReporter.install(this)
+            }
+        } catch (t: Throwable) {
+            Log.w("BannerlatorApp", "crash reporter not installed", t)
+        }
+
         try {
             // Restore-if-dirty + root probe + crash/shutdown safety nets, BEFORE anything touches a node.
             RootManager.onAppStartup(this)

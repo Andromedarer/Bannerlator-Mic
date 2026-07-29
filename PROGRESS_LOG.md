@@ -1,5 +1,100 @@
 # Star-Compose — Progress Log
 
+## 2026-07-28 — ✅ **Log Manager DEVICE-TESTED end to end — the two blocking tests PASS, five defects found and fixed** (branch `feat/log-manager` @ `6f89ed63`, run `30408135473`)
+
+> Drove the whole suite on the AYANEO Pocket FIT via the root bridge (prefs edited directly in `shared_prefs`, UI driven with `input tap/swipe` + screenshot verification). **Backed the real log folder up first** (`bannerlator-BACKUP-20260728`, 82 files, manifest-verified byte-identical) and ran every destructive test against a throwaway folder — a data-loss test must not be run on real data to find out whether the data-loss bug is fixed.
+>
+> ### 🟢 TEST 1 — rotation, per-game **OFF** + **CUSTOM** location + **keep=0** (the old data-loss path) — **PASS**
+> Planted `steam_debug.txt`, `bh_epic_debug.txt`, `bh_gog_debug.txt`, `my_notes.txt`, **`important.log` (a foreign `.log`, which the old bug matched)** and a `ReShade/preset.ini`, then launched twice. **All six survived byte-identical.** No `previous/` was created — rotation correctly stays inert while per-game folders are off, which is the designed guard.
+>
+> ### 🟢 TEST 1b — rotation actually WORKS when it should — **PASS**
+> Per-game ON, keep=2, four more launches: `previous/` went 1 → 2 → **2 with the oldest pruned**. Root decoys still byte-identical after six launches total.
+>
+> ### 🟢 TEST 2 — Delete / Clear all against foreign files — **PASS**
+> Of 9 loose files the confirm offered **4**; delete removed exactly our 4 and left every decoy + `ReShade/` untouched. **Clear all** then wiped the game folder and our logs and again left all five foreign files byte-identical. The allowlist holds.
+>
+> ### 🟢 Report button, GAME path (the untested half) — **PASS**, and it caught a follow-on
+> Issue body read `Device: AYANEO Pocket FIT` (dedup fix good) and **`GPU: Wrapper(Adreno (TM) 750)`** — a GPU at last, not the handheld. But a line labelled GPU should name the GPU: that raw DXVK device string now goes through `extractModelName` too, which the fallback path was already using.
+>
+> ### 🐛 Five defects found and fixed
+> 1. **GPU not normalized** — above.
+> 2. **"Delete Older logs logs?"** — the loose bucket is already named "Older logs", so only a game name needs the word appending.
+> 3. **Dead Delete button** — the loose bucket counts every log-shaped file but only ours are deletable, so a folder holding purely the user's files showed "5 files" then "Deletes 0 log files" with a live Delete. Now says nothing there is ours and offers only OK.
+> 4. **Browse-all dialog unusable in landscape** — title, search and chips each on their own row left **exactly one visible list row** on a landscape handheld, the form factor this runs on. Header collapsed to one row, redundant Done removed (the X closes it): **1 → 11 rows**.
+> 5. **Channel order buried the important ones** — `debug_buffer` sorted above `err`/`warn`/`fixme`/`seh`. 🔑 **My first fix (described-first) was verified on device to do nothing** — `debug_buffer` has a description too. `COMMON_WINE_CHANNELS` is the real priority order; now err/warn/fixme/seh/relay lead. Deliberately NOT selected-first: rows would jump under the finger while ticking.
+>
+> ⏭️ After testing, prefs restored (Download / per-game ON / keep 5), sandbox and test artifacts removed, and the real folder re-verified **82 files byte-identical** to the pre-test manifest. Backup kept at `/sdcard/Download/bannerlator-BACKUP-20260728`.
+
+## 2026-07-28 — ✨ **Per-shortcut "View logs" + browse all 521 Wine channels** (branch `feat/log-manager` @ `9ef0839b`, run `30405709785`)
+
+> **View logs on every shortcut.** Reaching a game's logs meant App Settings → Logs → Open Log Manager → find the game. Added to **both** menus — grid long-press and list overflow — opening the viewer on that game directly. New `LogInventory.forGame()` does the lookup, and 🔑 deliberately does **not** call `LogLocation.resolveGameLogDir`: **that creates the folder**, and asking whether logs exist must not.
+>
+> 🔑 The two empty cases are told apart rather than both opening a blank viewer. With per-game folders **off**, every game writes into one shared directory under names that cannot be attributed to a shortcut — there is no honest "this game's logs" to show, so it says that and points at the setting. On-but-nothing-captured says that instead.
+>
+> **Browse all 521 channels.** The picker showed 18 chips and a search field, and **search only helps once you know a name to type** — so 503 channels were effectively unreachable. Added a **"Browse all 521…" chip as the last item in the flow** (reading as "and the rest are through here" rather than as another channel) opening a scrollable dialog over the whole catalog, **grouped by family**: 521 names in one alphabetical column is technically all of them and practically unreadable, whereas "Sound" holding 15 is something a user can shop from. In-dialog search, an "On only" filter, and a **"What's this?"** toggle putting a one-line explanation under every row — off by default because it triples row height.
+>
+> 🔑 **New `WineChannelInfo.kt` works in two tiers, and the split is the point.** 185 hand-written descriptions for the channels genuinely worth knowing, and a prefix/suffix `categoryOf` classifier covering all 521 so the tail gets a **true** sentence ("Direct3D and graphics — output from Wine's `d3dxof` component") rather than an invented one. Nobody can honestly write 521 accurate descriptions. 📌 **Rule for future edits: if the specific behaviour isn't known, leave it out of `DESCRIPTIONS` and let the category answer.** Verified every described key exists in `wine_debug_channels.json` — dropped `trace`/`pid`/`timestamp`/`server`/`virtual`, which are debug *classes* and output modifiers, not channels.
+>
+> ⏭️ Both are **built and CI-green but NOT device-tested** (staged `bannerlator-logmgr9-9ef0839-standard.apk`).
+
+## 2026-07-28 — 🐛 **Report button named the handheld as the GPU** (branch `feat/log-manager` @ `c2d14099`, run `30403529505`)
+
+> Device test of the new **Report** button: the prefilled GitHub issue read ``- GPU: `AYANEO AYANEO Pocket FIT` `` — the device, not the GPU.
+>
+> **🔑 Every fact extractor in `LogReport.facts()` was an unanchored regex, so each matched the first thing that looked close enough.** `Device *: *(.+)` was written for DXVK's `info:    Device : Adreno (TM) 750`, but our OWN logcat header line — `Device: AYANEO AYANEO Pocket FIT`, written by `LogcatCapture.deviceHeader` at the top of `logcat.log` — sits in the same scanned blob and wins. For an **app-bucket report it is the only line that can ever match**, which is exactly the report in the screenshot (zip `app-2026-07-28_17-59-45.zip`). Two more of the four were broken the same way and had simply not been noticed: `DXVK: *v?(…)` also matches `DXVK: Read 46 valid state cache entries` → version `"Read"` whenever that line lands first, and `vkd3d-proton *v?(…)` captured the `-` out of `vkd3d-proton - applicationVersion: 3.0.1`.
+>
+> All four re-anchored to the shape the writing layer actually emits (`(?m)^info: +Device *: *…`, etc.), verified against the real logs on device — `Adreno (TM) 750` / `turnip Mesa driver (whitebelyash branch) 26.1.99` / `3.0-gplasync` / `3.0.1`, with the old patterns reproducing the bug on the same input.
+>
+> Added a fallback to `GPUInformation.getRenderer(null, null)` → `extractModelName` when no DXVK log is in the bundle, so app-only, native-Vulkan and wined3d reports still carry a real GPU instead of dropping the line.
+>
+> Also `LogcatCapture.deviceHeader` no longer repeats itself — MANUFACTURER/BRAND/MODEL overlap on most devices and the naive join produced the doubled "AYANEO AYANEO Pocket FIT" in the System block too.
+
+## 2026-07-28 — 🗂️ **Log Manager pass 3 — dead "Open in File Manager" fixed + laid out to match the approved mockup** (branch `feat/log-manager`)
+
+> Device screenshot showed the buttons doing nothing and the bottom half of the screen still not matching the HTML mockup (`/sdcard/Download/bannerlator-log-manager-plan.html`). Installed APK verified first: device base.apk sha256 `883a8ebf…14683582` == the staged `bannerlator-logmgr2-8239a36-standard.apk`, so this was the real build, not a stale install.
+>
+> **🐛 THE BUG: the restyle commit `8239a364` deleted the dialog that HOSTS the File Manager.** `browseDir` was still written by "Open in File Manager" and by "Manage" — and read by nothing. The `browseDir?.let { Dialog { FileManagerScreen(initialDir = dir) } }` block existed in `96742d22` and did not survive the 405-line rewrite, so both buttons set state into the void. Restored, plus the opaque `Surface` wrapper (a Dialog window is transparent and the File Manager paints no background of its own) and the re-scan on close.
+>
+> **Laid out to the mockup** — the remaining gaps were all in the bottom half:
+> - **Per-game cards** now carry the design's three-up **View · Share · Delete** row under a divider, replacing the single full-width "Open in File Manager" button. Icon tile picks 🎮 / ⚙️ / 📱 by group type.
+> - **New `ui/screens/LogViewerScreen.kt` — mockup screen 3, which had never been built.** File chips, a live **● following** tail, monospace body with severity colouring (err red / warn amber / layer chatter blue), and **Wrap · Find · Copy · Share**. Reads only the **last 256 KB** (`RandomAccessFile` seek, partial first line dropped) capped at 4000 lines — a Wine debug log with `seh` on reaches tens of MB in minutes, and a full read on the main thread would jank the dialog. Find filters lines with a match count; one shared horizontal scroll state so no-wrap mode can't shear lines apart.
+> - **Housekeeping** matches the mockup: "Keep last" is a value row with a **▾ preset menu** (0/1/3/5/10/20/50) instead of a −/+ stepper, and the total-size row regains **Clear all** in red, with **Browse** next to it for the File Manager.
+> - "Explain the log types" demoted from a filled accent button to a text link, and "Capture logcat now" from filled to outlined — the design keeps solid accent for switches only.
+>
+> **⚠️ Delete and Clear all reverse an earlier decision, so they are built to be incapable of the old bug.** `LogInventory.deleteGroup()` walks the folder and removes only names on `LogRotation.isOurRunLog`'s allowlist (now public, so there is exactly ONE definition of "a log we wrote") plus our own `crash_*.txt`; it recurses solely into the `previous/` archive we created, and removes the folder itself only when we emptied it and it is not the log root. `steam_debug.txt`, `bh_*_debug.txt`, ReShade/ and anything a user put in a custom log folder are untouchable by construction, not by care. Both actions confirm first and say the file count.
+> - Sharing copies to `cacheDir/logs/share` before handing a URI to the chooser (new `log_share` cache-path in `file_paths.xml`) — logs can live in a user-picked folder and granting a chooser access to that folder is not something to do casually.
+>
+> ⏭️ Device test still owes: rotation with **per-game OFF + a CUSTOM location** (the data-loss path), the new Delete/Clear all against a folder holding foreign files, and the viewer following a live game.
+
+## 2026-07-28 — 🗂️ **LOG MANAGER — built, CI-green, staged, NOT merged, NOT device-tested** (branch `feat/log-manager` @ `8239a36`, run `30389992534`)
+
+> ⏸️ **PAUSED — user at work, resuming later.** Staged `/sdcard/Download/bannerlator-logmgr2-8239a36-standard.apk` sha256 `883a8ebf…14683582` (host==device). Nothing merged; `main` untouched at `cc526ac2`.
+>
+> **What it is.** One Log Manager screen replacing the old Settings › Logs section: where logs go, which types to record, Wine channel chips, retention, and what is on disk per game. Same shape as the Performance screen incl. an always-live **`?` on every toggle whose copy LEADS WITH THE PERFORMANCE COST** (user's explicit ask). New files: `core/LogRotation.java`, `core/LogcatCapture.java`, `core/LogInventory.java`, `core/CrashReporter.java`, `ui/screens/LogManagerScreen.kt`; extended `core/LogLocation.java`.
+>
+> **User decisions (locked):** (1) game folders named after the **shortcut** (container name when no shortcut); (2) **leave** pre-existing flat logs alone, no migration; (3) **keep last 5**, user-adjustable via stepper; (4) originally "both surfaces" but **REVERSED after testing → App Settings ONLY**; the in-game entry was fully reverted (drawer row, `onLogManager`, `LOG_MANAGER` enum, host branch, activity callback — verified zero dangling refs). Correct call: the screen hosts a directory-picker launcher and the File Manager, neither safe inside XServerDisplayActivity.
+>
+> **Per-game folders are clean because we own all three destinations:** `DXVK_LOG_PATH` is a *directory* (DXVK names files itself), `VKD3D_LOG_FILE` a full path we set, `wine_debug.log` we write. No renaming or parsing needed.
+>
+> **🔐 SECURITY (user asked — the answer was "no, not automatically").** `SteamLogRedactor` only guarded the Steam diagnostic files. Now applied to logcat capture (per line, streaming) **and** crash reports **including the exception message and stack trace** — those routinely carry a tokenised URL or a path under the account name. Redaction failure drops the line rather than emitting it raw. 🔑 **Logcat is APP-ONLY BY DELIBERATE DESIGN — no system-wide capture even with root granted** (user's call): it would sweep other apps' data into a file we invite users to share, and our redactor cannot know a third party's secrets. I had added `RootManager.runCommand()` for that and **removed it again** rather than widen the su surface for an unshipped path.
+>
+> **🕵️ REVIEW AGENT CAUGHT TWO SHIP-BLOCKERS** (user asked for the handoff — vindicated):
+> 1. **Hard compile break** — a Kotlin local `fun saveMode()` referenced `refreshTick` declared 22 lines BELOW it. Locals resolve in declaration order. Signature damage from scripted text patching.
+> 2. **Guaranteed clobber, would have hit every user** — the old Logs UI was deleted but the Settings **Save FAB still wrote all five keys** from `remember{}`-ed state snapshotted at first composition. LogManagerScreen is a `Dialog` INSIDE SettingsScreen's composition, so SettingsScreen is never disposed and never re-reads. Repro: set anything in the manager → close → tap Save → silently reverts.
+> 3. **DATA LOSS, fixed after** — `LogRotation` matched **any `.log`/`.txt`** and ran on whatever `resolveGameLogDir()` returned. With per-game folders OFF that is the shared log root, which already holds `steam_debug.txt`, `steam_session.txt`, `bh_epic_debug.txt`, `bh_gog_debug.txt`, `bh_amazon_debug.txt`; with `MODE_CUSTOM` it is a folder the USER picked. Every launch archived them and pruning deleted them — **immediately with keep=0**. Now an explicit allowlist of names we write, **never `.txt`**, and rotation only runs when per-game folders are ON.
+> 4. **`LogInventory.delete()` DELETED OUTRIGHT** rather than fixed — it `deleteTree()`'d whatever dir an Entry pointed at, safe only while `scan()` never returned a folder we didn't create (it did: `ReShade/` under the default location). Deleting now goes through the File Manager. **That is why there is no "Clear all" button.**
+> 5. Logcat capture ran `Runtime.exec` + redaction + file write **on the UI thread** against its own documented contract → moved to `Dispatchers.IO`.
+>
+> **Two of my own bugs found by user device-testing:** `FileManagerScreen` honoured `initialDir` **only in pickMode** (browse mode hardcoded `/storage/emulated/0`) — that's why "Open" landed at Internal; and the FM shown in a `Dialog` was **transparent** (Dialog windows are, and FM draws no background of its own, normally sitting in the nav-host scaffold) → wrapped in an opaque `Surface`.
+>
+> **Restyle:** first cut drifted badly from the approved HTML mockup (`/sdcard/Download/bannerlator-log-manager-plan.html`). Now matches: section labels above cards, location as value+path row with *Change*, per-toggle hint lines, real chips with *+ add*/*reset*, retention stepper, total size, per-game cards with icon + relative time + one *Open in File Manager*.
+>
+> **⏭️ OPEN WHEN RESUMING:**
+> - **DEVICE TEST, priority one:** rotation with **per-game folders OFF + a CUSTOM location** (the data-loss path), plus normal per-game rotation across two launches, the `?` dialogs, and the FM opening at the right folder with an opaque background.
+> - **Untouched review findings:** disk I/O during composition (`LogInventory.scan` + recursive `sizeOfTree` synchronously in composition); DXVK toggle OFF no longer sets `DXVK_LOG_PATH`, so stray logs may fall back to the game's working dir — confirm on device.
+> - **Dead code to sweep in `SettingsScreen.kt`:** orphaned `enableWineDebug`/`wineDebugChannels`/`enableBox64Logs`/`logLocationMode`/`logLocationCustomPath`/`showLogLocationDropdown`/`logLocationDirLauncher` and the whole ~44-line `showDebugChannelDialog` block (nothing sets it true any more). Warnings only — `allWarningsAsErrors` is off.
+> - ⚠️ **SCOPE CREEP to decide:** this branch also corrects the stale Performance blurb ("coming soon — root-only controls" → "plus the opt-in root controls"). Correct post-2.9 but not Log Manager work — pull it out or keep it.
+
 ## 🔖 NEXT RELEASE NOTES — carry these into the next release body
 
 > **📥 Proton 9 is no longer bundled — link it in every release from now on.** A fresh install now ships with **NO Wine at all**; the user installs one from the in-app catalog on first run (the create-container guard says so). Add to the release body, next to the APK assets:

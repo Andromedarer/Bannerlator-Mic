@@ -2536,9 +2536,22 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // /sdcard/Android/data/com.winlator.star/files/wine_debug.log; falls back there if the
         // chosen dir is missing/unwritable.
         try {
-            File logDir = com.winlator.star.core.LogLocation.resolveLogDir(this);
+            // Per-game folder (Settings › Log Manager). The name comes from the shortcut so the
+            // folder is recognisable; a container launched with no shortcut uses the container name.
+            // Rotate BEFORE opening the writer: the previous run's files move into previous/<stamp>/
+            // and the oldest beyond the keep-count are pruned, so this run starts on a clean slate
+            // without destroying the log of a crash the user may still want.
+            File logDir = com.winlator.star.core.LogLocation.resolveGameLogDir(this, currentLogGameName());
             if (logDir != null) {
                 logDir.mkdirs();
+                // Only rotate inside a folder WE created for this game. With per-game folders off,
+                // resolveGameLogDir returns the flat log root — which on the default location holds
+                // other subsystems' debug files, and on a custom location is a folder the user
+                // chose. Archiving and pruning in there would delete files that aren't ours.
+                if (com.winlator.star.core.LogLocation.isPerGameEnabled(this)) {
+                    com.winlator.star.core.LogRotation.rotate(
+                            logDir, com.winlator.star.core.LogLocation.keepLastRuns(this));
+                }
                 File logFile = new File(logDir, "wine_debug.log");
                 wineDebugWriter = new java.io.PrintWriter(
                         new java.io.BufferedWriter(new java.io.FileWriter(logFile, false)), true);
@@ -4010,7 +4023,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     // Original logic for DXWrapper and environment variables
     if (dxwrapper.contains("dxvk")) {
-        DXVKConfigDialog.setEnvVars(this, dxwrapperConfig, envVars);
+        DXVKConfigDialog.setEnvVars(this, dxwrapperConfig, envVars,
+                com.winlator.star.core.LogLocation.resolveGameLogDir(this, currentLogGameName()));
         String version = dxwrapperConfig.get("version");
         if (version != null && version.equals("1.11.1-sarek")) {
             Log.d("GraphicsDriverExtraction", "Disabling Wrapper PATCH_OPCONSTCOMP SPIR-V pass");
@@ -4018,7 +4032,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
     }
     else if (dxwrapper.contains("vegas")) {
-        DXVKConfigDialog.setEnvVars(this, dxwrapperConfig, envVars);
+        DXVKConfigDialog.setEnvVars(this, dxwrapperConfig, envVars,
+                com.winlator.star.core.LogLocation.resolveGameLogDir(this, currentLogGameName()));
     }
     else {
         WineD3DConfigDialog.setEnvVars(this, dxwrapperConfig, envVars);
@@ -4834,6 +4849,20 @@ return true;
         } else {
             com.winlator.star.perf.PerformanceSettings.INSTANCE.setGlobalDefault(key, on);
         }
+    }
+
+    /**
+     * Name of the folder this launch's logs go in. The shortcut name is what the user recognises in
+     * the library, so it wins; a container booted straight to the desktop has no shortcut and uses
+     * the container's own name ("Container-2"), which is still what they see in the Containers list.
+     * Sanitising happens in {@link com.winlator.star.core.LogLocation#sanitizeFolderName}.
+     */
+    private String currentLogGameName() {
+        if (shortcut != null && shortcut.name != null && !shortcut.name.trim().isEmpty())
+            return shortcut.name;
+        if (container != null && container.getName() != null && !container.getName().trim().isEmpty())
+            return container.getName();
+        return com.winlator.star.core.LogLocation.APP_FOLDER;
     }
 
     // The LIVE effect of a perf key (independent of persistence), so both a toggle flip and a
