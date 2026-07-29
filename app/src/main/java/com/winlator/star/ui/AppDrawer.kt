@@ -55,8 +55,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.winlator.star.R
 import com.winlator.star.communityconfigs.AccountManager
+import com.winlator.star.core.StorageRoots
 import com.winlator.star.ui.theme.AppThemeState
 import com.winlator.star.ui.theme.LocalAccentDim
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private fun iconFor(screen: Screen): Int = when (screen) {
     Screen.Containers    -> R.drawable.icon_menu_container
@@ -230,8 +233,12 @@ private fun DrawerSectionHeader(title: String, note: String? = null, showDivider
 
 @Composable
 private fun StorageWidget() {
+    val context = LocalContext.current
     var usedBytes by remember { mutableStateOf(0L) }
     var totalBytes by remember { mutableStateOf(0L) }
+    // Removable volumes found at open, as (label, used, total). Empty on a device with no card,
+    // which is the normal case — the row simply does not appear.
+    var removable by remember { mutableStateOf<List<Triple<String, Long, Long>>>(emptyList()) }
 
     LaunchedEffect(Unit) {
         try {
@@ -242,8 +249,44 @@ private fun StorageWidget() {
             usedBytes = total - available
             totalBytes = total
         } catch (_: Exception) {}
+
+        // Ask StorageRoots rather than listing /storage here. A card can be mounted and healthy
+        // yet missing from this process's mount view, which is exactly what made earlier SD
+        // detection unreliable; StorageRoots already reconciles StorageManager, the app-specific
+        // dirs and the filesystem listing.
+        // Off the main thread: this crosses Binder to StorageManager and lists directories, and
+        // it runs while the drawer is opening.
+        removable = withContext(Dispatchers.IO) {
+            try {
+                StorageRoots.list(context)
+                    .filter { it.removable }
+                    .mapNotNull { root ->
+                        try {
+                            val stat = StatFs(root.dir.path)
+                            val total = stat.totalBytes
+                            // A volume we cannot stat reports zero. A card reading "0 B / 0 B" is
+                            // worse than no card at all, so drop it instead.
+                            if (total <= 0L) null
+                            else Triple(root.label, total - stat.availableBytes, total)
+                        } catch (_: Exception) {
+                            null
+                        }
+                    }
+            } catch (_: Exception) {
+                emptyList()
+            }
+        }
     }
 
+    StorageCard("Internal Storage", usedBytes, totalBytes)
+    removable.forEach { (label, used, total) ->
+        Spacer(Modifier.height(4.dp))
+        StorageCard(label, used, total)
+    }
+}
+
+@Composable
+private fun StorageCard(label: String, usedBytes: Long, totalBytes: Long) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -260,7 +303,7 @@ private fun StorageWidget() {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Storage",
+                    text = label,
                     color = MaterialTheme.colorScheme.onSurface,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
