@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-07-29T06-26-16-23041b",
+    "created": "2026-07-29T06:26:16.052Z",
+    "reporter": "Unknown",
+    "device": "Infinix hot 30i",
+    "gpu": "G37",
+    "game": "Eruo simulator",
+    "symptom": "Other",
+    "logs": 0
+  },
+  {
     "id": "2026-07-29T03-36-51-a8e6ad",
     "created": "2026-07-29T03:36:51.304Z",
     "reporter": "Elc",
