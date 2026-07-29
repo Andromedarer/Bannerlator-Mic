@@ -60,7 +60,7 @@
 |---|---|
 | **App label** | `Bannerlator Bionic` (standard) · `Bannerlator Bionic PuBG` (pubg) · `Bannerlator Bionic Ludashi` (ludashi) |
 | **Packages** | `com.winlator.banner` (standard) · `com.tencent.ig` (pubg) · `com.ludashi.benchmark` (ludashi) |
-| **Version** | Bannerlator **V 2.9** — built from Star **marcescence** (`versionName 2.9`, `versionCode 52`) |
+| **Version** | Bannerlator **V 2.9.1** — built from Star **marcescence** (`versionName 2.9.1`, `versionCode 53`) |
 | **Android SDK** | `compileSdk 34` · `targetSdk 28` · `minSdk 26` (Android 8.0+) |
 | **Lineage** | Winlator → cmod → Bionic Nightly → Star Bionic → **marcescence** → **Bannerlator** |
 
@@ -91,6 +91,7 @@ Every report gets its own **public discussion thread**. You can reply as the ori
 - [📌 Project Notice](#-project-notice)
 - [ℹ️ Information](#ℹ️-information)
 - [🐛 Report a Mali GPU Issue](#-report-a-mali-gpu-game-issue)
+- [🆕 What's New in 2.9.1](#-whats-new-in-291)
 - [🆕 What's New in 2.9](#-whats-new-in-29)
 - [✨ Full Features](#-full-features)
 - [🎨 Adding your own ReShade effects](#-adding-your-own-reshade-effects)
@@ -100,6 +101,22 @@ Every report gets its own **public discussion thread**. You can reply as the ori
 - [🙏 Credits](#-credits)
 - [⚖️ Disclaimer](#️-disclaimer)
 - [📄 License](#-license)
+
+---
+
+## 🆕 What's New in 2.9.1
+
+2.9.1 is a **point release over 2.9**, headlined by a full **Log Manager** — so when something breaks you can capture exactly what happened and file a report with the logs already attached — plus a set of drawer and library controls and a **non-root** GPU max-clock. Like the releases before it it's **entirely app-side** — **no ImageFS reinstall** — your containers, themes, custom accent and per-game settings carry over untouched; just install over 2.9.
+
+**🗂️ Log Manager.** One screen for everything logging, at **App Settings → Logs → Open Log Manager**. A **folder per game** with **keep-last-N rotation** and a choice of location (app data, Download, Documents, or a folder you pick). Choose exactly **what gets recorded** — Wine debug, Box64/FEXCore, DXVK & VKD3D, Android logcat, crash reports — with a **"?"** on every toggle whose copy **leads with the performance cost**, because two of them genuinely slow games down. **Browse all 521 Wine debug channels**, grouped by family (graphics, sound, input, networking…) with a **"What's this?"** switch that explains each in plain English, while the 18 everyday channels stay one tap away. A built-in **log viewer** with file tabs, a live **following** tail, severity colouring, find, wrap, copy and share — it reads only the tail of a file, so a multi-gigabyte Wine log opens instantly. **View logs on any game** straight from the library: long-press in grid view, or the ⋮ menu in list view. And **Report a problem** builds a **redacted** zip of the run and opens a GitHub issue pre-filled with device, app version, GPU, driver and DXVK/VKD3D versions. **Redaction runs before anything is written** — usernames, e-mail addresses and tokens are stripped from logs, crash reports and stack traces alike — and logcat capture is **Bannerlator's own output only**, never system-wide, even with root. Delete and **Clear all** remove **only** files Bannerlator wrote; anything else in your log folder is left alone by construction.
+
+**⚡ Lock GPU to max clock — without root.** On **Adreno** devices this control no longer needs root: on a Snapdragon handheld it took the GPU from 231 MHz to **1000 MHz** with root never granted. With root, the original path is still used; turning it off restores the clock either way.
+
+**🎨 Drawer & library controls.** **Appearance → Side Menu** gains switches to hide the **game stores** section, **internal storage** and **SD card storage**, each independently. The drawer's storage bar is now labelled **Internal Storage**, and a card in the device gets **its own card** beneath it. The **+ button** on Games and Containers can be **long-pressed and slid along the bottom**, so it stops covering a card's play or ⋮ button, and it stays where you put it. Games also gains **multi-select removal** (list *and* grid) and a third view mode — a **four-across compact grid**.
+
+**🔧 Graphics & runtime.** **Vulkan 1.4 by default**, with the exported version **clamped to the minor your driver actually reports** (picking 1.4 on a 1.3 driver used to produce a version string no driver would accept). New containers on **non-Adreno GPUs** default to **wrapper-gamenative**. And FEXCore's SMC-checks variable was being set under the wrong name — it is `FEX_SMCCHECKS`, so that setting now actually applies.
+
+**📦 Smaller install.** The APK is **~103 MB smaller**: the bundled Proton 9 is gone, because that bundled copy never launched. Wine installs from the in-app catalog on first run instead. ⚠️ **A fresh install ships with no Wine at all** — open **Containers → the download icon** and install a Proton before creating a container. Updating from 2.9 changes nothing. If you want Proton 9, the working **arm64ec `.wcp`** is a direct download: **[proton-9.0-arm64ec.wcp](https://github.com/The412Banner/Nightlies/releases/download/Proton/wine/proton-9.0-arm64ec.wcp)** (66.7 MB, compiled as a wcp by **Xnick417x**) — install it via **Containers → download icon**.
 
 ---
 
