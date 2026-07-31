@@ -429,8 +429,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (pids == null) return null;
         boolean d3d12 = false, d3d11 = false, d3d10 = false, d3d9 = false;
         boolean vulkan = false, opengl = false;
+        String dxPid = null;   // pid of the process holding the d3d12 modules (the game) — for log correlation
         for (java.io.File p : pids) {
             if (!p.isDirectory() || !android.text.TextUtils.isDigitsOnly(p.getName())) continue;
+            boolean pHasD3d12 = false;
             try (java.io.BufferedReader r = new java.io.BufferedReader(
                     new java.io.FileReader(new java.io.File(p, "maps")))) {
                 String line;
@@ -439,7 +441,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     // NOTE: do NOT break on the d3d12 hit — a dual-API build maps d3d12core.dll for a
                     // startup probe yet renders on d3d11 (both resident), so we must keep scanning this
                     // process to learn whether d3d11 is ALSO mapped (resolved below via the engine log).
-                    if (line.indexOf("d3d12core.dll") >= 0 || line.indexOf("d3d12.dll") >= 0) d3d12 = true;
+                    if (line.indexOf("d3d12core.dll") >= 0 || line.indexOf("d3d12.dll") >= 0) { d3d12 = true; pHasD3d12 = true; }
                     else if (line.indexOf("d3d11.dll") >= 0) d3d11 = true;
                     else if (line.indexOf("d3d10.dll") >= 0) d3d10 = true;
                     else if (line.indexOf("d3d9.dll") >= 0)  d3d9  = true;
@@ -453,7 +455,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     if (d3d12 && d3d11) break;
                 }
             } catch (Exception ignore) {}
-            if (d3d12) break;   // top priority — nothing outranks D3D12, so stop scanning early
+            // The first process carrying d3d12 IS the game — remember its pid so the engine-log
+            // resolver can prove the log belongs to it (not a stale one from another game). Break
+            // here keeps the old top-priority early-exit.
+            if (pHasD3d12) { dxPid = p.getName(); break; }
         }
         final String SEP = " · ";                       // " · " (middle dot)
         // 1. D3D wins over the API it is layered on (rank 12 > 11 > 10 > 9).
@@ -463,7 +468,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // DLL stays resident, so module presence would report D3D12 forever. When BOTH are mapped,
             // ask the engine's own log which device it actually created (the only host-visible truth).
             if (d3d11) {
-                String resolved = resolveDualApiFromEngineLog(wrapper);
+                String resolved = resolveDualApiFromEngineLog(wrapper, dxPid);
                 if (resolved != null) return resolved;
             }
             return "D3D12" + SEP + "VKD3D";                  // D3D12 always runs on VKD3D
@@ -502,13 +507,18 @@ public class XServerDisplayActivity extends AppCompatActivity {
      * resolves). Unity's capability-probe lines read "D3D12 Device Filter", NOT "Direct3D 12", so
      * they never false-positive here.
      *
-     * @return "D3D12 · VKD3D" / "D3D11 · &lt;wrapper&gt;" / etc., or null when no engine log is
-     *         available (non-Unity title, or not written yet) so the caller keeps the module result.
+     * @param pid pid of the running game process (holder of the d3d12 modules) — used to prove the
+     *            chosen log belongs to THIS game, not a stale one left by a different title.
+     * @return "D3D12 · VKD3D" / "D3D11 · &lt;wrapper&gt;" / etc., or null when no engine log that
+     *         belongs to the running game is available (non-Unity title, logs off, or not written
+     *         yet) so the caller keeps the module-presence result.
      */
-    private String resolveDualApiFromEngineLog(String wrapper) {
+    private String resolveDualApiFromEngineLog(String wrapper, String pid) {
         try {
+            String gameDir = runningGameDirToken(pid);
+            if (gameDir == null) return null;
             File localLow = new File(imageFs.home_path, ".wine/drive_c/users/xuser/AppData/LocalLow");
-            File log = newestPlayerLog(localLow);
+            File log = matchingPlayerLog(localLow, gameDir);
             if (log == null) return null;
             long mtime = log.lastModified(), len = log.length();
             if (mtime == lastEngineLogMtime && len == lastEngineLogLen) return lastEngineLogApi;
@@ -535,13 +545,37 @@ public class XServerDisplayActivity extends AppCompatActivity {
         } catch (Exception ignore) { return null; }
     }
 
-    /** Newest {@code AppData/LocalLow/<company>/<product>/Player.log} under the prefix (the running game's). */
-    private File newestPlayerLog(File localLow) {
-        if (localLow == null || !localLow.isDirectory()) return null;
+    /**
+     * The running game's install directory, normalized (forward slashes, lowercase) — e.g.
+     * {@code e:/winlator/games/mortal sin}. Read from {@code /proc/<pid>/cmdline}, whose argv[0] is
+     * the game's Windows exe path (wine sets it). Returns null if unreadable, so the caller falls
+     * back safely. This is the token we require inside a Player.log before trusting it.
+     */
+    private String runningGameDirToken(String pid) {
+        if (pid == null) return null;
+        try (java.io.FileReader fr = new java.io.FileReader(new java.io.File("/proc/" + pid + "/cmdline"))) {
+            StringBuilder sb = new StringBuilder();
+            int c;
+            while ((c = fr.read()) != -1 && c != 0) sb.append((char) c);   // argv[0] only (stop at first NUL)
+            String norm = sb.toString().trim().replace('\\', '/').toLowerCase();
+            int slash = norm.lastIndexOf('/');
+            return slash > 0 ? norm.substring(0, slash) : null;            // strip the exe filename
+        } catch (Exception ignore) { return null; }
+    }
+
+    /**
+     * The newest {@code AppData/LocalLow/<company>/<product>/Player.log} that PROVABLY belongs to the
+     * running game — i.e. whose header records the same install directory ({@code gameDir}) via
+     * Unity's "Mono path[0] = 'E:/.../<Game>/<Game>_Data/Managed'" line. A stale log from a different
+     * game (or a non-Unity title with no log) won't match, so the resolver falls back rather than
+     * mislabeling. This is the hardening: correlate by identity, not by recency.
+     */
+    private File matchingPlayerLog(File localLow, String gameDir) {
+        if (localLow == null || gameDir == null || !localLow.isDirectory()) return null;
         File[] companies = localLow.listFiles();
         if (companies == null) return null;
-        File newest = null;
-        long newestMtime = Long.MIN_VALUE;
+        File best = null;
+        long bestMtime = Long.MIN_VALUE;
         for (File company : companies) {
             if (!company.isDirectory()) continue;
             File[] products = company.listFiles();
@@ -549,13 +583,27 @@ public class XServerDisplayActivity extends AppCompatActivity {
             for (File product : products) {
                 if (!product.isDirectory()) continue;
                 File log = new File(product, "Player.log");
-                if (log.isFile() && log.lastModified() > newestMtime) {
-                    newestMtime = log.lastModified();
-                    newest = log;
+                if (log.isFile() && log.lastModified() > bestMtime && logBelongsToGame(log, gameDir)) {
+                    bestMtime = log.lastModified();
+                    best = log;
                 }
             }
         }
-        return newest;
+        return best;
+    }
+
+    /** Whether {@code log}'s header names {@code gameDir} (Unity records the install path near the top). */
+    private boolean logBelongsToGame(File log, String gameDir) {
+        try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(log))) {
+            String line;
+            int n = 0;
+            while ((line = r.readLine()) != null && n++ < 60) {   // Mono path / data path live near the top
+                if (line.indexOf("Mono path[0]") >= 0 || line.indexOf("data path") >= 0) {
+                    if (line.replace('\\', '/').toLowerCase().indexOf(gameDir) >= 0) return true;
+                }
+            }
+        } catch (Exception ignore) {}
+        return false;
     }
 
     /**
