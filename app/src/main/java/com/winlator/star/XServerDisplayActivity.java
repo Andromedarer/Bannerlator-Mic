@@ -436,7 +436,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 String line;
                 while ((line = r.readLine()) != null) {
                     if (line.indexOf(".dll") < 0) continue;
-                    if (line.indexOf("d3d12core.dll") >= 0 || line.indexOf("d3d12.dll") >= 0) { d3d12 = true; break; }
+                    // NOTE: do NOT break on the d3d12 hit — a dual-API build maps d3d12core.dll for a
+                    // startup probe yet renders on d3d11 (both resident), so we must keep scanning this
+                    // process to learn whether d3d11 is ALSO mapped (resolved below via the engine log).
+                    if (line.indexOf("d3d12core.dll") >= 0 || line.indexOf("d3d12.dll") >= 0) d3d12 = true;
                     else if (line.indexOf("d3d11.dll") >= 0) d3d11 = true;
                     else if (line.indexOf("d3d10.dll") >= 0) d3d10 = true;
                     else if (line.indexOf("d3d9.dll") >= 0)  d3d9  = true;
@@ -445,13 +448,26 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     // vulkan-1.dll, hence the D3D-first ordering below.
                     else if (line.indexOf("winevulkan.dll") >= 0 || line.indexOf("vulkan-1.dll") >= 0) vulkan = true;
                     else if (line.indexOf("opengl32.dll") >= 0) opengl = true;
+                    // Once BOTH top ranks are seen we have everything the ambiguous dual-API case needs;
+                    // stop scanning this process early (perf parity with the old break-on-d3d12).
+                    if (d3d12 && d3d11) break;
                 }
             } catch (Exception ignore) {}
             if (d3d12) break;   // top priority — nothing outranks D3D12, so stop scanning early
         }
         final String SEP = " · ";                       // " · " (middle dot)
         // 1. D3D wins over the API it is layered on (rank 12 > 11 > 10 > 9).
-        if (d3d12) return "D3D12" + SEP + "VKD3D";           // D3D12 always runs on VKD3D
+        if (d3d12) {
+            // Ambiguous dual-API build: a Unity title started with -force-d3d11 still LoadLibrary's
+            // d3d12core.dll for a one-time D3D12 capability probe and then renders on d3d11. The probe
+            // DLL stays resident, so module presence would report D3D12 forever. When BOTH are mapped,
+            // ask the engine's own log which device it actually created (the only host-visible truth).
+            if (d3d11) {
+                String resolved = resolveDualApiFromEngineLog(wrapper);
+                if (resolved != null) return resolved;
+            }
+            return "D3D12" + SEP + "VKD3D";                  // D3D12 always runs on VKD3D
+        }
         if (d3d11) return "D3D11" + SEP + wrapper;
         if (d3d10) return "D3D10" + SEP + wrapper;
         if (d3d9)  return "D3D9"  + SEP + wrapper;
@@ -466,6 +482,80 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (opengl) return guestGlIsZink() ? "Zink" : "OpenGL";
         // 3. Nothing graphics-related mapped yet — keep polling (unchanged behaviour).
         return null;
+    }
+
+    // Cache for resolveDualApiFromEngineLog: Player.log is near-static once the device is created,
+    // so we only re-parse when its mtime/length changes — keeps the 2s poll cheap on a chatty log.
+    private long lastEngineLogMtime = -1;
+    private long lastEngineLogLen = -1;
+    private String lastEngineLogApi = null;
+
+    /**
+     * Disambiguate a dual-API build (BOTH d3d11 and d3d12 mapped) by asking the game engine which
+     * graphics device it ACTUALLY created — ground truth that module presence cannot provide.
+     *
+     * <p>Unity writes its active device to {@code Player.log} ("Forcing GfxDevice: Direct3D 11",
+     * "Direct3D:\n    Version:  Direct3D 11.0 [level 11.1]"). A Unity title launched with
+     * {@code -force-d3d11} still maps d3d12core.dll for a one-time D3D12 capability probe, so
+     * /proc/maps shows both APIs; the log is the only host-visible signal for which one renders. We
+     * scan for the "Direct3D &lt;N&gt;" token and keep the LAST match (a mid-run device switch still
+     * resolves). Unity's capability-probe lines read "D3D12 Device Filter", NOT "Direct3D 12", so
+     * they never false-positive here.
+     *
+     * @return "D3D12 · VKD3D" / "D3D11 · &lt;wrapper&gt;" / etc., or null when no engine log is
+     *         available (non-Unity title, or not written yet) so the caller keeps the module result.
+     */
+    private String resolveDualApiFromEngineLog(String wrapper) {
+        try {
+            File localLow = new File(imageFs.home_path, ".wine/drive_c/users/xuser/AppData/LocalLow");
+            File log = newestPlayerLog(localLow);
+            if (log == null) return null;
+            long mtime = log.lastModified(), len = log.length();
+            if (mtime == lastEngineLogMtime && len == lastEngineLogLen) return lastEngineLogApi;
+            String api = null;
+            try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(log))) {
+                String line;
+                while ((line = r.readLine()) != null) {
+                    int i = line.indexOf("Direct3D 1");     // "Direct3D 12" / "11" / "10"
+                    if (i >= 0 && i + 10 < line.length()) {
+                        char c = line.charAt(i + 10);
+                        if (c == '2') api = "D3D12";
+                        else if (c == '1') api = "D3D11";
+                        else if (c == '0') api = "D3D10";
+                    } else if (line.indexOf("Direct3D 9") >= 0) {
+                        api = "D3D9";
+                    }
+                }
+            }
+            final String SEP = " · ";
+            String result = api == null ? null
+                    : api.equals("D3D12") ? "D3D12" + SEP + "VKD3D" : api + SEP + wrapper;
+            lastEngineLogMtime = mtime; lastEngineLogLen = len; lastEngineLogApi = result;
+            return result;
+        } catch (Exception ignore) { return null; }
+    }
+
+    /** Newest {@code AppData/LocalLow/<company>/<product>/Player.log} under the prefix (the running game's). */
+    private File newestPlayerLog(File localLow) {
+        if (localLow == null || !localLow.isDirectory()) return null;
+        File[] companies = localLow.listFiles();
+        if (companies == null) return null;
+        File newest = null;
+        long newestMtime = Long.MIN_VALUE;
+        for (File company : companies) {
+            if (!company.isDirectory()) continue;
+            File[] products = company.listFiles();
+            if (products == null) continue;
+            for (File product : products) {
+                if (!product.isDirectory()) continue;
+                File log = new File(product, "Player.log");
+                if (log.isFile() && log.lastModified() > newestMtime) {
+                    newestMtime = log.lastModified();
+                    newest = log;
+                }
+            }
+        }
+        return newest;
     }
 
     /**
