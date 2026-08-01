@@ -316,11 +316,16 @@ internal fun SaveManagerScreen(
     }
 
     // Settings — the two auto-back-up-on-exit toggles (both default ON, preserving current behavior).
-    // State seeds from the shared "save_manager_prefs" on open; each toggle writes through immediately.
+    // State seeds from the shared "save_manager_prefs" on open. Turning a toggle OFF is gated behind a
+    // warning confirm (write only on Continue; Cancel leaves it ON); turning ON writes through then
+    // shows a brief info dialog.
     if (showSettings) {
         val prefs = remember { context.getSharedPreferences("save_manager_prefs", Context.MODE_PRIVATE) }
         var steamOn by remember { mutableStateOf(prefs.getBoolean("auto_collect_steam_on_exit", true)) }
         var customOn by remember { mutableStateOf(prefs.getBoolean("auto_backup_custom_on_exit", true)) }
+        // A pending toggle interaction rendered over the settings dialog (null = none).
+        var pendingToggle by remember { mutableStateOf<TogglePrompt?>(null) }
+
         OutlinedAlertDialog(
             onDismissRequest = { showSettings = false },
             title = { Text("Save Manager settings") },
@@ -330,27 +335,92 @@ internal fun SaveManagerScreen(
                         title = "Steam games: auto-collect on exit",
                         subtitle = "Snapshot Steam-library saves to your local Library when a game exits.",
                         checked = steamOn,
-                        onCheckedChange = {
-                            steamOn = it
-                            prefs.edit().putBoolean("auto_collect_steam_on_exit", it).apply()
-                        },
+                        // Don't flip/write here — route through the confirm (OFF) / info (ON) prompt.
+                        onCheckedChange = { pendingToggle = TogglePrompt(ToggleKind.STEAM, it) },
                     )
                     Spacer(Modifier.height(8.dp))
                     SettingsToggleRow(
                         title = "Custom games: auto-back up on exit",
                         subtitle = "Snapshot custom-import saves to the local vault when a game exits.",
                         checked = customOn,
-                        onCheckedChange = {
-                            customOn = it
-                            prefs.edit().putBoolean("auto_backup_custom_on_exit", it).apply()
-                        },
+                        onCheckedChange = { pendingToggle = TogglePrompt(ToggleKind.CUSTOM, it) },
                     )
                 }
             },
             confirmButton = { TextButton(onClick = { showSettings = false }) { Text("Done") } },
         )
+
+        pendingToggle?.let { prompt ->
+            val prefKey = when (prompt.kind) {
+                ToggleKind.STEAM -> "auto_collect_steam_on_exit"
+                ToggleKind.CUSTOM -> "auto_backup_custom_on_exit"
+            }
+            // Commit a new value to both the pref and the controlling switch state.
+            val commit = { value: Boolean ->
+                prefs.edit().putBoolean(prefKey, value).apply()
+                when (prompt.kind) {
+                    ToggleKind.STEAM -> steamOn = value
+                    ToggleKind.CUSTOM -> customOn = value
+                }
+            }
+
+            if (!prompt.newValue) {
+                // OFF → warning confirm. Write + flip only on Continue; Cancel leaves the switch ON.
+                OutlinedAlertDialog(
+                    onDismissRequest = { pendingToggle = null },
+                    title = { Text("Turn off auto-backup?") },
+                    text = {
+                        Text(
+                            when (prompt.kind) {
+                                ToggleKind.STEAM ->
+                                    "Automatic save backup on exit will be OFF for your Steam library games. " +
+                                        "Their saves won't be captured when a game closes — you'll need to back " +
+                                        "them up yourself via a container's backup option or the Save Manager. Continue?"
+                                ToggleKind.CUSTOM ->
+                                    "Automatic save backup on exit will be OFF for your custom-imported games. " +
+                                        "Their saves won't be captured when a game closes — you'll need to back them " +
+                                        "up yourself via a container's backup option or the game's ⋮ menu → " +
+                                        "'Back up saves'. Continue?"
+                            },
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { commit(false); pendingToggle = null }) { Text("Continue") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { pendingToggle = null }) { Text("Cancel") }
+                    },
+                )
+            } else {
+                // ON → write through, then a brief single-OK info dialog.
+                LaunchedEffect(prompt) { commit(true) }
+                OutlinedAlertDialog(
+                    onDismissRequest = { pendingToggle = null },
+                    title = { Text("Auto-backup on") },
+                    text = {
+                        Text(
+                            when (prompt.kind) {
+                                ToggleKind.STEAM ->
+                                    "Automatic save backup on exit is ON for your Steam library games."
+                                ToggleKind.CUSTOM ->
+                                    "Automatic save backup on exit is ON for your custom-imported games."
+                            },
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { pendingToggle = null }) { Text("OK") }
+                    },
+                )
+            }
+        }
     }
 }
+
+/** Which auto-backup toggle a pending confirm/info prompt belongs to. */
+private enum class ToggleKind { STEAM, CUSTOM }
+
+/** A pending toggle interaction: which toggle, and the value the user is trying to set it to. */
+private data class TogglePrompt(val kind: ToggleKind, val newValue: Boolean)
 
 @Composable
 private fun SettingsToggleRow(
