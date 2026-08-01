@@ -3,7 +3,6 @@ package com.winlator.star.store
 import android.content.Intent
 import android.os.Bundle
 import android.text.format.DateUtils
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -39,6 +38,7 @@ import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -115,6 +115,10 @@ private fun SaveManagerScreen(
     var loading by remember { mutableStateOf(true) }
     // appIds with an in-flight quick action (Download/Upload) — disables that row's buttons.
     var busyAppIds by remember { mutableStateOf<Set<Int>>(emptySet()) }
+    // Live per-row progress line for a running (or just-finished) quick action, keyed by appId.
+    // While busy it shows what the move is doing (from Callback.onStatus); on done/error it briefly
+    // holds the summary/error, then the entry is removed and the row reverts to its last-synced line.
+    val rowProgress = remember { mutableStateMapOf<Int, RowProgress>() }
 
     // Instant load (sidecar + on-disk scan, no network) — off the main thread all the same.
     suspend fun reload() {
@@ -153,23 +157,31 @@ private fun SaveManagerScreen(
     fun runQuickMove(appId: Int, download: Boolean) {
         if (appId in busyAppIds) return
         busyAppIds = busyAppIds + appId
-        // The manager may call back on a worker thread, so marshal everything (Toast + state)
-        // onto the composition scope (main) before touching the UI.
+        rowProgress[appId] = RowProgress(if (download) "Preparing download…" else "Preparing upload…")
+        // The manager may call back on a worker thread, so marshal every UI write onto the
+        // composition scope (main) before touching state.
         val cb = object : SteamCloudSaveManager.Callback {
-            override fun onStatus(message: String) {}
+            override fun onStatus(message: String) {
+                scope.launch { rowProgress[appId] = RowProgress(message) }
+            }
             override fun onDone(summary: String) {
                 scope.launch {
-                    Toast.makeText(context, summary, Toast.LENGTH_LONG).show()
                     busyAppIds = busyAppIds - appId
-                    // Refresh just this row's status (records + local staleness, no network).
+                    rowProgress[appId] = RowProgress(summary)
+                    // Refresh just this row's status (records + local staleness, no network) so the
+                    // pill + last-synced line are current when the progress line clears.
                     val updated = withContext(Dispatchers.IO) { SaveSyncStore.statusOf(context, appId) }
                     statuses = statuses.map { if (it.appId == appId) updated else it }
+                    kotlinx.coroutines.delay(PROGRESS_LINGER_MS)
+                    rowProgress.remove(appId)
                 }
             }
             override fun onError(message: String) {
                 scope.launch {
-                    Toast.makeText(context, "Error: $message", Toast.LENGTH_LONG).show()
                     busyAppIds = busyAppIds - appId
+                    rowProgress[appId] = RowProgress("Error: $message", isError = true)
+                    kotlinx.coroutines.delay(PROGRESS_LINGER_MS)
+                    rowProgress.remove(appId)
                 }
             }
         }
@@ -242,6 +254,7 @@ private fun SaveManagerScreen(
                                 status = s,
                                 highlighted = s.appId == focusAppId,
                                 busy = s.appId in busyAppIds,
+                                progress = rowProgress[s.appId],
                                 onOpen = { onOpenGame(s.appId) },
                                 onDownload = { runQuickMove(s.appId, download = true) },
                                 onUpload = { runQuickMove(s.appId, download = false) },
@@ -268,6 +281,7 @@ private fun SaveStatusRow(
     status: SaveStatus,
     highlighted: Boolean,
     busy: Boolean,
+    progress: RowProgress?,
     onOpen: () -> Unit,
     onDownload: () -> Unit,
     onUpload: () -> Unit,
@@ -288,22 +302,16 @@ private fun SaveStatusRow(
             .clickable(onClick = onOpen)
             .padding(start = 12.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
     ) {
-        // Glyph tile keyed on state colour (no bitmap in the frozen status record).
         val (pillColor, pillLabel) = pillFor(status.state)
-        Box(
+
+        // Real Steam poster (library_600x900 → header.jpg), cached per appId; shows its own
+        // spinner while loading and "×" if the art is missing.
+        GameCoverArt(
+            appId = status.appId,
             modifier = Modifier
-                .size(40.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(pillColor.copy(alpha = 0.18f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = Icons.Filled.CloudDownload,
-                contentDescription = null,
-                tint = pillColor,
-                modifier = Modifier.size(22.dp),
-            )
-        }
+                .size(width = 44.dp, height = 60.dp)
+                .clip(RoundedCornerShape(8.dp)),
+        )
 
         Spacer(Modifier.width(12.dp))
 
@@ -322,44 +330,64 @@ private fun SaveStatusRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            val times = syncedTimesLine(status)
-            if (times.isNotEmpty()) {
-                Text(
-                    text = times,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            // While a move runs (or just finished) the progress line takes the open space where the
+            // last-synced line normally sits; a small spinner shows only while it's still running.
+            if (progress != null) {
+                Spacer(Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (busy) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            color = MaterialTheme.colorScheme.primary,
+                            strokeWidth = 2.dp,
+                        )
+                        Spacer(Modifier.width(6.dp))
+                    }
+                    Text(
+                        text = progress.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (progress.isError) MaterialTheme.colorScheme.error
+                                else MaterialTheme.colorScheme.primary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            } else {
+                val times = syncedTimesLine(status)
+                if (times.isNotEmpty()) {
+                    Text(
+                        text = times,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             // Status pill.
             Spacer(Modifier.height(6.dp))
             StatusPill(color = pillColor, label = pillLabel)
         }
 
-        // Per-row quick actions: Download (Cloud → Library) / Upload (Library → Cloud).
+        // Per-row quick actions: Download (Cloud → Library) / Upload (Library → Cloud). Both are
+        // disabled while a move runs (the live progress is in the row body); the progress spinner
+        // itself lives beside the status text, not here.
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            if (busy) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(22.dp),
-                    color = MaterialTheme.colorScheme.primary,
-                    strokeWidth = 2.dp,
+            IconButton(onClick = onDownload, enabled = !busy) {
+                Icon(
+                    imageVector = Icons.Filled.CloudDownload,
+                    contentDescription = "Download to Library",
+                    tint = if (busy) MaterialTheme.colorScheme.primary.copy(alpha = 0.38f)
+                           else MaterialTheme.colorScheme.primary,
                 )
-            } else {
-                IconButton(onClick = onDownload) {
-                    Icon(
-                        imageVector = Icons.Filled.CloudDownload,
-                        contentDescription = "Download to Library",
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                }
-                IconButton(onClick = onUpload) {
-                    Icon(
-                        imageVector = Icons.Filled.CloudUpload,
-                        contentDescription = "Upload from Library",
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                }
+            }
+            IconButton(onClick = onUpload, enabled = !busy) {
+                Icon(
+                    imageVector = Icons.Filled.CloudUpload,
+                    contentDescription = "Upload from Library",
+                    tint = if (busy) MaterialTheme.colorScheme.primary.copy(alpha = 0.38f)
+                           else MaterialTheme.colorScheme.primary,
+                )
             }
         }
     }
@@ -380,6 +408,12 @@ private fun StatusPill(color: Color, label: String) {
         Text(text = label, color = color, fontSize = 11.sp, fontWeight = FontWeight.Medium)
     }
 }
+
+/** A row's live quick-action progress line: what the move is doing, and whether it's an error. */
+private data class RowProgress(val message: String, val isError: Boolean = false)
+
+/** How long a finished move's summary / error lingers in the row before it reverts to normal. */
+private const val PROGRESS_LINGER_MS = 2500L
 
 // Green = settled, amber/orange = local drift, blue = cloud drift, grey = nothing to do / unset.
 private fun pillFor(state: SaveState): Pair<Color, String> = when (state) {
