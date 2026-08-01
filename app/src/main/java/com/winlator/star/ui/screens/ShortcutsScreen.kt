@@ -77,6 +77,7 @@ import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
@@ -230,6 +231,7 @@ import com.winlator.star.inputcontrols.ControlsProfile
 import com.winlator.star.inputcontrols.InputControlsManager
 import com.winlator.star.midi.MidiManager
 import com.winlator.star.store.StarLaunchBridge
+import com.winlator.star.store.SteamSaveManagerActivity
 import com.winlator.star.store.SteamStoreSearch
 import com.winlator.star.ui.theme.Divider as DividerColor
 import com.winlator.star.ui.theme.LocalAccentDim
@@ -783,6 +785,8 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                     onCommunityConfigs = { communityConfigsFor(shortcut) },
                                     onGameDetails = { gameDetailsShortcut = shortcut },
                                     onViewLogs = { logsShortcut = shortcut },
+                                    onCloudSaves = if (isSteamOriginShortcut(shortcut))
+                                        ({ launchSaveManager(context, steamAppIdOf(shortcut)) }) else null,
                                 )
                             }
                         }
@@ -814,6 +818,8 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                     onCommunityConfigs = { communityConfigsFor(shortcut) },
                                     onGameDetails = { gameDetailsShortcut = shortcut },
                                     onViewLogs = { logsShortcut = shortcut },
+                                    onCloudSaves = if (isSteamOriginShortcut(shortcut))
+                                        ({ launchSaveManager(context, steamAppIdOf(shortcut)) }) else null,
                                 )
                             }
                         }
@@ -4287,6 +4293,25 @@ private fun CommunityConfigDetailDialog(
 }
 
 // Game-list card (poster cover + primary chips + muted secondary line, issue #19). A tall
+// ─────────────────────────────────────────────────────────────────────────────
+// Steam Save Manager entry point (Games-tab ⋮ menu). A shortcut is "Steam-origin" when it was
+// tagged at creation (storeSource=steam) or, for pre-tagging shortcuts, when its exec path lives
+// under the steam_games install root. The linked appId reuses the existing `steamAppId` extra.
+private fun isSteamOriginShortcut(shortcut: Shortcut): Boolean {
+    if (shortcut.getExtra("storeSource") == "steam") return true
+    return shortcut.path.contains("steam_games", ignoreCase = true)
+}
+
+private fun steamAppIdOf(shortcut: Shortcut): Int =
+    shortcut.getExtra("steamAppId", "").toIntOrNull() ?: 0
+
+private fun launchSaveManager(context: Context, focusAppId: Int) {
+    context.startActivity(
+        Intent(context, SteamSaveManagerActivity::class.java)
+            .putExtra(SteamSaveManagerActivity.EXTRA_FOCUS_APP_ID, focusAppId),
+    )
+}
+
 // 3:4 cover on the left, name + container · resolution subtitle in the middle. Components are
 // split by how often you check them: renderer, DXVK and frame-gen are bright chips; driver,
 // VKD3D and x86 backend sit on a calm muted line with a colour dot each. "Calm but complete."
@@ -4306,6 +4331,7 @@ private fun ShortcutItemLayoutL(
     onCommunityConfigs: () -> Unit,
     onGameDetails: () -> Unit,
     onViewLogs: () -> Unit,
+    onCloudSaves: (() -> Unit)? = null,
 ) {
     val res = LocalContext.current.resources
 
@@ -4423,6 +4449,7 @@ private fun ShortcutItemLayoutL(
             onCommunityConfigs = onCommunityConfigs,
             onGameDetails = onGameDetails,
             onViewLogs = onViewLogs,
+            onCloudSaves = onCloudSaves,
         )
       }
     }
@@ -4441,6 +4468,7 @@ private fun ShortcutOverflowButton(
     onCommunityConfigs: () -> Unit,
     onGameDetails: () -> Unit,
     onViewLogs: () -> Unit,
+    onCloudSaves: (() -> Unit)? = null,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     Box {
@@ -4487,6 +4515,15 @@ private fun ShortcutOverflowButton(
                 leadingIcon = { Icon(Icons.Filled.Edit, null, tint = MaterialTheme.colorScheme.primary) },
                 onClick = { menuExpanded = false; onGameDetails() },
             )
+            // Steam-origin only — opens the Save Manager focused on this game.
+            if (onCloudSaves != null) {
+                MenuItemDivider()
+                DropdownMenuItem(
+                    text = { Text("Cloud Saves") },
+                    leadingIcon = { Icon(Icons.Filled.CloudSync, null, tint = MaterialTheme.colorScheme.primary) },
+                    onClick = { menuExpanded = false; onCloudSaves() },
+                )
+            }
             MenuItemDivider()
             DropdownMenuItem(
                 text = { Text("Scrape cover") },
@@ -4532,6 +4569,7 @@ private fun ShortcutGridItem(
     onCommunityConfigs: () -> Unit,
     onGameDetails: () -> Unit,
     onViewLogs: () -> Unit,
+    onCloudSaves: (() -> Unit)? = null,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
@@ -4656,6 +4694,11 @@ private fun ShortcutGridItem(
             DropdownMenuItem(text = { Text("Export") }, leadingIcon = { Icon(Icons.Filled.Upload, null) }, onClick = { menuExpanded = false; onExport() })
             MenuItemDivider()
             DropdownMenuItem(text = { Text("Game Details") }, leadingIcon = { Icon(Icons.Filled.Edit, null, tint = MaterialTheme.colorScheme.primary) }, onClick = { menuExpanded = false; onGameDetails() })
+            // Steam-origin only — opens the Save Manager focused on this game.
+            if (onCloudSaves != null) {
+                MenuItemDivider()
+                DropdownMenuItem(text = { Text("Cloud Saves") }, leadingIcon = { Icon(Icons.Filled.CloudSync, null, tint = MaterialTheme.colorScheme.primary) }, onClick = { menuExpanded = false; onCloudSaves() })
+            }
             MenuItemDivider()
             DropdownMenuItem(text = { Text("Scrape cover") }, leadingIcon = { Icon(Icons.Filled.Search, null, tint = MaterialTheme.colorScheme.primary) }, onClick = { menuExpanded = false; onScrapeCover() })
             MenuItemDivider()

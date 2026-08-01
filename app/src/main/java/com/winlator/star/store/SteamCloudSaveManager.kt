@@ -240,20 +240,38 @@ object SteamCloudSaveManager {
 
     /** Cloud → Library. Thin wrapper over [downloadSaves] with the Library dir resolved internally. */
     fun downloadToLibrary(ctx: Context, appId: Int, cb: Callback) {
-        downloadSaves(ctx, appId, SteamCloudSavePaths.libraryDir(ctx, appId), cb)
+        downloadSaves(ctx, appId, SteamCloudSavePaths.libraryDir(ctx, appId),
+            hooked(cb) { SaveSyncStore.recordAfterDownload(ctx, appId) })
     }
 
     /** Library → Cloud, strictly additive. Thin wrapper over [uploadSaves] (filesToDelete stays
      *  emptyList(); an empty Library is refused before any batch is opened). */
     fun uploadFromLibrary(ctx: Context, appId: Int, cb: Callback) {
-        uploadSaves(ctx, appId, SteamCloudSavePaths.libraryDir(ctx, appId), cb)
+        uploadSaves(ctx, appId, SteamCloudSavePaths.libraryDir(ctx, appId),
+            hooked(cb) { SaveSyncStore.recordAfterUpload(ctx, appId) })
+    }
+
+    /**
+     * Wrap a caller [Callback] so [onSuccess] runs after a successful move (on the move's own worker
+     * thread, right after the UI is notified via [Callback.onDone]). Used to fire the
+     * [SaveSyncStore] record hooks without changing any move's behavior; a hook failure is swallowed
+     * so it can never turn a successful move into a reported error.
+     */
+    private fun hooked(delegate: Callback, onSuccess: () -> Unit): Callback = object : Callback {
+        override fun onStatus(message: String) = delegate.onStatus(message)
+        override fun onDone(summary: String) {
+            delegate.onDone(summary)
+            try { onSuccess() } catch (e: Exception) { Log.w(TAG, "save-status record hook failed", e) }
+        }
+        override fun onError(message: String) = delegate.onError(message)
     }
 
     /** Library → Container. For every file in the Library, translate its `%Root%/rest` layout to an
      *  absolute container path via [SteamCloudSavePaths.toContainerPath] and copy it in (mkdirs,
      *  mtime preserved). Overwrites the container's copies; never deletes anything, never touches the
      *  cloud. Files whose leading root token is unknown/unsafe are skipped (logged), never guessed. */
-    fun applyToContainer(ctx: Context, appId: Int, installDir: String, cb: Callback) {
+    fun applyToContainer(ctx: Context, appId: Int, installDir: String, outerCb: Callback) {
+        val cb = hooked(outerCb) { SaveSyncStore.recordAfterApply(ctx, appId) }
         Thread({
             try {
                 val library = SteamCloudSavePaths.libraryDir(ctx, appId)
@@ -297,7 +315,8 @@ object SteamCloudSaveManager {
      *  maps each file back to its `%Root%/rest` layout via [SteamCloudSavePaths.toLibraryRel], and
      *  copies it into the Library (mkdirs, mtime preserved). Overwrites the Library's copies; never
      *  deletes anything from the container, never touches the cloud. */
-    fun collectFromContainer(ctx: Context, appId: Int, installDir: String, cb: Callback) {
+    fun collectFromContainer(ctx: Context, appId: Int, installDir: String, outerCb: Callback) {
+        val cb = hooked(outerCb) { SaveSyncStore.recordAfterCollect(ctx, appId) }
         Thread({
             try {
                 val library = SteamCloudSavePaths.libraryDir(ctx, appId)

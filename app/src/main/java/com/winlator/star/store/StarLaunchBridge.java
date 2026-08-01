@@ -162,6 +162,24 @@ public final class StarLaunchBridge {
                                           String exePath,
                                           String coverArtUrl,
                                           ResultCallback cb) {
+        // Legacy overload (GOG / Epic / Amazon paths): no Steam appId → shortcut is left untagged.
+        writeShortcutAsync(activity, container, gameName, exePath, coverArtUrl, 0, cb);
+    }
+
+    /**
+     * As above, but tags the written shortcut with its store origin when a Steam
+     * {@code steamAppId} is known (> 0): {@code storeSource=steam} + {@code steamAppId=<id>}
+     * in the [Extra Data] block. This makes the Games-tab "Cloud Saves" menu gate robust and
+     * hands the Save Manager the appId directly. A {@code steamAppId} of 0 leaves the shortcut
+     * untagged (non-Steam stores).
+     */
+    public static void writeShortcutAsync(Activity activity,
+                                          Container container,
+                                          String gameName,
+                                          String exePath,
+                                          String coverArtUrl,
+                                          int steamAppId,
+                                          ResultCallback cb) {
         Handler h = new Handler(Looper.getMainLooper());
         new Thread(() -> {
             try {
@@ -205,6 +223,13 @@ public final class StarLaunchBridge {
                         + "StartupWMClass=explorer\n"
                         + "\n"
                         + "[Extra Data]\n";
+
+                // Tag Steam-origin shortcuts so the Games-tab Cloud Saves menu can gate on
+                // storeSource and the Save Manager can read the appId straight off the shortcut.
+                if (steamAppId > 0) {
+                    content += "storeSource=steam\n"
+                            + "steamAppId=" + steamAppId + "\n";
+                }
 
                 try (FileWriter fw = new FileWriter(shortcutFile)) {
                     fw.write(content);

@@ -338,7 +338,7 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
                             addToShortcuts = null
                             StarLaunchBridge.writeShortcutAsync(
                                 this@SteamGameDetailActivity, container,
-                                req.gameName, req.exePath, req.coverUrl,
+                                req.gameName, req.exePath, req.coverUrl, appId,
                             ) { success, message ->
                                 addResult = AddShortcutResult(req.gameName, success, message)
                                 // The game now has a launch container — re-resolve so the Cloud Saves
