@@ -7,6 +7,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import com.winlator.star.container.Container
+import com.winlator.star.container.ContainerManager
 import com.winlator.star.container.Shortcut
 import java.io.File
 
@@ -66,7 +67,57 @@ object CustomSaveVault {
         return if (f.isFile) f.lastModified() else 0L
     }
 
-    data class VaultResult(val ok: Boolean, val fileCount: Int, val path: String?, val error: String?)
+    data class VaultResult(
+        val ok: Boolean,
+        val fileCount: Int,
+        val path: String?,
+        val error: String?,
+        /** True when nothing per-game was discovered and the whole container was backed up instead. */
+        val wholeContainer: Boolean = false,
+    )
+
+    /** Per-custom-game row for the Save Manager's Custom tab — local vault status only, no cloud. */
+    data class CustomGameStatus(
+        val shortcut: Shortcut,
+        val name: String,
+        val containerLabel: String?,
+        val hasBackup: Boolean,
+        val lastBackupMillis: Long,
+    )
+
+    /**
+     * Enumerate every CUSTOM (non-Steam) shortcut across all containers and build its local-vault
+     * status. Custom = NOT a genuine Steam game (mirrors ShortcutsScreen's isCustomShortcut):
+     * `storeSource != "steam"` AND the exec path is not under `steam_games`. Sorted no-backup-first,
+     * then by name. BLOCKING (loads containers + scans desktop dirs) — call off the main thread.
+     */
+    fun listStatuses(context: Context): List<CustomGameStatus> {
+        val shortcuts = try {
+            ContainerManager(context).loadShortcuts()
+        } catch (t: Throwable) {
+            Log.w(TAG, "listStatuses: loadShortcuts failed", t)
+            return emptyList()
+        }
+        return shortcuts
+            .filter { isCustom(it) }
+            .map { sc ->
+                CustomGameStatus(
+                    shortcut = sc,
+                    name = sc.name,
+                    containerLabel = sc.container?.name?.takeIf { it.isNotBlank() },
+                    hasBackup = hasBackup(sc),
+                    lastBackupMillis = backupTimeMillis(sc),
+                )
+            }
+            .sortedWith(compareBy({ it.hasBackup }, { it.name.lowercase() }))
+    }
+
+    /** Mirror of ShortcutsScreen's Steam-origin gate, inverted: true for custom (non-Steam) games. */
+    private fun isCustom(shortcut: Shortcut): Boolean {
+        if (shortcut.getExtra("storeSource") == "steam") return false
+        val p = shortcut.path
+        return p == null || !p.contains("steam_games", ignoreCase = true)
+    }
 
     /**
      * Snapshot this game's saves into `<vault>/<key>.zip`, overwriting any previous snapshot.
@@ -131,6 +182,40 @@ object CustomSaveVault {
             return
         }
         GameSaveBackup.restore(context, Uri.fromFile(f), targetContainer, onResult)
+    }
+
+    /**
+     * Manual "Back up saves": discover the game's save roots (persisted sidecar first, else a fresh
+     * discover; whole-container fallback when none found) and zip them to a timestamped
+     * `<perGameDir>/<GameName>_<epoch>.zip` in the chosen [layout]. Shared by the shortcut ⋮ menu AND
+     * the Save Manager Custom tab so both agree. Off the UI thread; posts [onResult] on the main
+     * thread. [VaultResult.wholeContainer] is true when the whole-container fallback was used.
+     */
+    fun manualBackup(
+        context: Context,
+        container: Container,
+        shortcut: Shortcut,
+        layout: GameSaveBackup.BackupLayout,
+        onResult: (VaultResult) -> Unit,
+    ) {
+        Thread {
+            val res = try {
+                val gameKey = SaveLocator.gameKey(shortcut.wmClass, shortcut.file.name)
+                val saved = SaveLocator.loadMap(container, gameKey)
+                val roots = if (saved != null && saved.roots.isNotEmpty()) saved.roots
+                    else SaveLocator.discover(container, shortcut.name, shortcut.path ?: "", shortcut.wmClass ?: "")
+                        .map { it.relPath }
+                // Empty → whole-container backup (roots = null), matching the Containers "whole" scope.
+                val effectiveRoots: List<String>? = if (roots.isEmpty()) null else roots
+                val outFile = perGameBackupFile(shortcut.name, System.currentTimeMillis())
+                val r = GameSaveBackup.backupToFile(container, effectiveRoots, layout, outFile)
+                VaultResult(r.ok, r.fileCount, r.path, r.error, wholeContainer = effectiveRoots == null)
+            } catch (t: Throwable) {
+                Log.w(TAG, "manual backup failed for \"${shortcut.name}\"", t)
+                VaultResult(false, 0, null, t.message ?: t.javaClass.simpleName)
+            }
+            Handler(Looper.getMainLooper()).post { onResult(res) }
+        }.start()
     }
 
     private fun sanitize(name: String): String =

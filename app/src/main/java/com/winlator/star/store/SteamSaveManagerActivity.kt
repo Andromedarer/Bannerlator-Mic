@@ -4,8 +4,10 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.text.format.DateUtils
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -29,12 +31,15 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.VideogameAsset
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
@@ -44,6 +49,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -51,12 +57,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.winlator.star.container.Container
+import com.winlator.star.container.ContainerManager
+import com.winlator.star.core.CustomSaveVault
+import com.winlator.star.core.GameSaveBackup
+import com.winlator.star.store.compose.ContainerPickerDialog
 import com.winlator.star.ui.screens.OutlinedAlertDialog
 import com.winlator.star.ui.theme.WinlatorTheme
 import kotlinx.coroutines.Dispatchers
@@ -125,6 +138,8 @@ internal fun SaveManagerScreen(
     var statuses by remember { mutableStateOf<List<SaveStatus>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var showSettings by remember { mutableStateOf(false) }
+    // 0 = Steam (cloud+local, appId-keyed), 1 = Custom (local vault, non-Steam imports).
+    var selectedTab by remember { mutableStateOf(0) }
     // appIds with an in-flight quick action (Download/Upload) — disables that row's buttons.
     var busyAppIds by remember { mutableStateOf<Set<Int>>(emptySet()) }
     // Live per-row progress line for a running (or just-finished) quick action, keyed by appId.
@@ -258,20 +273,28 @@ internal fun SaveManagerScreen(
             }
         }
 
-        // Summary line.
-        Text(
-            text = summary,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-        )
+        // Steam / Custom split. Steam = cloud+local appId-keyed list (existing); Custom = local vault.
+        TabRow(selectedTabIndex = selectedTab) {
+            Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("Steam") })
+            Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("Custom") })
+        }
 
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .nestedScroll(pullState.nestedScrollConnection),
-        ) {
+        when (selectedTab) {
+          0 -> {
+            // Summary line.
+            Text(
+                text = summary,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .nestedScroll(pullState.nestedScrollConnection),
+            ) {
             when {
                 loading -> {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -312,6 +335,11 @@ internal fun SaveManagerScreen(
                     modifier = Modifier.align(Alignment.TopCenter),
                 )
             }
+            }
+          }
+          else -> {
+            CustomSaveTab(modifier = Modifier.weight(1f))
+          }
         }
     }
 
@@ -446,6 +474,231 @@ private fun SettingsToggleRow(
             )
         }
         Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Custom tab — non-Steam imported games with their LOCAL vault status + Back up / Restore. No cloud.
+@Composable
+private fun CustomSaveTab(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    var rows by remember { mutableStateOf<List<CustomSaveVault.CustomGameStatus>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    // Rows with an in-flight backup/restore (keyed by the shortcut's file path).
+    var busyKeys by remember { mutableStateOf<Set<String>>(emptySet()) }
+    // Open dialogs: the backup layout picker, and the restore target-container picker.
+    var backupFor by remember { mutableStateOf<CustomSaveVault.CustomGameStatus?>(null) }
+    var restoreFor by remember { mutableStateOf<CustomSaveVault.CustomGameStatus?>(null) }
+
+    suspend fun reload() {
+        val fresh = withContext(Dispatchers.IO) { CustomSaveVault.listStatuses(context) }
+        rows = fresh
+        loading = false
+    }
+    LaunchedEffect(Unit) { reload() }
+
+    fun runBackup(s: CustomSaveVault.CustomGameStatus, layout: GameSaveBackup.BackupLayout) {
+        val key = s.shortcut.file.path
+        busyKeys = busyKeys + key
+        Toast.makeText(context, "Backing up saves for \"${s.name}\"…", Toast.LENGTH_SHORT).show()
+        CustomSaveVault.manualBackup(context, s.shortcut.container, s.shortcut, layout) { r ->
+            if (r.wholeContainer && r.ok) {
+                Toast.makeText(context, "No per-game saves detected — backed up the whole container.", Toast.LENGTH_LONG).show()
+            }
+            Toast.makeText(
+                context,
+                if (r.ok) "Backed up ${r.fileCount} files → ${r.path?.substringAfterLast('/')}"
+                else "Backup failed: ${r.error ?: "unknown error"}",
+                Toast.LENGTH_LONG,
+            ).show()
+            busyKeys = busyKeys - key
+            scope.launch { reload() }
+        }
+    }
+
+    fun runRestore(s: CustomSaveVault.CustomGameStatus, target: Container) {
+        val key = s.shortcut.file.path
+        busyKeys = busyKeys + key
+        Toast.makeText(context, "Restoring saves into \"${target.name}\"…", Toast.LENGTH_SHORT).show()
+        CustomSaveVault.restoreLatest(context, s.shortcut, target) { r ->
+            Toast.makeText(
+                context,
+                if (r.ok) "Restored ${r.filesWritten} files to \"${target.name}\""
+                else "Restore failed: ${r.error ?: "unknown error"}",
+                Toast.LENGTH_LONG,
+            ).show()
+            busyKeys = busyKeys - key
+            scope.launch { reload() }
+        }
+    }
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        when {
+            loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+            }
+            rows.isEmpty() -> Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+                Text(
+                    text = "No custom games found.\nImport a game (exe/folder), then back its saves up here.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            else -> LazyColumn(modifier = Modifier.fillMaxSize()) {
+                items(rows, key = { it.shortcut.file.path }) { s ->
+                    CustomSaveRow(
+                        status = s,
+                        busy = s.shortcut.file.path in busyKeys,
+                        onBackup = { backupFor = s },
+                        onRestore = { restoreFor = s },
+                    )
+                }
+            }
+        }
+    }
+
+    // Backup layout picker (Winlator / GameHub) — mirrors the shortcut ⋮ menu's choice.
+    backupFor?.let { s ->
+        OutlinedAlertDialog(
+            onDismissRequest = { backupFor = null },
+            title = { Text("Backup format") },
+            text = {
+                Column {
+                    Text(
+                        "Which tool is this backup for?",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { backupFor = null; runBackup(s, GameSaveBackup.BackupLayout.WINLATOR) }
+                            .padding(vertical = 8.dp),
+                    ) {
+                        Text("Winlator-native .zip", color = MaterialTheme.colorScheme.primary)
+                        Text("Sibling Winlator / WinNative builds", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    }
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { backupFor = null; runBackup(s, GameSaveBackup.BackupLayout.GAMEHUB) }
+                            .padding(vertical = 8.dp),
+                    ) {
+                        Text("GameHub-compatible .zip", color = MaterialTheme.colorScheme.primary)
+                        Text("GameHub, Proton-based tools (default)", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { backupFor = null }) { Text("Cancel") } },
+        )
+    }
+
+    // Restore target picker — choose which container to restore the latest vault snapshot into.
+    restoreFor?.let { s ->
+        val containers by produceState<List<Container>>(emptyList(), s) {
+            value = withContext(Dispatchers.IO) {
+                try { ContainerManager(context).getContainers() } catch (_: Throwable) { emptyList() }
+            }
+        }
+        ContainerPickerDialog(
+            gameName = s.name,
+            containers = containers,
+            onDismiss = { restoreFor = null },
+            onSelected = { chosen ->
+                restoreFor = null
+                runRestore(s, chosen)
+            },
+        )
+    }
+}
+
+@Composable
+private fun CustomSaveRow(
+    status: CustomSaveVault.CustomGameStatus,
+    busy: Boolean,
+    onBackup: () -> Unit,
+    onRestore: () -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp))
+            .padding(start = 12.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
+    ) {
+        // Thumbnail = the shortcut's own art (cover → icon); custom games have no Steam appId cover.
+        val bmp = status.shortcut.coverArt ?: status.shortcut.icon
+        Box(
+            modifier = Modifier
+                .size(width = 44.dp, height = 60.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surface),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (bmp != null) {
+                Image(
+                    bitmap = bmp.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Filled.VideogameAsset,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+        }
+
+        Spacer(Modifier.width(12.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = status.name,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = status.containerLabel?.let { "Container: $it" } ?: "No container",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = if (status.hasBackup) "Backed up ${relTime(status.lastBackupMillis)}" else "No backup yet",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (status.hasBackup) MaterialTheme.colorScheme.onSurfaceVariant
+                        else MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+
+        if (busy) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(22.dp),
+                color = MaterialTheme.colorScheme.primary,
+                strokeWidth = 2.dp,
+            )
+        } else {
+            Column(horizontalAlignment = Alignment.End) {
+                TextButton(onClick = onBackup) { Text("Back up") }
+                // Restore needs an existing snapshot — disabled with a clear reason otherwise.
+                TextButton(onClick = onRestore, enabled = status.hasBackup) { Text("Restore") }
+            }
+        }
     }
 }
 

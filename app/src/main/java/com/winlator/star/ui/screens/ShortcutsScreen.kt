@@ -219,7 +219,6 @@ import com.winlator.star.core.FileUtils
 import com.winlator.star.core.GameFolderScanner
 import com.winlator.star.core.CustomSaveVault
 import com.winlator.star.core.GameSaveBackup
-import com.winlator.star.core.SaveLocator
 import com.winlator.star.core.KeyValueSet
 import com.winlator.star.ui.components.DraggableAddButton
 import com.winlator.star.ui.theme.DangerRed
@@ -589,30 +588,15 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
         backupFormatShortcut = shortcut
     }
 
-    // Back up this game's saves into the shared per-game folder
-    // Downloads/Bannerlator/<GameName>/<GameName>_<epoch>.zip (timestamped — keeps history alongside
-    // the auto-on-exit "auto-latest.zip"). Scope = the game's discovered save folders; if none are
-    // found, fall back to the whole container so the action never silently no-ops. Discovery does file
-    // I/O → off the main thread; GameSaveBackup.backupToFile is the synchronous overload, so it too
-    // runs on the worker before we hop back to the main thread for the result toast.
+    // Back up this game's saves into the shared per-game folder via the one shared impl
+    // (CustomSaveVault.manualBackup) so the ⋮ menu and the Save Manager agree; the dialog/UX + toasts
+    // stay here. manualBackup discovers roots (with whole-container fallback) and zips off the main
+    // thread, posting its result on the main thread.
     fun runCustomBackup(shortcut: Shortcut, layout: GameSaveBackup.BackupLayout) {
-        val container = shortcut.container
         val name = shortcut.name
         Toast.makeText(context, "Backing up saves for \"$name\"…", Toast.LENGTH_SHORT).show()
-        scope.launch {
-            val result = withContext(Dispatchers.IO) {
-                val gameKey = SaveLocator.gameKey(shortcut.wmClass, shortcut.file.name)
-                val saved = SaveLocator.loadMap(container, gameKey)
-                val roots = if (saved != null && saved.roots.isNotEmpty()) saved.roots
-                    else SaveLocator.discover(container, name, shortcut.path ?: "", shortcut.wmClass ?: "")
-                        .map { it.relPath }
-                // Empty → whole-container backup (roots = null), matching the Containers "whole" scope.
-                val effectiveRoots: List<String>? = if (roots.isEmpty()) null else roots
-                val outFile = CustomSaveVault.perGameBackupFile(name, System.currentTimeMillis())
-                effectiveRoots to GameSaveBackup.backupToFile(container, effectiveRoots, layout, outFile)
-            }
-            val (effectiveRoots, r) = result
-            if (effectiveRoots == null && r.ok) {
+        CustomSaveVault.manualBackup(context, shortcut.container, shortcut, layout) { r ->
+            if (r.wholeContainer && r.ok) {
                 Toast.makeText(context, "No per-game saves detected — backed up the whole container.", Toast.LENGTH_LONG).show()
             }
             Toast.makeText(
