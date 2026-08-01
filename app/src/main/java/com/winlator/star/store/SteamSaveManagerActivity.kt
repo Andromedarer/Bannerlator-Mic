@@ -65,9 +65,11 @@ import kotlinx.coroutines.withContext
  * diff ([SaveSyncStore.refreshFromCloud]) per visible game off the main thread so "cloud ahead"
  * can surface.
  *
- * Two entry points reach here: the Steam store-home toolbar (no focus) and the Games-tab per-item
- * ⋮ menu on Steam-origin shortcuts (passes [EXTRA_FOCUS_APP_ID] so the list opens scrolled to and
- * highlighting that game). Tapping a row opens that game's detail Cloud Saves section.
+ * Three entry points reach the same [SaveManagerScreen] composable: the Steam store-home toolbar
+ * (no focus) and the Games-tab per-item ⋮ menu on Steam-origin shortcuts (both via this Activity,
+ * the latter passing [EXTRA_FOCUS_APP_ID] so the list opens scrolled to and highlighting that
+ * game), plus the side-nav drawer's Library section (rendered directly by the NavHost, no focus).
+ * Tapping a row opens that game's detail Cloud Saves section.
  */
 class SteamSaveManagerActivity : ComponentActivity() {
 
@@ -84,29 +86,33 @@ class SteamSaveManagerActivity : ComponentActivity() {
                 SaveManagerScreen(
                     focusAppId = focusAppId,
                     onBack = { finish() },
-                    onOpenGame = ::openGameDetail,
                 )
             }
         }
     }
+}
 
-    /** Reuse the existing detail nav; its Cloud Saves section is the per-game control surface. */
-    private fun openGameDetail(appId: Int) {
-        startActivity(
-            Intent(this, SteamGameDetailActivity::class.java)
+/**
+ * Shared content of the Save Manager. Rendered both by [SteamSaveManagerActivity] (with an
+ * [onBack] that finishes the Activity) and directly by the app NavHost for the drawer's
+ * Library → Save Manager entry (no [onBack] → no header back button, since the drawer owns
+ * navigation). Row taps open the per-game detail via [LocalContext], which is the hosting
+ * Activity in either case.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun SaveManagerScreen(
+    focusAppId: Int = 0,
+    onBack: (() -> Unit)? = null,
+) {
+    val context = LocalContext.current
+    // Reuse the existing detail nav; its Cloud Saves section is the per-game control surface.
+    val onOpenGame: (Int) -> Unit = { appId ->
+        context.startActivity(
+            Intent(context, SteamGameDetailActivity::class.java)
                 .putExtra(SteamGameDetailActivity.EXTRA_APP_ID, appId),
         )
     }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun SaveManagerScreen(
-    focusAppId: Int,
-    onBack: () -> Unit,
-    onOpenGame: (Int) -> Unit,
-) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     val pullState = rememberPullToRefreshState()
@@ -216,18 +222,24 @@ private fun SaveManagerScreen(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onBack) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back",
-                    tint = MaterialTheme.colorScheme.onBackground,
-                )
+            // Only the Activity entry points pass an onBack; the drawer destination relies on the
+            // NavHost/drawer for navigation, so it renders without a header back button.
+            if (onBack != null) {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = MaterialTheme.colorScheme.onBackground,
+                    )
+                }
             }
             Text(
                 text = "Save Manager",
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.weight(1f).padding(start = 4.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = if (onBack != null) 4.dp else 12.dp),
             )
         }
 

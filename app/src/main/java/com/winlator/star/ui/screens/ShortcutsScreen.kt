@@ -76,9 +76,11 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.ViewList
+import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.Unarchive
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
@@ -215,6 +217,8 @@ import com.winlator.star.ui.screens.adrenodownload.RemoteDriverRepository
 import com.winlator.star.core.DefaultVersion
 import com.winlator.star.core.FileUtils
 import com.winlator.star.core.GameFolderScanner
+import com.winlator.star.core.GameSaveBackup
+import com.winlator.star.core.SaveLocator
 import com.winlator.star.core.KeyValueSet
 import com.winlator.star.ui.components.DraggableAddButton
 import com.winlator.star.ui.theme.DangerRed
@@ -233,6 +237,7 @@ import com.winlator.star.midi.MidiManager
 import com.winlator.star.store.StarLaunchBridge
 import com.winlator.star.store.SteamSaveManagerActivity
 import com.winlator.star.store.SteamStoreSearch
+import com.winlator.star.store.compose.ContainerPickerDialog
 import com.winlator.star.ui.theme.Divider as DividerColor
 import com.winlator.star.ui.theme.LocalAccentDim
 import com.winlator.star.ui.theme.OnSurface
@@ -274,6 +279,10 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     var selectedPaths by remember { mutableStateOf(setOf<String>()) }
     var confirmRemoveSelected by remember { mutableStateOf(false) }
     var cloneTarget by remember { mutableStateOf<Shortcut?>(null) }
+    // Save Backup (custom-import games): a picked .zip awaiting a target-container choice, plus the
+    // label of the game the restore was launched from (shown in the container picker title).
+    var restoreZipUri by remember { mutableStateOf<Uri?>(null) }
+    var restoreForName by remember { mutableStateOf("") }
     var settingsShortcut by remember { mutableStateOf<Shortcut?>(null) }
     var gameDetailsShortcut by remember { mutableStateOf<Shortcut?>(null) }
     var propertiesShortcut by remember { mutableStateOf<Shortcut?>(null) }
@@ -564,6 +573,49 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     val importFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) handleShortcutImport(uri)
     }
+
+    // ── Save Backup / Restore (custom-import games only) ──────────────────────────────────────────
+    // SAF picker for a backup .zip; on pick we hold the uri and show a target-container picker.
+    val restoreSaveLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) restoreZipUri = uri
+    }
+
+    // Back up this game's saves to Downloads/Winlator/Backups/GameSaves/<name>_<epoch>.zip. Scope =
+    // the game's discovered save folders (per-game); if none are found, fall back to the whole
+    // container so the action never silently no-ops. Discovery does file I/O → off the main thread.
+    fun startSaveBackup(shortcut: Shortcut) {
+        val container = shortcut.container
+        val name = shortcut.name
+        Toast.makeText(context, "Backing up saves for \"$name\"…", Toast.LENGTH_SHORT).show()
+        scope.launch {
+            val roots = withContext(Dispatchers.IO) {
+                val gameKey = SaveLocator.gameKey(shortcut.wmClass, shortcut.file.name)
+                val saved = SaveLocator.loadMap(container, gameKey)
+                if (saved != null && saved.roots.isNotEmpty()) saved.roots
+                else SaveLocator.discover(container, name, shortcut.path ?: "", shortcut.wmClass ?: "")
+                    .map { it.relPath }
+            }
+            // Empty → whole-container backup (roots = null), matching the Containers "whole" scope.
+            val effectiveRoots: List<String>? = if (roots.isEmpty()) null else roots
+            if (effectiveRoots == null) {
+                Toast.makeText(context, "No per-game saves detected — backing up the whole container.", Toast.LENGTH_LONG).show()
+            }
+            GameSaveBackup.backup(context, container, effectiveRoots, name, GameSaveBackup.BackupLayout.WINLATOR) { r ->
+                Toast.makeText(
+                    context,
+                    if (r.ok) "Backed up ${r.fileCount} files → ${r.path?.substringAfterLast('/')}"
+                    else "Backup failed: ${r.error ?: "unknown error"}",
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
+    }
+
+    // Restore: pick a .zip (SAF) → then choose the target container (ContainerPickerDialog) → restore.
+    fun startSaveRestore(shortcut: Shortcut) {
+        restoreForName = shortcut.name
+        restoreSaveLauncher.launch("application/zip")
+    }
     // Built-in in-app file picker (primary).
     val importFileInAppLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -787,6 +839,10 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                     onViewLogs = { logsShortcut = shortcut },
                                     onCloudSaves = if (isSteamOriginShortcut(shortcut))
                                         ({ launchSaveManager(context, steamAppIdOf(shortcut)) }) else null,
+                                    onBackupSaves = if (isCustomShortcut(shortcut))
+                                        ({ startSaveBackup(shortcut) }) else null,
+                                    onRestoreSaves = if (isCustomShortcut(shortcut))
+                                        ({ startSaveRestore(shortcut) }) else null,
                                 )
                             }
                         }
@@ -820,6 +876,10 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                     onViewLogs = { logsShortcut = shortcut },
                                     onCloudSaves = if (isSteamOriginShortcut(shortcut))
                                         ({ launchSaveManager(context, steamAppIdOf(shortcut)) }) else null,
+                                    onBackupSaves = if (isCustomShortcut(shortcut))
+                                        ({ startSaveBackup(shortcut) }) else null,
+                                    onRestoreSaves = if (isCustomShortcut(shortcut))
+                                        ({ startSaveRestore(shortcut) }) else null,
                                 )
                             }
                         }
@@ -1404,6 +1464,28 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
             },
             confirmButton = {},
             dismissButton = { TextButton(onClick = { cloneTarget = null }) { Text("Cancel") } },
+        )
+    }
+
+    // Save Restore: a backup .zip has been picked — choose the TARGET container to restore it into,
+    // then hand off to GameSaveBackup.restore (which unzips into that container and remaps the user).
+    restoreZipUri?.let { uri ->
+        ContainerPickerDialog(
+            gameName = restoreForName,
+            containers = vm.containers(),
+            onDismiss = { restoreZipUri = null },
+            onSelected = { chosen ->
+                restoreZipUri = null
+                Toast.makeText(context, "Restoring saves into \"${chosen.name}\"…", Toast.LENGTH_SHORT).show()
+                GameSaveBackup.restore(context, uri, chosen) { r ->
+                    Toast.makeText(
+                        context,
+                        if (r.ok) "Restored ${r.filesWritten} files to \"${chosen.name}\""
+                        else "Restore failed: ${r.error ?: "unknown error"}",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+            },
         )
     }
 
@@ -4305,6 +4387,10 @@ private fun isSteamOriginShortcut(shortcut: Shortcut): Boolean {
 private fun steamAppIdOf(shortcut: Shortcut): Int =
     shortcut.getExtra("steamAppId", "").toIntOrNull() ?: 0
 
+// A shortcut is "custom" (exe/folder import) when it is NOT a genuine Steam-library game. Steam games
+// get the "Cloud Saves" item; custom games get the local-only "Back up / Restore saves" items.
+private fun isCustomShortcut(shortcut: Shortcut): Boolean = !isSteamOriginShortcut(shortcut)
+
 private fun launchSaveManager(context: Context, focusAppId: Int) {
     context.startActivity(
         Intent(context, SteamSaveManagerActivity::class.java)
@@ -4332,6 +4418,8 @@ private fun ShortcutItemLayoutL(
     onGameDetails: () -> Unit,
     onViewLogs: () -> Unit,
     onCloudSaves: (() -> Unit)? = null,
+    onBackupSaves: (() -> Unit)? = null,
+    onRestoreSaves: (() -> Unit)? = null,
 ) {
     val res = LocalContext.current.resources
 
@@ -4450,6 +4538,8 @@ private fun ShortcutItemLayoutL(
             onGameDetails = onGameDetails,
             onViewLogs = onViewLogs,
             onCloudSaves = onCloudSaves,
+            onBackupSaves = onBackupSaves,
+            onRestoreSaves = onRestoreSaves,
         )
       }
     }
@@ -4469,6 +4559,8 @@ private fun ShortcutOverflowButton(
     onGameDetails: () -> Unit,
     onViewLogs: () -> Unit,
     onCloudSaves: (() -> Unit)? = null,
+    onBackupSaves: (() -> Unit)? = null,
+    onRestoreSaves: (() -> Unit)? = null,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     Box {
@@ -4524,6 +4616,23 @@ private fun ShortcutOverflowButton(
                     onClick = { menuExpanded = false; onCloudSaves() },
                 )
             }
+            // Custom-import games only — local save backup/restore (the non-Steam equivalent).
+            if (onBackupSaves != null) {
+                MenuItemDivider()
+                DropdownMenuItem(
+                    text = { Text("Back up saves") },
+                    leadingIcon = { Icon(Icons.Filled.Archive, null, tint = MaterialTheme.colorScheme.primary) },
+                    onClick = { menuExpanded = false; onBackupSaves() },
+                )
+            }
+            if (onRestoreSaves != null) {
+                MenuItemDivider()
+                DropdownMenuItem(
+                    text = { Text("Restore saves") },
+                    leadingIcon = { Icon(Icons.Filled.Unarchive, null, tint = MaterialTheme.colorScheme.primary) },
+                    onClick = { menuExpanded = false; onRestoreSaves() },
+                )
+            }
             MenuItemDivider()
             DropdownMenuItem(
                 text = { Text("Scrape cover") },
@@ -4570,6 +4679,8 @@ private fun ShortcutGridItem(
     onGameDetails: () -> Unit,
     onViewLogs: () -> Unit,
     onCloudSaves: (() -> Unit)? = null,
+    onBackupSaves: (() -> Unit)? = null,
+    onRestoreSaves: (() -> Unit)? = null,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
@@ -4698,6 +4809,15 @@ private fun ShortcutGridItem(
             if (onCloudSaves != null) {
                 MenuItemDivider()
                 DropdownMenuItem(text = { Text("Cloud Saves") }, leadingIcon = { Icon(Icons.Filled.CloudSync, null, tint = MaterialTheme.colorScheme.primary) }, onClick = { menuExpanded = false; onCloudSaves() })
+            }
+            // Custom-import games only — local save backup/restore (the non-Steam equivalent).
+            if (onBackupSaves != null) {
+                MenuItemDivider()
+                DropdownMenuItem(text = { Text("Back up saves") }, leadingIcon = { Icon(Icons.Filled.Archive, null, tint = MaterialTheme.colorScheme.primary) }, onClick = { menuExpanded = false; onBackupSaves() })
+            }
+            if (onRestoreSaves != null) {
+                MenuItemDivider()
+                DropdownMenuItem(text = { Text("Restore saves") }, leadingIcon = { Icon(Icons.Filled.Unarchive, null, tint = MaterialTheme.colorScheme.primary) }, onClick = { menuExpanded = false; onRestoreSaves() })
             }
             MenuItemDivider()
             DropdownMenuItem(text = { Text("Scrape cover") }, leadingIcon = { Icon(Icons.Filled.Search, null, tint = MaterialTheme.colorScheme.primary) }, onClick = { menuExpanded = false; onScrapeCover() })
