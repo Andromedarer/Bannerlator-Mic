@@ -2442,37 +2442,72 @@ public class XServerDisplayActivity extends AppCompatActivity {
             boolean genuineSteam = "steam".equals(storeSource) || path.contains("steam_games");
             if (!genuineSteam) return;
 
-            int parsed;
+            // Tagged appId is the fast path; 0/missing (a PRE-TAGGING shortcut like an older Half-Life 2
+            // whose .desktop carries no steamAppId) is NOT a bail — we derive the appId from the exec
+            // path's steam_games/<folder> via the installed-games DB below, on the worker thread.
+            int tagged;
             try {
-                parsed = Integer.parseInt(sc.getExtra("steamAppId", "0").trim());
+                tagged = Integer.parseInt(sc.getExtra("steamAppId", "0").trim());
             } catch (Exception e) {
-                return; // untagged / non-numeric → not a Steam-library game
+                tagged = 0;
             }
-            if (parsed <= 0) return; // gate: only Steam-library games (steamAppId > 0)
+            final int fTaggedAppId = tagged;
+            final String execPath = sc.path;                    // original casing, for the folder parse
+            final String folder = steamGamesFolderOf(execPath); // e.g. "Half-Life 2", or null
 
-            final int appId = parsed;
             final Context appCtx = getApplicationContext();
             final CountDownLatch latch = new CountDownLatch(1);
 
             new Thread(() -> {
                 try {
-                    SteamDatabase.GameRow row = SteamRepository.getInstance().getDatabase().getGame(appId);
-                    String installDir = (row != null && row.installDir != null) ? row.installDir : "";
-                    if (installDir.isEmpty()) { latch.countDown(); return; }
-                    SteamCloudSaveManager.INSTANCE.collectFromContainer(appCtx, appId, installDir,
+                    int appId = fTaggedAppId;
+                    String installDir = "";
+
+                    // Fast path: tagged appId → resolve installDir via getGame (Room, off-main here).
+                    if (appId > 0) {
+                        SteamDatabase.GameRow row = SteamRepository.getInstance().getDatabase().getGame(appId);
+                        installDir = (row != null && row.installDir != null) ? row.installDir : "";
+                    }
+
+                    // Pre-tagging shortcut (no/<=0 steamAppId, or appId with no install row): derive
+                    // appId+installDir by matching the exec path's steam_games/<folder> against the
+                    // installed-games DB. getDatabase() lazy-inits from SteamRepository's appContext;
+                    // a "not initialised" throw is caught by the surrounding try/catch below.
+                    if ((appId <= 0 || installDir.isEmpty()) && folder != null) {
+                        List<SteamDatabase.GameRow> installed =
+                                SteamRepository.getInstance().getDatabase().getInstalledGames();
+                        if (installed != null) {
+                            for (SteamDatabase.GameRow r : installed) {
+                                if (installDirMatchesFolder(r.installDir, folder)) {
+                                    appId = r.appId;
+                                    installDir = (r.installDir != null) ? r.installDir : "";
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    if (appId <= 0 || installDir.isEmpty()) {
+                        Log.w("BH_SAVE_SYNC", "auto-collect: could not resolve appId for " + execPath);
+                        latch.countDown();
+                        return;
+                    }
+
+                    final int fAppId = appId;
+                    SteamCloudSaveManager.INSTANCE.collectFromContainer(appCtx, fAppId, installDir,
                             new SteamCloudSaveManager.Callback() {
                                 @Override public void onStatus(String message) {}
                                 @Override public void onDone(String summary) {
-                                    Log.i("BH_SAVE_SYNC", "auto-collect on exit (appId " + appId + "): " + summary);
+                                    Log.i("BH_SAVE_SYNC", "auto-collect on exit (appId " + fAppId + "): " + summary);
                                     latch.countDown();
                                 }
                                 @Override public void onError(String message) {
-                                    Log.w("BH_SAVE_SYNC", "auto-collect on exit failed (appId " + appId + "): " + message);
+                                    Log.w("BH_SAVE_SYNC", "auto-collect on exit failed (appId " + fAppId + "): " + message);
                                     latch.countDown();
                                 }
                             });
                 } catch (Throwable t) {
-                    Log.w("BH_SAVE_SYNC", "auto-collect on exit errored (appId " + appId + ")", t);
+                    Log.w("BH_SAVE_SYNC", "auto-collect on exit errored", t);
                     latch.countDown();
                 }
             }, "BH-SaveAutoCollect").start();
@@ -2482,6 +2517,39 @@ public class XServerDisplayActivity extends AppCompatActivity {
         } catch (Throwable t) {
             Log.w("BH_SAVE_SYNC", "auto-collect on exit wrapper errored", t);
         }
+    }
+
+    /**
+     * The game folder from a Steam shortcut's exec path — the segment right after {@code steam_games}.
+     * Handles both separators and the {@code Z:\steam_games\<Folder>\...exe} form. Returns null when
+     * the path has no {@code steam_games/} segment. e.g. {@code Z:\steam_games\Half-Life 2\hl2.exe} →
+     * "Half-Life 2".
+     */
+    private static String steamGamesFolderOf(String rawPath) {
+        if (rawPath == null) return null;
+        String norm = rawPath.replace('\\', '/');
+        int idx = norm.toLowerCase().indexOf("steam_games/");
+        if (idx < 0) return null;
+        String after = norm.substring(idx + "steam_games/".length());
+        int slash = after.indexOf('/');
+        String folder = (slash >= 0 ? after.substring(0, slash) : after).trim();
+        return folder.isEmpty() ? null : folder;
+    }
+
+    /**
+     * Whether an installed-game {@code installDir} corresponds to the exec path's steam_games folder.
+     * Matches on the adjacent path segments {@code steam_games/<folder>} (case-insensitive, slash-
+     * normalized) so "Half-Life" can't false-match "Half-Life 2".
+     */
+    private static boolean installDirMatchesFolder(String installDir, String folder) {
+        if (installDir == null || folder == null) return false;
+        String norm = installDir.replace('\\', '/');
+        while (norm.endsWith("/")) norm = norm.substring(0, norm.length() - 1);
+        String[] segs = norm.split("/");
+        for (int i = 0; i + 1 < segs.length; i++) {
+            if (segs[i].equalsIgnoreCase("steam_games") && segs[i + 1].equalsIgnoreCase(folder)) return true;
+        }
+        return false;
     }
 
     /**
