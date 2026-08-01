@@ -3,6 +3,10 @@ package com.winlator.star.store
 import android.content.Context
 import android.os.Build
 import android.util.Log
+import com.winlator.star.container.Container
+import com.winlator.star.container.ContainerManager
+import com.winlator.star.container.Shortcut
+import com.winlator.star.core.SaveLocator
 import `in`.dragonbra.javasteam.enums.EResult
 import `in`.dragonbra.javasteam.steam.handlers.steamcloud.AppFileChangeList
 import `in`.dragonbra.javasteam.steam.handlers.steamcloud.AppFileInfo
@@ -227,23 +231,24 @@ object SteamCloudSaveManager {
         }, "steam-cloud-apply-$appId").start()
     }
 
-    /** Container → Library. Walks the container's save scopes (the directories the Library already
-     *  established for this game — see [enumerateContainerSaves]), maps each file back to its
-     *  `%Root%/rest` layout via [SteamCloudSavePaths.toLibraryRel], and copies it into the Library
-     *  (mkdirs, mtime preserved). Overwrites the Library's copies; never deletes anything from the
-     *  container, never touches the cloud. */
+    /** Container → Library. Walks the container's save scopes for this game (see
+     *  [enumerateContainerSaves]: the directories the Library already established, PLUS a name-match
+     *  discovery fallback so a never-downloaded game with an empty Library can still be collected),
+     *  maps each file back to its `%Root%/rest` layout via [SteamCloudSavePaths.toLibraryRel], and
+     *  copies it into the Library (mkdirs, mtime preserved). Overwrites the Library's copies; never
+     *  deletes anything from the container, never touches the cloud. */
     fun collectFromContainer(ctx: Context, appId: Int, installDir: String, cb: Callback) {
         Thread({
             try {
                 val library = SteamCloudSavePaths.libraryDir(ctx, appId)
-                val container = SteamCloudSavePaths.resolveContainer(ctx, appId, installDir)
+                val shortcut = resolveShortcut(ctx, installDir)
                     ?: run { cb.onError("This game isn't set up in a container yet"); return@Thread }
 
                 cb.onStatus("Scanning container saves…")
-                val saves = enumerateContainerSaves(ctx, appId, container, installDir)
+                val saves = enumerateContainerSaves(ctx, appId, shortcut, installDir)
                 if (saves.isEmpty()) {
                     cb.onDone("No saves found in " +
-                        "${SteamCloudSavePaths.containerLabel(container)} to collect")
+                        "${SteamCloudSavePaths.containerLabel(shortcut.container)} to collect")
                     return@Thread
                 }
 
@@ -286,9 +291,9 @@ object SteamCloudSaveManager {
         val libraryFiles = enumerateLocal(library)
         val libraryNewest = libraryFiles.maxOfOrNull { it.first.lastModified() } ?: 0L
 
-        val container = SteamCloudSavePaths.resolveContainer(ctx, appId, installDir)
-        val containerSaves = if (container == null) emptyList() else try {
-            enumerateContainerSaves(ctx, appId, container, installDir)
+        val shortcut = resolveShortcut(ctx, installDir)
+        val containerSaves = if (shortcut == null) emptyList() else try {
+            enumerateContainerSaves(ctx, appId, shortcut, installDir)
         } catch (e: Exception) {
             Log.w(TAG, "staleness: container scan failed", e); emptyList()
         }
@@ -299,39 +304,101 @@ object SteamCloudSaveManager {
 
     /**
      * The container-side save files for this game, paired with their `%Root%/rest` library-relative
-     * paths. Scope = the container directories the Library already established as this game's save
-     * locations (each tracked Library file's container-parent), then walked for their current
-     * contents. This discovers NEW sibling files in the real save folder while staying scoped to
-     * this game — it never sweeps a whole shared root (Documents/AppData/…). Empty if the Library
-     * has never been populated (⇒ nothing tracked yet).
+     * paths. Two passes, de-duped by canonical file path:
+     *
+     *  1. **Primary** — the container directories the Library already established as this game's save
+     *     locations (each tracked Library file's container-parent), walked for their current
+     *     contents. Discovers NEW sibling files in the real save folder without sweeping a whole
+     *     shared root. Contributes nothing until the Library has been populated once.
+     *  2. **Discovery fallback** — OUR [SaveLocator.discover] heuristic name-matches candidate save
+     *     folders inside the container's Wine profile from the game's shortcut ([Shortcut.name] /
+     *     [Shortcut.path] / [Shortcut.wmClass]). Each candidate's [SaveLocator.Candidate.relPath] is
+     *     profile-relative; we resolve it under [SaveLocator.profileDir] and walk it. This is what
+     *     lets a brand-new game with an EMPTY Library still be Collected → Uploaded.
+     *
+     * Every file is mapped through [SteamCloudSavePaths.toLibraryRel], which rejects escapes and
+     * unknown roots (null ⇒ skip), so both passes stay safety-fenced and never emit files outside a
+     * known UFS root.
      */
     private fun enumerateContainerSaves(
-        ctx: Context, appId: Int, container: com.winlator.star.container.Container, installDir: String,
+        ctx: Context, appId: Int, shortcut: Shortcut, installDir: String,
     ): List<Pair<File, String>> {
+        val container: Container = shortcut.container
         val library = SteamCloudSavePaths.libraryDir(ctx, appId)
-        val tracked = enumerateLocal(library)
-        if (tracked.isEmpty()) return emptyList()
 
+        val out = ArrayList<Pair<File, String>>()
+        val seen = HashSet<String>()
+
+        // Map one container file → its %Root%/rest path and record it once (de-dupe across passes).
+        fun consider(f: File) {
+            if (!f.isFile) return
+            val libraryRel = SteamCloudSavePaths.toLibraryRel(f, container, installDir) ?: return
+            val canon = try { f.canonicalPath } catch (e: Exception) { f.absolutePath }
+            if (seen.add(canon)) out.add(f to libraryRel)
+        }
+
+        // ── Pass 1: directories the Library already established for this game. ──
         val scopeDirs = LinkedHashSet<File>()
-        for ((_, rel) in tracked) {
+        for ((_, rel) in enumerateLocal(library)) {
             val dest = SteamCloudSavePaths.toContainerPath(rel, container, installDir) ?: continue
             val parent = dest.parentFile ?: continue
             if (parent.isDirectory) {
                 try { scopeDirs.add(parent.canonicalFile) } catch (_: Exception) {}
             }
         }
-
-        val out = ArrayList<Pair<File, String>>()
-        val seen = HashSet<String>()
         for (dir in scopeDirs) {
-            dir.walkTopDown().filter { it.isFile }.forEach { f ->
-                val libraryRel = SteamCloudSavePaths.toLibraryRel(f, container, installDir)
-                    ?: return@forEach
-                val canon = try { f.canonicalPath } catch (e: Exception) { f.absolutePath }
-                if (seen.add(canon)) out.add(f to libraryRel)
-            }
+            dir.walkTopDown().filter { it.isFile }.forEach { consider(it) }
         }
+
+        // ── Pass 2: name-match discovery fallback (works with an empty Library). ──
+        try {
+            val profile = SaveLocator.profileDir(container)
+            val candidates = SaveLocator.discover(
+                container,
+                shortcut.name ?: "",
+                shortcut.path ?: "",
+                shortcut.wmClass ?: "",
+            )
+            for (c in candidates) {
+                val dir = File(profile, c.relPath)
+                if (!dir.isDirectory) continue
+                dir.walkTopDown().filter { it.isFile }.forEach { consider(it) }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Collect discovery pass failed", e)
+        }
+
         return out
+    }
+
+    /**
+     * The game's launch shortcut — the `.desktop` whose exec target sits under [installDir] — or
+     * null if the game isn't set up in a container. Same matching rule as
+     * [SteamCloudSavePaths.resolveContainer], but returns the whole [Shortcut] so Collect can read
+     * its name/path/wmClass for the [SaveLocator.discover] pass (and reach its container).
+     */
+    private fun resolveShortcut(ctx: Context, installDir: String): Shortcut? {
+        if (installDir.isBlank()) return null
+
+        val manager = ContainerManager(ctx)
+        val shortcuts = try { manager.loadShortcuts() } catch (e: Exception) {
+            Log.w(TAG, "loadShortcuts failed", e); return null
+        }
+
+        val imageFsRoot = File(ctx.filesDir, "imagefs").absolutePath.replace('\\', '/').trimEnd('/')
+        val instAbs = installDir.replace('\\', '/').trimEnd('/')
+        val instRel = if (instAbs.lowercase().startsWith(imageFsRoot.lowercase()))
+            instAbs.substring(imageFsRoot.length).trimStart('/') else instAbs.trimStart('/')
+        val keys = listOf("/${instRel.lowercase()}/", "/${instAbs.trimStart('/').lowercase()}/")
+
+        for (sc in shortcuts) {
+            val raw = sc.path ?: continue
+            var exec = raw.replace('\\', '/').lowercase().trim()
+            exec = exec.replaceFirst(Regex("^[a-z]:"), "")
+            if (!exec.startsWith("/")) exec = "/$exec"
+            if (keys.any { it.length > 2 && exec.contains(it) }) return sc
+        }
+        return null
     }
 
     /** Copy [src] onto [dst] (creating parents), preserving the modified time. Overwrites [dst]. */
