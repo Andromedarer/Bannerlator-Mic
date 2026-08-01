@@ -352,7 +352,10 @@ private fun SteamGamesScreen(
     onLaunch: (SteamGame) -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        // Header bar
+        // Header — split across two rows so the title + status badge aren't crowded by the action
+        // icons. Row 1: back + title (left) and the Online badge (far right). Row 2: the five action
+        // icons on their own compact, right-aligned strip.
+        // Top row: back arrow + title on the left, status badge pinned to the far right.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -370,9 +373,20 @@ private fun SteamGamesScreen(
                 text = "Steam Library",
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.weight(1f).padding(start = 4.dp),
+                modifier = Modifier.padding(start = 4.dp),
             )
+            Spacer(Modifier.weight(1f))
             SteamStatusPill(status = steamStatus, onReconnect = onReconnect)
+        }
+
+        // Second row: the action icons on their own line, right-aligned and compact.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             IconButton(onClick = onViewToggle) {
                 Icon(
                     imageVector = if (viewMode == "grid") Icons.Filled.ViewList else Icons.Filled.GridView,

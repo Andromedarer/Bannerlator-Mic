@@ -17,7 +17,11 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
 import java.util.Date
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.zip.ZipInputStream
 
 /**
@@ -53,6 +57,13 @@ object SteamCloudSaveManager {
      *  "no usable SHA" and its path is always re-uploaded (never skipped). */
     private const val SHA1_LEN = 20
 
+    /** How many files transfer concurrently in [downloadSaves]/[uploadSaves]. Each transfer keeps
+     *  its OWN independent [HttpURLConnection] (separate signed CDN URL per file) and its own
+     *  jobid-keyed CM future, so per-file parallelism is safe — this is NOT single-connection HTTP/2
+     *  multiplexing (the imagefs-truncation footgun was range streams of ONE file over one conn).
+     *  Bounded low so we never hammer the CDN or the CM job dispatcher; tune here if needed. */
+    private const val TRANSFER_CONCURRENCY = 4
+
     interface Callback {
         fun onStatus(message: String)
         fun onDone(summary: String)
@@ -79,8 +90,12 @@ object SteamCloudSaveManager {
 
                 if (!localFolder.exists()) localFolder.mkdirs()
 
-                var downloaded = 0
+                // Resolve the safe work set first (unsafe cloud paths are skipped, counted below),
+                // then GET the files CONCURRENTLY via a bounded pool. Each task runs the existing
+                // per-file downloadOne (its own clientFileDownload + its own HttpURLConnection); no
+                // shared connection, no HTTP/2 multiplexing.
                 var skipped = 0
+                val work = ArrayList<Triple<String, String, File>>() // (displayName, remotePath, dest)
                 for (f in files) {
                     val remotePath = remotePathOf(f, fileList)
                     val relLocal = sanitizeRelative(remotePath)
@@ -89,14 +104,34 @@ object SteamCloudSaveManager {
                         skipped++
                         continue
                     }
-                    cb.onStatus("Downloading: ${f.filename}")
-                    val ok = downloadOne(steamCloud, appId, remotePath, File(localFolder, relLocal))
-                    if (!ok) { cb.onError("Download failed for: ${f.filename}"); return@Thread }
-                    downloaded++
+                    work.add(Triple(f.filename, remotePath, File(localFolder, relLocal)))
+                }
+
+                val downloaded = AtomicInteger(0)
+                val failures = ConcurrentLinkedQueue<String>()   // filenames that failed/threw
+                runConcurrently(work, "steam-cloud-dl-$appId") { (name, remotePath, dest) ->
+                    try {
+                        cb.onStatus("Downloading: $name")
+                        if (downloadOne(steamCloud, appId, remotePath, dest)) {
+                            downloaded.incrementAndGet()
+                        } else {
+                            failures.add(name)
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Download task failed for $name", e)
+                        failures.add(name)
+                    }
+                }
+
+                if (failures.isNotEmpty()) {
+                    val first = failures.peek()
+                    val more = if (failures.size > 1) " (+${failures.size - 1} more)" else ""
+                    cb.onError("Download failed for: $first$more")
+                    return@Thread
                 }
 
                 val suffix = if (skipped > 0) " ($skipped skipped)" else ""
-                cb.onDone("Downloaded $downloaded file${plural(downloaded)}$suffix")
+                cb.onDone("Downloaded ${downloaded.get()} file${plural(downloaded.get())}$suffix")
             } catch (e: Exception) {
                 Log.e(TAG, "downloadSaves failed", e)
                 cb.onError("Download error: ${e.message ?: e.javaClass.simpleName}")
@@ -204,25 +239,38 @@ object SteamCloudSaveManager {
                     0L,              // appBuildId (not tracked)
                 ).get(FUTURE_TIMEOUT_SEC, TimeUnit.SECONDS)
 
-                var uploaded = 0
-                var allOk = true
-                for ((file, cloudPath) in toUpload) {
-                    cb.onStatus("Uploading: ${file.name}")
-                    val ok = uploadOne(steamCloud, appId, file, cloudPath, batch.batchID)
-                    if (ok) uploaded++ else allOk = false
+                // Upload the batch's files CONCURRENTLY (bounded pool) — WITHIN the single open
+                // batch. Only the per-file uploadOne is parallelized (its own beginFileUpload +
+                // block PUTs over its own HttpURLConnection(s) + commitFileUpload, all jobid-keyed);
+                // the batch begin/complete calls stay single and sequential around this loop.
+                val batchId = batch.batchID
+                val uploaded = AtomicInteger(0)
+                val allOk = AtomicBoolean(true)
+                runConcurrently(toUpload, "steam-cloud-ul-$appId") { (file, cloudPath) ->
+                    try {
+                        cb.onStatus("Uploading: ${file.name}")
+                        if (uploadOne(steamCloud, appId, file, cloudPath, batchId)) {
+                            uploaded.incrementAndGet()
+                        } else {
+                            allOk.set(false)
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Upload task failed for ${file.name}", e)
+                        allOk.set(false)
+                    }
                 }
 
                 // Close the batch with the aggregate result (OK only if every file committed).
                 steamCloud.completeAppUploadBatch(
                     appId,
-                    batch.batchID,
-                    if (allOk) EResult.OK else EResult.Fail,
+                    batchId,
+                    if (allOk.get()) EResult.OK else EResult.Fail,
                 ).get(FUTURE_TIMEOUT_SEC, TimeUnit.SECONDS)
 
-                if (allOk) {
-                    cb.onDone("Uploaded $uploaded changed, $upToDate already up-to-date")
+                if (allOk.get()) {
+                    cb.onDone("Uploaded ${uploaded.get()} changed, $upToDate already up-to-date")
                 } else {
-                    cb.onError("Uploaded $uploaded of ${toUpload.size} changed; some files failed")
+                    cb.onError("Uploaded ${uploaded.get()} of ${toUpload.size} changed; some files failed")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "uploadSaves failed", e)
@@ -542,6 +590,29 @@ object SteamCloudSaveManager {
         dst.parentFile?.mkdirs()
         src.inputStream().use { input -> dst.outputStream().use { out -> input.copyTo(out) } }
         try { dst.setLastModified(src.lastModified()) } catch (_: Exception) {}
+    }
+
+    /**
+     * Run [action] over [items] on a fixed-size pool of at most [TRANSFER_CONCURRENCY] daemon
+     * workers and block until every item is done. [action] is expected to swallow its own failures
+     * (record them in a thread-safe accumulator) — this helper only logs anything that still escapes
+     * so one bad task can't strand the others. The pool is always shut down before returning.
+     */
+    private fun <T> runConcurrently(items: List<T>, threadLabel: String, action: (T) -> Unit) {
+        if (items.isEmpty()) return
+        val workers = minOf(TRANSFER_CONCURRENCY, items.size)
+        val seq = AtomicInteger(0)
+        val pool = Executors.newFixedThreadPool(workers) { r ->
+            Thread(r, "$threadLabel-${seq.incrementAndGet()}").apply { isDaemon = true }
+        }
+        try {
+            val futures = items.map { item -> pool.submit { action(item) } }
+            for (f in futures) {
+                try { f.get() } catch (e: Exception) { Log.w(TAG, "$threadLabel worker error", e) }
+            }
+        } finally {
+            pool.shutdown()
+        }
     }
 
     // ── Private helpers ─────────────────────────────────────────────────────────
