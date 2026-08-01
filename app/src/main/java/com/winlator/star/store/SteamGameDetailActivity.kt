@@ -198,6 +198,11 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
 
         SteamPrefs.init(this)
         SteamRepository.getInstance().initialize(this)
+        // Lazy-connect: opening a detail page directly (e.g. drawer → Save Manager → tap a card) skips
+        // the store home that starts SteamForegroundService, so the CM connection would stay down and
+        // the status badge read offline. Ensure it here when signed in — idempotent (start/connect
+        // guard double-connect), and a no-op for users without a saved Steam account.
+        if (SteamPrefs.isLoggedIn) SteamForegroundService.start(this)
 
         setContent {
             WinlatorTheme {

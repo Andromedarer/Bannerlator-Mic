@@ -124,6 +124,15 @@ internal fun SaveManagerScreen(
     onBack: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
+    // Lazy-connect: the store home starts SteamForegroundService (which opens the CM connection), but
+    // reaching this screen via the drawer/⋮ doesn't — so ensure it here when the user has a signed-in
+    // Steam session. Idempotent (start/connect guard against double-connect) and gated on a saved
+    // account so custom-only users never spin up a Steam service/notification. Fires for BOTH the
+    // NavHost drawer destination and the Activity entry points.
+    LaunchedEffect(Unit) {
+        SteamPrefs.init(context)
+        if (SteamPrefs.isLoggedIn) SteamForegroundService.start(context)
+    }
     // Reuse the existing detail nav; its Cloud Saves section is the per-game control surface.
     val onOpenGame: (Int) -> Unit = { appId ->
         context.startActivity(
