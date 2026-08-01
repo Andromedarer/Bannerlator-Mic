@@ -1,5 +1,6 @@
 package com.winlator.star.store
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.text.format.DateUtils
@@ -27,12 +28,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
@@ -53,6 +57,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.winlator.star.ui.screens.OutlinedAlertDialog
 import com.winlator.star.ui.theme.WinlatorTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -119,6 +124,7 @@ internal fun SaveManagerScreen(
 
     var statuses by remember { mutableStateOf<List<SaveStatus>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
+    var showSettings by remember { mutableStateOf(false) }
     // appIds with an in-flight quick action (Download/Upload) — disables that row's buttons.
     var busyAppIds by remember { mutableStateOf<Set<Int>>(emptySet()) }
     // Live per-row progress line for a running (or just-finished) quick action, keyed by appId.
@@ -241,6 +247,15 @@ internal fun SaveManagerScreen(
                     .weight(1f)
                     .padding(start = if (onBack != null) 4.dp else 12.dp),
             )
+            // Settings cog — turn the auto-back-up-on-exit toggles on/off. Lives in the shared header,
+            // so it shows from every entry point (drawer + store-home/⋮ launches).
+            IconButton(onClick = { showSettings = true }) {
+                Icon(
+                    imageVector = Icons.Filled.Settings,
+                    contentDescription = "Save Manager settings",
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
         }
 
         // Summary line.
@@ -298,6 +313,69 @@ internal fun SaveManagerScreen(
                 )
             }
         }
+    }
+
+    // Settings — the two auto-back-up-on-exit toggles (both default ON, preserving current behavior).
+    // State seeds from the shared "save_manager_prefs" on open; each toggle writes through immediately.
+    if (showSettings) {
+        val prefs = remember { context.getSharedPreferences("save_manager_prefs", Context.MODE_PRIVATE) }
+        var steamOn by remember { mutableStateOf(prefs.getBoolean("auto_collect_steam_on_exit", true)) }
+        var customOn by remember { mutableStateOf(prefs.getBoolean("auto_backup_custom_on_exit", true)) }
+        OutlinedAlertDialog(
+            onDismissRequest = { showSettings = false },
+            title = { Text("Save Manager settings") },
+            text = {
+                Column {
+                    SettingsToggleRow(
+                        title = "Steam games: auto-collect on exit",
+                        subtitle = "Snapshot Steam-library saves to your local Library when a game exits.",
+                        checked = steamOn,
+                        onCheckedChange = {
+                            steamOn = it
+                            prefs.edit().putBoolean("auto_collect_steam_on_exit", it).apply()
+                        },
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    SettingsToggleRow(
+                        title = "Custom games: auto-back up on exit",
+                        subtitle = "Snapshot custom-import saves to the local vault when a game exits.",
+                        checked = customOn,
+                        onCheckedChange = {
+                            customOn = it
+                            prefs.edit().putBoolean("auto_backup_custom_on_exit", it).apply()
+                        },
+                    )
+                }
+            },
+            confirmButton = { TextButton(onClick = { showSettings = false }) { Text("Done") } },
+        )
+    }
+}
+
+@Composable
+private fun SettingsToggleRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
 

@@ -2389,10 +2389,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 // imports → the persistent local vault. Runs BEFORE restartApplication() because that
                 // kills the process (exit(0)), which would otherwise abort the copy. Both are bounded
                 // + fully guarded so they can never hang or break game-exit. Nothing is ever uploaded.
+                // Each auto-back-up branch is gated by its Save Manager toggle (shared prefs, both
+                // default true → behavior unchanged unless the user turns it off). When off, we skip
+                // cleanly — no worker thread, no latch, no work.
+                SharedPreferences savePrefs = getSharedPreferences("save_manager_prefs", MODE_PRIVATE);
                 if (isGenuineSteamShortcut()) {
-                    autoCollectSteamSavesBlocking();
+                    if (savePrefs.getBoolean("auto_collect_steam_on_exit", true)) autoCollectSteamSavesBlocking();
                 } else {
-                    autoSnapshotCustomSavesBlocking();
+                    if (savePrefs.getBoolean("auto_backup_custom_on_exit", true)) autoSnapshotCustomSavesBlocking();
                 }
                 preloaderDialog.closeOnUiThread();
                 AppUtils.restartApplication(getApplicationContext());
