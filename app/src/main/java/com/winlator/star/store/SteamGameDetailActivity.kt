@@ -83,8 +83,10 @@ private enum class PauseAction { PAUSE, RESUME }
  *  failed = error, everything else = onSurfaceVariant). */
 private enum class GameStatus { NOT_INSTALLED, INSTALLED, CANCELLED, FAILED }
 
-/** The four save moves across the three tiers (Cloud ⇄ Library ⇄ Container). */
-private enum class CloudMove { DOWNLOAD, UPLOAD, APPLY, COLLECT }
+/** The four granular save moves across the three tiers (Cloud ⇄ Library ⇄ Container), plus the two
+ *  end-to-end combos the primary UI now leads with: SYNC_FROM = Download+Apply (cloud → into game),
+ *  SYNC_TO = Collect+Upload (game → to cloud). The granular four stay for the Advanced expander. */
+private enum class CloudMove { DOWNLOAD, UPLOAD, APPLY, COLLECT, SYNC_FROM, SYNC_TO }
 
 /** A pending cloud-save confirm dialog: which move, the target container's label, and (for the
  *  moves that need it) a non-blocking staleness warning line — null when there's nothing to warn. */
@@ -243,6 +245,8 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
                     cloudContainerReady = cloudContainerReady,
                     cloudContainerLabel = cloudContainerLabel,
                     cloudLibraryPath = SteamCloudSavePaths.libraryDir(this, appId).absolutePath,
+                    onCloudSyncFrom = { onCloudMoveRequested(CloudMove.SYNC_FROM) },
+                    onCloudSyncTo = { onCloudMoveRequested(CloudMove.SYNC_TO) },
                     onCloudDownload = { onCloudMoveRequested(CloudMove.DOWNLOAD) },
                     onCloudApply = { onCloudMoveRequested(CloudMove.APPLY) },
                     onCloudCollect = { onCloudMoveRequested(CloudMove.COLLECT) },
@@ -338,7 +342,7 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
                             addToShortcuts = null
                             StarLaunchBridge.writeShortcutAsync(
                                 this@SteamGameDetailActivity, container,
-                                req.gameName, req.exePath, req.coverUrl,
+                                req.gameName, req.exePath, req.coverUrl, appId,
                             ) { success, message ->
                                 addResult = AddShortcutResult(req.gameName, success, message)
                                 // The game now has a launch container — re-resolve so the Cloud Saves
@@ -907,10 +911,12 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
         val g = game ?: return
         cloudBusy = true
         cloudStatus = when (move) {
-            CloudMove.DOWNLOAD -> "Preparing download…"
-            CloudMove.UPLOAD   -> "Preparing upload…"
-            CloudMove.APPLY    -> "Applying to container…"
-            CloudMove.COLLECT  -> "Collecting from container…"
+            CloudMove.DOWNLOAD  -> "Preparing download…"
+            CloudMove.UPLOAD    -> "Preparing upload…"
+            CloudMove.APPLY     -> "Applying to container…"
+            CloudMove.COLLECT   -> "Collecting from container…"
+            CloudMove.SYNC_FROM -> "Syncing from Cloud…"
+            CloudMove.SYNC_TO   -> "Syncing to Cloud…"
         }
         val cb = object : SteamCloudSaveManager.Callback {
             override fun onStatus(message: String) { runOnUiThread { cloudStatus = message } }
@@ -918,10 +924,14 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
             override fun onError(message: String) { runOnUiThread { cloudStatus = "Error: $message"; cloudBusy = false } }
         }
         when (move) {
-            CloudMove.DOWNLOAD -> SteamCloudSaveManager.downloadToLibrary(this, appId, cb)
-            CloudMove.UPLOAD   -> SteamCloudSaveManager.uploadFromLibrary(this, appId, cb)
-            CloudMove.APPLY    -> SteamCloudSaveManager.applyToContainer(this, appId, g.installDir, cb)
-            CloudMove.COLLECT  -> SteamCloudSaveManager.collectFromContainer(this, appId, g.installDir, cb)
+            CloudMove.DOWNLOAD  -> SteamCloudSaveManager.downloadToLibrary(this, appId, cb)
+            CloudMove.UPLOAD    -> SteamCloudSaveManager.uploadFromLibrary(this, appId, cb)
+            CloudMove.APPLY     -> SteamCloudSaveManager.applyToContainer(this, appId, g.installDir, cb)
+            CloudMove.COLLECT   -> SteamCloudSaveManager.collectFromContainer(this, appId, g.installDir, cb)
+            // Combos — chained Download+Apply / Collect+Upload; the manager guards not-set-up itself
+            // and reports progress across both phases via onStatus.
+            CloudMove.SYNC_FROM -> SteamCloudSaveManager.syncFromCloud(this, appId, g.installDir, cb)
+            CloudMove.SYNC_TO   -> SteamCloudSaveManager.syncToCloud(this, appId, g.installDir, cb)
         }
     }
 
@@ -1035,6 +1045,8 @@ private fun SteamGameDetailScreen(
     cloudContainerReady: Boolean,
     cloudContainerLabel: String?,
     cloudLibraryPath: String,
+    onCloudSyncFrom: () -> Unit,
+    onCloudSyncTo: () -> Unit,
     onCloudDownload: () -> Unit,
     onCloudApply: () -> Unit,
     onCloudCollect: () -> Unit,
@@ -1278,6 +1290,8 @@ private fun SteamGameDetailScreen(
                 containerReady = cloudContainerReady,
                 containerLabel = cloudContainerLabel,
                 libraryPath = cloudLibraryPath,
+                onSyncFromCloud = onCloudSyncFrom,
+                onSyncToCloud = onCloudSyncTo,
                 onDownload = onCloudDownload,
                 onApply = onCloudApply,
                 onCollect = onCloudCollect,
@@ -1487,12 +1501,17 @@ private fun CloudSavesSection(
     containerReady: Boolean,
     containerLabel: String?,
     libraryPath: String,
+    onSyncFromCloud: () -> Unit,
+    onSyncToCloud: () -> Unit,
     onDownload: () -> Unit,
     onApply: () -> Unit,
     onCollect: () -> Unit,
     onUpload: () -> Unit,
     onSetUp: () -> Unit,
 ) {
+    // The four granular moves live under a collapsed "Advanced" expander; the primary UI is the two
+    // end-to-end combos. Collapsed by default so re-opening the page starts simple.
+    var advancedExpanded by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1509,10 +1528,8 @@ private fun CloudSavesSection(
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            text = "Your saves live in three places: Steam Cloud, a local Library you own, and the " +
-                "container this game runs in. Download pulls the cloud into your Library, Apply puts " +
-                "it into the container, Collect captures your progress back, and Upload sends your " +
-                "Library to the cloud.",
+            text = "Sync this game's saves with your Steam Cloud in one step, either direction. A local " +
+                "Library you own is kept as an internal middle copy along the way.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -1548,7 +1565,7 @@ private fun CloudSavesSection(
                 Spacer(Modifier.height(10.dp))
                 Text(
                     text = "Set this game up in a container first. Its saves follow whichever " +
-                        "container you add it to — then you can Apply and Collect them here.",
+                        "container you add it to — then you can sync them with the cloud here.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1573,52 +1590,106 @@ private fun CloudSavesSection(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
 
-                // Cloud row — Download (Cloud → Library) / Upload (Library → Cloud, additive).
+                // Primary: the two end-to-end combos, each with a one-line description underneath.
                 Spacer(Modifier.height(12.dp))
+                Button(
+                    onClick = onSyncFromCloud,
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                ) { Text("⬇ Sync from Cloud", maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                Spacer(Modifier.height(2.dp))
                 Text(
-                    text = "Cloud",
-                    style = MaterialTheme.typography.labelSmall,
+                    text = "Bring your Steam Cloud saves down and into this game.",
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Spacer(Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        onClick = onDownload,
-                        enabled = !busy,
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp),
-                    ) { Text("⬇ Download", maxLines = 1, overflow = TextOverflow.Ellipsis) }
 
-                    OutlinedButton(
-                        onClick = onUpload,
-                        enabled = !busy,
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp),
-                    ) { Text("⬆ Upload", maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                Spacer(Modifier.height(10.dp))
+                Button(
+                    onClick = onSyncToCloud,
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                ) { Text("⬆ Sync to Cloud", maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = "Send this game's current saves up to Steam Cloud.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                // Advanced expander — the original four granular moves, hidden by default.
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { advancedExpanded = !advancedExpanded }
+                        .padding(vertical = 6.dp),
+                ) {
+                    Text(
+                        text = if (advancedExpanded) "▾ Advanced" else "▸ Advanced",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "individual Download / Apply / Collect / Upload",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
 
-                // Container row — Apply (Library → Container) / Collect (Container → Library).
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    text = "Container",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        onClick = onApply,
-                        enabled = !busy,
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp),
-                    ) { Text("→ Apply", maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                if (advancedExpanded) {
+                    // Cloud row — Download (Cloud → Library) / Upload (Library → Cloud, additive).
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "Cloud",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = onDownload,
+                            enabled = !busy,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                        ) { Text("⬇ Download", maxLines = 1, overflow = TextOverflow.Ellipsis) }
 
-                    OutlinedButton(
-                        onClick = onCollect,
-                        enabled = !busy,
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp),
-                    ) { Text("← Collect", maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                        OutlinedButton(
+                            onClick = onUpload,
+                            enabled = !busy,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                        ) { Text("⬆ Upload", maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                    }
+
+                    // Container row — Apply (Library → Container) / Collect (Container → Library).
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        text = "Container",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = onApply,
+                            enabled = !busy,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                        ) { Text("→ Apply", maxLines = 1, overflow = TextOverflow.Ellipsis) }
+
+                        OutlinedButton(
+                            onClick = onCollect,
+                            enabled = !busy,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                        ) { Text("← Collect", maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                    }
                 }
 
                 if (busy) {
@@ -1688,6 +1759,19 @@ private fun CloudConfirmDialog(
                 "cloud files — it never deletes anything from the cloud. If the Library is empty, " +
                 "nothing is sent. Make sure your Library has your latest saves (Collect after playing).",
             "Upload",
+        )
+        CloudMove.SYNC_FROM -> Triple(
+            "Sync from Cloud?",
+            "Bring your Steam Cloud saves down and into $container (this game's container). This " +
+                "overwrites this container's saves with the cloud copy.",
+            "Sync from Cloud",
+        )
+        CloudMove.SYNC_TO -> Triple(
+            "Sync to Cloud?",
+            "Send this game's current saves from $container up to your Steam Cloud. Make sure this is " +
+                "the container with your latest saves — this only ADDS or REPLACES cloud files, it " +
+                "never deletes anything from the cloud.",
+            "Sync to Cloud",
         )
     }
     OutlinedAlertDialog(
