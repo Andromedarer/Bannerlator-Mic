@@ -154,10 +154,14 @@ private fun SaveManagerScreen(
         }
     }
 
-    fun runQuickMove(appId: Int, download: Boolean) {
+    // One end-to-end combo per button: syncFrom = Download+Apply (cloud → into game), else = Collect+
+    // Upload (game → to cloud). onStatus now spans both phases; the manager guards not-set-up itself
+    // (returns onError with the "add to a container first" message), and we also disable the buttons
+    // for NOT_SET_UP rows up front.
+    fun runQuickMove(appId: Int, syncFrom: Boolean) {
         if (appId in busyAppIds) return
         busyAppIds = busyAppIds + appId
-        rowProgress[appId] = RowProgress(if (download) "Preparing download…" else "Preparing upload…")
+        rowProgress[appId] = RowProgress(if (syncFrom) "Preparing sync from Cloud…" else "Preparing sync to Cloud…")
         // The manager may call back on a worker thread, so marshal every UI write onto the
         // composition scope (main) before touching state.
         val cb = object : SteamCloudSaveManager.Callback {
@@ -185,8 +189,17 @@ private fun SaveManagerScreen(
                 }
             }
         }
-        if (download) SteamCloudSaveManager.downloadToLibrary(context, appId, cb)
-        else SteamCloudSaveManager.uploadFromLibrary(context, appId, cb)
+        // The combos need the game's install dir (to resolve its container); look it up by appId off
+        // the main thread, then dispatch. An empty dir → the manager's not-set-up guard fires.
+        scope.launch {
+            // Use the same installDir source as SaveSyncStore + the detail page (getGame), so the row
+            // combo resolves the identical container. An empty dir → the not-set-up guard fires.
+            val installDir = withContext(Dispatchers.IO) {
+                SteamRepository.getInstance().database.getGame(appId)?.installDir ?: ""
+            }
+            if (syncFrom) SteamCloudSaveManager.syncFromCloud(context, appId, installDir, cb)
+            else SteamCloudSaveManager.syncToCloud(context, appId, installDir, cb)
+        }
     }
 
     val needSync = statuses.count { it.state.needsAttention() }
@@ -256,8 +269,8 @@ private fun SaveManagerScreen(
                                 busy = s.appId in busyAppIds,
                                 progress = rowProgress[s.appId],
                                 onOpen = { onOpenGame(s.appId) },
-                                onDownload = { runQuickMove(s.appId, download = true) },
-                                onUpload = { runQuickMove(s.appId, download = false) },
+                                onSyncFrom = { runQuickMove(s.appId, syncFrom = true) },
+                                onSyncTo = { runQuickMove(s.appId, syncFrom = false) },
                             )
                         }
                     }
@@ -283,9 +296,12 @@ private fun SaveStatusRow(
     busy: Boolean,
     progress: RowProgress?,
     onOpen: () -> Unit,
-    onDownload: () -> Unit,
-    onUpload: () -> Unit,
+    onSyncFrom: () -> Unit,
+    onSyncTo: () -> Unit,
 ) {
+    // Both combos require a container; NOT_SET_UP rows can't sync — disable the buttons and hint.
+    val notSetUp = status.state == SaveState.NOT_SET_UP
+    val actionsEnabled = !busy && !notSetUp
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -352,6 +368,16 @@ private fun SaveStatusRow(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+            } else if (notSetUp) {
+                // Can't sync without a container — tell the user how to enable it (tap-through opens
+                // the detail page where they can set it up).
+                Text(
+                    text = "Add this game to a container first to sync.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
             } else {
                 val times = syncedTimesLine(status)
                 if (times.isNotEmpty()) {
@@ -369,24 +395,22 @@ private fun SaveStatusRow(
             StatusPill(color = pillColor, label = pillLabel)
         }
 
-        // Per-row quick actions: Download (Cloud → Library) / Upload (Library → Cloud). Both are
-        // disabled while a move runs (the live progress is in the row body); the progress spinner
-        // itself lives beside the status text, not here.
+        // Per-row quick actions: the two end-to-end combos — Sync from Cloud (⬇) / Sync to Cloud (⬆).
+        // Disabled while a move runs (live progress is in the row body) and for NOT_SET_UP rows.
+        val disabledTint = MaterialTheme.colorScheme.primary.copy(alpha = 0.38f)
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            IconButton(onClick = onDownload, enabled = !busy) {
+            IconButton(onClick = onSyncFrom, enabled = actionsEnabled) {
                 Icon(
                     imageVector = Icons.Filled.CloudDownload,
-                    contentDescription = "Download to Library",
-                    tint = if (busy) MaterialTheme.colorScheme.primary.copy(alpha = 0.38f)
-                           else MaterialTheme.colorScheme.primary,
+                    contentDescription = "Sync from Cloud",
+                    tint = if (actionsEnabled) MaterialTheme.colorScheme.primary else disabledTint,
                 )
             }
-            IconButton(onClick = onUpload, enabled = !busy) {
+            IconButton(onClick = onSyncTo, enabled = actionsEnabled) {
                 Icon(
                     imageVector = Icons.Filled.CloudUpload,
-                    contentDescription = "Upload from Library",
-                    tint = if (busy) MaterialTheme.colorScheme.primary.copy(alpha = 0.38f)
-                           else MaterialTheme.colorScheme.primary,
+                    contentDescription = "Sync to Cloud",
+                    tint = if (actionsEnabled) MaterialTheme.colorScheme.primary else disabledTint,
                 )
             }
         }

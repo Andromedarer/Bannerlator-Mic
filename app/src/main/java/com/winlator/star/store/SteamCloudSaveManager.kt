@@ -251,6 +251,63 @@ object SteamCloudSaveManager {
             hooked(cb) { SaveSyncStore.recordAfterUpload(ctx, appId) })
     }
 
+    // ── Combo actions (Cloud ⇄ Container in one press) ───────────────────────────
+    // Each combo chains two of the moves above via callbacks: phase-1's onDone triggers phase 2.
+    // onStatus from BOTH phases is forwarded to the caller; a phase-1 onError stops and propagates;
+    // the final onDone composes both phases' summaries. Both require the game to be set up in a
+    // container (checked up front via [SteamCloudSavePaths.resolveContainer]) — otherwise they do NO
+    // work and report a single, clear error. The [SaveSyncStore] record hooks fire INSIDE the
+    // underlying wrapper moves (download/apply/collect/upload); the combos add none, so nothing is
+    // double-recorded. Upload stays additive (unchanged).
+
+    /** ⬇ Sync from Cloud — Download (Cloud→Library) THEN Apply (Library→Container). No work + a
+     *  single [Callback.onError] if the game isn't in a container yet. */
+    fun syncFromCloud(ctx: Context, appId: Int, installDir: String, cb: Callback) {
+        if (SteamCloudSavePaths.resolveContainer(ctx, appId, installDir) == null) {
+            cb.onError("This game needs to be added to a container first.")
+            return
+        }
+        // Phase 1: Download. Its onDone chains into phase 2; its onError stops the whole combo.
+        downloadToLibrary(ctx, appId, object : Callback {
+            override fun onStatus(message: String) = cb.onStatus(message)
+            override fun onError(message: String) = cb.onError(message)
+            override fun onDone(downloadSummary: String) {
+                // Phase 2: Apply. Its onDone composes the final combo summary.
+                applyToContainer(ctx, appId, installDir, object : Callback {
+                    override fun onStatus(message: String) = cb.onStatus(message)
+                    override fun onError(message: String) = cb.onError(message)
+                    override fun onDone(applySummary: String) {
+                        cb.onDone("Synced from cloud ($downloadSummary; $applySummary)")
+                    }
+                })
+            }
+        })
+    }
+
+    /** ⬆ Sync to Cloud — Collect (Container→Library) THEN Upload (Library→Cloud, strictly additive).
+     *  No work + a single [Callback.onError] if the game isn't in a container yet. */
+    fun syncToCloud(ctx: Context, appId: Int, installDir: String, cb: Callback) {
+        if (SteamCloudSavePaths.resolveContainer(ctx, appId, installDir) == null) {
+            cb.onError("This game needs to be added to a container first.")
+            return
+        }
+        // Phase 1: Collect. Its onDone chains into phase 2; its onError stops the whole combo.
+        collectFromContainer(ctx, appId, installDir, object : Callback {
+            override fun onStatus(message: String) = cb.onStatus(message)
+            override fun onError(message: String) = cb.onError(message)
+            override fun onDone(collectSummary: String) {
+                // Phase 2: Upload — additive (filesToDelete stays emptyList()); composes the summary.
+                uploadFromLibrary(ctx, appId, object : Callback {
+                    override fun onStatus(message: String) = cb.onStatus(message)
+                    override fun onError(message: String) = cb.onError(message)
+                    override fun onDone(uploadSummary: String) {
+                        cb.onDone("Synced to cloud ($collectSummary; $uploadSummary)")
+                    }
+                })
+            }
+        })
+    }
+
     /**
      * Wrap a caller [Callback] so [onSuccess] runs after a successful move (on the move's own worker
      * thread, right after the UI is notified via [Callback.onDone]). Used to fire the
