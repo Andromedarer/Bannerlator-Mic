@@ -478,8 +478,12 @@ object SteamCloudSaveManager {
     private fun hooked(delegate: Callback, onSuccess: () -> Unit): Callback = object : Callback {
         override fun onStatus(message: String) = delegate.onStatus(message)
         override fun onDone(summary: String) {
-            delegate.onDone(summary)
+            // Run the record hook's FAST/LOCAL write BEFORE delivering onDone, so the UI's post-move
+            // per-row statusOf reads the freshly-stamped lastDownloadAt/lastUploadAt (was stale when
+            // onDone fired first). The hook's SLOW cloud re-baseline is dispatched to its own thread
+            // inside SaveSyncStore, so this does not delay onDone.
             try { onSuccess() } catch (e: Exception) { Log.w(TAG, "save-status record hook failed", e) }
+            delegate.onDone(summary)
         }
         override fun onError(message: String) = delegate.onError(message)
     }

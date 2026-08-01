@@ -194,22 +194,40 @@ object SaveSyncStore {
 
     // ── Record hooks (called by SteamCloudSaveManager after each successful move) ──
 
-    /** Cloud → Library succeeded: stamp lastDownloadAt + re-baseline the cloud manifest. */
+    /**
+     * Cloud → Library succeeded. Two-phase so the row updates instantly:
+     *  1. FAST/LOCAL (synchronous): stamp lastDownloadAt + refresh the local common fields and PERSIST
+     *     now — so lastDownloadAt is on disk before the move's onDone fires the UI's per-row statusOf.
+     *  2. SLOW/NETWORK (off-thread): re-baseline the cloud manifest as a second persist. Never delays
+     *     onDone or the immediate refresh.
+     */
     fun recordAfterDownload(ctx: Context, appId: Int) {
-        val cloud = observeCloud(appId)   // network fetch OUTSIDE the persistence lock
-        writeHook(ctx, appId) { rec ->
-            rec.put("lastDownloadAt", System.currentTimeMillis())
-            cloud?.let { (count, hash) -> rec.put("cloudFileCount", count); rec.put("cloudManifestHash", hash) }
-        }
+        writeHook(ctx, appId) { rec -> rec.put("lastDownloadAt", System.currentTimeMillis()) }
+        rebaselineCloudAsync(ctx, appId)
     }
 
-    /** Library → Cloud succeeded: stamp lastUploadAt + re-baseline the cloud manifest. */
+    /** Library → Cloud succeeded. Same two-phase split as [recordAfterDownload]: stamp lastUploadAt
+     *  locally + persist synchronously first, then re-baseline the cloud manifest off-thread. */
     fun recordAfterUpload(ctx: Context, appId: Int) {
-        val cloud = observeCloud(appId)   // network fetch OUTSIDE the persistence lock
-        writeHook(ctx, appId) { rec ->
-            rec.put("lastUploadAt", System.currentTimeMillis())
-            cloud?.let { (count, hash) -> rec.put("cloudFileCount", count); rec.put("cloudManifestHash", hash) }
-        }
+        writeHook(ctx, appId) { rec -> rec.put("lastUploadAt", System.currentTimeMillis()) }
+        rebaselineCloudAsync(ctx, appId)
+    }
+
+    /**
+     * Phase 2 of the download/upload hooks: fetch the cloud manifest and persist the cloud baseline
+     * (cloudFileCount / cloudManifestHash) as a SECOND write. Runs on its own thread so the network
+     * round-trip never delays the move's onDone or the UI's post-move status refresh — the local
+     * timestamp is already on disk by then. A null/failed fetch leaves the existing baseline intact
+     * (we never overwrite a good baseline with "cloud unknown").
+     */
+    private fun rebaselineCloudAsync(ctx: Context, appId: Int) {
+        Thread({
+            val cloud = observeCloud(appId) ?: return@Thread   // network fetch OUTSIDE the persistence lock
+            writeHook(ctx, appId) { rec ->
+                rec.put("cloudFileCount", cloud.first)
+                rec.put("cloudManifestHash", cloud.second)
+            }
+        }, "save-cloud-rebaseline-$appId").start()
     }
 
     /** Container → Library succeeded: Library now holds fresh saves not yet uploaded (→ LOCAL_AHEAD).
