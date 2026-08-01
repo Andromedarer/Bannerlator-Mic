@@ -133,7 +133,7 @@ object SteamCloudSavePaths {
         val baseCanon = try { base.canonicalPath } catch (e: Exception) { return null }
         val destCanon = try { dest.canonicalPath } catch (e: Exception) { return null }
         if (destCanon != baseCanon && !destCanon.startsWith(baseCanon + File.separator)) {
-            Log.w(TAG, "Rejecting container path escaping $token: $libraryRel")
+            Log.w(TAG, "Rejecting container path escaping ${root.token}: $libraryRel")
             return null
         }
         return dest
