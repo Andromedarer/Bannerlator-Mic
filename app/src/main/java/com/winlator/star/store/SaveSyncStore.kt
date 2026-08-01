@@ -29,6 +29,20 @@ import java.util.concurrent.TimeUnit
  * only place a CM future is awaited is [refreshFromCloud] and the [observeCloud] baseline capture the
  * download/upload hooks run (already on the move's background thread).
  */
+/** One game's cloud-save status for the Save Manager. Top-level so the UI can name it directly. */
+enum class SaveState { IN_SYNC, LOCAL_AHEAD, CLOUD_AHEAD, NEVER_SYNCED, NO_CLOUD_SAVES, NOT_SET_UP, UNKNOWN }
+
+data class SaveStatus(
+    val appId: Int,
+    val gameName: String,
+    val state: SaveState,
+    val lastDownloadAt: Long,    // epoch millis, 0 if never
+    val lastUploadAt: Long,      // epoch millis, 0 if never
+    val containerLabel: String?, // null if not set up
+    val libraryFileCount: Int,
+    val cloudFileCount: Int,     // last-known; may be stale until refresh
+)
+
 object SaveSyncStore {
 
     private const val TAG = "BH_SAVE_SYNC"
@@ -41,19 +55,6 @@ object SaveSyncStore {
 
     /** Serializes read-modify-write of the shared sidecar across the four move threads + refresh. */
     private val lock = Any()
-
-    enum class SaveState { IN_SYNC, LOCAL_AHEAD, CLOUD_AHEAD, NEVER_SYNCED, NO_CLOUD_SAVES, NOT_SET_UP, UNKNOWN }
-
-    data class SaveStatus(
-        val appId: Int,
-        val gameName: String,
-        val state: SaveState,
-        val lastDownloadAt: Long,    // epoch millis, 0 if never
-        val lastUploadAt: Long,      // epoch millis, 0 if never
-        val containerLabel: String?, // null if not set up
-        val libraryFileCount: Int,
-        val cloudFileCount: Int,     // last-known; may be stale until refresh
-    )
 
     // ── Public API ────────────────────────────────────────────────────────────
 
