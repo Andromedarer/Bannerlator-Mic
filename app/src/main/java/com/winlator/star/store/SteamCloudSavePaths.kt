@@ -58,15 +58,17 @@ object SteamCloudSavePaths {
     )
 
     /**
-     * Aliases the CM may send for the same root (GameNative's `PathType.from` accepts these). Keyed
-     * by the lowercased alias token, valued by the canonical token in [ROOTS]. Note: SteamUserData
-     * (`%SteamUserBaseStorage%` / `%SteamCloudDocuments%` for the userdata/remote store) is NOT
-     * mapped — it needs the account id we don't have here, so such files are skipped, not guessed.
+     * Extra spellings the CM may send for a root, keyed by the PERCENT-STRIPPED lowercased token,
+     * valued by the percent-stripped canonical token in [ROOTS]. [lookupRoot] strips percents before
+     * consulting this, so a token resolves whether it arrives as `%root_mod%`, `ROOT_MOD`, or
+     * `root_mod`. Note: SteamUserData (`SteamUserBaseStorage` — the userdata/remote store) is NOT
+     * mapped (needs the account id we don't have here), so those files are skipped, never guessed.
      */
     private val ALIASES: Map<String, String> = mapOf(
-        "%winappdata%" to "%WinAppDataRoaming%",   // legacy short form of Roaming
-        "%windowshome%" to "%Root%",               // GameNative alias for the profile root
-        "%root_mod%" to "%Root%",                  // GameNative alias for the profile root
+        "winappdata" to "winappdataroaming",       // legacy short form of Roaming
+        "windowshome" to "root",                   // GameNative alias for the profile root
+        "root_mod" to "root",                      // GameNative alias for the profile root
+        "steamclouddocuments" to "winmydocuments", // GameNative maps this to Documents
     )
 
     // ── Public API ───────────────────────────────────────────────────────────────
@@ -123,13 +125,8 @@ object SteamCloudSavePaths {
      * escape its mapped root.
      */
     fun toContainerPath(libraryRel: String, container: Container, installDir: String): File? {
-        val parts = safeParts(libraryRel) ?: return null
-        val token = parts.first()
-        val root = lookupRoot(token) ?: run {
-            Log.w(TAG, "Unknown UFS root token: $token"); return null
-        }
+        val (root, remainder) = parseRoot(libraryRel) ?: return null
         val base = root.baseDir(container, installDir)
-        val remainder = parts.drop(1)
         val dest = if (remainder.isEmpty()) base else File(base, remainder.joinToString("/"))
 
         // Escape guard: the canonicalized destination must be the root itself or strictly under it.
@@ -157,7 +154,11 @@ object SteamCloudSavePaths {
             if (target.startsWith(base + File.separator)) {
                 val rel = target.substring(base.length + 1).replace(File.separatorChar, '/')
                 if (rel.isEmpty() || rel.split('/').any { it == ".." }) return null
-                return "${root.token}/$rel"
+                // Real Steam data fuses %GameInstall% straight onto the path (e.g. "%GameInstall%hl2/
+                // save/…", no separator — confirmed from HL2 cloud manifests). Emit that same shape so
+                // an uploaded path round-trips; other roots keep the "%Token%/rest" form. [parseRoot]
+                // accepts both regardless.
+                return if (root.token == "%GameInstall%") "${root.token}$rel" else "${root.token}/$rel"
             }
         }
         return null
@@ -165,23 +166,53 @@ object SteamCloudSavePaths {
 
     // ── Private helpers ──────────────────────────────────────────────────────────
 
+    /** Loose files with no recognizable root token fall back here (game-install-relative). */
+    private val DEFAULT_ROOT: Root get() = ROOTS.first { it.token == "%GameInstall%" }
+
     /**
-     * Split a library-relative path into safe segments (reuse of the same normalization
-     * [SteamCloudSaveManager.sanitizeRelative] applies on download/upload): '\'→'/', strip leading
-     * slashes, drop '.'/empty, REJECT any '..'. Null ⇒ unsafe/empty.
+     * Split a library-relative path into its UFS root + safe remainder segments. Real Steam cloud
+     * paths arrive in three shapes — all handled here (HL2 uses all three):
+     *   - `%GameInstall%hl2/save/x.sav` — root fused onto the path (leading `%…%`, NO separator)
+     *   - `ROOT_MOD/cfg/config.cfg`     — root as a bare leading segment (no percents)
+     *   - `cfg/config.cfg`              — no root token at all → [DEFAULT_ROOT]
+     * (Steam's own client sometimes embeds `%GameInstall%` in the filename instead of splitting it —
+     * see GameNative SteamAutoCloud's identical work-around.) Rejects any `..` in the remainder.
+     * Null ⇒ empty/unsafe, or a `%…%` token we don't map (⇒ caller skips + logs).
      */
-    private fun safeParts(path: String): List<String>? {
+    private fun parseRoot(path: String): Pair<Root, List<String>>? {
         val norm = path.replace('\\', '/').trimStart('/')
         if (norm.isEmpty()) return null
-        val parts = norm.split('/').filter { it.isNotEmpty() && it != "." }
-        if (parts.isEmpty() || parts.any { it == ".." }) return null
-        return parts
+
+        val root: Root
+        val rest: String
+        val leadingPct = Regex("^%[^%]+%").find(norm)   // fused OR standalone %Token%
+        if (leadingPct != null) {
+            root = lookupRoot(leadingPct.value) ?: run {
+                Log.w(TAG, "Unknown UFS root token '${leadingPct.value}' in: $path"); return null
+            }
+            rest = norm.substring(leadingPct.value.length).trimStart('/')
+        } else {
+            val firstSeg = norm.substringBefore('/')
+            val bareRoot = lookupRoot(firstSeg)
+            if (bareRoot != null) {
+                root = bareRoot
+                rest = norm.substringAfter('/', "")
+            } else {
+                root = DEFAULT_ROOT                     // no recognizable root token
+                rest = norm
+                Log.w(TAG, "No UFS root token in '$path' → defaulting to %GameInstall%")
+            }
+        }
+
+        val parts = rest.split('/').filter { it.isNotEmpty() && it != "." }
+        if (parts.any { it == ".." }) return null
+        return root to parts
     }
 
-    /** Resolve a leading `%Token%` (case-insensitively, aliases applied) to its [Root], or null. */
+    /** Resolve a root token — with or without surrounding `%…%`, case-insensitively, aliases applied. */
     private fun lookupRoot(token: String): Root? {
-        val key = token.lowercase()
-        val canonical = ALIASES[key] ?: token
-        return ROOTS.firstOrNull { it.token.equals(canonical, ignoreCase = true) }
+        val bare = token.lowercase().trim('%')
+        val canonical = ALIASES[bare] ?: bare
+        return ROOTS.firstOrNull { it.token.lowercase().trim('%') == canonical }
     }
 }
