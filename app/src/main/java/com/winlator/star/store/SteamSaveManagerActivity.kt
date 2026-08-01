@@ -302,6 +302,9 @@ private fun SaveStatusRow(
     // Both combos require a container; NOT_SET_UP rows can't sync — disable the buttons and hint.
     val notSetUp = status.state == SaveState.NOT_SET_UP
     val actionsEnabled = !busy && !notSetUp
+    // Sync-from-Cloud is pointless with nothing in the cloud (e.g. a Not-backed-up game) — gate it so
+    // the meaningful action (Sync to Cloud = back it up) stands out.
+    val syncFromEnabled = actionsEnabled && status.cloudFileCount > 0
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -399,11 +402,11 @@ private fun SaveStatusRow(
         // Disabled while a move runs (live progress is in the row body) and for NOT_SET_UP rows.
         val disabledTint = MaterialTheme.colorScheme.primary.copy(alpha = 0.38f)
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            IconButton(onClick = onSyncFrom, enabled = actionsEnabled) {
+            IconButton(onClick = onSyncFrom, enabled = syncFromEnabled) {
                 Icon(
                     imageVector = Icons.Filled.CloudDownload,
                     contentDescription = "Sync from Cloud",
-                    tint = if (actionsEnabled) MaterialTheme.colorScheme.primary else disabledTint,
+                    tint = if (syncFromEnabled) MaterialTheme.colorScheme.primary else disabledTint,
                 )
             }
             IconButton(onClick = onSyncTo, enabled = actionsEnabled) {
@@ -442,6 +445,7 @@ private const val PROGRESS_LINGER_MS = 2500L
 // Green = settled, amber/orange = local drift, blue = cloud drift, grey = nothing to do / unset.
 private fun pillFor(state: SaveState): Pair<Color, String> = when (state) {
     SaveState.IN_SYNC        -> Color(0xFF3BA55D) to "In sync"
+    SaveState.LOCAL_ONLY     -> Color(0xFFE0662E) to "Not backed up"
     SaveState.LOCAL_AHEAD    -> Color(0xFFE0A82E) to "Local ahead"
     SaveState.CLOUD_AHEAD    -> Color(0xFF4B9CE0) to "Cloud ahead"
     SaveState.NEVER_SYNCED   -> Color(0xFFE07B2E) to "Never synced"
@@ -451,7 +455,7 @@ private fun pillFor(state: SaveState): Pair<Color, String> = when (state) {
 }
 
 private fun SaveState.needsAttention(): Boolean = when (this) {
-    SaveState.NOT_SET_UP, SaveState.CLOUD_AHEAD, SaveState.LOCAL_AHEAD, SaveState.NEVER_SYNCED -> true
+    SaveState.NOT_SET_UP, SaveState.CLOUD_AHEAD, SaveState.LOCAL_ONLY, SaveState.LOCAL_AHEAD, SaveState.NEVER_SYNCED -> true
     else -> false
 }
 

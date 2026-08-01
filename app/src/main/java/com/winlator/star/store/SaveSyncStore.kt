@@ -30,7 +30,7 @@ import java.util.concurrent.TimeUnit
  * download/upload hooks run (already on the move's background thread).
  */
 /** One game's cloud-save status for the Save Manager. Top-level so the UI can name it directly. */
-enum class SaveState { IN_SYNC, LOCAL_AHEAD, CLOUD_AHEAD, NEVER_SYNCED, NO_CLOUD_SAVES, NOT_SET_UP, UNKNOWN }
+enum class SaveState { IN_SYNC, LOCAL_ONLY, LOCAL_AHEAD, CLOUD_AHEAD, NEVER_SYNCED, NO_CLOUD_SAVES, NOT_SET_UP, UNKNOWN }
 
 data class SaveStatus(
     val appId: Int,
@@ -86,8 +86,12 @@ object SaveSyncStore {
         val out = ArrayList<SaveStatus>()
         for (appId in candidates) {
             val status = statusOf(ctx, appId)
-            // Scope gate: keep only games that have local library files OR known cloud saves.
-            if (status.libraryFileCount > 0 || status.cloudFileCount > 0) out.add(status)
+            // Scope gate: keep games with a local Library, known cloud saves, OR local (in-container)
+            // saves that need attention (LOCAL_ONLY = played-but-never-backed-up; LOCAL_AHEAD =
+            // synced-then-changed). The discovery scan already ran in statusOf, so this is free.
+            val keep = status.libraryFileCount > 0 || status.cloudFileCount > 0 ||
+                status.state == SaveState.LOCAL_ONLY || status.state == SaveState.LOCAL_AHEAD
+            if (keep) out.add(status)
         }
         return out.sortedWith(compareBy({ attentionRank(it.state) }, { it.gameName.lowercase() }))
     }
@@ -239,6 +243,12 @@ object SaveSyncStore {
         // Cloud has saves but nothing local yet (never downloaded).
         if (cloudFileCount > 0 && !hasLibrary && lastDownloadAt == 0L) return SaveState.NEVER_SYNCED
 
+        // Local saves exist but were NEVER backed up (no prior sync, cloud empty/unknown). This is a
+        // played-but-never-synced game — surfaced so the manager can nag you to back it up.
+        if ((hasLibrary || containerFileCount > 0) && lastSync == 0L && cloudFileCount == 0) {
+            return SaveState.LOCAL_ONLY
+        }
+
         // Local side (Library or container) changed since the last reconcile → needs uploading.
         if ((hasLibrary || containerFileCount > 0) && newestLocalMtime > lastSync) return SaveState.LOCAL_AHEAD
 
@@ -258,11 +268,12 @@ object SaveSyncStore {
     private fun attentionRank(state: SaveState): Int = when (state) {
         SaveState.NOT_SET_UP    -> 0
         SaveState.CLOUD_AHEAD   -> 1
-        SaveState.LOCAL_AHEAD   -> 2
-        SaveState.NEVER_SYNCED  -> 3
-        SaveState.IN_SYNC       -> 4
-        SaveState.NO_CLOUD_SAVES -> 5
-        SaveState.UNKNOWN       -> 6
+        SaveState.LOCAL_ONLY    -> 2   // never backed up — most worth surfacing
+        SaveState.LOCAL_AHEAD   -> 3
+        SaveState.NEVER_SYNCED  -> 4
+        SaveState.IN_SYNC       -> 5
+        SaveState.NO_CLOUD_SAVES -> 6
+        SaveState.UNKNOWN       -> 7
     }
 
     // ── Record persistence ────────────────────────────────────────────────────
