@@ -45,6 +45,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -124,14 +125,31 @@ internal fun SaveManagerScreen(
     onBack: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
+    // Signed-in gate (a saved Steam account). Read once; SteamPrefs.init is idempotent + cheap.
+    val signedIn = remember { SteamPrefs.init(context); SteamPrefs.isLoggedIn }
     // Lazy-connect: the store home starts SteamForegroundService (which opens the CM connection), but
-    // reaching this screen via the drawer/⋮ doesn't — so ensure it here when the user has a signed-in
-    // Steam session. Idempotent (start/connect guard against double-connect) and gated on a saved
-    // account so custom-only users never spin up a Steam service/notification. Fires for BOTH the
-    // NavHost drawer destination and the Activity entry points.
+    // reaching this screen via the drawer/⋮ doesn't — so ensure it here when signed in. Idempotent
+    // (start/connect guard against double-connect); no-op for custom-only users so they never spin up
+    // a Steam service/notification. Fires for BOTH the NavHost drawer destination and the Activity.
     LaunchedEffect(Unit) {
-        SteamPrefs.init(context)
-        if (SteamPrefs.isLoggedIn) SteamForegroundService.start(context)
+        if (signedIn) SteamForegroundService.start(context)
+    }
+    // Live Steam connection status for the header badge. Seed from the repository's current status,
+    // then track the same "SteamStatus:<NAME>" events the detail page listens to — but via a
+    // DisposableEffect (this composable is also the drawer NavHost destination, with no Activity to
+    // implement SteamEventListener). Reflects the connection coming up from the auto-connect above.
+    var steamStatus by remember { mutableStateOf(SteamRepository.getInstance().status) }
+    DisposableEffect(Unit) {
+        val repo = SteamRepository.getInstance()
+        val listener = SteamRepository.SteamEventListener { event ->
+            if (event.startsWith("SteamStatus:")) {
+                val name = event.substringAfter("SteamStatus:")
+                steamStatus = try { SteamRepository.SteamStatus.valueOf(name) } catch (e: Exception) { steamStatus }
+            }
+        }
+        repo.addListener(listener)
+        steamStatus = repo.status  // re-seed in case it changed between remember and register
+        onDispose { repo.removeListener(listener) }
     }
     // Reuse the existing detail nav; its Cloud Saves section is the per-game control surface.
     val onOpenGame: (Int) -> Unit = { appId ->
@@ -271,6 +289,15 @@ internal fun SaveManagerScreen(
                     .weight(1f)
                     .padding(start = if (onBack != null) 4.dp else 12.dp),
             )
+            // Live Steam connection badge (signed-in only) — same pill the store/detail screens show;
+            // tap to reconnect when offline. Custom-only users never see a Steam badge.
+            if (signedIn) {
+                SteamStatusPill(
+                    status = steamStatus,
+                    onReconnect = { SteamRepository.getInstance().reconnectNow() },
+                )
+                Spacer(Modifier.width(8.dp))
+            }
             // Settings cog — turn the auto-back-up-on-exit toggles on/off. Lives in the shared header,
             // so it shows from every entry point (drawer + store-home/⋮ launches).
             IconButton(onClick = { showSettings = true }) {
