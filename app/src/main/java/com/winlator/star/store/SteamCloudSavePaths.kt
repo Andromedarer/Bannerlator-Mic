@@ -37,7 +37,7 @@ object SteamCloudSavePaths {
 
     /**
      * The UFS `%Root%` table, ordered MOST-SPECIFIC → LEAST-SPECIFIC. Order matters only for
-     * [toLibraryRel]: the profile sub-roots (Documents, AppData/*, Saved Games) are nested under the
+     * [toLibraryRel]: the profile sub-roots (Documents, AppData subdirs, Saved Games) are nested under the
      * profile itself, so `%Root%` (the bare profile) MUST be matched last, and `AppData/LocalLow`
      * before `AppData/Local` for good measure. [GameInstall] / [WinProgramData] live outside the
      * profile entirely.
