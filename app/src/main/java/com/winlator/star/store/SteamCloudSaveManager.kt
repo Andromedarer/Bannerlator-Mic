@@ -167,6 +167,180 @@ object SteamCloudSaveManager {
         }, "steam-cloud-upload-$appId").start()
     }
 
+    // ── Three-tier moves (Cloud ⇄ Library ⇄ Container) ───────────────────────────
+    // Library = the managed local folder [SteamCloudSavePaths.libraryDir]; canonical local copy.
+    // These wrap the primitives above / add container-side copies. SAFETY is unchanged: Download and
+    // Upload delegate to [downloadSaves]/[uploadSaves] (Upload stays additive, filesToDelete empty,
+    // empty-Library refused). Apply/Collect are pure copies — they may overwrite the DESTINATION
+    // side only and NEVER delete the source and NEVER touch the cloud.
+
+    /** Cloud → Library. Thin wrapper over [downloadSaves] with the Library dir resolved internally. */
+    fun downloadToLibrary(ctx: Context, appId: Int, cb: Callback) {
+        downloadSaves(ctx, appId, SteamCloudSavePaths.libraryDir(ctx, appId), cb)
+    }
+
+    /** Library → Cloud, strictly additive. Thin wrapper over [uploadSaves] (filesToDelete stays
+     *  emptyList(); an empty Library is refused before any batch is opened). */
+    fun uploadFromLibrary(ctx: Context, appId: Int, cb: Callback) {
+        uploadSaves(ctx, appId, SteamCloudSavePaths.libraryDir(ctx, appId), cb)
+    }
+
+    /** Library → Container. For every file in the Library, translate its `%Root%/rest` layout to an
+     *  absolute container path via [SteamCloudSavePaths.toContainerPath] and copy it in (mkdirs,
+     *  mtime preserved). Overwrites the container's copies; never deletes anything, never touches the
+     *  cloud. Files whose leading root token is unknown/unsafe are skipped (logged), never guessed. */
+    fun applyToContainer(ctx: Context, appId: Int, installDir: String, cb: Callback) {
+        Thread({
+            try {
+                val library = SteamCloudSavePaths.libraryDir(ctx, appId)
+                val container = SteamCloudSavePaths.resolveContainer(ctx, appId, installDir)
+                    ?: run { cb.onError("This game isn't set up in a container yet"); return@Thread }
+
+                cb.onStatus("Scanning Library…")
+                val files = enumerateLocal(library)
+                if (files.isEmpty()) {
+                    cb.onDone("Library is empty — download from the cloud first")
+                    return@Thread
+                }
+
+                var applied = 0
+                var skipped = 0
+                for ((file, rel) in files) {
+                    val dest = SteamCloudSavePaths.toContainerPath(rel, container, installDir)
+                    if (dest == null) {
+                        Log.w(TAG, "Apply: skipping unmapped/unsafe path: $rel")
+                        skipped++
+                        continue
+                    }
+                    cb.onStatus("Applying: ${file.name}")
+                    copyPreserving(file, dest)
+                    applied++
+                }
+
+                val suffix = if (skipped > 0) " ($skipped skipped)" else ""
+                cb.onDone("Applied $applied file${plural(applied)} to " +
+                    "${SteamCloudSavePaths.containerLabel(container)}$suffix")
+            } catch (e: Exception) {
+                Log.e(TAG, "applyToContainer failed", e)
+                cb.onError("Apply error: ${e.message ?: e.javaClass.simpleName}")
+            }
+        }, "steam-cloud-apply-$appId").start()
+    }
+
+    /** Container → Library. Walks the container's save scopes (the directories the Library already
+     *  established for this game — see [enumerateContainerSaves]), maps each file back to its
+     *  `%Root%/rest` layout via [SteamCloudSavePaths.toLibraryRel], and copies it into the Library
+     *  (mkdirs, mtime preserved). Overwrites the Library's copies; never deletes anything from the
+     *  container, never touches the cloud. */
+    fun collectFromContainer(ctx: Context, appId: Int, installDir: String, cb: Callback) {
+        Thread({
+            try {
+                val library = SteamCloudSavePaths.libraryDir(ctx, appId)
+                val container = SteamCloudSavePaths.resolveContainer(ctx, appId, installDir)
+                    ?: run { cb.onError("This game isn't set up in a container yet"); return@Thread }
+
+                cb.onStatus("Scanning container saves…")
+                val saves = enumerateContainerSaves(ctx, appId, container, installDir)
+                if (saves.isEmpty()) {
+                    cb.onDone("No saves found in " +
+                        "${SteamCloudSavePaths.containerLabel(container)} to collect")
+                    return@Thread
+                }
+
+                var collected = 0
+                var skipped = 0
+                for ((file, libraryRel) in saves) {
+                    val relLocal = sanitizeRelative(libraryRel)
+                    if (relLocal == null) {
+                        Log.w(TAG, "Collect: skipping unsafe library path: $libraryRel")
+                        skipped++
+                        continue
+                    }
+                    cb.onStatus("Collecting: ${file.name}")
+                    copyPreserving(file, File(library, relLocal))
+                    collected++
+                }
+
+                val suffix = if (skipped > 0) " ($skipped skipped)" else ""
+                cb.onDone("Collected $collected file${plural(collected)} into your Library$suffix")
+            } catch (e: Exception) {
+                Log.e(TAG, "collectFromContainer failed", e)
+                cb.onError("Collect error: ${e.message ?: e.javaClass.simpleName}")
+            }
+        }, "steam-cloud-collect-$appId").start()
+    }
+
+    /** Freshness snapshot for the staleness guard the UI shows before Apply/Upload. Synchronous
+     *  filesystem scan — the caller runs it off the main thread. Container side is scoped to this
+     *  game's save directories (the same set [collectFromContainer] would collect), so it never
+     *  reflects other games' data. */
+    data class Staleness(
+        val libraryNewestMtime: Long,   // 0 if Library empty/absent
+        val containerNewestMtime: Long, // 0 if container absent or no save files
+        val libraryFileCount: Int,
+        val containerFileCount: Int,
+    )
+
+    fun staleness(ctx: Context, appId: Int, installDir: String): Staleness {
+        val library = SteamCloudSavePaths.libraryDir(ctx, appId)
+        val libraryFiles = enumerateLocal(library)
+        val libraryNewest = libraryFiles.maxOfOrNull { it.first.lastModified() } ?: 0L
+
+        val container = SteamCloudSavePaths.resolveContainer(ctx, appId, installDir)
+        val containerSaves = if (container == null) emptyList() else try {
+            enumerateContainerSaves(ctx, appId, container, installDir)
+        } catch (e: Exception) {
+            Log.w(TAG, "staleness: container scan failed", e); emptyList()
+        }
+        val containerNewest = containerSaves.maxOfOrNull { it.first.lastModified() } ?: 0L
+
+        return Staleness(libraryNewest, containerNewest, libraryFiles.size, containerSaves.size)
+    }
+
+    /**
+     * The container-side save files for this game, paired with their `%Root%/rest` library-relative
+     * paths. Scope = the container directories the Library already established as this game's save
+     * locations (each tracked Library file's container-parent), then walked for their current
+     * contents. This discovers NEW sibling files in the real save folder while staying scoped to
+     * this game — it never sweeps a whole shared root (Documents/AppData/…). Empty if the Library
+     * has never been populated (⇒ nothing tracked yet).
+     */
+    private fun enumerateContainerSaves(
+        ctx: Context, appId: Int, container: com.winlator.star.container.Container, installDir: String,
+    ): List<Pair<File, String>> {
+        val library = SteamCloudSavePaths.libraryDir(ctx, appId)
+        val tracked = enumerateLocal(library)
+        if (tracked.isEmpty()) return emptyList()
+
+        val scopeDirs = LinkedHashSet<File>()
+        for ((_, rel) in tracked) {
+            val dest = SteamCloudSavePaths.toContainerPath(rel, container, installDir) ?: continue
+            val parent = dest.parentFile ?: continue
+            if (parent.isDirectory) {
+                try { scopeDirs.add(parent.canonicalFile) } catch (_: Exception) {}
+            }
+        }
+
+        val out = ArrayList<Pair<File, String>>()
+        val seen = HashSet<String>()
+        for (dir in scopeDirs) {
+            dir.walkTopDown().filter { it.isFile }.forEach { f ->
+                val libraryRel = SteamCloudSavePaths.toLibraryRel(f, container, installDir)
+                    ?: return@forEach
+                val canon = try { f.canonicalPath } catch (e: Exception) { f.absolutePath }
+                if (seen.add(canon)) out.add(f to libraryRel)
+            }
+        }
+        return out
+    }
+
+    /** Copy [src] onto [dst] (creating parents), preserving the modified time. Overwrites [dst]. */
+    private fun copyPreserving(src: File, dst: File) {
+        dst.parentFile?.mkdirs()
+        src.inputStream().use { input -> dst.outputStream().use { out -> input.copyTo(out) } }
+        try { dst.setLastModified(src.lastModified()) } catch (_: Exception) {}
+    }
+
     // ── Private helpers ─────────────────────────────────────────────────────────
 
     private fun requireCloud(): SteamCloud? = SteamRepository.getInstance().steamCloud
