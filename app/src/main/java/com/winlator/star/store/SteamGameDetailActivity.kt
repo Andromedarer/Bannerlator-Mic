@@ -4,6 +4,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
@@ -761,14 +762,38 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
 
         if (g.isInstalled) {
             uninstallingName = g.name
-            StoreUninstaller.run(
-                installDir = g.installDir,
-                mark = { SteamRepository.getInstance().database.markUninstalled(appId) },
-            ) { ok ->
-                uninstallingName = null
-                uninstallResult = if (ok) "${g.name} uninstalled" else "Couldn't fully remove ${g.name}"
-                loadGame()
+            val installDir = g.installDir
+
+            // Then delete the game's files. Split out so the pre-uninstall save backup can run first
+            // and this proceeds regardless of whether that backup succeeded.
+            val proceedUninstall = {
+                StoreUninstaller.run(
+                    installDir = installDir,
+                    mark = { SteamRepository.getInstance().database.markUninstalled(appId) },
+                ) { ok ->
+                    uninstallingName = null
+                    uninstallResult = if (ok) "${g.name} uninstalled" else "Couldn't fully remove ${g.name}"
+                    loadGame()
+                }
             }
+
+            // Best-effort: snapshot this game's saves into the local Library (Container -> Library)
+            // BEFORE its files are deleted, so the Library is current at removal time (it lives on
+            // external storage and already survives uninstall — this just makes it CURRENT). Collect
+            // only — nothing is uploaded to the cloud. If the collect fails (e.g. never set up in a
+            // container), log it and uninstall anyway — the backup must never block removal.
+            SteamCloudSaveManager.collectFromContainer(this, appId, installDir,
+                object : SteamCloudSaveManager.Callback {
+                    override fun onStatus(message: String) {}
+                    override fun onDone(summary: String) {
+                        Log.i("BH_SAVE_SYNC", "pre-uninstall collect (appId $appId): $summary")
+                        runOnUiThread { proceedUninstall() }
+                    }
+                    override fun onError(message: String) {
+                        Log.w("BH_SAVE_SYNC", "pre-uninstall collect failed (appId $appId): $message")
+                        runOnUiThread { proceedUninstall() }
+                    }
+                })
         } else {
             showSpeedPicker = true
         }

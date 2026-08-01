@@ -58,6 +58,9 @@ import com.winlator.star.ui.XServerDialogState;
 import com.winlator.star.container.Container;
 import com.winlator.star.container.ContainerManager;
 import com.winlator.star.container.Shortcut;
+import com.winlator.star.store.SteamCloudSaveManager;
+import com.winlator.star.store.SteamDatabase;
+import com.winlator.star.store.SteamRepository;
 import com.winlator.star.contentdialog.ContentDialog;
 import com.winlator.star.contentdialog.DXVKConfigDialog;
 import com.winlator.star.contentdialog.GraphicsDriverConfigDialog;
@@ -153,8 +156,10 @@ import java.util.Iterator;
 import java.util.Set;
 import java.util.Map;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -2378,10 +2383,73 @@ public class XServerDisplayActivity extends AppCompatActivity {
                         break;
                     }
                 }
+                // Best-effort: for Steam-library games, snapshot the container's saves back into the
+                // local Library now that the game has terminated (and flushed), so the Library stays
+                // current and survives a later uninstall. Collect only — nothing is uploaded to the
+                // cloud. Runs BEFORE restartApplication() because that kills the process (exit(0)),
+                // which would otherwise abort the copy. Bounded + fully guarded so it can never hang
+                // or break game-exit.
+                autoCollectSteamSavesBlocking();
                 preloaderDialog.closeOnUiThread();
                 AppUtils.restartApplication(getApplicationContext());
             }
         }, 1000);
+    }
+
+    /**
+     * On game exit, snapshot this game's saves from its container into the local save Library
+     * (Container -> Library) when the shortcut is a Steam-library game (tagged with a positive
+     * {@code steamAppId}). Collect only — never uploads to Steam Cloud (explicit requirement).
+     *
+     * Best-effort and silent: no UI/Toast, all errors swallowed (logged to "BH_SAVE_SYNC"). Uses the
+     * application context so the copy isn't tied to this dying activity. The DB lookup + collect run
+     * on a worker thread (Room can't be queried on the main thread); we bound-wait on a latch so the
+     * copy finishes before the process exits, while a stuck collect can never freeze game-exit.
+     */
+    private void autoCollectSteamSavesBlocking() {
+        try {
+            final Shortcut sc = shortcut;
+            if (sc == null) return;
+            int parsed;
+            try {
+                parsed = Integer.parseInt(sc.getExtra("steamAppId", "0").trim());
+            } catch (Exception e) {
+                return; // untagged / non-numeric → not a Steam-library game
+            }
+            if (parsed <= 0) return; // gate: only Steam-library games (steamAppId > 0)
+
+            final int appId = parsed;
+            final Context appCtx = getApplicationContext();
+            final CountDownLatch latch = new CountDownLatch(1);
+
+            new Thread(() -> {
+                try {
+                    SteamDatabase.GameRow row = SteamRepository.getInstance().getDatabase().getGame(appId);
+                    String installDir = (row != null && row.installDir != null) ? row.installDir : "";
+                    if (installDir.isEmpty()) { latch.countDown(); return; }
+                    SteamCloudSaveManager.INSTANCE.collectFromContainer(appCtx, appId, installDir,
+                            new SteamCloudSaveManager.Callback() {
+                                @Override public void onStatus(String message) {}
+                                @Override public void onDone(String summary) {
+                                    Log.i("BH_SAVE_SYNC", "auto-collect on exit (appId " + appId + "): " + summary);
+                                    latch.countDown();
+                                }
+                                @Override public void onError(String message) {
+                                    Log.w("BH_SAVE_SYNC", "auto-collect on exit failed (appId " + appId + "): " + message);
+                                    latch.countDown();
+                                }
+                            });
+                } catch (Throwable t) {
+                    Log.w("BH_SAVE_SYNC", "auto-collect on exit errored (appId " + appId + ")", t);
+                    latch.countDown();
+                }
+            }, "BH-SaveAutoCollect").start();
+
+            // Bounded so a stalled collect (local file copy — normally sub-second) never hangs exit.
+            latch.await(8, TimeUnit.SECONDS);
+        } catch (Throwable t) {
+            Log.w("BH_SAVE_SYNC", "auto-collect on exit wrapper errored", t);
+        }
     }
 
     // Whether Wine/box64 logging is on — the single source of truth for the failure card's guidance
