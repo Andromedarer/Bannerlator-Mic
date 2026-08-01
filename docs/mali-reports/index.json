@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-08-01T07-15-20-91dc1f",
+    "created": "2026-08-01T07:15:20.079Z",
+    "reporter": "Jeysi",
+    "device": "Poco x8 pro",
+    "gpu": "Mali-G720 MC8",
+    "game": "Gta V",
+    "symptom": "Freezes / hangs",
+    "logs": 0
+  },
+  {
     "id": "2026-07-31T23-34-38-270942",
     "created": "2026-07-31T23:34:38.298Z",
     "reporter": "",
