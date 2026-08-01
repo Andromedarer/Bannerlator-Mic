@@ -48,6 +48,11 @@ object SteamCloudSaveManager {
     /** HTTP connect/read timeout for CDN block GET/PUT. */
     private const val HTTP_TIMEOUT_MS = 60_000
 
+    /** Length in bytes of a SHA-1 digest — Steam UFS's per-file [AppFileInfo.getShaFile] and our
+     *  local [sha1] both produce this. A cloud entry whose sha isn't exactly this long is treated as
+     *  "no usable SHA" and its path is always re-uploaded (never skipped). */
+    private const val SHA1_LEN = 20
+
     interface Callback {
         fun onStatus(message: String)
         fun onDone(summary: String)
@@ -104,8 +109,14 @@ object SteamCloudSaveManager {
     // ALWAYS an empty list, so the cloud can only gain/refresh files — never lose them. An empty
     // local folder is refused up-front, so we never even open a batch for a wipe.
 
-    /** Upload every file under [localFolder] to [appId]'s Steam Cloud, additively. Never deletes
-     *  anything from the cloud. Refuses (no-op) if the local folder has no files. */
+    /** Upload files under [localFolder] to [appId]'s Steam Cloud — INCREMENTALLY and additively.
+     *  Only NEW or CHANGED files are sent: the cloud manifest is fetched first and each local file's
+     *  SHA-1 is diffed against the cloud file at the same remote path. A file is skipped iff it
+     *  already exists in the cloud with a byte-identical SHA-1; otherwise it is uploaded. Never
+     *  deletes anything from the cloud (`filesToDelete` is always empty). Refuses (no-op) if the
+     *  local folder has no files. If a cloud SHA is unavailable (manifest fetch failed, or the
+     *  entry carries no usable sha), that file is uploaded — correctness over efficiency; we never
+     *  skip a file we can't prove is identical. */
     fun uploadSaves(ctx: Context, appId: Int, localFolder: File, cb: Callback) {
         Thread({
             try {
@@ -114,7 +125,7 @@ object SteamCloudSaveManager {
                 cb.onStatus("Scanning local saves…")
                 val localFiles = enumerateLocal(localFolder)   // List<Pair<File, cloudRelPath>>
 
-                // ── BELT-AND-SUSPENDERS GUARD ──────────────────────────────────────────
+                // ── BELT-AND-SUSPENDERS GUARD (unchanged) ──────────────────────────────
                 // If there is nothing local to upload we return immediately and NEVER call
                 // beginAppUploadBatch. This makes an empty/absent save folder a pure no-op and
                 // removes any chance of an "upload nothing" turning into a cloud wipe.
@@ -123,11 +134,60 @@ object SteamCloudSaveManager {
                     return@Thread
                 }
 
-                val filesToUpload: List<String> = localFiles.map { it.second }
+                // ── INCREMENTAL DIFF (new — still strictly additive) ───────────────────
+                // Fetch the cloud manifest and map each cloud file's normalized remote path to its
+                // SHA-1 (AppFileInfo.shaFile — a 20-byte digest). A failed fetch, or an entry with a
+                // missing/short sha, simply leaves that path OUT of the map, so it counts as
+                // "changed" and gets uploaded. We never skip a file we can't prove is byte-identical.
+                cb.onStatus("Comparing with cloud…")
+                val cloudShaByPath: Map<String, ByteArray> = try {
+                    val fileList = steamCloud.getAppFileListChange(appId)
+                        .get(FUTURE_TIMEOUT_SEC, TimeUnit.SECONDS)
+                    val map = HashMap<String, ByteArray>()
+                    for (f in fileList.files) {
+                        val sha = f.shaFile
+                        if (sha.size != SHA1_LEN) {
+                            Log.w(TAG, "Cloud file has no usable SHA (${sha.size}B), will re-upload: ${f.filename}")
+                            continue
+                        }
+                        val key = sanitizeRelative(remotePathOf(f, fileList)) ?: continue
+                        map[key] = sha
+                    }
+                    map
+                } catch (e: Exception) {
+                    // Can't diff → fall back to uploading everything (today's behavior). Never a wipe.
+                    Log.w(TAG, "Cloud manifest fetch failed; uploading all local files", e)
+                    emptyMap()
+                }
+
+                // Include a local file iff it is new, changed, or its cloud sha is unavailable.
+                val toUpload = ArrayList<Pair<File, String>>()
+                for (entry in localFiles) {
+                    val (file, cloudPath) = entry
+                    val key = sanitizeRelative(cloudPath)
+                    val cloudSha = if (key != null) cloudShaByPath[key] else null
+                    if (cloudSha != null && sha1(file).contentEquals(cloudSha)) {
+                        continue // an identical copy is already in the cloud — skip
+                    }
+                    toUpload.add(entry)
+                }
+
+                val upToDate = localFiles.size - toUpload.size
+
+                // ── NOTHING-TO-UPLOAD GUARD ────────────────────────────────────────────
+                // Same belt-and-suspenders as the empty-folder guard: if the diff found no new/
+                // changed files we return WITHOUT ever opening a batch.
+                if (toUpload.isEmpty()) {
+                    cb.onDone("Uploaded 0 changed, $upToDate already up-to-date")
+                    return@Thread
+                }
+
+                val filesToUpload: List<String> = toUpload.map { it.second }
 
                 // filesToDelete is ALWAYS empty. This is the single source of truth for the
                 // "never delete from cloud" guarantee — it is a literal emptyList() and is never
-                // populated from local/remote diffs anywhere in this class.
+                // populated from local/remote diffs anywhere in this class. The incremental diff
+                // only ever SHRINKS the upload set; it never produces a deletion.
                 val filesToDelete: List<String> = emptyList()
 
                 cb.onStatus("Opening cloud upload batch…")
@@ -146,7 +206,7 @@ object SteamCloudSaveManager {
 
                 var uploaded = 0
                 var allOk = true
-                for ((file, cloudPath) in localFiles) {
+                for ((file, cloudPath) in toUpload) {
                     cb.onStatus("Uploading: ${file.name}")
                     val ok = uploadOne(steamCloud, appId, file, cloudPath, batch.batchID)
                     if (ok) uploaded++ else allOk = false
@@ -160,9 +220,9 @@ object SteamCloudSaveManager {
                 ).get(FUTURE_TIMEOUT_SEC, TimeUnit.SECONDS)
 
                 if (allOk) {
-                    cb.onDone("Uploaded $uploaded file${plural(uploaded)} to the cloud")
+                    cb.onDone("Uploaded $uploaded changed, $upToDate already up-to-date")
                 } else {
-                    cb.onError("Uploaded $uploaded of ${localFiles.size}; some files failed")
+                    cb.onError("Uploaded $uploaded of ${toUpload.size} changed; some files failed")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "uploadSaves failed", e)
