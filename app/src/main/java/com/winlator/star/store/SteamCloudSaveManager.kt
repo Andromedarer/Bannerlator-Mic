@@ -8,9 +8,11 @@ import com.winlator.star.container.ContainerManager
 import com.winlator.star.container.Shortcut
 import com.winlator.star.core.SaveLocator
 import `in`.dragonbra.javasteam.enums.EResult
+import `in`.dragonbra.javasteam.steam.handlers.steamapps.PICSRequest
 import `in`.dragonbra.javasteam.steam.handlers.steamcloud.AppFileChangeList
 import `in`.dragonbra.javasteam.steam.handlers.steamcloud.AppFileInfo
 import `in`.dragonbra.javasteam.steam.handlers.steamcloud.SteamCloud
+import `in`.dragonbra.javasteam.types.KeyValue
 import java.io.File
 import java.io.RandomAccessFile
 import java.net.HttpURLConnection
@@ -63,6 +65,15 @@ object SteamCloudSaveManager {
      *  multiplexing (the imagefs-truncation footgun was range streams of ONE file over one conn).
      *  Bounded low so we never hammer the CDN or the CM job dispatcher; tune here if needed. */
     private const val TRANSFER_CONCURRENCY = 4
+
+    /** Honest message shown when a game has no Steam Cloud store (or an upload didn't persist).
+     *  The saves are never lost — they stay in the local Library — we just don't lie about the cloud. */
+    private const val NO_CLOUD_MESSAGE =
+        "This game doesn't support Steam Cloud — your saves are backed up locally in the Library."
+
+    /** Per-app cloud-support cache (PICS `ufs/savefiles` is stable per app). Only DEFINITIVE
+     *  true/false is cached; an "unknown" (null) is never stored so it can be retried later. */
+    private val cloudSupportCache = java.util.concurrent.ConcurrentHashMap<Int, Boolean>()
 
     interface Callback {
         fun onStatus(message: String)
@@ -169,6 +180,19 @@ object SteamCloudSaveManager {
                     return@Thread
                 }
 
+                // ── HONESTY GUARD 1: does this game even support Steam Cloud? ───────────
+                // Old titles (e.g. FlatOut 2) declare NO UFS save-file patterns → no cloud store.
+                // The upload handshake would "succeed" but nothing persists, so we'd FALSELY report
+                // "Uploaded N". Read the app's declared UFS config from PICS; if it says "no cloud",
+                // stop here and tell the truth. NULL = couldn't determine → proceed + verify later.
+                // Reported via onError (not onDone) so the SaveSyncStore.recordAfterUpload hook does
+                // NOT fire — we must not stamp a lastUploadAt "cloud sync" that never happened.
+                val support: Boolean? = hasCloudSupport(ctx, appId)
+                if (support == false) {
+                    cb.onError(NO_CLOUD_MESSAGE)
+                    return@Thread
+                }
+
                 // ── INCREMENTAL DIFF (new — still strictly additive) ───────────────────
                 // Fetch the cloud manifest and map each cloud file's normalized remote path to its
                 // SHA-1 (AppFileInfo.shaFile — a 20-byte digest). A failed fetch, or an entry with a
@@ -268,7 +292,20 @@ object SteamCloudSaveManager {
                 ).get(FUTURE_TIMEOUT_SEC, TimeUnit.SECONDS)
 
                 if (allOk.get()) {
-                    cb.onDone("Uploaded ${uploaded.get()} changed, $upToDate already up-to-date")
+                    // ── HONESTY GUARD 2: post-upload persistence verify (safety net) ───────
+                    // Only when PICS couldn't tell us (support == null): re-fetch the manifest and
+                    // confirm at least one just-uploaded path actually landed. If NONE landed, the
+                    // "upload" didn't persist (no cloud store) → tell the truth instead of "Uploaded
+                    // N". We DON'T run this when PICS already said "supported" (support == true) — a
+                    // freshly-uploaded manifest could momentarily lag, and we must not falsely tell a
+                    // cloud-supported game (e.g. HL2) that it has no cloud.
+                    if (support == null &&
+                        uploadedPathsPersisted(steamCloud, appId, toUpload.map { it.second }) == false) {
+                        // Nothing persisted → onError (no false success, no lastUploadAt stamp).
+                        cb.onError(NO_CLOUD_MESSAGE)
+                    } else {
+                        cb.onDone("Uploaded ${uploaded.get()} changed, $upToDate already up-to-date")
+                    }
                 } else {
                     cb.onError("Uploaded ${uploaded.get()} of ${toUpload.size} changed; some files failed")
                 }
@@ -297,6 +334,82 @@ object SteamCloudSaveManager {
     fun uploadFromLibrary(ctx: Context, appId: Int, cb: Callback) {
         uploadSaves(ctx, appId, SteamCloudSavePaths.libraryDir(ctx, appId),
             hooked(cb) { SaveSyncStore.recordAfterUpload(ctx, appId) })
+    }
+
+    // ── Cloud-support detection (UFS config from PICS product info) ───────────────
+
+    /**
+     * Whether [appId] actually supports Steam Cloud, read from the app's DECLARED UFS config in PICS
+     * product info (`appinfo → ufs → savefiles`) — the same source GameNative uses. A game with NO
+     * usable save-file patterns has no cloud store; uploading to it "succeeds" but persists nothing.
+     *
+     * Returns:
+     *  - `true`  — the app declares ≥1 usable UFS save-file pattern (e.g. Half-Life 2).
+     *  - `false` — the app's product info is populated but declares no save files (e.g. FlatOut 2).
+     *  - `null`  — couldn't determine (not signed in, PICS query failed/timed out, or metadata-only
+     *              product info with no populated KeyValues). Callers should NOT treat null as "no
+     *              cloud"; upload falls back to a post-upload persistence check instead.
+     *
+     * Definitive results are cached per app (the UFS config is stable); `null` is never cached.
+     */
+    fun hasCloudSupport(ctx: Context, appId: Int): Boolean? {
+        cloudSupportCache[appId]?.let { return it }
+
+        val steamApps = SteamRepository.getInstance().steamApps ?: return null
+        return try {
+            val resultSet = steamApps.picsGetProductInfo(PICSRequest(appId))
+                .toFuture().get(FUTURE_TIMEOUT_SEC, TimeUnit.SECONDS)
+
+            var appKeyValues: KeyValue? = null
+            for (callback in resultSet.results) {
+                val info = callback.apps[appId]
+                if (info != null) { appKeyValues = info.keyValues; break }
+            }
+
+            // No populated KeyValues (metadata-only / missing token) → genuinely unknown.
+            if (appKeyValues == null || appKeyValues.children.isEmpty()) {
+                null
+            } else {
+                val supported = hasUsableSaveFiles(appKeyValues)
+                cloudSupportCache[appId] = supported
+                supported
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "hasCloudSupport: PICS product-info query failed for appId=$appId", e)
+            null
+        }
+    }
+
+    /** True if the app's PICS KeyValues declare at least one usable UFS save-file pattern. Navigates
+     *  `ufs/savefiles` (case-insensitive; [KeyValue.get] returns the INVALID sentinel — never null —
+     *  when a key is absent, so missing sections yield an empty child list ⇒ false). A pattern counts
+     *  as usable if it carries a non-blank `root` or `pattern`. */
+    private fun hasUsableSaveFiles(appKeyValues: KeyValue): Boolean {
+        val saveFiles = appKeyValues.get("ufs").get("savefiles").children
+        return saveFiles.any { entry ->
+            !entry.get("root").value.isNullOrBlank() || !entry.get("pattern").value.isNullOrBlank()
+        }
+    }
+
+    /**
+     * Post-upload persistence check. Re-fetches the cloud manifest and reports whether ANY of the
+     * [uploadedCloudPaths] actually landed. Returns true if ≥1 uploaded path is now present, false if
+     * NONE are (⇒ the upload didn't persist — no cloud store), or null if the manifest re-fetch
+     * itself failed (⇒ can't tell, don't override the success message).
+     */
+    private fun uploadedPathsPersisted(
+        sc: SteamCloud, appId: Int, uploadedCloudPaths: List<String>,
+    ): Boolean? {
+        if (uploadedCloudPaths.isEmpty()) return null
+        return try {
+            val fresh = sc.getAppFileListChange(appId).get(FUTURE_TIMEOUT_SEC, TimeUnit.SECONDS)
+            val present = HashSet<String>()
+            for (f in fresh.files) sanitizeRelative(remotePathOf(f, fresh))?.let { present.add(it) }
+            uploadedCloudPaths.any { p -> sanitizeRelative(p)?.let { present.contains(it) } == true }
+        } catch (e: Exception) {
+            Log.w(TAG, "post-upload persistence check failed for appId=$appId", e)
+            null
+        }
     }
 
     // ── Combo actions (Cloud ⇄ Container in one press) ───────────────────────────

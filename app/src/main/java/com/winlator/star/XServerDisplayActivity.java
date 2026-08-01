@@ -2410,6 +2410,17 @@ public class XServerDisplayActivity extends AppCompatActivity {
         try {
             final Shortcut sc = shortcut;
             if (sc == null) return;
+
+            // A steamAppId alone is NOT proof of a Steam-library game: custom exe/folder imports can
+            // carry one purely to link cover art / metadata. Auto-collect (keyed by appId) only for
+            // GENUINE Steam-library games — tagged storeSource=steam, OR whose exec lives under the
+            // Steam install root (steam_games/, where the in-app store installs; imports don't). This
+            // prevents a cover-linked custom import from being mis-filed under a Steam appId's Library.
+            String storeSource = sc.getExtra("storeSource", "");
+            String path = sc.path != null ? sc.path.toLowerCase() : "";
+            boolean genuineSteam = "steam".equals(storeSource) || path.contains("steam_games");
+            if (!genuineSteam) return;
+
             int parsed;
             try {
                 parsed = Integer.parseInt(sc.getExtra("steamAppId", "0").trim());
