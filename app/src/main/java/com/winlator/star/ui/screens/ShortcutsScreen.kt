@@ -217,6 +217,7 @@ import com.winlator.star.ui.screens.adrenodownload.RemoteDriverRepository
 import com.winlator.star.core.DefaultVersion
 import com.winlator.star.core.FileUtils
 import com.winlator.star.core.GameFolderScanner
+import com.winlator.star.core.CustomSaveVault
 import com.winlator.star.core.GameSaveBackup
 import com.winlator.star.core.SaveLocator
 import com.winlator.star.core.KeyValueSet
@@ -283,6 +284,8 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     // label of the game the restore was launched from (shown in the container picker title).
     var restoreZipUri by remember { mutableStateOf<Uri?>(null) }
     var restoreForName by remember { mutableStateOf("") }
+    // The shortcut whose "Back up saves" layout-choice dialog is open (Winlator vs GameHub).
+    var backupFormatShortcut by remember { mutableStateOf<Shortcut?>(null) }
     var settingsShortcut by remember { mutableStateOf<Shortcut?>(null) }
     var gameDetailsShortcut by remember { mutableStateOf<Shortcut?>(null) }
     var propertiesShortcut by remember { mutableStateOf<Shortcut?>(null) }
@@ -580,34 +583,44 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
         if (uri != null) restoreZipUri = uri
     }
 
-    // Back up this game's saves to Downloads/Winlator/Backups/GameSaves/<name>_<epoch>.zip. Scope =
-    // the game's discovered save folders (per-game); if none are found, fall back to the whole
-    // container so the action never silently no-ops. Discovery does file I/O → off the main thread.
+    // "Back up saves" → first pick the archive layout (Winlator vs GameHub), mirroring the Containers
+    // backup menu; the chosen layout runs in runCustomBackup below.
     fun startSaveBackup(shortcut: Shortcut) {
+        backupFormatShortcut = shortcut
+    }
+
+    // Back up this game's saves into the shared per-game folder
+    // Downloads/Bannerlator/<GameName>/<GameName>_<epoch>.zip (timestamped — keeps history alongside
+    // the auto-on-exit "auto-latest.zip"). Scope = the game's discovered save folders; if none are
+    // found, fall back to the whole container so the action never silently no-ops. Discovery does file
+    // I/O → off the main thread; GameSaveBackup.backupToFile is the synchronous overload, so it too
+    // runs on the worker before we hop back to the main thread for the result toast.
+    fun runCustomBackup(shortcut: Shortcut, layout: GameSaveBackup.BackupLayout) {
         val container = shortcut.container
         val name = shortcut.name
         Toast.makeText(context, "Backing up saves for \"$name\"…", Toast.LENGTH_SHORT).show()
         scope.launch {
-            val roots = withContext(Dispatchers.IO) {
+            val result = withContext(Dispatchers.IO) {
                 val gameKey = SaveLocator.gameKey(shortcut.wmClass, shortcut.file.name)
                 val saved = SaveLocator.loadMap(container, gameKey)
-                if (saved != null && saved.roots.isNotEmpty()) saved.roots
-                else SaveLocator.discover(container, name, shortcut.path ?: "", shortcut.wmClass ?: "")
-                    .map { it.relPath }
+                val roots = if (saved != null && saved.roots.isNotEmpty()) saved.roots
+                    else SaveLocator.discover(container, name, shortcut.path ?: "", shortcut.wmClass ?: "")
+                        .map { it.relPath }
+                // Empty → whole-container backup (roots = null), matching the Containers "whole" scope.
+                val effectiveRoots: List<String>? = if (roots.isEmpty()) null else roots
+                val outFile = CustomSaveVault.perGameBackupFile(name, System.currentTimeMillis())
+                effectiveRoots to GameSaveBackup.backupToFile(container, effectiveRoots, layout, outFile)
             }
-            // Empty → whole-container backup (roots = null), matching the Containers "whole" scope.
-            val effectiveRoots: List<String>? = if (roots.isEmpty()) null else roots
-            if (effectiveRoots == null) {
-                Toast.makeText(context, "No per-game saves detected — backing up the whole container.", Toast.LENGTH_LONG).show()
+            val (effectiveRoots, r) = result
+            if (effectiveRoots == null && r.ok) {
+                Toast.makeText(context, "No per-game saves detected — backed up the whole container.", Toast.LENGTH_LONG).show()
             }
-            GameSaveBackup.backup(context, container, effectiveRoots, name, GameSaveBackup.BackupLayout.WINLATOR) { r ->
-                Toast.makeText(
-                    context,
-                    if (r.ok) "Backed up ${r.fileCount} files → ${r.path?.substringAfterLast('/')}"
-                    else "Backup failed: ${r.error ?: "unknown error"}",
-                    Toast.LENGTH_LONG,
-                ).show()
-            }
+            Toast.makeText(
+                context,
+                if (r.ok) "Backed up ${r.fileCount} files → ${r.path?.substringAfterLast('/')}"
+                else "Backup failed: ${r.error ?: "unknown error"}",
+                Toast.LENGTH_LONG,
+            ).show()
         }
     }
 
@@ -1486,6 +1499,51 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                     ).show()
                 }
             },
+        )
+    }
+
+    // Save Backup: choose the archive layout before backing up (mirrors the Containers backup menu's
+    // GameHub / Winlator-native choice), then run the scoped backup into the per-game folder.
+    backupFormatShortcut?.let { s ->
+        OutlinedAlertDialog(
+            onDismissRequest = { backupFormatShortcut = null },
+            title = { Text(stringResource(R.string.save_backup_format_title)) },
+            text = {
+                Column {
+                    Text(
+                        text = stringResource(R.string.save_backup_format_prompt),
+                        color = OnSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                backupFormatShortcut = null
+                                runCustomBackup(s, GameSaveBackup.BackupLayout.WINLATOR)
+                            }
+                            .padding(vertical = 8.dp),
+                    ) {
+                        Text(stringResource(R.string.save_backup_format_winlator), color = MaterialTheme.colorScheme.primary)
+                        Text(stringResource(R.string.save_backup_format_winlator_sub), color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    }
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                backupFormatShortcut = null
+                                runCustomBackup(s, GameSaveBackup.BackupLayout.GAMEHUB)
+                            }
+                            .padding(vertical = 8.dp),
+                    ) {
+                        Text(stringResource(R.string.save_backup_format_gamehub), color = MaterialTheme.colorScheme.primary)
+                        Text(stringResource(R.string.save_backup_format_gamehub_sub), color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { backupFormatShortcut = null }) { Text("Cancel") } },
         )
     }
 

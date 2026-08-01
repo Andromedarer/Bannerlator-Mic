@@ -58,6 +58,7 @@ import com.winlator.star.ui.XServerDialogState;
 import com.winlator.star.container.Container;
 import com.winlator.star.container.ContainerManager;
 import com.winlator.star.container.Shortcut;
+import com.winlator.star.core.CustomSaveVault;
 import com.winlator.star.store.SteamCloudSaveManager;
 import com.winlator.star.store.SteamDatabase;
 import com.winlator.star.store.SteamRepository;
@@ -2383,17 +2384,33 @@ public class XServerDisplayActivity extends AppCompatActivity {
                         break;
                     }
                 }
-                // Best-effort: for Steam-library games, snapshot the container's saves back into the
-                // local Library now that the game has terminated (and flushed), so the Library stays
-                // current and survives a later uninstall. Collect only — nothing is uploaded to the
-                // cloud. Runs BEFORE restartApplication() because that kills the process (exit(0)),
-                // which would otherwise abort the copy. Bounded + fully guarded so it can never hang
-                // or break game-exit.
-                autoCollectSteamSavesBlocking();
+                // Best-effort save backup on exit, now that the game has terminated (and flushed).
+                // Steam-library games → their per-appId local Library (Collect, no cloud); custom
+                // imports → the persistent local vault. Runs BEFORE restartApplication() because that
+                // kills the process (exit(0)), which would otherwise abort the copy. Both are bounded
+                // + fully guarded so they can never hang or break game-exit. Nothing is ever uploaded.
+                if (isGenuineSteamShortcut()) {
+                    autoCollectSteamSavesBlocking();
+                } else {
+                    autoSnapshotCustomSavesBlocking();
+                }
                 preloaderDialog.closeOnUiThread();
                 AppUtils.restartApplication(getApplicationContext());
             }
         }, 1000);
+    }
+
+    /**
+     * Whether this shortcut is a genuine Steam-library game: tagged {@code storeSource=steam}, or its
+     * exec path lives under the {@code steam_games} install root (covers pre-tagging shortcuts). Steam
+     * games back up to their per-appId Library; everything else (custom exe/folder imports) backs up
+     * to the local vault. Mirrors ShortcutsScreen's Steam-origin gate.
+     */
+    private boolean isGenuineSteamShortcut() {
+        if (shortcut == null) return false;
+        if ("steam".equals(shortcut.getExtra("storeSource"))) return true;
+        String p = shortcut.path;
+        return p != null && p.toLowerCase().contains("steam_games");
     }
 
     /**
@@ -2460,6 +2477,48 @@ public class XServerDisplayActivity extends AppCompatActivity {
             latch.await(8, TimeUnit.SECONDS);
         } catch (Throwable t) {
             Log.w("BH_SAVE_SYNC", "auto-collect on exit wrapper errored", t);
+        }
+    }
+
+    /**
+     * On game exit, snapshot a CUSTOM (non-Steam) game's saves into the persistent local vault
+     * (<externalStorage>/Bannerlator/GameSaveVault/<key>.zip, overwriting the latest), so they
+     * survive the shortcut/game being removed. Local only — no cloud.
+     *
+     * Same robustness envelope as the Steam collect: application context (not this dying activity),
+     * the zip runs on its own worker thread, and we bound-wait on a latch so it finishes BEFORE
+     * restartApplication()'s exit(0) aborts the process. Silent + best-effort; logs to "BH_SAVE_SYNC";
+     * skips gracefully when there's no shortcut/container or no saves are discovered.
+     */
+    private void autoSnapshotCustomSavesBlocking() {
+        try {
+            final Shortcut sc = shortcut;
+            final Container ctn = container;
+            if (sc == null || ctn == null) return;
+
+            final Context appCtx = getApplicationContext();
+            final CountDownLatch latch = new CountDownLatch(1);
+
+            new Thread(() -> {
+                try {
+                    CustomSaveVault.VaultResult r = CustomSaveVault.INSTANCE.snapshot(appCtx, ctn, sc);
+                    if (r != null && r.getOk()) {
+                        Log.i("BH_SAVE_SYNC", "auto-vault on exit (" + sc.name + "): " + r.getFileCount() + " files");
+                    } else {
+                        Log.i("BH_SAVE_SYNC", "auto-vault on exit (" + sc.name + "): "
+                                + (r != null ? r.getError() : "null result"));
+                    }
+                } catch (Throwable t) {
+                    Log.w("BH_SAVE_SYNC", "auto-vault on exit errored (" + sc.name + ")", t);
+                } finally {
+                    latch.countDown();
+                }
+            }, "BH-SaveAutoVault").start();
+
+            // Bounded so a stalled snapshot (local file copy — normally sub-second) never hangs exit.
+            latch.await(8, TimeUnit.SECONDS);
+        } catch (Throwable t) {
+            Log.w("BH_SAVE_SYNC", "auto-vault on exit wrapper errored", t);
         }
     }
 
