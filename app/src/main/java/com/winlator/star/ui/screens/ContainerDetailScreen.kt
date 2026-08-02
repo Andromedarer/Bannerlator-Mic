@@ -78,6 +78,7 @@ import com.winlator.star.widget.perfhud.parseHudOutline
 import com.winlator.star.widget.exportHudDiagnostics
 import com.winlator.star.widget.ColorPickerView
 import com.winlator.star.widget.CPUListView
+import com.winlator.star.ui.components.ContainerGlossarySheet
 import com.winlator.star.ui.components.EnvVarsEditor
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -99,6 +100,7 @@ fun ContainerDetailScreen(
     var showBox64DownloadSheet   by remember { mutableStateOf(false) }
     var showFexCoreDownloadSheet by remember { mutableStateOf(false) }
     var showDxvkDownloadSheet    by remember { mutableStateOf(false) }
+    var showGlossary             by remember { mutableStateOf(false) }
     var showVegasDownloadSheet   by remember { mutableStateOf(false) }
     var showVkd3dDownloadSheet   by remember { mutableStateOf(false) }
     var showVulkanConfig          by remember { mutableStateOf(false) }
@@ -158,6 +160,15 @@ fun ContainerDetailScreen(
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
         ) {
+            // "What is all this?" — newcomer glossary of the setup terms (DXVK, Mali/Adreno, BCn,
+            // colours, glibc/bionic, …). Placed above the tabs so it's reachable from every tab.
+            TextButton(
+                onClick = { showGlossary = true },
+                modifier = Modifier.padding(start = 8.dp, top = 4.dp)
+            ) {
+                Text("❔  What is all this?")
+            }
+
             // ── Tabs ───────────────────────────────────────────────────────────
             ScrollableTabRow(
                 selectedTabIndex = viewModel.selectedTab,
@@ -208,6 +219,10 @@ fun ContainerDetailScreen(
 
             Spacer(modifier = Modifier.height(80.dp)) // room for FAB
         }
+    }
+
+    if (showGlossary) {
+        ContainerGlossarySheet(onDismiss = { showGlossary = false })
     }
 
     if (showGraphicsDriverConfig) {
