@@ -1,5 +1,11 @@
 # Star-Compose — Progress Log
 
+## 2026-08-02 — 🏁 **2.9.3 STABLE cut** (versionCode 55) — Save Manager v2 + lsfg GameNative-parity defaults
+
+> Cutting current `main` as **2.9.3 stable** (feature release over 2.9.2). Headline = **Save Manager v2** (three-tier Cloud/Library/Container, auto-Collect on exit + before uninstall, cloud honesty, universal custom-game vault, LOCAL_ONLY visibility, Steam badge/auto-connect). Plus **lsfg-vk GameNative-parity defaults** (perf_mode ON, flow_scale 0.80, per-container Auto-enable at launch ON) and the **perf-HUD dual-API** hardening. All app-side, no ImageFS reinstall; signed with the committed testkey (in-place update safe). Version bump `build.gradle` 54→55 / 2.9.2→2.9.3; README updated (version table, contents, "What's New in 2.9.3"); NEW in-depth user doc `docs/save-manager-guide.md` (305 lines, verified against code) linked from the release + README. Release notes open with a milestone banner (2,000 Discord members + 400k downloads). Cut via `release.yml` (Nightly Manual Release Build) → all 3 flavors + auto-`update.json`, make_latest. ⚠️ Corrected a wrong "App Settings/in-game drawer" entry-point claim before publish (real entries: side menu Library, Steam store, game ⋮/detail).
+
+
+
 ## 2026-08-01 — 🎞️🏁 **lsfg-vk: adopt GameNative's proven defaults — MERGED to main** (`--no-ff` merge `62935d89`; built commit `fe19fd0a`; main build run `30730493963` @ `62935d89` green, APK `bannerlator-main-lsfg-defaults-62935d8-standard.apk` sha256 `d0f52139`)
 
 > **MERGED to main by explicit user directive (revert point: tag `checkpoint-pre-lsfg-gamenative-defaults-20260801` → `b7ac9af8`; `git revert -m 1 62935d89` to undo). ⚠️ Merged WITHOUT an on-device pass — recommendation was to device-test first; user chose to merge. Compiles-green only.** Companion audit (`reference_bannerlator_lsfg_hook_and_interference`): our layer injection/hook is correct + right-timed (== GameNative, different mechanism), gestures/HUDs do NOT interfere; smoothness levers are compositor resample (renderer choice + VRR match) + not stacking ReShade with lsfg. The separate 1-commit branch `feat/lsfg-perf-mode-under-multiplier` (`d62f4f0`, in-game toggle relocation) was DELETED at user request (recoverable from that SHA).

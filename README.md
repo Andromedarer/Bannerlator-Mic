@@ -60,7 +60,7 @@
 |---|---|
 | **App label** | `Bannerlator Bionic` (standard) · `Bannerlator Bionic PuBG` (pubg) · `Bannerlator Bionic Ludashi` (ludashi) |
 | **Packages** | `com.winlator.banner` (standard) · `com.tencent.ig` (pubg) · `com.ludashi.benchmark` (ludashi) |
-| **Version** | Bannerlator **V 2.9.2** — built from Star **marcescence** (`versionName 2.9.2`, `versionCode 54`) |
+| **Version** | Bannerlator **V 2.9.3** — built from Star **marcescence** (`versionName 2.9.3`, `versionCode 55`) |
 | **Android SDK** | `compileSdk 34` · `targetSdk 28` · `minSdk 26` (Android 8.0+) |
 | **Lineage** | Winlator → cmod → Bionic Nightly → Star Bionic → **marcescence** → **Bannerlator** |
 
@@ -91,6 +91,7 @@ Every report gets its own **public discussion thread**. You can reply as the ori
 - [📌 Project Notice](#-project-notice)
 - [ℹ️ Information](#ℹ️-information)
 - [🐛 Report a Mali GPU Issue](#-report-a-mali-gpu-game-issue)
+- [🆕 What's New in 2.9.3](#-whats-new-in-293)
 - [🆕 What's New in 2.9.2](#-whats-new-in-292)
 - [🆕 What's New in 2.9.1](#-whats-new-in-291)
 - [🆕 What's New in 2.9](#-whats-new-in-29)
@@ -102,6 +103,18 @@ Every report gets its own **public discussion thread**. You can reply as the ori
 - [🙏 Credits](#-credits)
 - [⚖️ Disclaimer](#️-disclaimer)
 - [📄 License](#-license)
+
+---
+
+## 🆕 What's New in 2.9.3
+
+2.9.3 is a **feature release over 2.9.2** — headlined by a full **Save Manager**. Everything from 2.9.2 is included. Like the releases before it it's **entirely app-side** — **no ImageFS reinstall** — just install over 2.9.2; your containers, themes, accent and per-game settings carry over untouched.
+
+**💾 Save Manager — never lose a save again.** A whole screen for your game saves — open it from the **side menu** (under Library), the **Steam store**, or any game's **⋮ menu** or detail page. It manages three tiers — **Steam Cloud**, your local **Library**, and the **container** — and keeps them honest: for games whose Steam Cloud doesn't actually retain saves (looking at you, FlatOut 2) it detects that and **backs them up locally instead**, telling you exactly what happened. **Auto-Collect** grabs your saves automatically **when you exit a game** and **before you uninstall** one, so an uninstall never takes your progress with it. And it isn't Steam-only — **any custom game** (an imported EXE or folder) gets the same treatment through a **universal save vault**: auto-snapshot on exit, per-game folders under `Downloads/Bannerlator/game saves/`, and restore back into whichever container you choose. Rounded out with a live **Steam connection badge + auto-connect** and a **"played but never synced"** flag so nothing slips through the cracks. **📖 Full guide: [Save Manager — Complete Guide](https://github.com/The412Banner/Bannerlator/blob/main/docs/save-manager-guide.md).**
+
+**🎞️ Frame generation — smoother by default (lsfg-vk).** The **lsfg-vk** frame-gen defaults are retuned to match the settings that get the best real-world results: **Performance mode is now on by default** (a lighter interpolation model that's cheaper on Adreno), **flow scale defaults higher (0.80)** for cleaner motion, and a new per-container **"Auto-enable at launch"** (on by default) starts frame generation **live at your saved multiplier from the first frame** instead of waiting for you to switch it on in the drawer. Every one of these is still a toggle — flip auto-enable off to restore the old start-off behavior, per container. *(Defaults ported from **[GameNative](https://github.com/utkarshdalal/GameNative)** — see [Credits](#-credits).)*
+
+**📊 Perf HUD.** On dual-API builds the in-game overlay now reads the **active DirectX API straight from the engine log** and pins it to the running game, so the DX version it shows is the one actually in use.
 
 ---
 
