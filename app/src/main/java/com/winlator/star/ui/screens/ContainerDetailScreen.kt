@@ -484,6 +484,10 @@ private fun TopLevelFields(
     onShowWineDownloadSheet: () -> Unit,
 ) {
     val context = LocalContext.current
+    // Per-field "?" help — a centered, scrollable Compose dialog (HelpDialog), replacing the old
+    // top-left PopupWindow. null = no dialog; otherwise the string res of the field's help text.
+    var helpRes by remember { mutableStateOf<Int?>(null) }
+    helpRes?.let { HelpDialog(it) { helpRes = null } }
 
     Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
 
@@ -532,7 +536,7 @@ private fun TopLevelFields(
                 modifier = Modifier.weight(1f)
             )
             ContentInstallGear(onDownloadFile = onShowWineDownloadSheet)
-            IconButton(onClick = { AppUtils.showHelpBox(context, View(context), R.string.help_wine_version) }) {
+            IconButton(onClick = { helpRes = R.string.help_wine_version }) {
                 Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
             }
         }
@@ -548,7 +552,7 @@ private fun TopLevelFields(
                 onSelect = { viewModel.selectedGraphicsDriver = it },
                 modifier = Modifier.weight(1f)
             )
-            IconButton(onClick = { AppUtils.showHelpBox(context, View(context), R.string.help_graphics_driver) }) {
+            IconButton(onClick = { helpRes = R.string.help_graphics_driver }) {
                 Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
             }
             IconButton(onClick = { showWrapperManager = true }) {
@@ -574,9 +578,7 @@ private fun TopLevelFields(
                     onSelect = { viewModel.selectedDXWrapper = it },
                     modifier = Modifier.weight(1f)
                 )
-                IconButton(onClick = {
-                    AppUtils.showHelpBox(context, View(context), R.string.dxwrapper_help_content)
-                }) {
+                IconButton(onClick = { helpRes = R.string.dxwrapper_help_content }) {
                     Icon(Icons.Default.Help, contentDescription = null, modifier = Modifier.size(18.dp))
                 }
             }
@@ -603,7 +605,7 @@ private fun TopLevelFields(
                 },
                 modifier = Modifier.weight(1f)
             )
-            IconButton(onClick = { AppUtils.showHelpBox(context, View(context), R.string.help_renderer) }) {
+            IconButton(onClick = { helpRes = R.string.help_renderer }) {
                 Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
             }
             if (viewModel.selectedRenderer == "Vulkan") {
@@ -1366,6 +1368,9 @@ private fun AdvancedTab(
     onShowFexCoreDownloadSheet: () -> Unit = {},
 ) {
     val context = LocalContext.current
+    // Per-field "?" help — centered scrollable Compose dialog (same as the General tab).
+    var helpRes by remember { mutableStateOf<Int?>(null) }
+    helpRes?.let { HelpDialog(it) { helpRes = null } }
     // Flush legacy CPUListView selections back to the ViewModel before the tab
     // leaves composition, so a tab switch doesn't drop in-progress edits.
     DisposableEffect(Unit) {
@@ -1433,7 +1438,7 @@ private fun AdvancedTab(
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(stringResource(R.string.enable_xinput_for_wine_game), modifier = Modifier.weight(1f))
-                IconButton(onClick = { AppUtils.showHelpBox(context, View(context), R.string.help_xinput) }) {
+                IconButton(onClick = { helpRes = R.string.help_xinput }) {
                     Icon(Icons.Default.Help, contentDescription = null, modifier = Modifier.size(18.dp))
                 }
             }
@@ -1445,7 +1450,7 @@ private fun AdvancedTab(
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(stringResource(R.string.enable_dinput_for_wine_game), modifier = Modifier.weight(1f))
-                IconButton(onClick = { AppUtils.showHelpBox(context, View(context), R.string.help_dinput) }) {
+                IconButton(onClick = { helpRes = R.string.help_dinput }) {
                     Icon(Icons.Default.Help, contentDescription = null, modifier = Modifier.size(18.dp))
                 }
             }
@@ -1456,7 +1461,7 @@ private fun AdvancedTab(
                 )
                 Spacer(Modifier.width(8.dp))
                 Text("Exclusive Input", modifier = Modifier.weight(1f))
-                IconButton(onClick = { AppUtils.showHelpBox(context, View(context), R.string.help_exclusive_xinput) }) {
+                IconButton(onClick = { helpRes = R.string.help_exclusive_xinput }) {
                     Icon(Icons.Default.Help, contentDescription = null, modifier = Modifier.size(18.dp))
                 }
             }
