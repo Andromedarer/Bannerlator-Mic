@@ -292,6 +292,18 @@
         <i><b>VKD3D</b></i> is a translation layer for Direct3D 12 API to Vulkan.<br /><br />
         <i><b>CNC DDraw</b></i> is an implementation of DirectDraw for better compatibility with classic games.
     ]]></string>
+    <string name="help_wine_version"><![CDATA[
+        <b>Wine version</b><br /><br />
+        The compatibility layer that runs the Windows game — it translates Windows into Android without a real Windows install. <i><b>Proton</b></i> is a gaming-tuned build of Wine. Newer builds fix more games; leave it on the default unless a game needs a specific one.
+    ]]></string>
+    <string name="help_graphics_driver"><![CDATA[
+        <b>Graphics driver (wrapper)</b><br /><br />
+        The Vulkan driver the container uses to talk to your GPU. Different wrappers suit different GPUs — <i><b>Adreno</b></i> (Snapdragon) has the best support; <i><b>Mali</b></i> phones may need a specific wrapper to handle compressed textures. Stick with the default unless you\'re troubleshooting.
+    ]]></string>
+    <string name="help_renderer"><![CDATA[
+        <b>Renderer</b><br /><br />
+        How the game\'s image is delivered to your screen. <i><b>Vulkan</b></i> is the default and best for most games. <i><b>OpenGL</b></i> is a fallback for older games; <i><b>SurfaceFlinger</b></i> is experimental and can misbehave on some devices.
+    ]]></string>
     <string name="box64_env_var_help__dynarec_safeflags"><![CDATA[
         Handling of flags on CALL/RET opcodes<br /><br />
         <b>0</b> : Treats CALL/RET as if it never needed flags (faster, unstable)<br />

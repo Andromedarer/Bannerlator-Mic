@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
@@ -158,6 +160,10 @@ fun ContainerDetailScreen(
         // The glossary button + tab row are a FIXED header (outer Column does NOT scroll); only the
         // tab content below scrolls (the content Box owns the scroll + weight(1f)). This keeps the
         // GENERAL/ENVIRONMENT/DRIVES/… tabs pinned and tappable while scrolling a long settings tab.
+        val contentScroll = rememberScrollState()
+        // The "What is all this?" button collapses once you scroll into the content and returns at the
+        // top. derivedStateOf so only the header recomposes, and only when it crosses the very top.
+        val atTop by remember { derivedStateOf { contentScroll.value == 0 } }
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -165,11 +171,13 @@ fun ContainerDetailScreen(
         ) {
             // "What is all this?" — newcomer glossary of the setup terms (DXVK, Mali/Adreno, BCn,
             // colours, glibc/bionic, …). Placed above the tabs so it's reachable from every tab.
-            TextButton(
-                onClick = { glossaryQuery = "" },
-                modifier = Modifier.padding(start = 8.dp, top = 4.dp)
-            ) {
-                Text("❔  What is all this?")
+            AnimatedVisibility(visible = atTop) {
+                TextButton(
+                    onClick = { glossaryQuery = "" },
+                    modifier = Modifier.padding(start = 8.dp, top = 4.dp)
+                ) {
+                    Text("❔  What is all this?")
+                }
             }
 
             // ── Tabs ───────────────────────────────────────────────────────────
@@ -192,7 +200,7 @@ fun ContainerDetailScreen(
             Box(modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(contentScroll)
                 .padding(horizontal = 12.dp, vertical = 8.dp)) {
                 when (viewModel.selectedTab) {
                     0 -> Column {
@@ -204,7 +212,6 @@ fun ContainerDetailScreen(
                             onShowFpsConfig = { showFpsConfig = true },
                             onShowWineDownloadSheet = { showWineDownloadSheet = true },
                             onShowVulkanConfig = { showVulkanConfig = true },
-                            onGlossary = { glossaryQuery = it },
                         )
                         WineConfigTab(viewModel, colorPickerViewRef)
                     }
@@ -475,7 +482,6 @@ private fun TopLevelFields(
     onShowFpsConfig: () -> Unit,
     onShowVulkanConfig: () -> Unit,
     onShowWineDownloadSheet: () -> Unit,
-    onGlossary: (String) -> Unit,
 ) {
     val context = LocalContext.current
 
@@ -526,7 +532,7 @@ private fun TopLevelFields(
                 modifier = Modifier.weight(1f)
             )
             ContentInstallGear(onDownloadFile = onShowWineDownloadSheet)
-            IconButton(onClick = { onGlossary("Proton") }) {
+            IconButton(onClick = { AppUtils.showHelpBox(context, View(context), R.string.help_wine_version) }) {
                 Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
             }
         }
@@ -542,7 +548,7 @@ private fun TopLevelFields(
                 onSelect = { viewModel.selectedGraphicsDriver = it },
                 modifier = Modifier.weight(1f)
             )
-            IconButton(onClick = { onGlossary("Wrapper") }) {
+            IconButton(onClick = { AppUtils.showHelpBox(context, View(context), R.string.help_graphics_driver) }) {
                 Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
             }
             IconButton(onClick = { showWrapperManager = true }) {
@@ -597,7 +603,7 @@ private fun TopLevelFields(
                 },
                 modifier = Modifier.weight(1f)
             )
-            IconButton(onClick = { onGlossary("Vulkan") }) {
+            IconButton(onClick = { AppUtils.showHelpBox(context, View(context), R.string.help_renderer) }) {
                 Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
             }
             if (viewModel.selectedRenderer == "Vulkan") {
