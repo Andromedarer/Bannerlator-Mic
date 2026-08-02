@@ -1,10 +1,13 @@
 package com.winlator.star.store
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.text.format.DateUtils
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -27,19 +30,27 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.VideogameAsset
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -47,12 +58,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.winlator.star.container.Container
+import com.winlator.star.container.ContainerManager
+import com.winlator.star.core.CustomSaveVault
+import com.winlator.star.core.GameSaveBackup
+import com.winlator.star.store.compose.ContainerPickerDialog
+import com.winlator.star.ui.screens.OutlinedAlertDialog
 import com.winlator.star.ui.theme.WinlatorTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -65,9 +84,11 @@ import kotlinx.coroutines.withContext
  * diff ([SaveSyncStore.refreshFromCloud]) per visible game off the main thread so "cloud ahead"
  * can surface.
  *
- * Two entry points reach here: the Steam store-home toolbar (no focus) and the Games-tab per-item
- * ⋮ menu on Steam-origin shortcuts (passes [EXTRA_FOCUS_APP_ID] so the list opens scrolled to and
- * highlighting that game). Tapping a row opens that game's detail Cloud Saves section.
+ * Three entry points reach the same [SaveManagerScreen] composable: the Steam store-home toolbar
+ * (no focus) and the Games-tab per-item ⋮ menu on Steam-origin shortcuts (both via this Activity,
+ * the latter passing [EXTRA_FOCUS_APP_ID] so the list opens scrolled to and highlighting that
+ * game), plus the side-nav drawer's Library section (rendered directly by the NavHost, no focus).
+ * Tapping a row opens that game's detail Cloud Saves section.
  */
 class SteamSaveManagerActivity : ComponentActivity() {
 
@@ -84,35 +105,68 @@ class SteamSaveManagerActivity : ComponentActivity() {
                 SaveManagerScreen(
                     focusAppId = focusAppId,
                     onBack = { finish() },
-                    onOpenGame = ::openGameDetail,
                 )
             }
         }
     }
+}
 
-    /** Reuse the existing detail nav; its Cloud Saves section is the per-game control surface. */
-    private fun openGameDetail(appId: Int) {
-        startActivity(
-            Intent(this, SteamGameDetailActivity::class.java)
+/**
+ * Shared content of the Save Manager. Rendered both by [SteamSaveManagerActivity] (with an
+ * [onBack] that finishes the Activity) and directly by the app NavHost for the drawer's
+ * Library → Save Manager entry (no [onBack] → no header back button, since the drawer owns
+ * navigation). Row taps open the per-game detail via [LocalContext], which is the hosting
+ * Activity in either case.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun SaveManagerScreen(
+    focusAppId: Int = 0,
+    onBack: (() -> Unit)? = null,
+) {
+    val context = LocalContext.current
+    // Signed-in gate (a saved Steam account). Read once; SteamPrefs.init is idempotent + cheap.
+    val signedIn = remember { SteamPrefs.init(context); SteamPrefs.isLoggedIn }
+    // Lazy-connect: the store home starts SteamForegroundService (which opens the CM connection), but
+    // reaching this screen via the drawer/⋮ doesn't — so ensure it here when signed in. Idempotent
+    // (start/connect guard against double-connect); no-op for custom-only users so they never spin up
+    // a Steam service/notification. Fires for BOTH the NavHost drawer destination and the Activity.
+    LaunchedEffect(Unit) {
+        if (signedIn) SteamForegroundService.start(context)
+    }
+    // Live Steam connection status for the header badge. Seed from the repository's current status,
+    // then track the same "SteamStatus:<NAME>" events the detail page listens to — but via a
+    // DisposableEffect (this composable is also the drawer NavHost destination, with no Activity to
+    // implement SteamEventListener). Reflects the connection coming up from the auto-connect above.
+    var steamStatus by remember { mutableStateOf(SteamRepository.getInstance().status) }
+    DisposableEffect(Unit) {
+        val repo = SteamRepository.getInstance()
+        val listener = SteamRepository.SteamEventListener { event ->
+            if (event.startsWith("SteamStatus:")) {
+                val name = event.substringAfter("SteamStatus:")
+                steamStatus = try { SteamRepository.SteamStatus.valueOf(name) } catch (e: Exception) { steamStatus }
+            }
+        }
+        repo.addListener(listener)
+        steamStatus = repo.status  // re-seed in case it changed between remember and register
+        onDispose { repo.removeListener(listener) }
+    }
+    // Reuse the existing detail nav; its Cloud Saves section is the per-game control surface.
+    val onOpenGame: (Int) -> Unit = { appId ->
+        context.startActivity(
+            Intent(context, SteamGameDetailActivity::class.java)
                 .putExtra(SteamGameDetailActivity.EXTRA_APP_ID, appId),
         )
     }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun SaveManagerScreen(
-    focusAppId: Int,
-    onBack: () -> Unit,
-    onOpenGame: (Int) -> Unit,
-) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     val pullState = rememberPullToRefreshState()
 
     var statuses by remember { mutableStateOf<List<SaveStatus>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
+    var showSettings by remember { mutableStateOf(false) }
+    // 0 = Steam (cloud+local, appId-keyed), 1 = Custom (local vault, non-Steam imports).
+    var selectedTab by remember { mutableStateOf(0) }
     // appIds with an in-flight quick action (Download/Upload) — disables that row's buttons.
     var busyAppIds by remember { mutableStateOf<Set<Int>>(emptySet()) }
     // Live per-row progress line for a running (or just-finished) quick action, keyed by appId.
@@ -122,7 +176,15 @@ private fun SaveManagerScreen(
 
     // Instant load (sidecar + on-disk scan, no network) — off the main thread all the same.
     suspend fun reload() {
-        val fresh = withContext(Dispatchers.IO) { SaveSyncStore.listStatuses(context) }
+        val fresh = withContext(Dispatchers.IO) {
+            // Ensure the Steam stack is ready (appContext + SteamDatabase) BEFORE computing statuses.
+            // The drawer path only starts the async foreground service, so getGame()/resolveContainer
+            // could otherwise hit an uninitialised DB → blank installDir → a set-up game mis-reported
+            // as NOT_SET_UP. initialize() is idempotent and does NOT connect, so it's safe here on IO;
+            // getInstance() is a non-null eager singleton. Guarded so a failure can't break the load.
+            try { SteamRepository.getInstance().initialize(context.applicationContext) } catch (_: Throwable) {}
+            SaveSyncStore.listStatuses(context)
+        }
         statuses = fresh
         loading = false
     }
@@ -216,35 +278,67 @@ private fun SaveManagerScreen(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onBack) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back",
-                    tint = MaterialTheme.colorScheme.onBackground,
-                )
+            // Only the Activity entry points pass an onBack; the drawer destination relies on the
+            // NavHost/drawer for navigation, so it renders without a header back button.
+            if (onBack != null) {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = MaterialTheme.colorScheme.onBackground,
+                    )
+                }
             }
             Text(
                 text = "Save Manager",
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.weight(1f).padding(start = 4.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = if (onBack != null) 4.dp else 12.dp),
             )
+            // Live Steam connection badge (signed-in only) — same pill the store/detail screens show;
+            // tap to reconnect when offline. Custom-only users never see a Steam badge.
+            if (signedIn) {
+                SteamStatusPill(
+                    status = steamStatus,
+                    onReconnect = { SteamRepository.getInstance().reconnectNow() },
+                )
+                Spacer(Modifier.width(8.dp))
+            }
+            // Settings cog — turn the auto-back-up-on-exit toggles on/off. Lives in the shared header,
+            // so it shows from every entry point (drawer + store-home/⋮ launches).
+            IconButton(onClick = { showSettings = true }) {
+                Icon(
+                    imageVector = Icons.Filled.Settings,
+                    contentDescription = "Save Manager settings",
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
         }
 
-        // Summary line.
-        Text(
-            text = summary,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-        )
+        // Steam / Custom split. Steam = cloud+local appId-keyed list (existing); Custom = local vault.
+        TabRow(selectedTabIndex = selectedTab) {
+            Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("Steam") })
+            Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("Custom") })
+        }
 
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .nestedScroll(pullState.nestedScrollConnection),
-        ) {
+        when (selectedTab) {
+          0 -> {
+            // Summary line.
+            Text(
+                text = summary,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .nestedScroll(pullState.nestedScrollConnection),
+            ) {
             when {
                 loading -> {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -285,6 +379,369 @@ private fun SaveManagerScreen(
                     modifier = Modifier.align(Alignment.TopCenter),
                 )
             }
+            }
+          }
+          else -> {
+            CustomSaveTab(modifier = Modifier.weight(1f))
+          }
+        }
+    }
+
+    // Settings — the two auto-back-up-on-exit toggles (both default ON, preserving current behavior).
+    // State seeds from the shared "save_manager_prefs" on open. Turning a toggle OFF is gated behind a
+    // warning confirm (write only on Continue; Cancel leaves it ON); turning ON writes through then
+    // shows a brief info dialog.
+    if (showSettings) {
+        val prefs = remember { context.getSharedPreferences("save_manager_prefs", Context.MODE_PRIVATE) }
+        var steamOn by remember { mutableStateOf(prefs.getBoolean("auto_collect_steam_on_exit", true)) }
+        var customOn by remember { mutableStateOf(prefs.getBoolean("auto_backup_custom_on_exit", true)) }
+        // A pending toggle interaction rendered over the settings dialog (null = none).
+        var pendingToggle by remember { mutableStateOf<TogglePrompt?>(null) }
+
+        OutlinedAlertDialog(
+            onDismissRequest = { showSettings = false },
+            title = { Text("Save Manager settings") },
+            text = {
+                Column {
+                    SettingsToggleRow(
+                        title = "Steam games: auto-collect on exit",
+                        subtitle = "Snapshot Steam-library saves to your local Library when a game exits.",
+                        checked = steamOn,
+                        // Don't flip/write here — route through the confirm (OFF) / info (ON) prompt.
+                        onCheckedChange = { pendingToggle = TogglePrompt(ToggleKind.STEAM, it) },
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    SettingsToggleRow(
+                        title = "Custom games: auto-back up on exit",
+                        subtitle = "Snapshot custom-import saves to the local vault when a game exits.",
+                        checked = customOn,
+                        onCheckedChange = { pendingToggle = TogglePrompt(ToggleKind.CUSTOM, it) },
+                    )
+                }
+            },
+            confirmButton = { TextButton(onClick = { showSettings = false }) { Text("Done") } },
+        )
+
+        pendingToggle?.let { prompt ->
+            val prefKey = when (prompt.kind) {
+                ToggleKind.STEAM -> "auto_collect_steam_on_exit"
+                ToggleKind.CUSTOM -> "auto_backup_custom_on_exit"
+            }
+            // Commit a new value to both the pref and the controlling switch state.
+            val commit = { value: Boolean ->
+                prefs.edit().putBoolean(prefKey, value).apply()
+                when (prompt.kind) {
+                    ToggleKind.STEAM -> steamOn = value
+                    ToggleKind.CUSTOM -> customOn = value
+                }
+            }
+
+            if (!prompt.newValue) {
+                // OFF → warning confirm. Write + flip only on Continue; Cancel leaves the switch ON.
+                OutlinedAlertDialog(
+                    onDismissRequest = { pendingToggle = null },
+                    title = { Text("Turn off auto-backup?") },
+                    text = {
+                        Text(
+                            when (prompt.kind) {
+                                ToggleKind.STEAM ->
+                                    "Automatic save backup on exit will be OFF for your Steam library games. " +
+                                        "Their saves won't be captured when a game closes — you'll need to back " +
+                                        "them up yourself via a container's backup option or the Save Manager. Continue?"
+                                ToggleKind.CUSTOM ->
+                                    "Automatic save backup on exit will be OFF for your custom-imported games. " +
+                                        "Their saves won't be captured when a game closes — you'll need to back them " +
+                                        "up yourself via a container's backup option or the game's ⋮ menu → " +
+                                        "'Back up saves'. Continue?"
+                            },
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { commit(false); pendingToggle = null }) { Text("Continue") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { pendingToggle = null }) { Text("Cancel") }
+                    },
+                )
+            } else {
+                // ON → write through, then a brief single-OK info dialog.
+                LaunchedEffect(prompt) { commit(true) }
+                OutlinedAlertDialog(
+                    onDismissRequest = { pendingToggle = null },
+                    title = { Text("Auto-backup on") },
+                    text = {
+                        Text(
+                            when (prompt.kind) {
+                                ToggleKind.STEAM ->
+                                    "Automatic save backup on exit is ON for your Steam library games."
+                                ToggleKind.CUSTOM ->
+                                    "Automatic save backup on exit is ON for your custom-imported games."
+                            },
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { pendingToggle = null }) { Text("OK") }
+                    },
+                )
+            }
+        }
+    }
+}
+
+/** Which auto-backup toggle a pending confirm/info prompt belongs to. */
+private enum class ToggleKind { STEAM, CUSTOM }
+
+/** A pending toggle interaction: which toggle, and the value the user is trying to set it to. */
+private data class TogglePrompt(val kind: ToggleKind, val newValue: Boolean)
+
+@Composable
+private fun SettingsToggleRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Custom tab — non-Steam imported games with their LOCAL vault status + Back up / Restore. No cloud.
+@Composable
+private fun CustomSaveTab(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    var rows by remember { mutableStateOf<List<CustomSaveVault.CustomGameStatus>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    // Rows with an in-flight backup/restore (keyed by the shortcut's file path).
+    var busyKeys by remember { mutableStateOf<Set<String>>(emptySet()) }
+    // Open dialogs: the backup layout picker, and the restore target-container picker.
+    var backupFor by remember { mutableStateOf<CustomSaveVault.CustomGameStatus?>(null) }
+    var restoreFor by remember { mutableStateOf<CustomSaveVault.CustomGameStatus?>(null) }
+
+    suspend fun reload() {
+        val fresh = withContext(Dispatchers.IO) { CustomSaveVault.listStatuses(context) }
+        rows = fresh
+        loading = false
+    }
+    LaunchedEffect(Unit) { reload() }
+
+    fun runBackup(s: CustomSaveVault.CustomGameStatus, layout: GameSaveBackup.BackupLayout) {
+        val key = s.shortcut.file.path
+        busyKeys = busyKeys + key
+        Toast.makeText(context, "Backing up saves for \"${s.name}\"…", Toast.LENGTH_SHORT).show()
+        CustomSaveVault.manualBackup(context, s.shortcut.container, s.shortcut, layout) { r ->
+            if (r.wholeContainer && r.ok) {
+                Toast.makeText(context, "No per-game saves detected — backed up the whole container.", Toast.LENGTH_LONG).show()
+            }
+            Toast.makeText(
+                context,
+                if (r.ok) "Backed up ${r.fileCount} files → ${r.path?.substringAfterLast('/')}"
+                else "Backup failed: ${r.error ?: "unknown error"}",
+                Toast.LENGTH_LONG,
+            ).show()
+            busyKeys = busyKeys - key
+            scope.launch { reload() }
+        }
+    }
+
+    fun runRestore(s: CustomSaveVault.CustomGameStatus, target: Container) {
+        val key = s.shortcut.file.path
+        busyKeys = busyKeys + key
+        Toast.makeText(context, "Restoring saves into \"${target.name}\"…", Toast.LENGTH_SHORT).show()
+        CustomSaveVault.restoreLatest(context, s.shortcut, target) { r ->
+            Toast.makeText(
+                context,
+                if (r.ok) "Restored ${r.filesWritten} files to \"${target.name}\""
+                else "Restore failed: ${r.error ?: "unknown error"}",
+                Toast.LENGTH_LONG,
+            ).show()
+            busyKeys = busyKeys - key
+            scope.launch { reload() }
+        }
+    }
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        when {
+            loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+            }
+            rows.isEmpty() -> Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+                Text(
+                    text = "No custom games found.\nImport a game (exe/folder), then back its saves up here.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            else -> LazyColumn(modifier = Modifier.fillMaxSize()) {
+                items(rows, key = { it.shortcut.file.path }) { s ->
+                    CustomSaveRow(
+                        status = s,
+                        busy = s.shortcut.file.path in busyKeys,
+                        onBackup = { backupFor = s },
+                        onRestore = { restoreFor = s },
+                    )
+                }
+            }
+        }
+    }
+
+    // Backup layout picker (Winlator / GameHub) — mirrors the shortcut ⋮ menu's choice.
+    backupFor?.let { s ->
+        OutlinedAlertDialog(
+            onDismissRequest = { backupFor = null },
+            title = { Text("Backup format") },
+            text = {
+                Column {
+                    Text(
+                        "Which tool is this backup for?",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { backupFor = null; runBackup(s, GameSaveBackup.BackupLayout.WINLATOR) }
+                            .padding(vertical = 8.dp),
+                    ) {
+                        Text("Winlator-native .zip", color = MaterialTheme.colorScheme.primary)
+                        Text("Sibling Winlator / WinNative builds", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    }
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { backupFor = null; runBackup(s, GameSaveBackup.BackupLayout.GAMEHUB) }
+                            .padding(vertical = 8.dp),
+                    ) {
+                        Text("GameHub-compatible .zip", color = MaterialTheme.colorScheme.primary)
+                        Text("GameHub, Proton-based tools (default)", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { backupFor = null }) { Text("Cancel") } },
+        )
+    }
+
+    // Restore target picker — choose which container to restore the latest vault snapshot into.
+    restoreFor?.let { s ->
+        val containers by produceState<List<Container>>(emptyList(), s) {
+            value = withContext(Dispatchers.IO) {
+                try { ContainerManager(context).getContainers() } catch (_: Throwable) { emptyList() }
+            }
+        }
+        ContainerPickerDialog(
+            gameName = s.name,
+            containers = containers,
+            onDismiss = { restoreFor = null },
+            onSelected = { chosen ->
+                restoreFor = null
+                runRestore(s, chosen)
+            },
+        )
+    }
+}
+
+@Composable
+private fun CustomSaveRow(
+    status: CustomSaveVault.CustomGameStatus,
+    busy: Boolean,
+    onBackup: () -> Unit,
+    onRestore: () -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp))
+            .padding(start = 12.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
+    ) {
+        // Thumbnail = the shortcut's own art (cover → icon); custom games have no Steam appId cover.
+        val bmp = status.shortcut.coverArt ?: status.shortcut.icon
+        Box(
+            modifier = Modifier
+                .size(width = 44.dp, height = 60.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surface),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (bmp != null) {
+                Image(
+                    bitmap = bmp.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Filled.VideogameAsset,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+        }
+
+        Spacer(Modifier.width(12.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = status.name,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = status.containerLabel?.let { "Container: $it" } ?: "No container",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = if (status.hasBackup) "Backed up ${relTime(status.lastBackupMillis)}" else "No backup yet",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (status.hasBackup) MaterialTheme.colorScheme.onSurfaceVariant
+                        else MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+
+        if (busy) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(22.dp),
+                color = MaterialTheme.colorScheme.primary,
+                strokeWidth = 2.dp,
+            )
+        } else {
+            Column(horizontalAlignment = Alignment.End) {
+                TextButton(onClick = onBackup) { Text("Back up") }
+                // Restore needs an existing snapshot — disabled with a clear reason otherwise.
+                TextButton(onClick = onRestore, enabled = status.hasBackup) { Text("Restore") }
+            }
         }
     }
 }
@@ -302,6 +759,9 @@ private fun SaveStatusRow(
     // Both combos require a container; NOT_SET_UP rows can't sync — disable the buttons and hint.
     val notSetUp = status.state == SaveState.NOT_SET_UP
     val actionsEnabled = !busy && !notSetUp
+    // Sync-from-Cloud is pointless with nothing in the cloud (e.g. a Not-backed-up game) — gate it so
+    // the meaningful action (Sync to Cloud = back it up) stands out.
+    val syncFromEnabled = actionsEnabled && status.cloudFileCount > 0
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -399,11 +859,11 @@ private fun SaveStatusRow(
         // Disabled while a move runs (live progress is in the row body) and for NOT_SET_UP rows.
         val disabledTint = MaterialTheme.colorScheme.primary.copy(alpha = 0.38f)
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            IconButton(onClick = onSyncFrom, enabled = actionsEnabled) {
+            IconButton(onClick = onSyncFrom, enabled = syncFromEnabled) {
                 Icon(
                     imageVector = Icons.Filled.CloudDownload,
                     contentDescription = "Sync from Cloud",
-                    tint = if (actionsEnabled) MaterialTheme.colorScheme.primary else disabledTint,
+                    tint = if (syncFromEnabled) MaterialTheme.colorScheme.primary else disabledTint,
                 )
             }
             IconButton(onClick = onSyncTo, enabled = actionsEnabled) {
@@ -442,6 +902,7 @@ private const val PROGRESS_LINGER_MS = 2500L
 // Green = settled, amber/orange = local drift, blue = cloud drift, grey = nothing to do / unset.
 private fun pillFor(state: SaveState): Pair<Color, String> = when (state) {
     SaveState.IN_SYNC        -> Color(0xFF3BA55D) to "In sync"
+    SaveState.LOCAL_ONLY     -> Color(0xFFE0662E) to "Not backed up"
     SaveState.LOCAL_AHEAD    -> Color(0xFFE0A82E) to "Local ahead"
     SaveState.CLOUD_AHEAD    -> Color(0xFF4B9CE0) to "Cloud ahead"
     SaveState.NEVER_SYNCED   -> Color(0xFFE07B2E) to "Never synced"
@@ -451,7 +912,7 @@ private fun pillFor(state: SaveState): Pair<Color, String> = when (state) {
 }
 
 private fun SaveState.needsAttention(): Boolean = when (this) {
-    SaveState.NOT_SET_UP, SaveState.CLOUD_AHEAD, SaveState.LOCAL_AHEAD, SaveState.NEVER_SYNCED -> true
+    SaveState.NOT_SET_UP, SaveState.CLOUD_AHEAD, SaveState.LOCAL_ONLY, SaveState.LOCAL_AHEAD, SaveState.NEVER_SYNCED -> true
     else -> false
 }
 

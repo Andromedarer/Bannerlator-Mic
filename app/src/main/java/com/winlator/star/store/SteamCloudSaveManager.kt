@@ -8,9 +8,11 @@ import com.winlator.star.container.ContainerManager
 import com.winlator.star.container.Shortcut
 import com.winlator.star.core.SaveLocator
 import `in`.dragonbra.javasteam.enums.EResult
+import `in`.dragonbra.javasteam.steam.handlers.steamapps.PICSRequest
 import `in`.dragonbra.javasteam.steam.handlers.steamcloud.AppFileChangeList
 import `in`.dragonbra.javasteam.steam.handlers.steamcloud.AppFileInfo
 import `in`.dragonbra.javasteam.steam.handlers.steamcloud.SteamCloud
+import `in`.dragonbra.javasteam.types.KeyValue
 import java.io.File
 import java.io.RandomAccessFile
 import java.net.HttpURLConnection
@@ -63,6 +65,20 @@ object SteamCloudSaveManager {
      *  multiplexing (the imagefs-truncation footgun was range streams of ONE file over one conn).
      *  Bounded low so we never hammer the CDN or the CM job dispatcher; tune here if needed. */
     private const val TRANSFER_CONCURRENCY = 4
+
+    /** Honest message shown when a game has no Steam Cloud store (or an upload didn't persist).
+     *  The saves are never lost — they stay in the local Library — we just don't lie about the cloud. */
+    private const val NO_CLOUD_MESSAGE =
+        "This game doesn't support Steam Cloud — your saves are backed up locally in the Library."
+
+    /** Honest message when a game ACKS the upload commit but Steam retains nothing (an empty manifest
+     *  right after a committed N>0 upload — old titles like FlatOut 2). Saves are safe in the Library. */
+    private const val NO_RETENTION_MESSAGE =
+        "This game doesn't keep Steam Cloud saves — your saves are backed up locally in the Library."
+
+    /** Per-app cloud-support cache (PICS `ufs/savefiles` is stable per app). Only DEFINITIVE
+     *  true/false is cached; an "unknown" (null) is never stored so it can be retried later. */
+    private val cloudSupportCache = java.util.concurrent.ConcurrentHashMap<Int, Boolean>()
 
     interface Callback {
         fun onStatus(message: String)
@@ -169,6 +185,27 @@ object SteamCloudSaveManager {
                     return@Thread
                 }
 
+                // ── HONESTY GUARD 0: already proven to not retain cloud uploads? ───────
+                // If a prior upload committed files but Steam kept nothing, we marked this game.
+                // Short-circuit before opening any batch — no work, honest message, no false success.
+                if (SaveSyncStore.isMarkedNoSteamCloud(appId)) {
+                    cb.onError(NO_RETENTION_MESSAGE)
+                    return@Thread
+                }
+
+                // ── HONESTY GUARD 1: does this game even support Steam Cloud? ───────────
+                // Old titles declare NO UFS save-file patterns → no cloud store. The upload handshake
+                // would "succeed" but nothing persists, so we'd FALSELY report "Uploaded N". Read the
+                // app's declared UFS config from PICS; if it says "no cloud", stop here and tell the
+                // truth. NULL = couldn't determine → proceed + post-upload emptiness check catches it.
+                // Reported via onError (not onDone) so the SaveSyncStore.recordAfterUpload hook does
+                // NOT fire — we must not stamp a lastUploadAt "cloud sync" that never happened.
+                val support: Boolean? = hasCloudSupport(ctx, appId)
+                if (support == false) {
+                    cb.onError(NO_CLOUD_MESSAGE)
+                    return@Thread
+                }
+
                 // ── INCREMENTAL DIFF (new — still strictly additive) ───────────────────
                 // Fetch the cloud manifest and map each cloud file's normalized remote path to its
                 // SHA-1 (AppFileInfo.shaFile — a 20-byte digest). A failed fetch, or an entry with a
@@ -268,7 +305,21 @@ object SteamCloudSaveManager {
                 ).get(FUTURE_TIMEOUT_SEC, TimeUnit.SECONDS)
 
                 if (allOk.get()) {
-                    cb.onDone("Uploaded ${uploaded.get()} changed, $upToDate already up-to-date")
+                    // ── HONESTY GUARD 2: did the cloud actually KEEP the committed files? ──
+                    // We committed N>0 files. Re-fetch the manifest SYNCHRONOUSLY: a COMPLETELY EMPTY
+                    // manifest right after a committed upload is the no-retention signature (old games
+                    // like FlatOut 2 ack the commit but store nothing). This runs regardless of the
+                    // PICS verdict — FlatOut 2 fooled the PICS check by declaring UFS savefiles. It is
+                    // safe vs HL2: a retaining game returns a NON-EMPTY manifest, so it never
+                    // false-triggers. If the re-fetch itself fails we keep the optimistic result (the
+                    // async rebaseline will still correct the pill) and do NOT mark.
+                    val emptyAfterUpload = if (uploaded.get() > 0) isCloudManifestEmpty(steamCloud, appId) else null
+                    if (emptyAfterUpload == true) {
+                        SaveSyncStore.markNoSteamCloud(ctx, appId)   // remember → short-circuit next time
+                        cb.onError(NO_RETENTION_MESSAGE)             // onError: no false success, no lastUploadAt stamp
+                    } else {
+                        cb.onDone("Uploaded ${uploaded.get()} changed, $upToDate already up-to-date")
+                    }
                 } else {
                     cb.onError("Uploaded ${uploaded.get()} of ${toUpload.size} changed; some files failed")
                 }
@@ -297,6 +348,81 @@ object SteamCloudSaveManager {
     fun uploadFromLibrary(ctx: Context, appId: Int, cb: Callback) {
         uploadSaves(ctx, appId, SteamCloudSavePaths.libraryDir(ctx, appId),
             hooked(cb) { SaveSyncStore.recordAfterUpload(ctx, appId) })
+    }
+
+    // ── Cloud-support detection (UFS config from PICS product info) ───────────────
+
+    /**
+     * Whether [appId] actually supports Steam Cloud, read from the app's DECLARED UFS config in PICS
+     * product info (`appinfo → ufs → savefiles`) — the same source GameNative uses. A game with NO
+     * usable save-file patterns has no cloud store; uploading to it "succeeds" but persists nothing.
+     *
+     * Returns:
+     *  - `true`  — the app declares ≥1 usable UFS save-file pattern (e.g. Half-Life 2).
+     *  - `false` — the app's product info is populated but declares no save files (e.g. FlatOut 2).
+     *  - `null`  — couldn't determine (not signed in, PICS query failed/timed out, or metadata-only
+     *              product info with no populated KeyValues). Callers should NOT treat null as "no
+     *              cloud"; upload falls back to a post-upload persistence check instead.
+     *
+     * Definitive results are cached per app (the UFS config is stable); `null` is never cached.
+     */
+    fun hasCloudSupport(ctx: Context, appId: Int): Boolean? {
+        // A game we already proved doesn't retain uploads is definitively "no cloud" — this wins over
+        // both the cache and PICS (FlatOut 2 declares UFS savefiles yet keeps nothing).
+        if (SaveSyncStore.isMarkedNoSteamCloud(appId)) return false
+
+        cloudSupportCache[appId]?.let { return it }
+
+        val steamApps = SteamRepository.getInstance().steamApps ?: return null
+        return try {
+            val resultSet = steamApps.picsGetProductInfo(PICSRequest(appId))
+                .toFuture().get(FUTURE_TIMEOUT_SEC, TimeUnit.SECONDS)
+
+            var appKeyValues: KeyValue? = null
+            for (callback in resultSet.results) {
+                val info = callback.apps[appId]
+                if (info != null) { appKeyValues = info.keyValues; break }
+            }
+
+            // No populated KeyValues (metadata-only / missing token) → genuinely unknown.
+            if (appKeyValues == null || appKeyValues.children.isEmpty()) {
+                null
+            } else {
+                val supported = hasUsableSaveFiles(appKeyValues)
+                cloudSupportCache[appId] = supported
+                supported
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "hasCloudSupport: PICS product-info query failed for appId=$appId", e)
+            null
+        }
+    }
+
+    /** True if the app's PICS KeyValues declare at least one usable UFS save-file pattern. Navigates
+     *  `ufs/savefiles` (case-insensitive; [KeyValue.get] returns the INVALID sentinel — never null —
+     *  when a key is absent, so missing sections yield an empty child list ⇒ false). A pattern counts
+     *  as usable if it carries a non-blank `root` or `pattern`. */
+    private fun hasUsableSaveFiles(appKeyValues: KeyValue): Boolean {
+        val saveFiles = appKeyValues.get("ufs").get("savefiles").children
+        return saveFiles.any { entry ->
+            !entry.get("root").value.isNullOrBlank() || !entry.get("pattern").value.isNullOrBlank()
+        }
+    }
+
+    /**
+     * Post-upload retention check. Re-fetches the cloud manifest and reports whether it is COMPLETELY
+     * EMPTY (0 files). Returns true = empty (the just-committed upload was NOT retained → no cloud),
+     * false = non-empty (retained, e.g. HL2), or null if the manifest re-fetch itself failed (⇒ can't
+     * tell → caller keeps the optimistic success and does not mark).
+     */
+    private fun isCloudManifestEmpty(sc: SteamCloud, appId: Int): Boolean? {
+        return try {
+            val fresh = sc.getAppFileListChange(appId).get(FUTURE_TIMEOUT_SEC, TimeUnit.SECONDS)
+            fresh.files.isEmpty()
+        } catch (e: Exception) {
+            Log.w(TAG, "post-upload emptiness check failed for appId=$appId", e)
+            null
+        }
     }
 
     // ── Combo actions (Cloud ⇄ Container in one press) ───────────────────────────
@@ -365,8 +491,12 @@ object SteamCloudSaveManager {
     private fun hooked(delegate: Callback, onSuccess: () -> Unit): Callback = object : Callback {
         override fun onStatus(message: String) = delegate.onStatus(message)
         override fun onDone(summary: String) {
-            delegate.onDone(summary)
+            // Run the record hook's FAST/LOCAL write BEFORE delivering onDone, so the UI's post-move
+            // per-row statusOf reads the freshly-stamped lastDownloadAt/lastUploadAt (was stale when
+            // onDone fired first). The hook's SLOW cloud re-baseline is dispatched to its own thread
+            // inside SaveSyncStore, so this does not delay onDone.
             try { onSuccess() } catch (e: Exception) { Log.w(TAG, "save-status record hook failed", e) }
+            delegate.onDone(summary)
         }
         override fun onError(message: String) = delegate.onError(message)
     }

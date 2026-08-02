@@ -30,7 +30,7 @@ import java.util.concurrent.TimeUnit
  * download/upload hooks run (already on the move's background thread).
  */
 /** One game's cloud-save status for the Save Manager. Top-level so the UI can name it directly. */
-enum class SaveState { IN_SYNC, LOCAL_AHEAD, CLOUD_AHEAD, NEVER_SYNCED, NO_CLOUD_SAVES, NOT_SET_UP, UNKNOWN }
+enum class SaveState { IN_SYNC, LOCAL_ONLY, LOCAL_AHEAD, CLOUD_AHEAD, NEVER_SYNCED, NO_CLOUD_SAVES, NOT_SET_UP, UNKNOWN }
 
 data class SaveStatus(
     val appId: Int,
@@ -86,8 +86,12 @@ object SaveSyncStore {
         val out = ArrayList<SaveStatus>()
         for (appId in candidates) {
             val status = statusOf(ctx, appId)
-            // Scope gate: keep only games that have local library files OR known cloud saves.
-            if (status.libraryFileCount > 0 || status.cloudFileCount > 0) out.add(status)
+            // Scope gate: keep games with a local Library, known cloud saves, OR local (in-container)
+            // saves that need attention (LOCAL_ONLY = played-but-never-backed-up; LOCAL_AHEAD =
+            // synced-then-changed). The discovery scan already ran in statusOf, so this is free.
+            val keep = status.libraryFileCount > 0 || status.cloudFileCount > 0 ||
+                status.state == SaveState.LOCAL_ONLY || status.state == SaveState.LOCAL_AHEAD
+            if (keep) out.add(status)
         }
         return out.sortedWith(compareBy({ attentionRank(it.state) }, { it.gameName.lowercase() }))
     }
@@ -190,22 +194,40 @@ object SaveSyncStore {
 
     // ── Record hooks (called by SteamCloudSaveManager after each successful move) ──
 
-    /** Cloud → Library succeeded: stamp lastDownloadAt + re-baseline the cloud manifest. */
+    /**
+     * Cloud → Library succeeded. Two-phase so the row updates instantly:
+     *  1. FAST/LOCAL (synchronous): stamp lastDownloadAt + refresh the local common fields and PERSIST
+     *     now — so lastDownloadAt is on disk before the move's onDone fires the UI's per-row statusOf.
+     *  2. SLOW/NETWORK (off-thread): re-baseline the cloud manifest as a second persist. Never delays
+     *     onDone or the immediate refresh.
+     */
     fun recordAfterDownload(ctx: Context, appId: Int) {
-        val cloud = observeCloud(appId)   // network fetch OUTSIDE the persistence lock
-        writeHook(ctx, appId) { rec ->
-            rec.put("lastDownloadAt", System.currentTimeMillis())
-            cloud?.let { (count, hash) -> rec.put("cloudFileCount", count); rec.put("cloudManifestHash", hash) }
-        }
+        writeHook(ctx, appId) { rec -> rec.put("lastDownloadAt", System.currentTimeMillis()) }
+        rebaselineCloudAsync(ctx, appId)
     }
 
-    /** Library → Cloud succeeded: stamp lastUploadAt + re-baseline the cloud manifest. */
+    /** Library → Cloud succeeded. Same two-phase split as [recordAfterDownload]: stamp lastUploadAt
+     *  locally + persist synchronously first, then re-baseline the cloud manifest off-thread. */
     fun recordAfterUpload(ctx: Context, appId: Int) {
-        val cloud = observeCloud(appId)   // network fetch OUTSIDE the persistence lock
-        writeHook(ctx, appId) { rec ->
-            rec.put("lastUploadAt", System.currentTimeMillis())
-            cloud?.let { (count, hash) -> rec.put("cloudFileCount", count); rec.put("cloudManifestHash", hash) }
-        }
+        writeHook(ctx, appId) { rec -> rec.put("lastUploadAt", System.currentTimeMillis()) }
+        rebaselineCloudAsync(ctx, appId)
+    }
+
+    /**
+     * Phase 2 of the download/upload hooks: fetch the cloud manifest and persist the cloud baseline
+     * (cloudFileCount / cloudManifestHash) as a SECOND write. Runs on its own thread so the network
+     * round-trip never delays the move's onDone or the UI's post-move status refresh — the local
+     * timestamp is already on disk by then. A null/failed fetch leaves the existing baseline intact
+     * (we never overwrite a good baseline with "cloud unknown").
+     */
+    private fun rebaselineCloudAsync(ctx: Context, appId: Int) {
+        Thread({
+            val cloud = observeCloud(appId) ?: return@Thread   // network fetch OUTSIDE the persistence lock
+            writeHook(ctx, appId) { rec ->
+                rec.put("cloudFileCount", cloud.first)
+                rec.put("cloudManifestHash", cloud.second)
+            }
+        }, "save-cloud-rebaseline-$appId").start()
     }
 
     /** Container → Library succeeded: Library now holds fresh saves not yet uploaded (→ LOCAL_AHEAD).
@@ -215,6 +237,23 @@ object SaveSyncStore {
 
     /** Library → Container succeeded: no Library or cloud change; just refresh container/label + snapshot. */
     fun recordAfterApply(ctx: Context, appId: Int) = writeHook(ctx, appId) { /* common refresh only */ }
+
+    /**
+     * Persist that this game's Steam Cloud does NOT retain uploads — i.e. the client commit
+     * "succeeds" but Steam keeps nothing (old titles like FlatOut 2). Discovered by
+     * [SteamCloudSaveManager]'s post-upload emptiness check and read back by its [hasCloudSupport] /
+     * upload short-circuit so we never re-attempt and never again falsely claim "Uploaded N". The
+     * local Library backup is unaffected. Not auto-cleared here.
+     */
+    fun markNoSteamCloud(ctx: Context, appId: Int) {
+        writeHook(ctx, appId) { rec -> rec.put("noSteamCloud", true) }
+    }
+
+    /** True if [appId] has been marked as not retaining Steam Cloud uploads (see [markNoSteamCloud]). */
+    fun isMarkedNoSteamCloud(appId: Int): Boolean {
+        val rec = getRecord(loadRoot(), appId) ?: return false
+        return rec.optBoolean("noSteamCloud", false)
+    }
 
     // ── State machine ─────────────────────────────────────────────────────────
 
@@ -239,6 +278,12 @@ object SaveSyncStore {
         // Cloud has saves but nothing local yet (never downloaded).
         if (cloudFileCount > 0 && !hasLibrary && lastDownloadAt == 0L) return SaveState.NEVER_SYNCED
 
+        // Local saves exist but were NEVER backed up (no prior sync, cloud empty/unknown). This is a
+        // played-but-never-synced game — surfaced so the manager can nag you to back it up.
+        if ((hasLibrary || containerFileCount > 0) && lastSync == 0L && cloudFileCount == 0) {
+            return SaveState.LOCAL_ONLY
+        }
+
         // Local side (Library or container) changed since the last reconcile → needs uploading.
         if ((hasLibrary || containerFileCount > 0) && newestLocalMtime > lastSync) return SaveState.LOCAL_AHEAD
 
@@ -258,11 +303,12 @@ object SaveSyncStore {
     private fun attentionRank(state: SaveState): Int = when (state) {
         SaveState.NOT_SET_UP    -> 0
         SaveState.CLOUD_AHEAD   -> 1
-        SaveState.LOCAL_AHEAD   -> 2
-        SaveState.NEVER_SYNCED  -> 3
-        SaveState.IN_SYNC       -> 4
-        SaveState.NO_CLOUD_SAVES -> 5
-        SaveState.UNKNOWN       -> 6
+        SaveState.LOCAL_ONLY    -> 2   // never backed up — most worth surfacing
+        SaveState.LOCAL_AHEAD   -> 3
+        SaveState.NEVER_SYNCED  -> 4
+        SaveState.IN_SYNC       -> 5
+        SaveState.NO_CLOUD_SAVES -> 6
+        SaveState.UNKNOWN       -> 7
     }
 
     // ── Record persistence ────────────────────────────────────────────────────
@@ -305,6 +351,7 @@ object SaveSyncStore {
         put("cloudManifestHash", "")
         put("containerId", NO_CONTAINER)
         put("containerLabel", "")
+        put("noSteamCloud", false)
     }
 
     /** Load → get-or-create record → apply the hook body → refresh common fields → persist. */

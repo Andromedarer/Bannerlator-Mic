@@ -58,6 +58,10 @@ import com.winlator.star.ui.XServerDialogState;
 import com.winlator.star.container.Container;
 import com.winlator.star.container.ContainerManager;
 import com.winlator.star.container.Shortcut;
+import com.winlator.star.core.CustomSaveVault;
+import com.winlator.star.store.SteamCloudSaveManager;
+import com.winlator.star.store.SteamDatabase;
+import com.winlator.star.store.SteamRepository;
 import com.winlator.star.contentdialog.ContentDialog;
 import com.winlator.star.contentdialog.DXVKConfigDialog;
 import com.winlator.star.contentdialog.GraphicsDriverConfigDialog;
@@ -153,8 +157,10 @@ import java.util.Iterator;
 import java.util.Set;
 import java.util.Map;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -2378,10 +2384,214 @@ public class XServerDisplayActivity extends AppCompatActivity {
                         break;
                     }
                 }
+                // Best-effort save backup on exit, now that the game has terminated (and flushed).
+                // Steam-library games → their per-appId local Library (Collect, no cloud); custom
+                // imports → the persistent local vault. Runs BEFORE restartApplication() because that
+                // kills the process (exit(0)), which would otherwise abort the copy. Both are bounded
+                // + fully guarded so they can never hang or break game-exit. Nothing is ever uploaded.
+                // Each auto-back-up branch is gated by its Save Manager toggle (shared prefs, both
+                // default true → behavior unchanged unless the user turns it off). When off, we skip
+                // cleanly — no worker thread, no latch, no work.
+                SharedPreferences savePrefs = getSharedPreferences("save_manager_prefs", MODE_PRIVATE);
+                if (isGenuineSteamShortcut()) {
+                    if (savePrefs.getBoolean("auto_collect_steam_on_exit", true)) autoCollectSteamSavesBlocking();
+                } else {
+                    if (savePrefs.getBoolean("auto_backup_custom_on_exit", true)) autoSnapshotCustomSavesBlocking();
+                }
                 preloaderDialog.closeOnUiThread();
                 AppUtils.restartApplication(getApplicationContext());
             }
         }, 1000);
+    }
+
+    /**
+     * Whether this shortcut is a genuine Steam-library game: tagged {@code storeSource=steam}, or its
+     * exec path lives under the {@code steam_games} install root (covers pre-tagging shortcuts). Steam
+     * games back up to their per-appId Library; everything else (custom exe/folder imports) backs up
+     * to the local vault. Mirrors ShortcutsScreen's Steam-origin gate.
+     */
+    private boolean isGenuineSteamShortcut() {
+        if (shortcut == null) return false;
+        if ("steam".equals(shortcut.getExtra("storeSource"))) return true;
+        String p = shortcut.path;
+        return p != null && p.toLowerCase().contains("steam_games");
+    }
+
+    /**
+     * On game exit, snapshot this game's saves from its container into the local save Library
+     * (Container -> Library) when the shortcut is a Steam-library game (tagged with a positive
+     * {@code steamAppId}). Collect only — never uploads to Steam Cloud (explicit requirement).
+     *
+     * Best-effort and silent: no UI/Toast, all errors swallowed (logged to "BH_SAVE_SYNC"). Uses the
+     * application context so the copy isn't tied to this dying activity. The DB lookup + collect run
+     * on a worker thread (Room can't be queried on the main thread); we bound-wait on a latch so the
+     * copy finishes before the process exits, while a stuck collect can never freeze game-exit.
+     */
+    private void autoCollectSteamSavesBlocking() {
+        try {
+            final Shortcut sc = shortcut;
+            if (sc == null) return;
+
+            // A steamAppId alone is NOT proof of a Steam-library game: custom exe/folder imports can
+            // carry one purely to link cover art / metadata. Auto-collect (keyed by appId) only for
+            // GENUINE Steam-library games — tagged storeSource=steam, OR whose exec lives under the
+            // Steam install root (steam_games/, where the in-app store installs; imports don't). This
+            // prevents a cover-linked custom import from being mis-filed under a Steam appId's Library.
+            String storeSource = sc.getExtra("storeSource", "");
+            String path = sc.path != null ? sc.path.toLowerCase() : "";
+            boolean genuineSteam = "steam".equals(storeSource) || path.contains("steam_games");
+            if (!genuineSteam) return;
+
+            // Tagged appId is the fast path; 0/missing (a PRE-TAGGING shortcut like an older Half-Life 2
+            // whose .desktop carries no steamAppId) is NOT a bail — we derive the appId from the exec
+            // path's steam_games/<folder> via the installed-games DB below, on the worker thread.
+            int tagged;
+            try {
+                tagged = Integer.parseInt(sc.getExtra("steamAppId", "0").trim());
+            } catch (Exception e) {
+                tagged = 0;
+            }
+            final int fTaggedAppId = tagged;
+            final String execPath = sc.path;                    // original casing, for the folder parse
+            final String folder = steamGamesFolderOf(execPath); // e.g. "Half-Life 2", or null
+
+            final Context appCtx = getApplicationContext();
+            final CountDownLatch latch = new CountDownLatch(1);
+
+            new Thread(() -> {
+                try {
+                    int appId = fTaggedAppId;
+                    String installDir = "";
+
+                    // Fast path: tagged appId → resolve installDir via getGame (Room, off-main here).
+                    if (appId > 0) {
+                        SteamDatabase.GameRow row = SteamRepository.getInstance().getDatabase().getGame(appId);
+                        installDir = (row != null && row.installDir != null) ? row.installDir : "";
+                    }
+
+                    // Pre-tagging shortcut (no/<=0 steamAppId, or appId with no install row): derive
+                    // appId+installDir by matching the exec path's steam_games/<folder> against the
+                    // installed-games DB. getDatabase() lazy-inits from SteamRepository's appContext;
+                    // a "not initialised" throw is caught by the surrounding try/catch below.
+                    if ((appId <= 0 || installDir.isEmpty()) && folder != null) {
+                        List<SteamDatabase.GameRow> installed =
+                                SteamRepository.getInstance().getDatabase().getInstalledGames();
+                        if (installed != null) {
+                            for (SteamDatabase.GameRow r : installed) {
+                                if (installDirMatchesFolder(r.installDir, folder)) {
+                                    appId = r.appId;
+                                    installDir = (r.installDir != null) ? r.installDir : "";
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    if (appId <= 0 || installDir.isEmpty()) {
+                        Log.w("BH_SAVE_SYNC", "auto-collect: could not resolve appId for " + execPath);
+                        latch.countDown();
+                        return;
+                    }
+
+                    final int fAppId = appId;
+                    SteamCloudSaveManager.INSTANCE.collectFromContainer(appCtx, fAppId, installDir,
+                            new SteamCloudSaveManager.Callback() {
+                                @Override public void onStatus(String message) {}
+                                @Override public void onDone(String summary) {
+                                    Log.i("BH_SAVE_SYNC", "auto-collect on exit (appId " + fAppId + "): " + summary);
+                                    latch.countDown();
+                                }
+                                @Override public void onError(String message) {
+                                    Log.w("BH_SAVE_SYNC", "auto-collect on exit failed (appId " + fAppId + "): " + message);
+                                    latch.countDown();
+                                }
+                            });
+                } catch (Throwable t) {
+                    Log.w("BH_SAVE_SYNC", "auto-collect on exit errored", t);
+                    latch.countDown();
+                }
+            }, "BH-SaveAutoCollect").start();
+
+            // Bounded so a stalled collect (local file copy — normally sub-second) never hangs exit.
+            latch.await(8, TimeUnit.SECONDS);
+        } catch (Throwable t) {
+            Log.w("BH_SAVE_SYNC", "auto-collect on exit wrapper errored", t);
+        }
+    }
+
+    /**
+     * The game folder from a Steam shortcut's exec path — the segment right after {@code steam_games}.
+     * Handles both separators and the {@code Z:\steam_games\<Folder>\...exe} form. Returns null when
+     * the path has no {@code steam_games/} segment. e.g. {@code Z:\steam_games\Half-Life 2\hl2.exe} →
+     * "Half-Life 2".
+     */
+    private static String steamGamesFolderOf(String rawPath) {
+        if (rawPath == null) return null;
+        String norm = rawPath.replace('\\', '/');
+        int idx = norm.toLowerCase().indexOf("steam_games/");
+        if (idx < 0) return null;
+        String after = norm.substring(idx + "steam_games/".length());
+        int slash = after.indexOf('/');
+        String folder = (slash >= 0 ? after.substring(0, slash) : after).trim();
+        return folder.isEmpty() ? null : folder;
+    }
+
+    /**
+     * Whether an installed-game {@code installDir} corresponds to the exec path's steam_games folder.
+     * Matches on the adjacent path segments {@code steam_games/<folder>} (case-insensitive, slash-
+     * normalized) so "Half-Life" can't false-match "Half-Life 2".
+     */
+    private static boolean installDirMatchesFolder(String installDir, String folder) {
+        if (installDir == null || folder == null) return false;
+        String norm = installDir.replace('\\', '/');
+        while (norm.endsWith("/")) norm = norm.substring(0, norm.length() - 1);
+        String[] segs = norm.split("/");
+        for (int i = 0; i + 1 < segs.length; i++) {
+            if (segs[i].equalsIgnoreCase("steam_games") && segs[i + 1].equalsIgnoreCase(folder)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * On game exit, snapshot a CUSTOM (non-Steam) game's saves into the persistent local vault
+     * (<externalStorage>/Bannerlator/GameSaveVault/<key>.zip, overwriting the latest), so they
+     * survive the shortcut/game being removed. Local only — no cloud.
+     *
+     * Same robustness envelope as the Steam collect: application context (not this dying activity),
+     * the zip runs on its own worker thread, and we bound-wait on a latch so it finishes BEFORE
+     * restartApplication()'s exit(0) aborts the process. Silent + best-effort; logs to "BH_SAVE_SYNC";
+     * skips gracefully when there's no shortcut/container or no saves are discovered.
+     */
+    private void autoSnapshotCustomSavesBlocking() {
+        try {
+            final Shortcut sc = shortcut;
+            final Container ctn = container;
+            if (sc == null || ctn == null) return;
+
+            final Context appCtx = getApplicationContext();
+            final CountDownLatch latch = new CountDownLatch(1);
+
+            new Thread(() -> {
+                try {
+                    CustomSaveVault.VaultResult r = CustomSaveVault.INSTANCE.snapshot(appCtx, ctn, sc);
+                    if (r != null && r.getOk()) {
+                        Log.i("BH_SAVE_SYNC", "auto-vault on exit (" + sc.name + "): " + r.getFileCount() + " files");
+                    } else {
+                        Log.i("BH_SAVE_SYNC", "auto-vault on exit (" + sc.name + "): "
+                                + (r != null ? r.getError() : "null result"));
+                    }
+                } catch (Throwable t) {
+                    Log.w("BH_SAVE_SYNC", "auto-vault on exit errored (" + sc.name + ")", t);
+                } finally {
+                    latch.countDown();
+                }
+            }, "BH-SaveAutoVault").start();
+
+            // Bounded so a stalled snapshot (local file copy — normally sub-second) never hangs exit.
+            latch.await(8, TimeUnit.SECONDS);
+        } catch (Throwable t) {
+            Log.w("BH_SAVE_SYNC", "auto-vault on exit wrapper errored", t);
+        }
     }
 
     // Whether Wine/box64 logging is on — the single source of truth for the failure card's guidance
