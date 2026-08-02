@@ -756,9 +756,10 @@ private fun MultiSelectGroup(
 }
 
 /**
- * Searchable add-picker. The catalog is well past 30 entries, so a flat list is unusable —
- * the query filters the catalog and doubles as the name field for a variable we don't know
- * about, which is the free-form escape hatch for anything outside the catalog.
+ * Searchable add-picker with separate Name and Value boxes. The catalog is well past 30 entries,
+ * so a flat list is unusable — the Name box filters the catalog AND doubles as the free-form name
+ * for a variable we don't know about; the Value box supplies its value (no '=' needed, though a
+ * pasted "NAME=VALUE" in the Name box is split for you). A live preview states whether it will save.
  */
 @Composable
 private fun AddEnvVarPicker(
@@ -766,34 +767,38 @@ private fun AddEnvVarPicker(
     onAdd: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var query by remember { mutableStateOf("") }
-    val typed = query.trim().replace(" ", "")
-    // Parse what the user typed on the FIRST '=' so the dialog can preview EXACTLY what will be
-    // stored and tell them up-front whether it saves. "mytest=12345" -> name "mytest", value "12345".
-    val eqIdx = typed.indexOf('=')
-    val previewName  = if (eqIdx >= 0) typed.substring(0, eqIdx) else typed
-    val previewValue = if (eqIdx >= 0) typed.substring(eqIdx + 1) else ""
-    val alreadyExists = previewName.isNotEmpty() && previewName in existingNames
-    val isKnownName   = previewName in KnownEnvVars.names
-    // Offer the "add typed" action for a genuinely custom name, or whenever a value was typed
-    // (NAME=VALUE) — including for a known name the user wants to set directly.
-    val showAddTyped  = previewName.isNotEmpty() && !alreadyExists && (eqIdx >= 0 || !isKnownName)
-    val candidates = remember(previewName, existingNames) {
+    var nameQuery by remember { mutableStateOf("") }
+    var valueQuery by remember { mutableStateOf("") }
+    val rawName = nameQuery.trim().replace(" ", "")
+    // TWO boxes — Name and Value — so users never have to type an '='. The Name box still also
+    // accepts a pasted "NAME=VALUE" (split on the FIRST '='); otherwise the Value box supplies it.
+    val eqIdx = rawName.indexOf('=')
+    val name  = if (eqIdx >= 0) rawName.substring(0, eqIdx) else rawName
+    val value = if (eqIdx >= 0) rawName.substring(eqIdx + 1) else valueQuery.trim().replace(" ", "")
+    val alreadyExists = name.isNotEmpty() && name in existingNames
+    val isKnownName   = name in KnownEnvVars.names
+    // Offer the explicit Add action for a custom name, or whenever a value was supplied (so a known
+    // name can be added with a value directly). A bare known name is added from the list below.
+    val showAddTyped  = name.isNotEmpty() && !alreadyExists && (value.isNotEmpty() || !isKnownName)
+    val candidates = remember(name, existingNames) {
         KnownEnvVars.names
             .filter { it !in existingNames }
-            .filter { previewName.isBlank() || it.contains(previewName, ignoreCase = true) }
+            .filter { name.isBlank() || it.contains(name, ignoreCase = true) }
     }
-    // One-line "will it save?" feedback shown under the field. null = nothing to say (a plain
-    // known-variable search the list below already handles). Pair = (message, isError).
+    // Live "will it save?" feedback under the boxes. null = nothing to say. Pair = (message, isError).
     val previewMsg: Pair<String, Boolean>? = when {
-        typed.isEmpty() -> null
-        previewName.isEmpty() -> "Won't be saved — type a name before the \"=\"" to true
-        alreadyExists -> "\"$previewName\" is already in the list" to true
-        eqIdx >= 0 && previewValue.isEmpty() -> "Saves as  $previewName=  (empty value)" to false
-        eqIdx >= 0 -> "Saves as  $previewName = $previewValue" to false
-        isKnownName -> null
-        else -> "Saves as custom  $previewName  (empty value until you set one)" to false
+        rawName.isEmpty() && valueQuery.isBlank() -> null
+        name.isEmpty() -> "Won't be saved — enter a variable name" to true
+        alreadyExists -> "\"$name\" is already in the list" to true
+        value.isEmpty() -> "Saves as  $name=  (empty value)" to false
+        else -> "Saves as  $name = $value" to false
     }
+    // If the user typed "=" in the Name box we still split it correctly (name before, value after) —
+    // reassure them rather than error: we roll with it AND teach the two-box way.
+    val splitNote = if (eqIdx >= 0 && name.isNotEmpty())
+        "No \"=\" needed — the Value box handles that. Split it for you." else null
+    // What the Add actions hand back — onAdd re-splits on the first '=' (so an empty value is fine).
+    fun combined(varName: String) = if (value.isEmpty()) varName else "$varName=$value"
 
     OutlinedAlertDialog(
         onDismissRequest = onDismiss,
@@ -801,10 +806,19 @@ private fun AddEnvVarPicker(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    label = { Text("Search, or type NAME=VALUE") },
+                    value = nameQuery,
+                    onValueChange = { nameQuery = it },
+                    label = { Text("Name (search or type)") },
+                    placeholder = { Text("e.g. DXVK_FRAME_RATE") },
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = valueQuery,
+                    onValueChange = { valueQuery = it },
+                    label = { Text("Value (optional)") },
+                    placeholder = { Text("e.g. 60") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -817,26 +831,31 @@ private fun AddEnvVarPicker(
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
+                if (splitNote != null) {
+                    Text(
+                        splitNote,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 280.dp)
+                        .heightIn(max = 240.dp)
                         .verticalScroll(rememberScrollState())
                 ) {
                     if (showAddTyped) {
-                        TextButton(onClick = { onAdd(typed) }, modifier = Modifier.fillMaxWidth()) {
-                            Text(
-                                if (eqIdx >= 0) "Add  $previewName = ${previewValue.ifEmpty { "(empty)" }}"
-                                else "Add custom variable \"$previewName\"",
-                                modifier = Modifier.weight(1f)
-                            )
+                        TextButton(onClick = { onAdd(combined(name)) }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Add  $name${if (value.isNotEmpty()) " = $value" else ""}",
+                                modifier = Modifier.weight(1f))
                         }
                         if (candidates.isNotEmpty()) MenuItemDivider()
                     }
-                    candidates.forEachIndexed { index, name ->
+                    candidates.forEachIndexed { index, known ->
                         if (index > 0) MenuItemDivider()
-                        TextButton(onClick = { onAdd(name) }, modifier = Modifier.fillMaxWidth()) {
-                            Text(name, modifier = Modifier.weight(1f))
+                        TextButton(onClick = { onAdd(combined(known)) }, modifier = Modifier.fillMaxWidth()) {
+                            Text(known, modifier = Modifier.weight(1f))
                         }
                     }
                     if (candidates.isEmpty() && !showAddTyped) {
