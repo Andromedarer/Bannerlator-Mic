@@ -139,6 +139,53 @@ internal object KnownEnvVars {
         // GPU selection / present latency
         KnownEnvVar("DXVK_FILTER_DEVICE_NAME", EnvVarType.TEXT),
         KnownEnvVar("VKD3D_SWAPCHAIN_LATENCY_FRAMES", EnvVarType.NUMBER),
+        // DXVK extras
+        KnownEnvVar("DXVK_ASYNC", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("DXVK_GPLASYNCCACHE", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("DXVK_CONFIG", EnvVarType.TEXT),
+        // Wine extras
+        KnownEnvVar("WINE_DISABLE_FULLSCREEN_HACK", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("WINE_X11FORCEGLX", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("WINE_GST_NO_GL", EnvVarType.CHECKBOX, listOf("0", "1")),
+        // Mali BCn decode layer (leegao / Fcharan libbcn_layer.so). On Adreno the app keeps these
+        // OFF automatically (native BCn); setting them here only matters on Mali/non-Qualcomm GPUs.
+        KnownEnvVar("ENABLE_BCN_COMPUTE", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("BCN_COMPUTE_AUTO", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("BCN_COMPUTE_IMAGE_VIEW", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("BCN_TRANSCODE_TO_ASTC", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("BCN_TRANSCODE_TO_ETC1", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("BCN_TRANSCODE_TO_ETC2", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("BCN_PROFILE_TRANSFERS", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("BCN_ASTC_TRY_2P", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("BCN_ASTC_ONLY_2P", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("BCN_ASTC_USE_LARGE_STEPS", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("BCN_LAYER_LOG_LEVEL", EnvVarType.SELECT, listOf("error", "info,error", "warn,error", "info,warn,error")),
+        KnownEnvVar("BCN_MAX_STAGING_CACHE_MB", EnvVarType.NUMBER),
+        KnownEnvVar("BCN_QUEUE_THROTTLE_LIMIT", EnvVarType.NUMBER),
+        // Mali wrapper (Vulkan ICD). WRAPPER_EMULATE_BCN: 0=off 1=default 2=full 3=auto.
+        KnownEnvVar("WRAPPER_EMULATE_BCN", EnvVarType.SELECT, listOf("0", "1", "2", "3")),
+        KnownEnvVar("WRAPPER_BCN_ASTC", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("WRAPPER_USE_BCN_CACHE", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("WRAPPER_BCN_GPU", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("WRAPPER_NO_BCN_THREAD", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("WRAPPER_SAFE_CREATE_DEVICE", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("WRAPPER_DIAG", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("WRAPPER_REDUCE_DEPTH_FORMAT", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("WRAPPER_DISABLE_PRESENT_WAIT", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("WRAPPER_DISABLE_PLACED", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("WRAPPER_NO_PATCH_OPCONSTCOMP", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("WRAPPER_DRIVER_ID", EnvVarType.NUMBER),
+        KnownEnvVar("WRAPPER_VMEM_MAX_SIZE", EnvVarType.NUMBER),
+        KnownEnvVar("WRAPPER_VK_VERSION", EnvVarType.TEXT),
+        KnownEnvVar("WRAPPER_EXTENSION_BLACKLIST", EnvVarType.TEXT),
+        KnownEnvVar("WRAPPER_DEVICE_NAME", EnvVarType.TEXT),
+        KnownEnvVar("WRAPPER_RESOURCE_TYPE", EnvVarType.TEXT),
+        // Mali DX12 compat layer (leegao compat_layer; Valhall Mali r32p1+).
+        KnownEnvVar("ENABLE_DXVK_MALI_COMPAT_LAYER", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("COMPAT_EMULATE_SPARSE_BINDING", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("COMPAT_EMULATE_PUSH_DESCRIPTORS", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("COMPAT_EMULATE_NULL_DESCRIPTORS", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("COMPAT_FORCE_MASKING", EnvVarType.CHECKBOX, listOf("0", "1")),
     )
 
     private val byName = all.associateBy { it.name }
