@@ -176,7 +176,15 @@ internal fun SaveManagerScreen(
 
     // Instant load (sidecar + on-disk scan, no network) — off the main thread all the same.
     suspend fun reload() {
-        val fresh = withContext(Dispatchers.IO) { SaveSyncStore.listStatuses(context) }
+        val fresh = withContext(Dispatchers.IO) {
+            // Ensure the Steam stack is ready (appContext + SteamDatabase) BEFORE computing statuses.
+            // The drawer path only starts the async foreground service, so getGame()/resolveContainer
+            // could otherwise hit an uninitialised DB → blank installDir → a set-up game mis-reported
+            // as NOT_SET_UP. initialize() is idempotent and does NOT connect, so it's safe here on IO;
+            // getInstance() is a non-null eager singleton. Guarded so a failure can't break the load.
+            try { SteamRepository.getInstance().initialize(context.applicationContext) } catch (_: Throwable) {}
+            SaveSyncStore.listStatuses(context)
+        }
         statuses = fresh
         loading = false
     }
