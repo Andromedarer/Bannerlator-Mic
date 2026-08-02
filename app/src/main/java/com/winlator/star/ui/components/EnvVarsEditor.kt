@@ -287,7 +287,10 @@ private fun parseRows(raw: String, nextId: () -> Int): List<EnvRow> =
         }
 
 private fun renderRows(rows: List<EnvRow>): String =
-    rows.filter { it.name.isNotBlank() && it.value.isNotBlank() }
+    // Keep every NAMED row — an empty value ("NAME=") is valid env-var syntax and must NOT be
+    // silently dropped. The old `&& it.value.isNotBlank()` discarded freshly-added custom variables
+    // (which start with an empty value) so they vanished on save even though they showed in the list.
+    rows.filter { it.name.isNotBlank() }
         .joinToString(" ") { "${it.name}=${it.value}" }
 
 /**
@@ -479,10 +482,17 @@ internal fun EnvVarsEditor(
     if (showAddPicker) {
         AddEnvVarPicker(
             existingNames = rows.map { it.name }.toSet(),
-            onAdd = { name ->
-                val clean = name.trim().replace(" ", "")
-                if (clean.isNotEmpty() && rows.none { it.name == clean }) {
-                    rows.add(EnvRow(nextId(), clean, defaultValueFor(clean)))
+            onAdd = { raw ->
+                // Accept "NAME=VALUE" as well as a bare "NAME": split on the FIRST '=' so a custom
+                // var typed as "mytest=12345" is stored as name + value, not one unparseable token
+                // with a blank value (which used to be dropped on save). A bare NAME keeps its known
+                // default, or "" for a custom one — an empty value is valid and now persists.
+                val cleaned = raw.trim().replace(" ", "")
+                val eq = cleaned.indexOf('=')
+                val name  = if (eq >= 0) cleaned.substring(0, eq) else cleaned
+                val value = if (eq >= 0) cleaned.substring(eq + 1) else defaultValueFor(cleaned)
+                if (name.isNotEmpty() && rows.none { it.name == name }) {
+                    rows.add(EnvRow(nextId(), name, value))
                     emit()
                 }
                 showAddPicker = false
@@ -757,13 +767,33 @@ private fun AddEnvVarPicker(
     onDismiss: () -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
-    val candidates = remember(query, existingNames) {
+    val typed = query.trim().replace(" ", "")
+    // Parse what the user typed on the FIRST '=' so the dialog can preview EXACTLY what will be
+    // stored and tell them up-front whether it saves. "mytest=12345" -> name "mytest", value "12345".
+    val eqIdx = typed.indexOf('=')
+    val previewName  = if (eqIdx >= 0) typed.substring(0, eqIdx) else typed
+    val previewValue = if (eqIdx >= 0) typed.substring(eqIdx + 1) else ""
+    val alreadyExists = previewName.isNotEmpty() && previewName in existingNames
+    val isKnownName   = previewName in KnownEnvVars.names
+    // Offer the "add typed" action for a genuinely custom name, or whenever a value was typed
+    // (NAME=VALUE) — including for a known name the user wants to set directly.
+    val showAddTyped  = previewName.isNotEmpty() && !alreadyExists && (eqIdx >= 0 || !isKnownName)
+    val candidates = remember(previewName, existingNames) {
         KnownEnvVars.names
             .filter { it !in existingNames }
-            .filter { query.isBlank() || it.contains(query.trim(), ignoreCase = true) }
+            .filter { previewName.isBlank() || it.contains(previewName, ignoreCase = true) }
     }
-    val typed = query.trim().replace(" ", "")
-    val isNewName = typed.isNotEmpty() && typed !in KnownEnvVars.names && typed !in existingNames
+    // One-line "will it save?" feedback shown under the field. null = nothing to say (a plain
+    // known-variable search the list below already handles). Pair = (message, isError).
+    val previewMsg: Pair<String, Boolean>? = when {
+        typed.isEmpty() -> null
+        previewName.isEmpty() -> "Won't be saved — type a name before the \"=\"" to true
+        alreadyExists -> "\"$previewName\" is already in the list" to true
+        eqIdx >= 0 && previewValue.isEmpty() -> "Saves as  $previewName=  (empty value)" to false
+        eqIdx >= 0 -> "Saves as  $previewName = $previewValue" to false
+        isKnownName -> null
+        else -> "Saves as custom  $previewName  (empty value until you set one)" to false
+    }
 
     OutlinedAlertDialog(
         onDismissRequest = onDismiss,
@@ -773,20 +803,33 @@ private fun AddEnvVarPicker(
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
-                    label = { Text("Search or type a name") },
+                    label = { Text("Search, or type NAME=VALUE") },
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
+                if (previewMsg != null) {
+                    Text(
+                        previewMsg.first,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (previewMsg.second) MaterialTheme.colorScheme.error
+                                else MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(max = 280.dp)
                         .verticalScroll(rememberScrollState())
                 ) {
-                    if (isNewName) {
+                    if (showAddTyped) {
                         TextButton(onClick = { onAdd(typed) }, modifier = Modifier.fillMaxWidth()) {
-                            Text("Add custom variable \"$typed\"", modifier = Modifier.weight(1f))
+                            Text(
+                                if (eqIdx >= 0) "Add  $previewName = ${previewValue.ifEmpty { "(empty)" }}"
+                                else "Add custom variable \"$previewName\"",
+                                modifier = Modifier.weight(1f)
+                            )
                         }
                         if (candidates.isNotEmpty()) MenuItemDivider()
                     }
@@ -796,7 +839,7 @@ private fun AddEnvVarPicker(
                             Text(name, modifier = Modifier.weight(1f))
                         }
                     }
-                    if (candidates.isEmpty() && !isNewName) {
+                    if (candidates.isEmpty() && !showAddTyped) {
                         Text(
                             "No matches",
                             style = MaterialTheme.typography.bodySmall,
