@@ -238,6 +238,23 @@ object SaveSyncStore {
     /** Library → Container succeeded: no Library or cloud change; just refresh container/label + snapshot. */
     fun recordAfterApply(ctx: Context, appId: Int) = writeHook(ctx, appId) { /* common refresh only */ }
 
+    /**
+     * Persist that this game's Steam Cloud does NOT retain uploads — i.e. the client commit
+     * "succeeds" but Steam keeps nothing (old titles like FlatOut 2). Discovered by
+     * [SteamCloudSaveManager]'s post-upload emptiness check and read back by its [hasCloudSupport] /
+     * upload short-circuit so we never re-attempt and never again falsely claim "Uploaded N". The
+     * local Library backup is unaffected. Not auto-cleared here.
+     */
+    fun markNoSteamCloud(ctx: Context, appId: Int) {
+        writeHook(ctx, appId) { rec -> rec.put("noSteamCloud", true) }
+    }
+
+    /** True if [appId] has been marked as not retaining Steam Cloud uploads (see [markNoSteamCloud]). */
+    fun isMarkedNoSteamCloud(appId: Int): Boolean {
+        val rec = getRecord(loadRoot(), appId) ?: return false
+        return rec.optBoolean("noSteamCloud", false)
+    }
+
     // ── State machine ─────────────────────────────────────────────────────────
 
     private fun computeState(
@@ -334,6 +351,7 @@ object SaveSyncStore {
         put("cloudManifestHash", "")
         put("containerId", NO_CONTAINER)
         put("containerLabel", "")
+        put("noSteamCloud", false)
     }
 
     /** Load → get-or-create record → apply the hook body → refresh common fields → persist. */

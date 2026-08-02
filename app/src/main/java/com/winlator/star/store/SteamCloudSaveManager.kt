@@ -71,6 +71,11 @@ object SteamCloudSaveManager {
     private const val NO_CLOUD_MESSAGE =
         "This game doesn't support Steam Cloud — your saves are backed up locally in the Library."
 
+    /** Honest message when a game ACKS the upload commit but Steam retains nothing (an empty manifest
+     *  right after a committed N>0 upload — old titles like FlatOut 2). Saves are safe in the Library. */
+    private const val NO_RETENTION_MESSAGE =
+        "This game doesn't keep Steam Cloud saves — your saves are backed up locally in the Library."
+
     /** Per-app cloud-support cache (PICS `ufs/savefiles` is stable per app). Only DEFINITIVE
      *  true/false is cached; an "unknown" (null) is never stored so it can be retried later. */
     private val cloudSupportCache = java.util.concurrent.ConcurrentHashMap<Int, Boolean>()
@@ -180,11 +185,19 @@ object SteamCloudSaveManager {
                     return@Thread
                 }
 
+                // ── HONESTY GUARD 0: already proven to not retain cloud uploads? ───────
+                // If a prior upload committed files but Steam kept nothing, we marked this game.
+                // Short-circuit before opening any batch — no work, honest message, no false success.
+                if (SaveSyncStore.isMarkedNoSteamCloud(appId)) {
+                    cb.onError(NO_RETENTION_MESSAGE)
+                    return@Thread
+                }
+
                 // ── HONESTY GUARD 1: does this game even support Steam Cloud? ───────────
-                // Old titles (e.g. FlatOut 2) declare NO UFS save-file patterns → no cloud store.
-                // The upload handshake would "succeed" but nothing persists, so we'd FALSELY report
-                // "Uploaded N". Read the app's declared UFS config from PICS; if it says "no cloud",
-                // stop here and tell the truth. NULL = couldn't determine → proceed + verify later.
+                // Old titles declare NO UFS save-file patterns → no cloud store. The upload handshake
+                // would "succeed" but nothing persists, so we'd FALSELY report "Uploaded N". Read the
+                // app's declared UFS config from PICS; if it says "no cloud", stop here and tell the
+                // truth. NULL = couldn't determine → proceed + post-upload emptiness check catches it.
                 // Reported via onError (not onDone) so the SaveSyncStore.recordAfterUpload hook does
                 // NOT fire — we must not stamp a lastUploadAt "cloud sync" that never happened.
                 val support: Boolean? = hasCloudSupport(ctx, appId)
@@ -292,17 +305,18 @@ object SteamCloudSaveManager {
                 ).get(FUTURE_TIMEOUT_SEC, TimeUnit.SECONDS)
 
                 if (allOk.get()) {
-                    // ── HONESTY GUARD 2: post-upload persistence verify (safety net) ───────
-                    // Only when PICS couldn't tell us (support == null): re-fetch the manifest and
-                    // confirm at least one just-uploaded path actually landed. If NONE landed, the
-                    // "upload" didn't persist (no cloud store) → tell the truth instead of "Uploaded
-                    // N". We DON'T run this when PICS already said "supported" (support == true) — a
-                    // freshly-uploaded manifest could momentarily lag, and we must not falsely tell a
-                    // cloud-supported game (e.g. HL2) that it has no cloud.
-                    if (support == null &&
-                        uploadedPathsPersisted(steamCloud, appId, toUpload.map { it.second }) == false) {
-                        // Nothing persisted → onError (no false success, no lastUploadAt stamp).
-                        cb.onError(NO_CLOUD_MESSAGE)
+                    // ── HONESTY GUARD 2: did the cloud actually KEEP the committed files? ──
+                    // We committed N>0 files. Re-fetch the manifest SYNCHRONOUSLY: a COMPLETELY EMPTY
+                    // manifest right after a committed upload is the no-retention signature (old games
+                    // like FlatOut 2 ack the commit but store nothing). This runs regardless of the
+                    // PICS verdict — FlatOut 2 fooled the PICS check by declaring UFS savefiles. It is
+                    // safe vs HL2: a retaining game returns a NON-EMPTY manifest, so it never
+                    // false-triggers. If the re-fetch itself fails we keep the optimistic result (the
+                    // async rebaseline will still correct the pill) and do NOT mark.
+                    val emptyAfterUpload = if (uploaded.get() > 0) isCloudManifestEmpty(steamCloud, appId) else null
+                    if (emptyAfterUpload == true) {
+                        SaveSyncStore.markNoSteamCloud(ctx, appId)   // remember → short-circuit next time
+                        cb.onError(NO_RETENTION_MESSAGE)             // onError: no false success, no lastUploadAt stamp
                     } else {
                         cb.onDone("Uploaded ${uploaded.get()} changed, $upToDate already up-to-date")
                     }
@@ -353,6 +367,10 @@ object SteamCloudSaveManager {
      * Definitive results are cached per app (the UFS config is stable); `null` is never cached.
      */
     fun hasCloudSupport(ctx: Context, appId: Int): Boolean? {
+        // A game we already proved doesn't retain uploads is definitively "no cloud" — this wins over
+        // both the cache and PICS (FlatOut 2 declares UFS savefiles yet keeps nothing).
+        if (SaveSyncStore.isMarkedNoSteamCloud(appId)) return false
+
         cloudSupportCache[appId]?.let { return it }
 
         val steamApps = SteamRepository.getInstance().steamApps ?: return null
@@ -392,22 +410,17 @@ object SteamCloudSaveManager {
     }
 
     /**
-     * Post-upload persistence check. Re-fetches the cloud manifest and reports whether ANY of the
-     * [uploadedCloudPaths] actually landed. Returns true if ≥1 uploaded path is now present, false if
-     * NONE are (⇒ the upload didn't persist — no cloud store), or null if the manifest re-fetch
-     * itself failed (⇒ can't tell, don't override the success message).
+     * Post-upload retention check. Re-fetches the cloud manifest and reports whether it is COMPLETELY
+     * EMPTY (0 files). Returns true = empty (the just-committed upload was NOT retained → no cloud),
+     * false = non-empty (retained, e.g. HL2), or null if the manifest re-fetch itself failed (⇒ can't
+     * tell → caller keeps the optimistic success and does not mark).
      */
-    private fun uploadedPathsPersisted(
-        sc: SteamCloud, appId: Int, uploadedCloudPaths: List<String>,
-    ): Boolean? {
-        if (uploadedCloudPaths.isEmpty()) return null
+    private fun isCloudManifestEmpty(sc: SteamCloud, appId: Int): Boolean? {
         return try {
             val fresh = sc.getAppFileListChange(appId).get(FUTURE_TIMEOUT_SEC, TimeUnit.SECONDS)
-            val present = HashSet<String>()
-            for (f in fresh.files) sanitizeRelative(remotePathOf(f, fresh))?.let { present.add(it) }
-            uploadedCloudPaths.any { p -> sanitizeRelative(p)?.let { present.contains(it) } == true }
+            fresh.files.isEmpty()
         } catch (e: Exception) {
-            Log.w(TAG, "post-upload persistence check failed for appId=$appId", e)
+            Log.w(TAG, "post-upload emptiness check failed for appId=$appId", e)
             null
         }
     }
