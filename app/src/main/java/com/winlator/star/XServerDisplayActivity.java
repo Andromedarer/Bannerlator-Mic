@@ -1246,10 +1246,15 @@ public class XServerDisplayActivity extends AppCompatActivity {
         boolean bionicFgActive = fgEnabled || lsfgOn;
         XServerDrawerState.INSTANCE.setBionicFgActive(bionicFgActive);
         XServerDrawerState.INSTANCE.setFrameGenEnabled(fgEnabled || lsfgOn);
-        // Frame gen ALWAYS starts OFF in-game (multiplier 0) regardless of the container setting.
-        // The layer is still loaded at launch (below), so the user can opt in per session from the
-        // FG drawer (live hot-reload). The persisted container multiplier is left untouched.
-        XServerDrawerState.INSTANCE.setFrameGenMultiplier(0);
+        // Frame gen normally starts OFF in-game (multiplier 0) regardless of the container setting. The
+        // layer is still loaded at launch (below), so the user can opt in per session from the FG drawer
+        // (live hot-reload). EXCEPTION: an lsfg container that opted into auto-enable seeds its saved
+        // multiplier so frame gen is live + the drawer/badge show ON from launch. The setupUI FPS-limiter
+        // apply (applyFpsLimit) runs after this seed and re-evaluates lsfgGovernsFps(), so the cap steps
+        // aside automatically for mult>=2. The persisted container multiplier is left untouched.
+        int lsfgSeedMult = (lsfgOn && container.isLsfgAutoEnable() && container.getFrameGenMultiplier() >= 2)
+                ? container.getFrameGenMultiplier() : 0;
+        XServerDrawerState.INSTANCE.setFrameGenMultiplier(lsfgSeedMult);
         XServerDrawerState.INSTANCE.setFrameGenFlowScale(container.getFrameGenFlowScale());
         XServerDrawerState.INSTANCE.setFrameGenModel(resolvedFrameGenModel());
         XServerDrawerState.INSTANCE.setFrameGenEngine(fgEngine);
@@ -3036,7 +3041,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     // Start in passthrough (multiplier 1 = frame gen off). ENABLE_LSFG still loads the
                     // layer, so the FG drawer can enable it live in-session (the conf.toml mtime watch
                     // re-applies the user's multiplier without a relaunch). Container value untouched.
-                    writeLsfgConfig(1, container.getFrameGenFlowScale(), losslessDll.getAbsolutePath(), container.isLsfgPerformanceMode());
+                    // EXCEPTION: a container that opted into auto-enable starts LIVE at its saved
+                    // multiplier from frame one (GameNative-style), matching the drawer seed above.
+                    int lsfgSavedMult = container.getFrameGenMultiplier();
+                    int lsfgLaunchMult = (container.isLsfgAutoEnable() && lsfgSavedMult >= 2) ? lsfgSavedMult : 1;
+                    writeLsfgConfig(lsfgLaunchMult, container.getFrameGenFlowScale(), losslessDll.getAbsolutePath(), container.isLsfgPerformanceMode());
                     File lsfgConf = new File(imageFs.home_path, ".config/lsfg-vk/conf.toml");
                     envVars.put("ENABLE_LSFG", "1");
                     envVars.put("LSFG_CONFIG", lsfgConf.getAbsolutePath());
