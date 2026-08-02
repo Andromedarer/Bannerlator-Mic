@@ -100,7 +100,8 @@ fun ContainerDetailScreen(
     var showBox64DownloadSheet   by remember { mutableStateOf(false) }
     var showFexCoreDownloadSheet by remember { mutableStateOf(false) }
     var showDxvkDownloadSheet    by remember { mutableStateOf(false) }
-    var showGlossary             by remember { mutableStateOf(false) }
+    // null = hidden; "" = glossary open unfiltered (the button); "term" = open at a field's term.
+    var glossaryQuery            by remember { mutableStateOf<String?>(null) }
     var showVegasDownloadSheet   by remember { mutableStateOf(false) }
     var showVkd3dDownloadSheet   by remember { mutableStateOf(false) }
     var showVulkanConfig          by remember { mutableStateOf(false) }
@@ -165,7 +166,7 @@ fun ContainerDetailScreen(
             // "What is all this?" — newcomer glossary of the setup terms (DXVK, Mali/Adreno, BCn,
             // colours, glibc/bionic, …). Placed above the tabs so it's reachable from every tab.
             TextButton(
-                onClick = { showGlossary = true },
+                onClick = { glossaryQuery = "" },
                 modifier = Modifier.padding(start = 8.dp, top = 4.dp)
             ) {
                 Text("❔  What is all this?")
@@ -203,6 +204,7 @@ fun ContainerDetailScreen(
                             onShowFpsConfig = { showFpsConfig = true },
                             onShowWineDownloadSheet = { showWineDownloadSheet = true },
                             onShowVulkanConfig = { showVulkanConfig = true },
+                            onGlossary = { glossaryQuery = it },
                         )
                         WineConfigTab(viewModel, colorPickerViewRef)
                     }
@@ -227,8 +229,8 @@ fun ContainerDetailScreen(
         }
     }
 
-    if (showGlossary) {
-        ContainerGlossarySheet(onDismiss = { showGlossary = false })
+    glossaryQuery?.let { q ->
+        ContainerGlossarySheet(initialQuery = q, onDismiss = { glossaryQuery = null })
     }
 
     if (showGraphicsDriverConfig) {
@@ -473,6 +475,7 @@ private fun TopLevelFields(
     onShowFpsConfig: () -> Unit,
     onShowVulkanConfig: () -> Unit,
     onShowWineDownloadSheet: () -> Unit,
+    onGlossary: (String) -> Unit,
 ) {
     val context = LocalContext.current
 
@@ -523,6 +526,9 @@ private fun TopLevelFields(
                 modifier = Modifier.weight(1f)
             )
             ContentInstallGear(onDownloadFile = onShowWineDownloadSheet)
+            IconButton(onClick = { onGlossary("Proton") }) {
+                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+            }
         }
         Spacer(Modifier.height(8.dp))
 
@@ -536,6 +542,9 @@ private fun TopLevelFields(
                 onSelect = { viewModel.selectedGraphicsDriver = it },
                 modifier = Modifier.weight(1f)
             )
+            IconButton(onClick = { onGlossary("Wrapper") }) {
+                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+            }
             IconButton(onClick = { showWrapperManager = true }) {
                 Icon(Icons.Default.CloudDownload, contentDescription = stringResource(R.string.wrapper_manager_open))
             }
@@ -588,6 +597,9 @@ private fun TopLevelFields(
                 },
                 modifier = Modifier.weight(1f)
             )
+            IconButton(onClick = { onGlossary("Vulkan") }) {
+                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+            }
             if (viewModel.selectedRenderer == "Vulkan") {
                 IconButton(onClick = onShowVulkanConfig) {
                     Icon(Icons.Default.Settings, contentDescription = null)

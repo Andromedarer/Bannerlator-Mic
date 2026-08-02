@@ -99,10 +99,12 @@ internal val CONTAINER_GLOSSARY: List<GlossarySection> = listOf(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ContainerGlossarySheet(onDismiss: () -> Unit) {
+fun ContainerGlossarySheet(onDismiss: () -> Unit, initialQuery: String = "") {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val cs = MaterialTheme.colorScheme
-    var query by remember { mutableStateOf("") }
+    // A per-field help icon opens the sheet pre-filtered to that term (initialQuery); the general
+    // "What is all this?" button opens it unfiltered (initialQuery == "").
+    var query by remember { mutableStateOf(initialQuery) }
 
     // Flatten + filter. A section is shown only if it has any matching entries.
     val q = query.trim()
