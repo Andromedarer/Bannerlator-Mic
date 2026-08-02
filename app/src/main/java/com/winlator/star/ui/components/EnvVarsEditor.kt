@@ -139,6 +139,53 @@ internal object KnownEnvVars {
         // GPU selection / present latency
         KnownEnvVar("DXVK_FILTER_DEVICE_NAME", EnvVarType.TEXT),
         KnownEnvVar("VKD3D_SWAPCHAIN_LATENCY_FRAMES", EnvVarType.NUMBER),
+        // DXVK extras
+        KnownEnvVar("DXVK_ASYNC", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("DXVK_GPLASYNCCACHE", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("DXVK_CONFIG", EnvVarType.TEXT),
+        // Wine extras
+        KnownEnvVar("WINE_DISABLE_FULLSCREEN_HACK", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("WINE_X11FORCEGLX", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("WINE_GST_NO_GL", EnvVarType.CHECKBOX, listOf("0", "1")),
+        // Mali BCn decode layer (leegao / Fcharan libbcn_layer.so). On Adreno the app keeps these
+        // OFF automatically (native BCn); setting them here only matters on Mali/non-Qualcomm GPUs.
+        KnownEnvVar("ENABLE_BCN_COMPUTE", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("BCN_COMPUTE_AUTO", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("BCN_COMPUTE_IMAGE_VIEW", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("BCN_TRANSCODE_TO_ASTC", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("BCN_TRANSCODE_TO_ETC1", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("BCN_TRANSCODE_TO_ETC2", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("BCN_PROFILE_TRANSFERS", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("BCN_ASTC_TRY_2P", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("BCN_ASTC_ONLY_2P", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("BCN_ASTC_USE_LARGE_STEPS", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("BCN_LAYER_LOG_LEVEL", EnvVarType.SELECT, listOf("error", "info,error", "warn,error", "info,warn,error")),
+        KnownEnvVar("BCN_MAX_STAGING_CACHE_MB", EnvVarType.NUMBER),
+        KnownEnvVar("BCN_QUEUE_THROTTLE_LIMIT", EnvVarType.NUMBER),
+        // Mali wrapper (Vulkan ICD). WRAPPER_EMULATE_BCN: 0=off 1=default 2=full 3=auto.
+        KnownEnvVar("WRAPPER_EMULATE_BCN", EnvVarType.SELECT, listOf("0", "1", "2", "3")),
+        KnownEnvVar("WRAPPER_BCN_ASTC", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("WRAPPER_USE_BCN_CACHE", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("WRAPPER_BCN_GPU", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("WRAPPER_NO_BCN_THREAD", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("WRAPPER_SAFE_CREATE_DEVICE", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("WRAPPER_DIAG", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("WRAPPER_REDUCE_DEPTH_FORMAT", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("WRAPPER_DISABLE_PRESENT_WAIT", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("WRAPPER_DISABLE_PLACED", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("WRAPPER_NO_PATCH_OPCONSTCOMP", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("WRAPPER_DRIVER_ID", EnvVarType.NUMBER),
+        KnownEnvVar("WRAPPER_VMEM_MAX_SIZE", EnvVarType.NUMBER),
+        KnownEnvVar("WRAPPER_VK_VERSION", EnvVarType.TEXT),
+        KnownEnvVar("WRAPPER_EXTENSION_BLACKLIST", EnvVarType.TEXT),
+        KnownEnvVar("WRAPPER_DEVICE_NAME", EnvVarType.TEXT),
+        KnownEnvVar("WRAPPER_RESOURCE_TYPE", EnvVarType.TEXT),
+        // Mali DX12 compat layer (leegao compat_layer; Valhall Mali r32p1+).
+        KnownEnvVar("ENABLE_DXVK_MALI_COMPAT_LAYER", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("COMPAT_EMULATE_SPARSE_BINDING", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("COMPAT_EMULATE_PUSH_DESCRIPTORS", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("COMPAT_EMULATE_NULL_DESCRIPTORS", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("COMPAT_FORCE_MASKING", EnvVarType.CHECKBOX, listOf("0", "1")),
     )
 
     private val byName = all.associateBy { it.name }
@@ -287,7 +334,10 @@ private fun parseRows(raw: String, nextId: () -> Int): List<EnvRow> =
         }
 
 private fun renderRows(rows: List<EnvRow>): String =
-    rows.filter { it.name.isNotBlank() && it.value.isNotBlank() }
+    // Keep every NAMED row — an empty value ("NAME=") is valid env-var syntax and must NOT be
+    // silently dropped. The old `&& it.value.isNotBlank()` discarded freshly-added custom variables
+    // (which start with an empty value) so they vanished on save even though they showed in the list.
+    rows.filter { it.name.isNotBlank() }
         .joinToString(" ") { "${it.name}=${it.value}" }
 
 /**
@@ -479,10 +529,17 @@ internal fun EnvVarsEditor(
     if (showAddPicker) {
         AddEnvVarPicker(
             existingNames = rows.map { it.name }.toSet(),
-            onAdd = { name ->
-                val clean = name.trim().replace(" ", "")
-                if (clean.isNotEmpty() && rows.none { it.name == clean }) {
-                    rows.add(EnvRow(nextId(), clean, defaultValueFor(clean)))
+            onAdd = { raw ->
+                // Accept "NAME=VALUE" as well as a bare "NAME": split on the FIRST '=' so a custom
+                // var typed as "mytest=12345" is stored as name + value, not one unparseable token
+                // with a blank value (which used to be dropped on save). A bare NAME keeps its known
+                // default, or "" for a custom one — an empty value is valid and now persists.
+                val cleaned = raw.trim().replace(" ", "")
+                val eq = cleaned.indexOf('=')
+                val name  = if (eq >= 0) cleaned.substring(0, eq) else cleaned
+                val value = if (eq >= 0) cleaned.substring(eq + 1) else defaultValueFor(cleaned)
+                if (name.isNotEmpty() && rows.none { it.name == name }) {
+                    rows.add(EnvRow(nextId(), name, value))
                     emit()
                 }
                 showAddPicker = false
@@ -746,9 +803,10 @@ private fun MultiSelectGroup(
 }
 
 /**
- * Searchable add-picker. The catalog is well past 30 entries, so a flat list is unusable —
- * the query filters the catalog and doubles as the name field for a variable we don't know
- * about, which is the free-form escape hatch for anything outside the catalog.
+ * Searchable add-picker with separate Name and Value boxes. The catalog is well past 30 entries,
+ * so a flat list is unusable — the Name box filters the catalog AND doubles as the free-form name
+ * for a variable we don't know about; the Value box supplies its value (no '=' needed, though a
+ * pasted "NAME=VALUE" in the Name box is split for you). A live preview states whether it will save.
  */
 @Composable
 private fun AddEnvVarPicker(
@@ -756,14 +814,38 @@ private fun AddEnvVarPicker(
     onAdd: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var query by remember { mutableStateOf("") }
-    val candidates = remember(query, existingNames) {
+    var nameQuery by remember { mutableStateOf("") }
+    var valueQuery by remember { mutableStateOf("") }
+    val rawName = nameQuery.trim().replace(" ", "")
+    // TWO boxes — Name and Value — so users never have to type an '='. The Name box still also
+    // accepts a pasted "NAME=VALUE" (split on the FIRST '='); otherwise the Value box supplies it.
+    val eqIdx = rawName.indexOf('=')
+    val name  = if (eqIdx >= 0) rawName.substring(0, eqIdx) else rawName
+    val value = if (eqIdx >= 0) rawName.substring(eqIdx + 1) else valueQuery.trim().replace(" ", "")
+    val alreadyExists = name.isNotEmpty() && name in existingNames
+    val isKnownName   = name in KnownEnvVars.names
+    // Offer the explicit Add action for a custom name, or whenever a value was supplied (so a known
+    // name can be added with a value directly). A bare known name is added from the list below.
+    val showAddTyped  = name.isNotEmpty() && !alreadyExists && (value.isNotEmpty() || !isKnownName)
+    val candidates = remember(name, existingNames) {
         KnownEnvVars.names
             .filter { it !in existingNames }
-            .filter { query.isBlank() || it.contains(query.trim(), ignoreCase = true) }
+            .filter { name.isBlank() || it.contains(name, ignoreCase = true) }
     }
-    val typed = query.trim().replace(" ", "")
-    val isNewName = typed.isNotEmpty() && typed !in KnownEnvVars.names && typed !in existingNames
+    // Live "will it save?" feedback under the boxes. null = nothing to say. Pair = (message, isError).
+    val previewMsg: Pair<String, Boolean>? = when {
+        rawName.isEmpty() && valueQuery.isBlank() -> null
+        name.isEmpty() -> "Won't be saved — enter a variable name" to true
+        alreadyExists -> "\"$name\" is already in the list" to true
+        value.isEmpty() -> "Saves as  $name=  (empty value)" to false
+        else -> "Saves as  $name = $value" to false
+    }
+    // If the user typed "=" in the Name box we still split it correctly (name before, value after) —
+    // reassure them rather than error: we roll with it AND teach the two-box way.
+    val splitNote = if (eqIdx >= 0 && name.isNotEmpty())
+        "No \"=\" needed — the Value box handles that. Split it for you." else null
+    // What the Add actions hand back — onAdd re-splits on the first '=' (so an empty value is fine).
+    fun combined(varName: String) = if (value.isEmpty()) varName else "$varName=$value"
 
     OutlinedAlertDialog(
         onDismissRequest = onDismiss,
@@ -771,32 +853,59 @@ private fun AddEnvVarPicker(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    label = { Text("Search or type a name") },
+                    value = nameQuery,
+                    onValueChange = { nameQuery = it },
+                    label = { Text("Name (search or type)") },
+                    placeholder = { Text("e.g. DXVK_FRAME_RATE") },
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
+                OutlinedTextField(
+                    value = valueQuery,
+                    onValueChange = { valueQuery = it },
+                    label = { Text("Value (optional)") },
+                    placeholder = { Text("e.g. 60") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (previewMsg != null) {
+                    Text(
+                        previewMsg.first,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (previewMsg.second) MaterialTheme.colorScheme.error
+                                else MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                if (splitNote != null) {
+                    Text(
+                        splitNote,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 280.dp)
+                        .heightIn(max = 240.dp)
                         .verticalScroll(rememberScrollState())
                 ) {
-                    if (isNewName) {
-                        TextButton(onClick = { onAdd(typed) }, modifier = Modifier.fillMaxWidth()) {
-                            Text("Add custom variable \"$typed\"", modifier = Modifier.weight(1f))
+                    if (showAddTyped) {
+                        TextButton(onClick = { onAdd(combined(name)) }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Add  $name${if (value.isNotEmpty()) " = $value" else ""}",
+                                modifier = Modifier.weight(1f))
                         }
                         if (candidates.isNotEmpty()) MenuItemDivider()
                     }
-                    candidates.forEachIndexed { index, name ->
+                    candidates.forEachIndexed { index, known ->
                         if (index > 0) MenuItemDivider()
-                        TextButton(onClick = { onAdd(name) }, modifier = Modifier.fillMaxWidth()) {
-                            Text(name, modifier = Modifier.weight(1f))
+                        TextButton(onClick = { onAdd(combined(known)) }, modifier = Modifier.fillMaxWidth()) {
+                            Text(known, modifier = Modifier.weight(1f))
                         }
                     }
-                    if (candidates.isEmpty() && !isNewName) {
+                    if (candidates.isEmpty() && !showAddTyped) {
                         Text(
                             "No matches",
                             style = MaterialTheme.typography.bodySmall,
