@@ -142,7 +142,12 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     var frameGenModel by mutableStateOf(0)
     // lsfg-vk performance_mode (per-container): lower interpolation quality for higher FPS. Also
     // live-toggleable from the in-game FG menu. Only meaningful when frameGenEngine == "lsfg".
-    var lsfgPerformanceMode by mutableStateOf(false)
+    // Default ON for new/unset containers (see loadContainerData) — initial value mirrors that.
+    var lsfgPerformanceMode by mutableStateOf(true)
+    // lsfg-vk auto-enable at launch (per-container): start frame gen live at the saved multiplier
+    // from launch instead of off. Only meaningful when frameGenEngine == "lsfg". Default ON (matches
+    // GameNative; see loadContainerData) — initial value mirrors that.
+    var lsfgAutoEnable by mutableStateOf(true)
     // NOTE: the power-user performance toggles are intentionally NOT edited here. Their model is
     // global-default (App Settings > Performance, com.winlator.star.perf.PerformanceSettings) +
     // optional per-game override (ShortcutsScreen / in-game drawer) — no container level.
@@ -433,7 +438,8 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
 
         frameGenEngine     = c?.frameGenEngine ?: "off"
         frameGenModel      = c?.frameGenModel ?: 0
-        lsfgPerformanceMode = c?.isLsfgPerformanceMode == true
+        lsfgPerformanceMode = c?.isLsfgPerformanceMode != false   // default ON for new/unset containers
+        lsfgAutoEnable      = c?.isLsfgAutoEnable != false   // default ON for new/unset containers (GameNative parity)
         fpsLimiterEnabled  = c?.isFpsLimiterEnabled == true
         matchRefreshRate   = c?.isMatchRefreshRate != false   // default ON for new/unset containers
         manualRefreshRate  = c?.manualRefreshRate ?: 0
@@ -751,6 +757,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             c.setFrameGenEngine(frameGenEngine)
             c.setFrameGenModel(frameGenModel)
             c.setLsfgPerformanceMode(lsfgPerformanceMode)
+            c.setLsfgAutoEnable(lsfgAutoEnable)
             c.setFpsLimiterEnabled(fpsLimiterEnabled)
             c.setMatchRefreshRate(matchRefreshRate)
             c.setManualRefreshRate(manualRefreshRate)
@@ -848,6 +855,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
                     created.setFrameGenEngine(frameGenEngine)
                     created.setFrameGenModel(frameGenModel)
                     created.setLsfgPerformanceMode(lsfgPerformanceMode)
+                    created.setLsfgAutoEnable(lsfgAutoEnable)
                     created.setVibrationMode(vibrationMode)
                     created.setVibrationIntensity(vibrationIntensity)
                     // Same set as the edit path above — a new container must not silently drop these.

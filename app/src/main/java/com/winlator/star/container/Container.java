@@ -405,6 +405,9 @@ public class Container {
     // are tuned live from the in-game side menu (both hot-reload via conf.toml).
     public static final int FRAMEGEN_DEFAULT_MULTIPLIER = 2;
     public static final float FRAMEGEN_DEFAULT_FLOW_SCALE = 0.6f;
+    // lsfg-vk runs best at a higher flow scale than bionic-fg (GameNative's proven default). Only the
+    // UNSET default differs per engine (see getFrameGenFlowScale) — an explicit user value wins either way.
+    public static final float LSFG_DEFAULT_FLOW_SCALE = 0.80f;
     public static final int FRAMEGEN_DEFAULT_MODEL = 0;
 
     public boolean isFrameGenEnabled() {
@@ -452,13 +455,17 @@ public class Container {
     }
 
     public float getFrameGenFlowScale() {
+        // Engine-dependent UNSET default: lsfg-vk defaults to 0.80, bionic-fg stays at 0.60. An explicit
+        // frameGenFlowScale extra (whatever the engine) is always honored — only the fallback differs.
+        float dflt = getFrameGenEngine().equals("lsfg") ? LSFG_DEFAULT_FLOW_SCALE : FRAMEGEN_DEFAULT_FLOW_SCALE;
+        if (!hasExtra("frameGenFlowScale")) return dflt;
         try {
-            float f = Float.parseFloat(getExtra("frameGenFlowScale", String.valueOf(FRAMEGEN_DEFAULT_FLOW_SCALE)));
+            float f = Float.parseFloat(getExtra("frameGenFlowScale"));
             // Mirror the layer's clamp range (layer.cpp parseConfigFile).
-            return (f < 0.2f || f > 1.0f) ? FRAMEGEN_DEFAULT_FLOW_SCALE : f;
+            return (f < 0.2f || f > 1.0f) ? dflt : f;
         }
         catch (NumberFormatException e) {
-            return FRAMEGEN_DEFAULT_FLOW_SCALE;
+            return dflt;
         }
     }
 
@@ -491,15 +498,28 @@ public class Container {
         putExtra("frameGenModel", String.valueOf(model));
     }
 
-    // lsfg-vk "performance mode" (conf.toml performance_mode): trades interpolation quality for FPS,
-    // aimed at low-end devices. Per-container, default OFF (matches the previous hardcoded false, so
-    // existing users see no change until they flip it). Also live-toggleable from the in-game FG menu.
+    // lsfg-vk "performance mode" (conf.toml performance_mode): trades interpolation quality for FPS.
+    // Per-container, default ON (matches GameNative — the lighter LSFG_3_1P model is cheaper on Adreno).
+    // Also live-toggleable from the in-game FG menu.
     public boolean isLsfgPerformanceMode() {
-        return getExtra("lsfgPerformanceMode", "0").equals("1");
+        return getExtra("lsfgPerformanceMode", "1").equals("1");
     }
 
     public void setLsfgPerformanceMode(boolean performanceMode) {
         putExtra("lsfgPerformanceMode", performanceMode ? "1" : "0");
+    }
+
+    // lsfg-vk "auto-enable at launch": when ON, the container starts frame generation LIVE at its saved
+    // multiplier from the first frame (GameNative-style) instead of the safe global default (layer loaded
+    // but frame gen OFF, opt-in per session from the FG drawer). Per-container, default ON to match
+    // GameNative — uncheck it to restore the start-off behavior for a given lsfg container. Note this
+    // only affects lsfg containers; bionic-fg still always starts off in-game.
+    public boolean isLsfgAutoEnable() {
+        return getExtra("lsfgAutoEnable", "1").equals("1");
+    }
+
+    public void setLsfgAutoEnable(boolean autoEnable) {
+        putExtra("lsfgAutoEnable", autoEnable ? "1" : "0");
     }
 
     // NOTE: the power-user performance toggles (sustainedPerfMode / perfPriorityBoost / preferBigCores)
