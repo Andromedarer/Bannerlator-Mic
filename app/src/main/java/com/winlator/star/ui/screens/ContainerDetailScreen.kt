@@ -154,11 +154,13 @@ fun ContainerDetailScreen(
             }
         }
     ) { padding ->
+        // The glossary button + tab row are a FIXED header (outer Column does NOT scroll); only the
+        // tab content below scrolls (the content Box owns the scroll + weight(1f)). This keeps the
+        // GENERAL/ENVIRONMENT/DRIVES/… tabs pinned and tappable while scrolling a long settings tab.
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .verticalScroll(rememberScrollState())
         ) {
             // "What is all this?" — newcomer glossary of the setup terms (DXVK, Mali/Adreno, BCn,
             // colours, glibc/bionic, …). Placed above the tabs so it's reachable from every tab.
@@ -185,8 +187,12 @@ fun ContainerDetailScreen(
                 }
             }
 
-            // ── Tab content ────────────────────────────────────────────────────
-            Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+            // ── Tab content (the ONLY scrolling region now — header above stays pinned) ──────────
+            Box(modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp, vertical = 8.dp)) {
                 when (viewModel.selectedTab) {
                     0 -> Column {
                         TopLevelFields(
