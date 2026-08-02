@@ -1,6 +1,10 @@
 # Star-Compose — Progress Log
 
-## 2026-08-01 — 🗂️ **CHECKPOINT: Steam Cloud Saves + universal Save Manager** (branch `feat/save-manager-local-only`, tip `eb2bd926` — NOT merged; pre-merge verification pending)
+## 2026-08-01 — 🗂️ **CHECKPOINT: Steam Cloud Saves + universal Save Manager** (branch `feat/save-manager-local-only`, tip `54c5c6b2` — NOT merged; pre-merge verification IN PROGRESS)
+
+> **Pre-merge on-device testing underway (evening 2026-08-01).** Going through the verification checklist section-by-section. **5 fixes landed during testing** (on top of the feature-complete `eb2bd926`): Steam auto-connect from the Save Manager/detail (`d99cecb8`, was store-home-only → badge stuck offline via the drawer path); a live Steam status **badge** in the Save Manager header (`f9eee1d1`); **auto-collect derives the appId** for pre-existing untagged Steam shortcuts (`3a1fc403` — HL2's shortcut predates the steamAppId tag → the exit hook parsed appId 0 and silently skipped; now derived from the `steam_games/<Folder>` exec-path segment via getInstalledGames); and a **stale-timestamp** fix (`54c5c6b2` — record hooks now persist lastDownload/UploadAt synchronously before onDone, cloud re-baseline moved async, so the row shows "just now" immediately). **Passed on device:** §1 Steam cloud core (Download→Apply→load in-game, Sync-to-Cloud combo, incremental upload), §4 auto-collect on exit ("Collected 42 files", Library advanced), §10 auto-connect/badge. Remaining: cloud honesty, LOCAL_ONLY, toggle-off, custom vault + Custom tab, path separation, alerts. Known cosmetic: HL2 Sync-to-Cloud re-uploads 2 config.cfg variants each time (the round-trip path-format quirk; real saves skip correctly).
+
+
 
 > A large save-management arc, built + device-proven in pieces on ONE branch, held for a full on-device sweep before merging to main. The Steam Cloud save engine itself already merged earlier (three-tier Cloud/Library/Container, incremental additive upload, parallel transfer, the 2-combo Sync-from/to-Cloud UI, the Save Manager screen + two entry points). THIS branch adds the rest:
 >
