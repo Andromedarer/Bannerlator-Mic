@@ -430,7 +430,6 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         }
         val template = buildTemplateContainer(seedArch)
         val seed = c ?: template
-        val prefs = PreferenceManager.getDefaultSharedPreferences(context)
 
         containerName = if (c != null) c.name else "${context.getString(R.string.container)}-${manager.getNextContainerId()}"
         wineVersionEnabled = !isEditMode
@@ -456,12 +455,11 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         if (defaultsMode) applyArch(defaultsArch == NewContainerDefaults.ARCH_ARM64EC)
         else refreshWineDependent(selectedWineVersion)
 
-        // Box64 version: applyArch()/refreshWineDependent() reset to entry 0 (correct on
-        // Wine-version change since the list differs for arm64ec). On initial
-        // load we override that to honor the seed's saved selection.
-        seed?.box64Version
-            ?.takeIf { it.isNotEmpty() && box64VersionEntries.contains(it) }
-            ?.let { selectedBox64Version = it }
+        // Arch-DEPENDENT fields (emulator, box64/wowbox64 version + preset, FEXCore version + preset)
+        // — seeded from the arch-matched profile via the SAME helper a create-mode wine-version arch
+        // flip uses, so initial-load and arch-change can't drift. Runs AFTER applyArch()/
+        // refreshWineDependent() has populated box64VersionEntries for the arch.
+        seedArchDependentDefaults(seedArch)
 
         // Graphics driver (load as display name for dropdown)
         selectedGraphicsDriver   = identifierToDisplay(seed?.graphicsDriver ?: defaultGraphicsDriverForNewContainer(), graphicsDriverEntries)
@@ -477,9 +475,8 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         selectedDXWrapper        = identifierToDisplay(seed?.getDXWrapper() ?: Container.DEFAULT_DXWRAPPER, dxWrapperEntries)
         dxWrapperConfig          = seed?.getDXWrapperConfig() ?: Container.DEFAULT_DXWRAPPERCONFIG
 
-        // Audio / emulator (load as display name)
+        // Audio driver (load as display name). Emulator is arch-dependent → seedArchDependentDefaults.
         selectedAudioDriver = identifierToDisplay(seed?.audioDriver ?: Container.DEFAULT_AUDIO_DRIVER, audioDriverEntries)
-        selectedEmulator    = identifierToDisplay(seed?.emulator ?: Container.DEFAULT_EMULATOR, emulatorEntries)
 
         // MIDI
         val midiVal = seed?.getMIDISoundFont() ?: ""
@@ -539,17 +536,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         gyroInvertX     = seed?.isGyroInvertX() ?: Container.GYRO_INVERT_X_DEFAULT
         gyroInvertY     = seed?.isGyroInvertY() ?: Container.GYRO_INVERT_Y_DEFAULT
 
-        // Box64 preset
-        val b64Preset = seed?.box64Preset ?: prefs.getString("box64_preset", Box64Preset.COMPATIBILITY) ?: Box64Preset.COMPATIBILITY
-        selectedBox64PresetIndex = box64PresetIds.indexOf(b64Preset).takeIf { it >= 0 } ?: 0
-
-        // FEXCore preset
-        val fexPreset = seed?.getFEXCorePreset() ?: prefs.getString("fexcore_preset", FEXCorePreset.INTERMEDIATE) ?: FEXCorePreset.INTERMEDIATE
-        selectedFEXCorePresetIndex = fexCorePresetIds.indexOf(fexPreset).takeIf { it >= 0 } ?: 0
-
-        // FEXCore version
-        loadFEXCoreVersions()
-        selectedFEXCoreVersion = seed?.getFEXCoreVersion() ?: DefaultVersion.FEXCORE
+        // (Box64/FEXCore version + preset are arch-dependent → seeded by seedArchDependentDefaults.)
 
         // Startup selection
         selectedStartupSelection = (seed?.startupSelection ?: Container.STARTUP_SELECTION_ESSENTIAL).toInt()
@@ -634,6 +621,45 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         applyArch(wineInfo.isArm64EC())
     }
 
+    /**
+     * Seed the ARCH-DEPENDENT fields — emulator, box64/wowbox64 version + preset, FEXCore version +
+     * preset — from the [arch]-matched defaults profile (the transient template for that arch, or the
+     * real container in edit mode, else the built-in arch defaults). MUST run AFTER applyArch()/
+     * refreshWineDependent() has populated box64VersionEntries for [arch].
+     *
+     * This is the SINGLE code path shared by the initial load and a create-mode wine-version arch flip
+     * (onWineVersionChanged), so the two can never drift. Arch-AGNOSTIC fields (screen size, renderer,
+     * dxwrapper, env vars, …) are deliberately NOT touched here — a wine change must not clobber edits
+     * the user already made to them.
+     */
+    private fun seedArchDependentDefaults(arch: String) {
+        // Same seed semantics as loadContainerData: real container in edit mode, else the arch-matched
+        // template (null when no profile → built-in arch defaults below).
+        val archSeed = container ?: buildTemplateContainer(arch)
+        val prefs = PreferenceManager.getDefaultSharedPreferences(context)
+
+        // Emulator (arm64ec only; identifierToDisplay degrades an unknown id to entry 0).
+        selectedEmulator = identifierToDisplay(archSeed?.emulator ?: Container.DEFAULT_EMULATOR, emulatorEntries)
+
+        // Box64/WOWBox64 version — honor the profile's saved value only when it's valid for THIS arch's
+        // list; otherwise leave applyArch()'s firstOrNull() default in place.
+        archSeed?.box64Version
+            ?.takeIf { it.isNotEmpty() && box64VersionEntries.contains(it) }
+            ?.let { selectedBox64Version = it }
+
+        // Box64 preset (preset list itself is arch-agnostic; only the saved selection differs).
+        val b64Preset = archSeed?.box64Preset ?: prefs.getString("box64_preset", Box64Preset.COMPATIBILITY) ?: Box64Preset.COMPATIBILITY
+        selectedBox64PresetIndex = box64PresetIds.indexOf(b64Preset).takeIf { it >= 0 } ?: 0
+
+        // FEXCore version (list is arch-agnostic, but the profile's saved value is arch-specific).
+        loadFEXCoreVersions()
+        selectedFEXCoreVersion = archSeed?.getFEXCoreVersion() ?: DefaultVersion.FEXCORE
+
+        // FEXCore preset.
+        val fexPreset = archSeed?.getFEXCorePreset() ?: prefs.getString("fexcore_preset", FEXCorePreset.INTERMEDIATE) ?: FEXCorePreset.INTERMEDIATE
+        selectedFEXCorePresetIndex = fexCorePresetIds.indexOf(fexPreset).takeIf { it >= 0 } ?: 0
+    }
+
     // The arch-dependent slice of the form: emulator gate + the box64/wowbox64 version list & its
     // reset. Split out of refreshWineDependent so defaults mode can drive the arch straight from its
     // ARCHITECTURE selector (applyArch(defaultsArch == ARM64EC)) with no wine version involved, while
@@ -688,8 +714,19 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             ?: id
 
     fun onWineVersionChanged(version: String) {
+        val wasArm64 = isArm64EC
         selectedWineVersion = version
-        refreshWineDependent(version)
+        refreshWineDependent(version)   // updates isArm64EC + swaps the box64/wowbox64 list
+
+        // CREATE mode only: a wine change can FLIP the architecture. applyArch() swapped the box64 list
+        // and reset its selection but did NOT re-seed the arch-dependent fields, so without this they'd
+        // keep the OLD arch's profile values (box64 reset to default, FEXCore stale). Re-seed them from
+        // the NEW arch's profile. Edit mode: never (real container). Defaults mode: arch is driven by
+        // the selector via setDefaultsArch/loadContainerData, not here. Arch-agnostic fields untouched.
+        if (container == null && !defaultsMode && wasArm64 != isArm64EC) {
+            val arch = if (isArm64EC) NewContainerDefaults.ARCH_ARM64EC else NewContainerDefaults.ARCH_X86_64
+            seedArchDependentDefaults(arch)
+        }
     }
 
     /**
