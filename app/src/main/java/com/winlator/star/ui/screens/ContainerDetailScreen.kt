@@ -2825,6 +2825,9 @@ internal fun FpsCounterConfigDialog(
     fun bool(k: String, fallbackKey: String, d: String) =
         cfg.getOrDefault(k, cfg.getOrDefault(fallbackKey, d)) == "1"
 
+    // Master HUD on/off — mirrors the in-game drawer's "Show HUD" toggle so the two surfaces keep an
+    // identical key set. When off, the overlay stays hidden even while a game window is bound.
+    var hudEnabled by remember { mutableStateOf(bool("hudEnabled", "hudEnabled", "1")) }
     // Orientation (vertical/horizontal) is toggled live by tapping the HUD in-game; preserve it.
     val hudMode = remember { cfg.getOrDefault("hudMode", "vertical") }
     // 4-way HUD style: classic | gamehub | gamenative | fusion.
@@ -2900,6 +2903,7 @@ internal fun FpsCounterConfigDialog(
     fun i(v: Boolean) = if (v) "1" else "0"
     fun buildConfig(): String = listOf(
         "hudStyle=$hudStyle",
+        "hudEnabled=${i(hudEnabled)}",
         "hudSize=$fusionSize",
         "hudLocked=${i(hudLocked)}",
         "showVram=${i(showVram)}",
@@ -2957,6 +2961,16 @@ internal fun FpsCounterConfigDialog(
                     .heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.7f).dp)
                     .verticalScroll(rememberScrollState())
             ) {
+                // Master toggle (parity with the in-game drawer): hides the whole overlay when off.
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Switch(
+                        checked = hudEnabled,
+                        onCheckedChange = { hudEnabled = it }
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("Show HUD")
+                }
+                Spacer(Modifier.height(12.dp))
                 HudThreeStop(
                     "HUD style",
                     listOf("Classic", "GameHub", "GameNative", "Fusion"),

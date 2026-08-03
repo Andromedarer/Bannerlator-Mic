@@ -220,6 +220,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // restores each process exactly (revert philosophy). Populated on toggle ON, cleared on OFF.
     private final java.util.HashMap<Integer, Integer> bigCoreAffinitySnapshot = new java.util.HashMap<>();
     private int frameRatingWindowId = -1;
+    // Master HUD on/off, parsed from the fps config's `hudEnabled` key (default on). When false, every
+    // overlay style stays GONE even while a game window is bound to frameRatingWindowId — the drawer's
+    // "Show HUD" master toggle drives this live via onFpsConfigApply.
+    private boolean hudCounterEnabled = true;
     // Windows that have published a _MESA_DRV property (GPU/render windows). The perf HUD binds to one
     // of these (frameRatingWindowId); we keep the whole set so that when the bound window unmaps we can
     // re-bind to another still-live one instead of hiding the HUD permanently — games like Dirt 3 /
@@ -1093,8 +1097,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
             if (newConfig == null) return;
             state.setFpsConfig(newConfig);
             runOnUiThread(() -> {
-                String wantStyle = new com.winlator.star.core.KeyValueSet(newConfig)
-                    .get("hudStyle", "fusion");
+                com.winlator.star.core.KeyValueSet kv = new com.winlator.star.core.KeyValueSet(newConfig);
+                // Master toggle: re-read live so flipping "Show HUD" hides/shows the overlay without a
+                // relaunch (this callback is the same path metric toggles ride).
+                hudCounterEnabled = kv.get("hudEnabled", "1").equals("1");
+                String wantStyle = kv.get("hudStyle", "fusion");
                 String haveStyle = perfHud != null ? "gamehub"
                     : gameNativeHud != null ? "gamenative"
                     : fusionHud != null ? "fusion"
@@ -1113,18 +1120,20 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     else buildClassicHud(newConfig);
                 } else {
                     // Same style (or no HUD built): just push the new config to whatever exists.
+                    // `shown` folds in the master toggle so flipping "Show HUD" hides/reveals every
+                    // style live (the single-view styles re-assert visibility here too, not just at build).
+                    boolean shown = frameRatingWindowId != -1 && hudCounterEnabled;
                     if (frameRating != null) frameRating.applyConfig(newConfig);
                     if (frameRatingHorizontal != null) frameRatingHorizontal.applyConfig(newConfig);
-                    if (perfHud != null) perfHud.applyConfig(newConfig);
-                    if (gameNativeHud != null) gameNativeHud.applyConfig(newConfig);
-                    if (fusionHud != null) fusionHud.applyConfig(newConfig);
+                    if (perfHud != null) { perfHud.applyConfig(newConfig); perfHud.setVisibility(shown ? View.VISIBLE : View.GONE); }
+                    if (gameNativeHud != null) { gameNativeHud.applyConfig(newConfig); gameNativeHud.setVisibility(shown ? View.VISIBLE : View.GONE); }
+                    if (fusionHud != null) { fusionHud.applyConfig(newConfig); fusionHud.setVisibility(shown ? View.VISIBLE : View.GONE); }
                     // Classic HUD: applyConfig()->updateParentVisibility() re-shows BOTH orientation
                     // views whenever they have visible rows, clobbering the active-orientation choice
                     // (toggling a metric made the inactive orientation pop in alongside the active one).
                     // Re-assert: only the active orientation is visible, and only while the HUD window
-                    // is up.
+                    // is up and the master toggle is on.
                     if (frameRating != null || frameRatingHorizontal != null) {
-                        boolean shown = frameRatingWindowId != -1;
                         if (frameRatingHorizontal != null)
                             frameRatingHorizontal.setVisibility(shown && fpsHudHorizontal ? View.VISIBLE : View.GONE);
                         if (frameRating != null)
@@ -3415,6 +3424,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
             String fpsConfigString = resolvedFPSCounterConfig();
             com.winlator.star.core.KeyValueSet fpsConfig = new com.winlator.star.core.KeyValueSet(fpsConfigString);
             fpsHudHorizontal = fpsConfig.get("hudMode", "vertical").equals("horizontal");
+            // Master toggle: the HUD is still BUILT (so it can be revealed live), but stays GONE while off.
+            hudCounterEnabled = fpsConfig.get("hudEnabled", "1").equals("1");
             String hudStyle = fpsConfig.get("hudStyle", "fusion");
 
             String resolvedR = resolvedRenderer();
@@ -5975,16 +5986,16 @@ return true;
         perfHud.setOnMovedListener((x, y) -> persistHudPosition("hudPosGH", x, y));
         perfHud.setOnLockChangedListener((locked) -> persistHudConfigKey("hudLocked", locked ? "1" : "0"));
         restoreHudPosition(perfHud, "hudPosGH");
-        // Visible immediately if the game window is already mapped (live swap); otherwise it is
-        // revealed by changeFrameRatingVisibility once the window appears (launch path).
-        perfHud.setVisibility(frameRatingWindowId != -1 ? View.VISIBLE : View.GONE);
+        // Visible immediately if the game window is already mapped (live swap) AND the master toggle is
+        // on; otherwise it is revealed by changeFrameRatingVisibility once the window appears (launch path).
+        perfHud.setVisibility(frameRatingWindowId != -1 && hudCounterEnabled ? View.VISIBLE : View.GONE);
         rootView.addView(perfHud);
     }
 
     /** Build the classic FrameRating HUD (both orientations) and add it. Safe to call live (UI thread). */
     private void buildClassicHud(String fpsConfigString) {
         FrameLayout rootView = findViewById(R.id.FLXServerDisplay);
-        boolean shown = frameRatingWindowId != -1;
+        boolean shown = frameRatingWindowId != -1 && hudCounterEnabled;
 
         // Create BOTH orientations up front so the user can flip between them in-game with a tap;
         // only the active one is ever made visible.
@@ -6062,9 +6073,9 @@ return true;
         gameNativeHud.setOnMovedListener((x, y) -> persistHudPosition("hudPosGN", x, y));
         gameNativeHud.setOnLockChangedListener((locked) -> persistHudConfigKey("hudLocked", locked ? "1" : "0"));
         restoreHudPosition(gameNativeHud, "hudPosGN");
-        // Visible immediately if the game window is already mapped (live swap); otherwise it is
-        // revealed by changeFrameRatingVisibility once the window appears (launch path).
-        gameNativeHud.setVisibility(frameRatingWindowId != -1 ? View.VISIBLE : View.GONE);
+        // Visible immediately if the game window is already mapped (live swap) AND the master toggle is
+        // on; otherwise it is revealed by changeFrameRatingVisibility once the window appears (launch path).
+        gameNativeHud.setVisibility(frameRatingWindowId != -1 && hudCounterEnabled ? View.VISIBLE : View.GONE);
         rootView.addView(gameNativeHud);
     }
 
@@ -6101,7 +6112,7 @@ return true;
         fusionHud.setOnLockChangedListener((locked) -> persistHudConfigKey("hudLocked", locked ? "1" : "0"));
         fusionHud.setOnMovedListener((x, y) -> persistHudPosition("hudPosFusion", x, y));
         restoreHudPosition(fusionHud, "hudPosFusion");
-        fusionHud.setVisibility(frameRatingWindowId != -1 ? View.VISIBLE : View.GONE);
+        fusionHud.setVisibility(frameRatingWindowId != -1 && hudCounterEnabled ? View.VISIBLE : View.GONE);
         rootView.addView(fusionHud);
     }
 
@@ -6220,6 +6231,9 @@ return true;
                 Log.d("XServerDisplayActivity", "Showing hud for Window " + window.getName());
 
                 runOnUiThread(() -> {
+                    // Respect the master toggle: a binding window must not reveal the HUD while "Show
+                    // HUD" is off. When it's turned back on, onFpsConfigApply re-asserts visibility.
+                    if (!hudCounterEnabled) return;
                     // Show only the active orientation (both widgets exist for tap-toggle).
                     if (perfHud != null) perfHud.setVisibility(View.VISIBLE);
                     if (gameNativeHud != null) gameNativeHud.setVisibility(View.VISIBLE);
