@@ -1,5 +1,17 @@
 # Star-Compose — Progress Log
 
+## 2026-08-03 — 🏷️ **2.9.4 STABLE cut** (versionCode 56, plain tag `2.9.4`, prerelease:false, make_latest:true)
+
+> Cut from main `44795df7`. Bump `versionCode 55→56` / `versionName 2.9.3→2.9.4` in `app/build.gradle`. Stable (in-app updater offers it). Entirely app-side — no ImageFS reinstall.
+>
+> **Headline: HUD overhaul + container-setup QoL.** Rolls up everything merged to main since 2.9.3:
+> - **HUD:** Fusion HUD is now the DEFAULT overlay at Pill size (`6d6fac65`); new system-wide **RAM%** row in the Pill + latency-under-battery reorder (`bde19832`); **FPS-tab accordion** — master **Show HUD** on/off toggle (live, no relaunch), collapsible appearance sections closed by default, theme-accent rail divider (`ac199907`).
+> - **Container setup:** user-configurable **per-arch New Container Defaults** (`bf0329b2`); **"What is all this?" glossary** 34 terms + per-field help (`cfd161ab`/`1bdd46a4`/`ccd2dc80`); **env-var editor fixes** — custom vars no longer dropped, Name/Value fields, catalog 34→75 (`11b7693d`); **Save Manager** custom Restore always available + in-app picker (`b46aef82`/`71088358`).
+> - **Fixes:** **log storage → Documents** fixing the "game closes mid-play" FUSE/media-service crash (`1644ad31`); **RTL "+" button** off-screen fix #200 (`facb5571`, credit @aszba258-cyber/@alroe2435-cell, verified iManiii); **Mali BCn→ASTC** transcode toggle on the default compute path (`6ff83995`/`7cb9c537`); landscape dialog scroll/clipping fixes (`53746f94`/`c48bd47e`).
+> - **Notes:** bionic-fg stays disabled (use lsfg-vk); lsfg-vk flagged experimental.
+>
+> Updater one-liner (plain, release.yml-safe): "Bannerlator 2.9.4 — HUD overhaul: Fusion is now the default overlay with a Show HUD on/off switch and a RAM readout, plus per-architecture Container Defaults, a newcomer glossary, and a fix for the log-storage bug that closed games mid-play. App-side — install over 2.9.3. Full notes below." Rich GitHub body applied post-publish via `gh release edit --notes-file`. ⚠️ release.yml tags the default branch — verify tag SHA == built commit + repoint if drifted.
+
 ## 2026-08-03 — ⚙️✅ **User-configurable New Container Defaults (per-arch) — MERGED to main** (post-2.9.3, unreleased)
 
 > Merge `bf0329b2` (--no-ff of `feat/new-container-defaults`; revert tag `checkpoint-pre-container-defaults-20260803` → `1a1cc57f`). Device-verified. Built with android-app-engineer (2 rework rounds + 2 fix rounds).

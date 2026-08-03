@@ -91,6 +91,7 @@ Every report gets its own **public discussion thread**. You can reply as the ori
 - [📌 Project Notice](#-project-notice)
 - [ℹ️ Information](#ℹ️-information)
 - [🐛 Report a Mali GPU Issue](#-report-a-mali-gpu-game-issue)
+- [🆕 What's New in 2.9.4](#-whats-new-in-294)
 - [🆕 What's New in 2.9.3](#-whats-new-in-293)
 - [🆕 What's New in 2.9.2](#-whats-new-in-292)
 - [🆕 What's New in 2.9.1](#-whats-new-in-291)
@@ -103,6 +104,24 @@ Every report gets its own **public discussion thread**. You can reply as the ori
 - [🙏 Credits](#-credits)
 - [⚖️ Disclaimer](#️-disclaimer)
 - [📄 License](#-license)
+
+---
+
+## 🆕 What's New in 2.9.4
+
+2.9.4 is a **feature release over 2.9.3**, headlined by a **HUD overhaul** and a batch of **container-setup quality-of-life**. Everything from 2.9.3 is included. Like the releases before it it's **entirely app-side** — **no ImageFS reinstall** — just install over 2.9.3; your containers, themes, accent and per-game settings carry over untouched.
+
+**🎚️ HUD overhaul — Fusion by default, with an on/off switch.** The Fusion overlay is now the default HUD at its compact **Pill** size, and it gained a system-wide **RAM%** readout. The in-game FPS tab is reorganized: a master **Show HUD** toggle turns the whole overlay on/off **live** (no relaunch), your frame-rate & refresh controls stay put, and the appearance settings collapse into tidy tap-to-open sections — Style & Size, Metrics, Appearance, Alerts, Tools — with a thin accent line separating the tab buttons from their content.
+
+**🗂️ Log storage moved to Documents — fixes games closing mid-play.** Logs defaulted to the app's private `Android/data` folder on restricted storage; under heavy logging, log rotation could crash the phone's media service and Android would kill the running game — the "**the game just closes**" bug (worst on the pubg build / AYANEO Pocket FIT). Logs now default to **Documents/bannerlator**; existing installs are migrated automatically, and the crash-prone "App data" location is removed.
+
+**🧰 Easier container setup.** New Container Defaults are now **user-configurable and per-architecture** (x86-64 / arm64ec). A **"What is all this?"** newcomer glossary (34 terms) plus per-field **?** help explains every container setting in plain English. The **environment-variable editor** no longer silently drops custom variables on save, adds separate **Name** and **Value** fields, and recognizes ~75 variables (was ~34). **Save Manager**'s custom-game **Restore** is now always available via the in-app file picker.
+
+**🧩 Mali: BCn→ASTC transcode on the default driver.** Set **BCn Emulation Type = Compute**, then enable **BCn → ASTC** in the graphics driver settings — the transcode is done by a bundled Vulkan layer, so it works on **any** wrapper (including "Original", which has no built-in BCn). No effect on Adreno, which decodes BCn natively.
+
+**🔤 Polish & fixes.** The **"+" add button** no longer lands off-screen in right-to-left languages (#200) — thanks **@aszba258-cyber** and **@alroe2435-cell** for reporting, and **iManiii** for verifying on device. Landscape dialog **scroll/clipping** fixes across the growable pickers and Select-container dialogs.
+
+**⚠️ Frame generation.** **bionic-fg** is temporarily disabled (repeated false-positive "it's working" reports on a work-in-progress feature) — use **lsfg-vk** for now. lsfg-vk is **experimental**: it's the recommended option, but don't expect it to run fluidly on every game and every device. bionic-fg returns as selectable once it's proven to work as intended.
 
 ---
 
