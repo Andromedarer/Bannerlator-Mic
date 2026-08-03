@@ -32,46 +32,53 @@ public final class LogLocation {
     /** Folder for logs that belong to no particular game (app logcat, crash reports). */
     public static final String APP_FOLDER = "_app";
 
-    public static final String MODE_APP_DATA = "app_data";   // getExternalFilesDir(null) — default
+    /** RETIRED — getExternalFilesDir(null) (Android/data/&lt;pkg&gt;) crashed MediaProvider FUSE under
+     *  log rotation. Kept only so stored prefs still parse; resolveLogDir() migrates it to Documents. */
+    public static final String MODE_APP_DATA = "app_data";
     public static final String MODE_DOWNLOAD = "download";    // /sdcard/Download/bannerlator
-    public static final String MODE_DOCUMENTS = "documents";  // /sdcard/Documents/bannerlator
+    public static final String MODE_DOCUMENTS = "documents";  // /sdcard/Documents/bannerlator — default
     public static final String MODE_CUSTOM = "custom";        // user-picked folder
 
     private LogLocation() {}
 
     /**
-     * Resolve the configured log directory, creating it if needed. Falls back to
-     * {@code getExternalFilesDir(null)} whenever the chosen dir is missing or unwritable.
+     * Resolve the configured log directory, creating it if needed. Defaults to Documents and, as a
+     * LAST-RESORT fallback for an unwritable target, degrades to INTERNAL storage
+     * ({@code getFilesDir()}) — never {@code getExternalFilesDir(null)} (Android/data/&lt;pkg&gt;).
+     * The Android/data path lives on the restricted-FUSE subtree, and heavy log churn there (keep-N
+     * rotation deletes files while they're held open) can crash a device's MediaProvider FUSE daemon,
+     * after which vold kills every process holding a descriptor on emulated storage — taking the whole
+     * container session down. Documents/Download are ordinary public dirs and don't hit that path.
      */
     public static File resolveLogDir(Context context) {
-        File fallback = context.getExternalFilesDir(null);
+        // Internal, non-FUSE — always writable, cannot provoke the MediaProvider FUSE crash.
+        File fallback = context.getFilesDir();
         try {
             String mode = PreferenceManager.getDefaultSharedPreferences(context)
-                    .getString(PREF_MODE, MODE_APP_DATA);
+                    .getString(PREF_MODE, MODE_DOCUMENTS);
             File storage = Environment.getExternalStorageDirectory();
+            File documents = new File(storage, "Documents/bannerlator");
             File dir;
-            switch (mode != null ? mode : MODE_APP_DATA) {
+            switch (mode != null ? mode : MODE_DOCUMENTS) {
                 case MODE_DOWNLOAD:
                     dir = new File(storage, "Download/bannerlator");
-                    break;
-                case MODE_DOCUMENTS:
-                    dir = new File(storage, "Documents/bannerlator");
                     break;
                 case MODE_CUSTOM:
                     String custom = PreferenceManager.getDefaultSharedPreferences(context)
                             .getString(PREF_CUSTOM_PATH, null);
-                    dir = (custom != null && !custom.isEmpty()) ? new File(custom) : fallback;
+                    dir = (custom != null && !custom.isEmpty()) ? new File(custom) : documents;
                     break;
-                case MODE_APP_DATA:
+                case MODE_APP_DATA:   // RETIRED: crashed MediaProvider FUSE — migrate silently to Documents.
+                case MODE_DOCUMENTS:
                 default:
-                    dir = fallback;
+                    dir = documents;
                     break;
             }
             if (dir == null) return fallback;
             if (!dir.exists()) dir.mkdirs();
             if (dir.isDirectory() && dir.canWrite()) return dir;
         } catch (Exception e) {
-            // ignore — degrade to the app-data dir below
+            // ignore — degrade to internal storage below
         }
         return fallback;
     }

@@ -104,7 +104,7 @@ fun LogManagerScreen(onClose: () -> Unit) {
     // immediately, matching the Performance screen and removing the risk of two screens holding
     // the same preference and one overwriting the other on save.
     var locationMode by remember {
-        mutableStateOf(prefs.getString(LogLocation.PREF_MODE, LogLocation.MODE_APP_DATA) ?: LogLocation.MODE_APP_DATA)
+        mutableStateOf(prefs.getString(LogLocation.PREF_MODE, LogLocation.MODE_DOCUMENTS) ?: LogLocation.MODE_DOCUMENTS)
     }
     var customPath by remember {
         mutableStateOf(prefs.getString(LogLocation.PREF_CUSTOM_PATH, "") ?: "")
@@ -184,9 +184,9 @@ fun LogManagerScreen(onClose: () -> Unit) {
                 PickRow(
                     label = when (locationMode) {
                         LogLocation.MODE_DOWNLOAD -> "Download"
-                        LogLocation.MODE_DOCUMENTS -> "Documents"
                         LogLocation.MODE_CUSTOM -> if (customPath.isNotEmpty()) "Custom folder" else "Choose folder…"
-                        else -> "App data (default)"
+                        // MODE_DOCUMENTS (default) and the retired MODE_APP_DATA both resolve to Documents.
+                        else -> "Documents"
                     },
                     sub = LogLocation.resolveLogDir(context)?.absolutePath ?: "—",
                     action = "Change",
@@ -200,10 +200,6 @@ fun LogManagerScreen(onClose: () -> Unit) {
                         onDismissRequest = { showLocationMenu = false },
                         modifier = Modifier.outlinedMenuCard(),
                     ) {
-                        MenuRow("App data (default)", Icons.Default.Folder) {
-                            saveMode(LogLocation.MODE_APP_DATA); showLocationMenu = false
-                        }
-                        MenuItemDivider()
                         MenuRow("Download", Icons.Default.Download) {
                             saveMode(LogLocation.MODE_DOWNLOAD); showLocationMenu = false
                         }
