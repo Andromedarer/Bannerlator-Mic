@@ -15,6 +15,10 @@
     <string name="no_items_to_display">No items to display</string>
     <string name="new_container">New Container</string>
     <string name="edit_container">Edit Container</string>
+    <string name="new_container_defaults">New Container Defaults</string>
+    <string name="new_container_defaults_saved">New-container defaults saved</string>
+    <string name="new_container_defaults_save_failed">Could not save defaults</string>
+    <string name="reset_to_app_defaults">Reset to app defaults</string>
     <string name="creating_container">Creating Container…</string>
     <string name="removing_container">Removing Container…</string>
     <string name="duplicating_container">Duplicating Container…</string>

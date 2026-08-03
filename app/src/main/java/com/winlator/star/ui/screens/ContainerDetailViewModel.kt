@@ -23,6 +23,7 @@ import com.winlator.star.core.AppUtils
 import com.winlator.star.core.DefaultVersion
 import com.winlator.star.core.EnvVars
 import com.winlator.star.core.GPUInformation
+import com.winlator.star.core.NewContainerDefaults
 import com.winlator.star.core.PreloaderState
 import com.winlator.star.core.StorageRoots
 import com.winlator.star.core.StringUtils
@@ -58,6 +59,18 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     var isEditMode by mutableStateOf(false); private set
     var isSaving by mutableStateOf(false); private set
     private var initialized = false
+
+    // "New Container Defaults" mode: the SAME container form, but ✓ saves the field state as the
+    // user's new-container defaults profile (NewContainerDefaults) instead of creating a container.
+    // Entered via the EDIT_DEFAULTS_ID sentinel (see init); container stays null (it's a template).
+    var defaultsMode by mutableStateOf(false); private set
+
+    companion object {
+        // Sentinel containerId that opens the editor in "New Container Defaults" mode. Negative like
+        // the create sentinel (-1) so getContainerById is never consulted; distinct so init can tell
+        // "edit the defaults" from "create a new container".
+        const val EDIT_DEFAULTS_ID = -2
+    }
 
     // ── Top-level fields ──────────────────────────────────────────────────────
     var containerName by mutableStateOf("")
@@ -309,6 +322,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
 
         container = if (containerId > 0) manager.getContainerById(containerId) else null
         isEditMode = container != null
+        defaultsMode = containerId == EDIT_DEFAULTS_ID
 
         loadStaticResources()
         loadContainerData()
@@ -377,15 +391,34 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
+    /**
+     * A transient, in-memory template container built from the saved "New Container Defaults" profile,
+     * or null when no profile is set (or we're editing a real container). It is NEVER persisted — it
+     * exists only so loadContainerData() can read the user's saved preferences back through the exact
+     * same Container getters a real container uses (round-tripped via loadData, extras included).
+     */
+    private fun buildTemplateContainer(): Container? {
+        if (container != null) return null
+        val json = NewContainerDefaults.load(context) ?: return null
+        return runCatching { Container(0, manager).apply { loadData(JSONObject(json)) } }.getOrNull()
+    }
+
     private fun loadContainerData() {
         val c = container
+        // Seed source for user-PREFERENCE fields: the real container in edit mode, else the saved
+        // defaults template (create/defaults mode with a profile set), else null → built-in
+        // Container.DEFAULT_*. When no profile exists `template == null` so `seed == c == null` and
+        // this is byte-identical to today's hardcoded-defaults create flow. Identity/per-container/
+        // device fields (name, drives, registry-backed mouseWarp/runAsAdmin) stay on the REAL `c`.
+        val template = buildTemplateContainer()
+        val seed = c ?: template
         val prefs = PreferenceManager.getDefaultSharedPreferences(context)
 
         containerName = if (c != null) c.name else "${context.getString(R.string.container)}-${manager.getNextContainerId()}"
         wineVersionEnabled = !isEditMode
 
         // Screen size
-        val ssValue = c?.screenSize ?: Container.DEFAULT_SCREEN_SIZE
+        val ssValue = seed?.screenSize ?: Container.DEFAULT_SCREEN_SIZE
         val ssFound = screenSizeEntries.indexOfFirst {
             StringUtils.parseIdentifier(it).equals(ssValue, ignoreCase = true)
         }
@@ -399,114 +432,114 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         // Wine version
-        selectedWineVersion = c?.wineVersion ?: wineVersionEntries.firstOrNull() ?: ""
+        selectedWineVersion = seed?.wineVersion ?: wineVersionEntries.firstOrNull() ?: ""
         refreshWineDependent(selectedWineVersion)
 
         // Box64 version: refreshWineDependent() resets to entry 0 (correct on
         // Wine-version change since the list differs for arm64ec). On initial
-        // load we override that to honor the container's saved selection.
-        c?.box64Version
+        // load we override that to honor the seed's saved selection.
+        seed?.box64Version
             ?.takeIf { it.isNotEmpty() && box64VersionEntries.contains(it) }
             ?.let { selectedBox64Version = it }
 
         // Graphics driver (load as display name for dropdown)
-        selectedGraphicsDriver   = identifierToDisplay(c?.graphicsDriver ?: defaultGraphicsDriverForNewContainer(), graphicsDriverEntries)
-        graphicsDriverConfig     = c?.graphicsDriverConfig ?: Container.DEFAULT_GRAPHICSDRIVERCONFIG
-        rendererNative           = c?.isRendererNative() ?: false
-        rendererPresentMode      = c?.getRendererPresentMode() ?: "fifo"
-        rendererDriverId         = c?.getRendererDriverId() ?: "system"
-        rendererFilterMode       = c?.getRendererFilterMode() ?: 0
-        rendererSwapRB           = c?.getRendererSwapRB() ?: false
-        rendererSfCompatMode     = c?.getRendererSfCompatMode() ?: true
-        renderScale              = c?.getExtra("renderScale", "1.0") ?: "1.0"
-        autoCloseOnExit          = (c?.getExtra("autoCloseOnExit", "1") ?: "1") == "1"
-        selectedDXWrapper        = identifierToDisplay(c?.getDXWrapper() ?: Container.DEFAULT_DXWRAPPER, dxWrapperEntries)
-        dxWrapperConfig          = c?.getDXWrapperConfig() ?: Container.DEFAULT_DXWRAPPERCONFIG
+        selectedGraphicsDriver   = identifierToDisplay(seed?.graphicsDriver ?: defaultGraphicsDriverForNewContainer(), graphicsDriverEntries)
+        graphicsDriverConfig     = seed?.graphicsDriverConfig ?: Container.DEFAULT_GRAPHICSDRIVERCONFIG
+        rendererNative           = seed?.isRendererNative() ?: false
+        rendererPresentMode      = seed?.getRendererPresentMode() ?: "fifo"
+        rendererDriverId         = seed?.getRendererDriverId() ?: "system"
+        rendererFilterMode       = seed?.getRendererFilterMode() ?: 0
+        rendererSwapRB           = seed?.getRendererSwapRB() ?: false
+        rendererSfCompatMode     = seed?.getRendererSfCompatMode() ?: true
+        renderScale              = seed?.getExtra("renderScale", "1.0") ?: "1.0"
+        autoCloseOnExit          = (seed?.getExtra("autoCloseOnExit", "1") ?: "1") == "1"
+        selectedDXWrapper        = identifierToDisplay(seed?.getDXWrapper() ?: Container.DEFAULT_DXWRAPPER, dxWrapperEntries)
+        dxWrapperConfig          = seed?.getDXWrapperConfig() ?: Container.DEFAULT_DXWRAPPERCONFIG
 
         // Audio / emulator (load as display name)
-        selectedAudioDriver = identifierToDisplay(c?.audioDriver ?: Container.DEFAULT_AUDIO_DRIVER, audioDriverEntries)
-        selectedEmulator    = identifierToDisplay(c?.emulator ?: Container.DEFAULT_EMULATOR, emulatorEntries)
+        selectedAudioDriver = identifierToDisplay(seed?.audioDriver ?: Container.DEFAULT_AUDIO_DRIVER, audioDriverEntries)
+        selectedEmulator    = identifierToDisplay(seed?.emulator ?: Container.DEFAULT_EMULATOR, emulatorEntries)
 
         // MIDI
-        val midiVal = c?.getMIDISoundFont() ?: ""
+        val midiVal = seed?.getMIDISoundFont() ?: ""
         selectedMidiIndex = if (midiVal.isEmpty()) 0
                             else midiEntries.indexOf(midiVal).takeIf { it >= 0 } ?: 0
 
-        showFPS           = c?.isShowFPS == true
-        fpsCounterConfig  = c?.getFPSCounterConfig() ?: Container.DEFAULT_FPS_COUNTER_CONFIG
-        fullscreenMode      = c?.getFullscreenMode() ?: Container.FULLSCREEN_OFF
+        showFPS           = seed?.isShowFPS == true
+        fpsCounterConfig  = seed?.getFPSCounterConfig() ?: Container.DEFAULT_FPS_COUNTER_CONFIG
+        fullscreenMode      = seed?.getFullscreenMode() ?: Container.FULLSCREEN_OFF
 
-        frameGenEngine     = c?.frameGenEngine ?: "off"
-        frameGenModel      = c?.frameGenModel ?: 0
-        lsfgPerformanceMode = c?.isLsfgPerformanceMode != false   // default ON for new/unset containers
-        lsfgAutoEnable      = c?.isLsfgAutoEnable != false   // default ON for new/unset containers (GameNative parity)
-        fpsLimiterEnabled  = c?.isFpsLimiterEnabled == true
-        matchRefreshRate   = c?.isMatchRefreshRate != false   // default ON for new/unset containers
-        manualRefreshRate  = c?.manualRefreshRate ?: 0
-        maxGameRefreshRate = c?.maxGameRefreshRate ?: 0
-        unlockGameRefreshRate = c?.isUnlockGameRefreshRate != false  // default ON for new/unset containers
-        refreshWasExplicit = c?.hasExtra("unlockGameRefreshRate") == true
+        frameGenEngine     = seed?.frameGenEngine ?: "off"
+        frameGenModel      = seed?.frameGenModel ?: 0
+        lsfgPerformanceMode = seed?.isLsfgPerformanceMode != false   // default ON for new/unset containers
+        lsfgAutoEnable      = seed?.isLsfgAutoEnable != false   // default ON for new/unset containers (GameNative parity)
+        fpsLimiterEnabled  = seed?.isFpsLimiterEnabled == true
+        matchRefreshRate   = seed?.isMatchRefreshRate != false   // default ON for new/unset containers
+        manualRefreshRate  = seed?.manualRefreshRate ?: 0
+        maxGameRefreshRate = seed?.maxGameRefreshRate ?: 0
+        unlockGameRefreshRate = seed?.isUnlockGameRefreshRate != false  // default ON for new/unset containers
+        refreshWasExplicit = seed?.hasExtra("unlockGameRefreshRate") == true
 
         // ReShade: scan the drop-in folder, then load the loadout (migrating a legacy single effect).
         reshadeEffects = com.winlator.star.reshade.ReshadeManager.scanEffects(context)
         reshadeLoadout.init(
             reshadeEffects,
-            c?.getReshadeLoadout(), c?.getReshadeMode(), c?.getReshadeParams(), c?.getReshadeEffect()
+            seed?.getReshadeLoadout(), seed?.getReshadeMode(), seed?.getReshadeParams(), seed?.getReshadeEffect()
         )
 
         // Renderer
         // Map the stored identifier ("opengl"/"vulkan") to its display label ("OpenGL"/"Vulkan") so
         // the dropdown shows the proper case AND the Vulkan-settings gear (gated on == "Vulkan") shows
         // on load — not only after the user re-picks from the list.
-        selectedRenderer = identifierToDisplay(c?.renderer ?: "opengl", rendererEntries)
+        selectedRenderer = identifierToDisplay(seed?.renderer ?: "opengl", rendererEntries)
 
         val locale = java.util.Locale.getDefault()
-        lcAll = c?.getLC_ALL() ?: "${locale.language}_${locale.country}.UTF-8"
+        lcAll = seed?.getLC_ALL() ?: "${locale.language}_${locale.country}.UTF-8"
 
         // Input type
-        val inputType: Int = c?.inputType ?: WinHandler.DEFAULT_INPUT_TYPE.toInt()
+        val inputType: Int = seed?.inputType ?: WinHandler.DEFAULT_INPUT_TYPE.toInt()
         enableXInput   = (inputType and WinHandler.FLAG_INPUT_TYPE_XINPUT.toInt()) != 0
         enableDInput   = (inputType and WinHandler.FLAG_INPUT_TYPE_DINPUT.toInt()) != 0
-        exclusiveXInput = c?.isExclusiveXInput ?: true
+        exclusiveXInput = seed?.isExclusiveXInput ?: true
         if (!exclusiveXInput) {
             enableXInput = true; enableDInput = true
         }
-        vibrationMode      = c?.getVibrationMode() ?: Container.VIBRATION_MODE_DEFAULT
-        vibrationIntensity = c?.getVibrationIntensity() ?: Container.VIBRATION_INTENSITY_DEFAULT
+        vibrationMode      = seed?.getVibrationMode() ?: Container.VIBRATION_MODE_DEFAULT
+        vibrationIntensity = seed?.getVibrationIntensity() ?: Container.VIBRATION_INTENSITY_DEFAULT
 
-        gyroEnabled     = c?.isGyroEnabled() ?: Container.GYRO_ENABLED_DEFAULT
-        gyroTarget      = c?.getGyroTarget() ?: Container.GYRO_TARGET_DEFAULT
-        gyroActivator   = c?.getGyroActivator() ?: Container.GYRO_ACTIVATOR_DEFAULT
-        gyroActivationMode = c?.getGyroActivationMode() ?: Container.GYRO_ACTIVATION_MODE_DEFAULT
-        gyroMode        = c?.getGyroMode() ?: Container.GYRO_MODE_DEFAULT
-        gyroSensitivity = c?.getGyroSensitivity() ?: Container.GYRO_SENSITIVITY_DEFAULT
-        gyroDeadzone    = c?.getGyroDeadzone() ?: Container.GYRO_DEADZONE_DEFAULT
-        gyroSmoothing   = c?.getGyroSmoothing() ?: Container.GYRO_SMOOTHING_DEFAULT
-        gyroInvertX     = c?.isGyroInvertX() ?: Container.GYRO_INVERT_X_DEFAULT
-        gyroInvertY     = c?.isGyroInvertY() ?: Container.GYRO_INVERT_Y_DEFAULT
+        gyroEnabled     = seed?.isGyroEnabled() ?: Container.GYRO_ENABLED_DEFAULT
+        gyroTarget      = seed?.getGyroTarget() ?: Container.GYRO_TARGET_DEFAULT
+        gyroActivator   = seed?.getGyroActivator() ?: Container.GYRO_ACTIVATOR_DEFAULT
+        gyroActivationMode = seed?.getGyroActivationMode() ?: Container.GYRO_ACTIVATION_MODE_DEFAULT
+        gyroMode        = seed?.getGyroMode() ?: Container.GYRO_MODE_DEFAULT
+        gyroSensitivity = seed?.getGyroSensitivity() ?: Container.GYRO_SENSITIVITY_DEFAULT
+        gyroDeadzone    = seed?.getGyroDeadzone() ?: Container.GYRO_DEADZONE_DEFAULT
+        gyroSmoothing   = seed?.getGyroSmoothing() ?: Container.GYRO_SMOOTHING_DEFAULT
+        gyroInvertX     = seed?.isGyroInvertX() ?: Container.GYRO_INVERT_X_DEFAULT
+        gyroInvertY     = seed?.isGyroInvertY() ?: Container.GYRO_INVERT_Y_DEFAULT
 
         // Box64 preset
-        val b64Preset = c?.box64Preset ?: prefs.getString("box64_preset", Box64Preset.COMPATIBILITY) ?: Box64Preset.COMPATIBILITY
+        val b64Preset = seed?.box64Preset ?: prefs.getString("box64_preset", Box64Preset.COMPATIBILITY) ?: Box64Preset.COMPATIBILITY
         selectedBox64PresetIndex = box64PresetIds.indexOf(b64Preset).takeIf { it >= 0 } ?: 0
 
         // FEXCore preset
-        val fexPreset = c?.getFEXCorePreset() ?: prefs.getString("fexcore_preset", FEXCorePreset.INTERMEDIATE) ?: FEXCorePreset.INTERMEDIATE
+        val fexPreset = seed?.getFEXCorePreset() ?: prefs.getString("fexcore_preset", FEXCorePreset.INTERMEDIATE) ?: FEXCorePreset.INTERMEDIATE
         selectedFEXCorePresetIndex = fexCorePresetIds.indexOf(fexPreset).takeIf { it >= 0 } ?: 0
 
         // FEXCore version
         loadFEXCoreVersions()
-        selectedFEXCoreVersion = c?.getFEXCoreVersion() ?: DefaultVersion.FEXCORE
+        selectedFEXCoreVersion = seed?.getFEXCoreVersion() ?: DefaultVersion.FEXCORE
 
         // Startup selection
-        selectedStartupSelection = (c?.startupSelection ?: Container.STARTUP_SELECTION_ESSENTIAL).toInt()
-        startupServicesEnabled = WineUtils.parseStartupServicesCsv(c?.startupServices ?: "").toSet()
+        selectedStartupSelection = (seed?.startupSelection ?: Container.STARTUP_SELECTION_ESSENTIAL).toInt()
+        startupServicesEnabled = WineUtils.parseStartupServicesCsv(seed?.startupServices ?: "").toSet()
 
         // CPU lists
-        cpuList      = c?.getCPUList(true) ?: Container.getFallbackCPUList()
-        cpuListWoW64 = c?.getCPUListWoW64(true) ?: Container.getFallbackCPUListWoW64()
+        cpuList      = seed?.getCPUList(true) ?: Container.getFallbackCPUList()
+        cpuListWoW64 = seed?.getCPUListWoW64(true) ?: Container.getFallbackCPUListWoW64()
 
         // Wine Config (desktop theme)
-        val themeStr = c?.desktopTheme ?: WineThemeManager.DEFAULT_DESKTOP_THEME
+        val themeStr = seed?.desktopTheme ?: WineThemeManager.DEFAULT_DESKTOP_THEME
         val themeInfo = WineThemeManager.ThemeInfo(themeStr)
         desktopThemeIndex   = themeInfo.theme.ordinal
         desktopBgTypeIndex  = themeInfo.backgroundType.ordinal
@@ -540,13 +573,17 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
                     runAsAdmin = enableLUA == 0
                 }
             } catch (_: Exception) {}
+        } else if (template != null) {
+            // The template has no on-disk registry; the defaults profile stashes the toggle as a
+            // dedicated extra (see saveDefaults) so a new container inherits the user's choice.
+            runAsAdmin = template.getExtra("runAsAdminDefault", "1") == "1"
         }
 
         // Win Components
-        loadWinComponents(c?.winComponents ?: Container.DEFAULT_WINCOMPONENTS)
+        loadWinComponents(seed?.winComponents ?: Container.DEFAULT_WINCOMPONENTS)
 
         // Env vars
-        envVarsStr = c?.envVars ?: Container.DEFAULT_ENV_VARS
+        envVarsStr = seed?.envVars ?: Container.DEFAULT_ENV_VARS
 
         // Drives
         drives.clear()
@@ -555,14 +592,14 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         // XR
-        selectedPrimaryController = c?.primaryController ?: 1
+        selectedPrimaryController = seed?.primaryController ?: 1
         val xcodes = XKeycode.values()
         val xrMappings = Container.XrControllerMapping.values()
         xrMappingIndices.clear()
         for ((i, mapping) in xrMappings.withIndex()) {
             val defaultOrdinal = xrDefaults.getOrElse(i) { 0 }
-            val idx = if (c != null) {
-                val byteId = c.getControllerMapping(mapping)
+            val idx = if (seed != null) {
+                val byteId = seed.getControllerMapping(mapping)
                 xcodes.indexOfFirst { it.id == byteId }.takeIf { it >= 0 } ?: defaultOrdinal
             } else {
                 defaultOrdinal
@@ -667,6 +704,22 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         resolvedColorAsString: String,
         onDone: () -> Unit
     ) {
+        // Defaults mode: the ✓ saves the field state as the user's new-container defaults profile
+        // instead of creating a container (no Wine gate — a template can be saved before any Wine is
+        // installed; the gate below still protects real create/edit).
+        if (defaultsMode) {
+            saveDefaults(
+                resolvedGraphicsDriverConfig,
+                resolvedDXWrapperConfig,
+                resolvedFPSCounterConfig,
+                resolvedEnvVars,
+                resolvedCPUList,
+                resolvedCPUListWoW64,
+                resolvedColorAsString,
+                onDone,
+            )
+            return
+        }
         // No Wine/Proton ships in the APK any more, so on a fresh install this list is empty until
         // the user installs one from the in-app catalog. Saving anyway would write wineVersion="",
         // which WineInfo.fromIdentifier can only resolve to a non-existent fallback path — i.e. a
@@ -808,46 +861,11 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             onComplete()
         } else {
             // Create mode
-            val data = JSONObject().apply {
-                put("name", containerName)
-                put("screenSize", screenSize)
-                put("envVars", envVarsIn)
-                put("cpuList", cpuListIn)
-                put("cpuListWoW64", cpuListWoW64In)
-                put("graphicsDriver", graphicsDriver)
-                put("graphicsDriverConfig", finalGDConfig)
-                put("dxwrapper", dxWrapper)
-                put("dxwrapperConfig", dxConfig)
-                put("audioDriver", audioDriver)
-                put("emulator", emulator)
-                put("wincomponents", wincomponents)
-                put("drives", drivesStr)
-                put("showFPS", showFPS)
-                put("fpsCounterConfig", fpsConfig)
-                put("fullscreenMode", fullscreenMode)
-                put("exclusiveXInput", exclusiveXInput)
-                put("renderer", StringUtils.parseIdentifier(selectedRenderer))
-                put("rendererNative", rendererNative)
-                put("rendererPresentMode", rendererPresentMode)
-                put("rendererDriverId", rendererDriverId)
-                put("rendererFilterMode", rendererFilterMode)
-                put("rendererSwapRB", rendererSwapRB)
-                put("rendererSfCompatMode", rendererSfCompatMode)
-                put("inputType", inputType)
-                put("runAsAdmin", runAsAdmin)
-                put("startupSelection", selectedStartupSelection)
-                put("startupServices", startupServicesEnabled.joinToString(","))
-                put("box64Version", selectedBox64Version)
-                put("box64Preset", box64Preset)
-                put("fexcoreVersion", selectedFEXCoreVersion)
-                put("fexcorePreset", fexcorePreset)
-                put("desktopTheme", desktopThemeStr)
-                put("wineVersion", selectedWineVersion)
-                put("midiSoundFont", midiSoundFont)
-                put("lc_all", lcAll)
-                put("primaryController", selectedPrimaryController)
-                put("controllerMapping", controllerMapping)
-            }
+            val data = buildCreateData(
+                screenSize, envVarsIn, cpuListIn, cpuListWoW64In, graphicsDriver, finalGDConfig,
+                dxWrapper, dxConfig, audioDriver, emulator, wincomponents, drivesStr, fpsConfig,
+                inputType, box64Preset, fexcorePreset, desktopThemeStr, midiSoundFont, controllerMapping,
+            )
             // createContainerAsync posts callback to main thread when done
             manager.createContainerAsync(data, contentsManager) { created ->
                 container = created
@@ -885,6 +903,157 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
                 onComplete()
             }
         }
+    }
+
+    // The create-mode container-config `data` JSON — the exact field set createContainerAsync consumes.
+    // Extracted so the "New Container Defaults" profile persists the identical shape rather than a copy
+    // that could silently drift. Post-create-only extras (frameGen/gyro/vibration/reshade/refresh/
+    // renderScale/autoCloseOnExit) are NOT here — they're applied by their setters after the container
+    // exists (see the createContainerAsync callback and saveDefaults' throwaway template).
+    private fun buildCreateData(
+        screenSize: String, envVarsIn: String, cpuListIn: String, cpuListWoW64In: String,
+        graphicsDriver: String, finalGDConfig: String, dxWrapper: String, dxConfig: String,
+        audioDriver: String, emulator: String, wincomponents: String, drivesStr: String,
+        fpsConfig: String, inputType: Int, box64Preset: String, fexcorePreset: String,
+        desktopThemeStr: String, midiSoundFont: String, controllerMapping: String,
+    ): JSONObject = JSONObject().apply {
+        put("name", containerName)
+        put("screenSize", screenSize)
+        put("envVars", envVarsIn)
+        put("cpuList", cpuListIn)
+        put("cpuListWoW64", cpuListWoW64In)
+        put("graphicsDriver", graphicsDriver)
+        put("graphicsDriverConfig", finalGDConfig)
+        put("dxwrapper", dxWrapper)
+        put("dxwrapperConfig", dxConfig)
+        put("audioDriver", audioDriver)
+        put("emulator", emulator)
+        put("wincomponents", wincomponents)
+        put("drives", drivesStr)
+        put("showFPS", showFPS)
+        put("fpsCounterConfig", fpsConfig)
+        put("fullscreenMode", fullscreenMode)
+        put("exclusiveXInput", exclusiveXInput)
+        put("renderer", StringUtils.parseIdentifier(selectedRenderer))
+        put("rendererNative", rendererNative)
+        put("rendererPresentMode", rendererPresentMode)
+        put("rendererDriverId", rendererDriverId)
+        put("rendererFilterMode", rendererFilterMode)
+        put("rendererSwapRB", rendererSwapRB)
+        put("rendererSfCompatMode", rendererSfCompatMode)
+        put("inputType", inputType)
+        put("runAsAdmin", runAsAdmin)
+        put("startupSelection", selectedStartupSelection)
+        put("startupServices", startupServicesEnabled.joinToString(","))
+        put("box64Version", selectedBox64Version)
+        put("box64Preset", box64Preset)
+        put("fexcoreVersion", selectedFEXCoreVersion)
+        put("fexcorePreset", fexcorePreset)
+        put("desktopTheme", desktopThemeStr)
+        put("wineVersion", selectedWineVersion)
+        put("midiSoundFont", midiSoundFont)
+        put("lc_all", lcAll)
+        put("primaryController", selectedPrimaryController)
+        put("controllerMapping", controllerMapping)
+    }
+
+    // Defaults mode ✓: build the same create `data`, materialise a throwaway template container to
+    // capture the post-create extras through the REAL setters, then persist its serialized form (minus
+    // the per-container name/drives) as the user's new-container defaults profile. Never creates a
+    // container. Mirrors doConfirm's local computations so the saved shape matches create exactly.
+    private fun saveDefaults(
+        gdConfig: String, dxConfig: String, fpsConfig: String, envVarsIn: String,
+        cpuListIn: String, cpuListWoW64In: String, colorAsString: String, onDone: () -> Unit,
+    ) {
+        // Finalize graphics driver config (ensure version is set) — identical to doConfirm.
+        var finalGDConfig = gdConfig
+        try {
+            val cfg = GraphicsDriverConfigDialog.parseGraphicsDriverConfig(gdConfig)
+            if (cfg["version"].isNullOrEmpty()) {
+                cfg["version"] = if (GPUInformation.isDriverSupported(DefaultVersion.WRAPPER_ADRENO, context))
+                    DefaultVersion.WRAPPER_ADRENO else DefaultVersion.WRAPPER
+                finalGDConfig = GraphicsDriverConfigDialog.toGraphicsDriverConfig(cfg)
+            }
+        } catch (_: Exception) {}
+
+        val screenSize   = buildScreenSize()
+        val graphicsDriver = StringUtils.parseIdentifier(selectedGraphicsDriver)
+        val dxWrapper    = StringUtils.parseIdentifier(selectedDXWrapper)
+        val audioDriver  = StringUtils.parseIdentifier(selectedAudioDriver)
+        val emulator     = StringUtils.parseIdentifier(selectedEmulator)
+        val midiSoundFont = if (selectedMidiIndex == 0) "" else midiEntries.getOrElse(selectedMidiIndex) { "" }
+        val wincomponents = winComponents.joinToString(",") { "${it.key}=${it.selectedIndex}" }
+        val drivesStr = buildDrivesString()
+        val desktopThemeStr = buildDesktopThemeStr(colorAsString)
+        val box64Preset = box64PresetIds.getOrElse(selectedBox64PresetIndex) { Box64Preset.COMPATIBILITY }
+        val fexcorePreset = fexCorePresetIds.getOrElse(selectedFEXCorePresetIndex) { FEXCorePreset.INTERMEDIATE }
+        val controllerMapping = buildControllerMapping()
+
+        var inputType = 0
+        if (enableXInput) inputType = inputType or WinHandler.FLAG_INPUT_TYPE_XINPUT.toInt()
+        if (enableDInput) inputType = inputType or WinHandler.FLAG_INPUT_TYPE_DINPUT.toInt()
+
+        val data = buildCreateData(
+            screenSize, envVarsIn, cpuListIn, cpuListWoW64In, graphicsDriver, finalGDConfig,
+            dxWrapper, dxConfig, audioDriver, emulator, wincomponents, drivesStr, fpsConfig,
+            inputType, box64Preset, fexcorePreset, desktopThemeStr, midiSoundFont, controllerMapping,
+        )
+
+        // A throwaway container (never written to disk) so the post-create-only extras round-trip
+        // through the SAME setters createContainerAsync's callback uses — keeping the profile's extras
+        // byte-identical to what a real new container would store. Same set as the create callback.
+        try {
+            val template = Container(0, manager)
+            template.loadData(data)
+            template.setFrameGenEngine(frameGenEngine)
+            template.setFrameGenModel(frameGenModel)
+            template.setLsfgPerformanceMode(lsfgPerformanceMode)
+            template.setLsfgAutoEnable(lsfgAutoEnable)
+            template.setVibrationMode(vibrationMode)
+            template.setVibrationIntensity(vibrationIntensity)
+            template.setGyroEnabled(gyroEnabled)
+            template.setGyroTarget(gyroTarget)
+            template.setGyroActivator(gyroActivator)
+            template.setGyroActivationMode(gyroActivationMode)
+            template.setGyroMode(gyroMode)
+            template.setGyroSensitivity(gyroSensitivity)
+            template.setGyroDeadzone(gyroDeadzone)
+            template.setGyroSmoothing(gyroSmoothing)
+            template.setGyroInvertX(gyroInvertX)
+            template.setGyroInvertY(gyroInvertY)
+            template.setFpsLimiterEnabled(fpsLimiterEnabled)
+            template.setMatchRefreshRate(matchRefreshRate)
+            template.setManualRefreshRate(manualRefreshRate)
+            applyRefreshSettings(template)
+            template.setReshadeLoadout(reshadeLoadout.loadoutJsonOrNull())
+            template.setReshadeMode(reshadeLoadout.mode)
+            template.setReshadeParams(reshadeLoadout.paramsJsonOrNull())
+            template.setReshadeEffect(reshadeLoadout.firstEffectName())
+            if (renderScale != "1.0") template.putExtra("renderScale", renderScale)
+            if (!autoCloseOnExit) template.putExtra("autoCloseOnExit", "0")  // default ON
+            // runAsAdmin is a registry stamp for real containers (not a config field), so getData()
+            // won't carry it. Stash it as a dedicated profile-only extra so loadContainerData can seed
+            // a new container's toggle from the saved default (see the template branch there).
+            template.putExtra("runAsAdminDefault", if (runAsAdmin) "1" else "0")
+
+            val profile = template.getData()
+            // name + drives are per-container (never templatable); id is meaningless for a template.
+            profile.remove("id")
+            profile.remove("name")
+            profile.remove("drives")
+            NewContainerDefaults.save(context, profile.toString())
+            AppUtils.showToast(context, R.string.new_container_defaults_saved)
+        } catch (e: Exception) {
+            AppUtils.showToast(context, R.string.new_container_defaults_save_failed)
+        }
+        onDone()
+    }
+
+    /** Reset mode ✓: forget the saved profile and reload the form to the built-in app defaults. */
+    fun resetDefaults() {
+        NewContainerDefaults.clear(context)
+        loadContainerData()   // template is now null → every field falls back to Container.DEFAULT_*
+        AppUtils.showToast(context, R.string.reset_to_app_defaults)
     }
 
     private fun buildScreenSize(): String {
