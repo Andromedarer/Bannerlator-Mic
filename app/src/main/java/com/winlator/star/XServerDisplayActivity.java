@@ -4637,6 +4637,15 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 case "none" -> envVars.put("WRAPPER_EMULATE_BCN", "0");
                 default -> envVars.put("WRAPPER_EMULATE_BCN", isQualcomm ? "0" : "1");
             }
+
+            // BCn -> ASTC transcode target for the compute layer on the DEFAULT driver. The compute
+            // path activates the implicit leegao bcn_layer (ENABLE_BCN_COMPUTE) but never exposed its
+            // ASTC target here — only the explicit Wrapper + bcn_layer driver did — so Mali users had
+            // to hand-add BCN_TRANSCODE_TO_ASTC. Honor the same bcnTranscodeAstc toggle now. Opt-in
+            // (emit only when enabled, like WRAPPER_BCN_ASTC below) and only on the compute path, so
+            // OFF leaves the previous behavior byte-identical.
+            if (computeLayer && "1".equals(graphicsDriverConfig.get("bcnTranscodeAstc")))
+                envVars.put("BCN_TRANSCODE_TO_ASTC", "1");
         }
 
         String bcnEmulationCache = graphicsDriverConfig.get("bcnEmulationCache");

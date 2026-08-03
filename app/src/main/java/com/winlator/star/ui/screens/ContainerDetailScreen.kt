@@ -2200,6 +2200,25 @@ internal fun GraphicsDriverConfigDialog(
                         )
                     }
                 }
+                // Compute-layer BCn -> ASTC target on the DEFAULT driver. When BCn type = compute, the
+                // implicit leegao bcn_layer is the active decoder (ENABLE_BCN_COMPUTE) and honors
+                // BCN_TRANSCODE_TO_ASTC — previously only exposed on the explicit Wrapper + bcn_layer
+                // driver, so Mali users had to hand-add the env var. Reuses the same bcnTranscodeAstc
+                // state (already persisted); default off.
+                if (!isBcnLayer && bcnEmulationType == "compute" &&
+                    (bcnEmulation == "auto" || bcnEmulation == "full")) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = bcnTranscodeAstc, onCheckedChange = { bcnTranscodeAstc = it })
+                        Text(stringResource(R.string.bcn_layer_transcode_astc))
+                    }
+                    if (isQualcomm) {
+                        Text(
+                            "No effect on Adreno (native BCn)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = syncFrame, onCheckedChange = { syncFrame = it })
                     Text(stringResource(R.string.graphics_driver_sync_frame))
