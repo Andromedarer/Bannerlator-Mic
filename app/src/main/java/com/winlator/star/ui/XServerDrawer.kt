@@ -1956,18 +1956,18 @@ private fun HudContent(state: XServerDrawerState) {
 
     // 4-way HUD style: classic | gamehub | gamenative | fusion.
     val styles = listOf("classic", "gamehub", "gamenative", "fusion")
-    var hudStyle by remember(cfg) { mutableStateOf(cfg.getOrDefault("hudStyle", "classic")) }
+    var hudStyle by remember(cfg) { mutableStateOf(cfg.getOrDefault("hudStyle", "fusion")) }
     val gameHub = hudStyle == "gamehub"
     val gameNative = hudStyle == "gamenative"
     val fusion = hudStyle == "fusion"
     val rich = gameHub || gameNative || fusion   // opacity + FPS graph + GPU model + color/outline
     // Fusion size mode (also live-cycled by tapping the Fusion HUD in-game).
     val fusionSizes = listOf("full", "tiles", "pill", "minimal", "mega")
-    var fusionSize by remember(cfg) { mutableStateOf(cfg.getOrDefault("hudSize", "full")) }
+    var fusionSize by remember(cfg) { mutableStateOf(cfg.getOrDefault("hudSize", "pill")) }
     // Chips the selected Fusion size actually renders (single source of truth in FusionSize).
     val fusionChips = com.winlator.star.widget.fusionhud.FusionSize.from(fusionSize).supportedChips()
-    val gpuModelDefault = if (cfg.getOrDefault("hudStyle", "classic") == "fusion") "1" else "0"
-    val clockDefault = if (cfg.getOrDefault("hudStyle", "classic") == "fusion") "1" else "0"
+    val gpuModelDefault = if (cfg.getOrDefault("hudStyle", "fusion") == "fusion") "1" else "0"
+    val clockDefault = if (cfg.getOrDefault("hudStyle", "fusion") == "fusion") "1" else "0"
     var showFPS by remember(cfg) { mutableStateOf(b("showFPS", "showFPS", "1")) }
     var showGraph by remember(cfg) { mutableStateOf(b("showFPSGraph", "showFPSGraph", "0")) }
     var showCPU by remember(cfg) { mutableStateOf(b("showCPUUsage", "showCPULoad", "1")) }

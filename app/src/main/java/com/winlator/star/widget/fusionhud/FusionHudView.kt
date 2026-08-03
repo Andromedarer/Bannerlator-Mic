@@ -193,7 +193,7 @@ class FusionHudView(
         if (configString.isNullOrEmpty()) return
         val cfg = KeyValueSet(configString)
 
-        size = FusionSize.from(cfg.get("hudSize", "full"))
+        size = FusionSize.from(cfg.get("hudSize", "pill"))
         showFPS = cfg.get("showFPS", "1") == "1"
         showEngine = cfg.get("showEngine", "1") == "1"
         showGpuModel = cfg.get("showGpuModel", "1") == "1"

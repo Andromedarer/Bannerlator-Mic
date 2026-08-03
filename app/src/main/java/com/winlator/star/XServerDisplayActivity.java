@@ -1094,7 +1094,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             state.setFpsConfig(newConfig);
             runOnUiThread(() -> {
                 String wantStyle = new com.winlator.star.core.KeyValueSet(newConfig)
-                    .get("hudStyle", "classic");
+                    .get("hudStyle", "fusion");
                 String haveStyle = perfHud != null ? "gamehub"
                     : gameNativeHud != null ? "gamenative"
                     : fusionHud != null ? "fusion"
@@ -3415,7 +3415,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             String fpsConfigString = resolvedFPSCounterConfig();
             com.winlator.star.core.KeyValueSet fpsConfig = new com.winlator.star.core.KeyValueSet(fpsConfigString);
             fpsHudHorizontal = fpsConfig.get("hudMode", "vertical").equals("horizontal");
-            String hudStyle = fpsConfig.get("hudStyle", "classic");
+            String hudStyle = fpsConfig.get("hudStyle", "fusion");
 
             String resolvedR = resolvedRenderer();
             String rendererMode = "vulkan".equals(resolvedR) ? "Vulkan"
