@@ -71,6 +71,11 @@ import com.winlator.star.container.ContainerManager
 import com.winlator.star.core.CustomSaveVault
 import com.winlator.star.core.GameSaveBackup
 import com.winlator.star.store.compose.ContainerPickerDialog
+import com.winlator.star.util.InAppFilePicker
+import android.app.Activity
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import com.winlator.star.ui.screens.OutlinedAlertDialog
 import com.winlator.star.ui.theme.WinlatorTheme
 import kotlinx.coroutines.Dispatchers
@@ -535,6 +540,15 @@ private fun CustomSaveTab(modifier: Modifier = Modifier) {
     // Open dialogs: the backup layout picker, and the restore target-container picker.
     var backupFor by remember { mutableStateOf<CustomSaveVault.CustomGameStatus?>(null) }
     var restoreFor by remember { mutableStateOf<CustomSaveVault.CustomGameStatus?>(null) }
+    // Restore-source chooser (latest vault snapshot vs. a browsed file), and a file-restore in
+    // progress: the game + the picked save-zip Uri, awaiting a target container.
+    var restoreChooser by remember { mutableStateOf<CustomSaveVault.CustomGameStatus?>(null) }
+    var fileRestoreFor by remember { mutableStateOf<CustomSaveVault.CustomGameStatus?>(null) }
+    var pickedSaveUri by remember { mutableStateOf<Uri?>(null) }
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val uri = if (result.resultCode == Activity.RESULT_OK) InAppFilePicker.pickedUri(result.data) else null
+        if (uri != null) pickedSaveUri = uri else fileRestoreFor = null
+    }
 
     suspend fun reload() {
         val fresh = withContext(Dispatchers.IO) { CustomSaveVault.listStatuses(context) }
@@ -578,6 +592,23 @@ private fun CustomSaveTab(modifier: Modifier = Modifier) {
         }
     }
 
+    // Restore a browsed save zip (GameHub or Bannerlator) into the chosen container.
+    fun runFileRestore(s: CustomSaveVault.CustomGameStatus, uri: Uri, target: Container) {
+        val key = s.shortcut.file.path
+        busyKeys = busyKeys + key
+        Toast.makeText(context, "Restoring saves into \"${target.name}\"…", Toast.LENGTH_SHORT).show()
+        GameSaveBackup.restore(context, uri, target) { r ->
+            Toast.makeText(
+                context,
+                if (r.ok) "Restored ${r.filesWritten} files to \"${target.name}\""
+                else "Restore failed: ${r.error ?: "unknown error"}",
+                Toast.LENGTH_LONG,
+            ).show()
+            busyKeys = busyKeys - key
+            scope.launch { reload() }
+        }
+    }
+
     Column(modifier = modifier.fillMaxWidth()) {
         when {
             loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -596,7 +627,7 @@ private fun CustomSaveTab(modifier: Modifier = Modifier) {
                         status = s,
                         busy = s.shortcut.file.path in busyKeys,
                         onBackup = { backupFor = s },
-                        onRestore = { restoreFor = s },
+                        onRestore = { restoreChooser = s },
                     )
                 }
             }
@@ -655,6 +686,64 @@ private fun CustomSaveTab(modifier: Modifier = Modifier) {
             onSelected = { chosen ->
                 restoreFor = null
                 runRestore(s, chosen)
+            },
+        )
+    }
+
+    // Restore-source chooser: latest vault snapshot (if any) or a save file the user browses to.
+    restoreChooser?.let { s ->
+        OutlinedAlertDialog(
+            onDismissRequest = { restoreChooser = null },
+            title = { Text("Restore saves") },
+            text = {
+                Column {
+                    if (s.hasBackup) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { restoreChooser = null; restoreFor = s }
+                                .padding(vertical = 8.dp),
+                        ) {
+                            Text("Restore latest backup", color = MaterialTheme.colorScheme.primary)
+                            Text("Backed up ${relTime(s.lastBackupMillis)}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                restoreChooser = null
+                                fileRestoreFor = s
+                                filePicker.launch(InAppFilePicker.buildIntent(context, InAppFilePicker.SAVE, "Select a save .zip"))
+                            }
+                            .padding(vertical = 8.dp),
+                    ) {
+                        Text("Restore from a file…", color = MaterialTheme.colorScheme.primary)
+                        Text("Browse for a GameHub or Bannerlator save .zip", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { restoreChooser = null }) { Text("Cancel") } },
+        )
+    }
+
+    // File restore: once a save zip is picked, choose the container to restore it into, then restore.
+    val fr = fileRestoreFor
+    val fu = pickedSaveUri
+    if (fr != null && fu != null) {
+        val containers by produceState<List<Container>>(emptyList(), fr) {
+            value = withContext(Dispatchers.IO) {
+                try { ContainerManager(context).getContainers() } catch (_: Throwable) { emptyList() }
+            }
+        }
+        ContainerPickerDialog(
+            gameName = fr.name,
+            containers = containers,
+            onDismiss = { fileRestoreFor = null; pickedSaveUri = null },
+            onSelected = { chosen ->
+                fileRestoreFor = null; pickedSaveUri = null
+                runFileRestore(fr, fu, chosen)
             },
         )
     }
@@ -739,8 +828,9 @@ private fun CustomSaveRow(
         } else {
             Column(horizontalAlignment = Alignment.End) {
                 TextButton(onClick = onBackup) { Text("Back up") }
-                // Restore needs an existing snapshot — disabled with a clear reason otherwise.
-                TextButton(onClick = onRestore, enabled = status.hasBackup) { Text("Restore") }
+                // Restore is always available: latest vault snapshot if present, else browse for a
+                // GameHub/Bannerlator save file (the chooser decides).
+                TextButton(onClick = onRestore) { Text("Restore") }
             }
         }
     }
