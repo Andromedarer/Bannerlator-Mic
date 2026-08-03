@@ -50,7 +50,7 @@ public class Container {
      * overlay jumped size on the first metric toggle).
      */
     public static final int DEFAULT_HUD_SCALE = 100;
-    public static final String DEFAULT_FPS_COUNTER_CONFIG = "hudStyle=fusion,hudMode=horizontal,showFPS=1,showCPULoad=1,showGPULoad=1,showRAM=1,showRenderer=1,showBatteryTemp=1,hudScale=" + DEFAULT_HUD_SCALE + ",hudSize=pill,showVram=1,showLow001=1,fpsDecimal=1,hudLocked=0,showPerCore=1,showSwap=1,showNet=1,showResolution=1,showProton=1,showWrapper=1,showDxVer=1,showSession=1";
+    public static final String DEFAULT_FPS_COUNTER_CONFIG = "hudStyle=fusion,hudEnabled=1,hudMode=horizontal,showFPS=1,showCPULoad=1,showGPULoad=1,showRAM=1,showRenderer=1,showBatteryTemp=1,hudScale=" + DEFAULT_HUD_SCALE + ",hudSize=pill,showVram=1,showLow001=1,fpsDecimal=1,hudLocked=0,showPerCore=1,showSwap=1,showNet=1,showResolution=1,showProton=1,showWrapper=1,showDxVer=1,showSession=1";
     public static final String DEFAULT_WINCOMPONENTS = "direct3d=1,directsound=0,directmusic=0,directshow=0,directplay=0,xaudio=0,vcrun2010=1";
     public static final String FALLBACK_WINCOMPONENTS = "direct3d=1,directsound=1,directmusic=1,directshow=1,directplay=1,xaudio=1,vcrun2010=1";
     public static final String DEFAULT_DRIVES = "F:"+Environment.getExternalStorageDirectory().getAbsolutePath()+"D:"+Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);

@@ -1,6 +1,7 @@
 package com.winlator.star.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -74,11 +75,13 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -229,6 +232,15 @@ fun XServerDrawer() {
                 }
             }
         }
+
+        // Accent seam between the tab rail and its content — mirrors the HUD's "Accent" outline
+        // (full-height cyan), matching the prototype's rail/drawer divider.
+        Box(
+            modifier = Modifier
+                .width(1.5.dp)
+                .fillMaxHeight()
+                .background(accent)
+        )
 
         Column(
             modifier = Modifier
@@ -1848,13 +1860,10 @@ private fun HudContent(state: XServerDrawerState) {
 
     SectionHeader("HUD")
 
-    // ── FPS Limiter (standalone host-side cap; output-cap = on-screen fps, independent of frame gen) ──
+    // ── FPS Limiter state (standalone host-side cap; output-cap = on-screen fps, independent of
+    //    frame gen). Declared here; its UI lives in the Performance accordion section below. ──
     val fpsLimiterEnabled by state.fpsLimiterEnabled.collectAsState()
     val initFpsLimit by state.fpsLimit.collectAsState()
-
-    Text("FPS Limiter", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-    Spacer(Modifier.height(4.dp))
-
     var limiterOn by remember(fpsLimiterEnabled) { mutableStateOf(fpsLimiterEnabled) }
     var limitVal by remember(initFpsLimit) { mutableIntStateOf(initFpsLimit) }
     fun applyLimiter() {
@@ -1864,73 +1873,14 @@ private fun HudContent(state: XServerDrawerState) {
         state.onFpsLimitChange?.run()
     }
 
-    ToggleRow("Limit FPS", limiterOn) { limiterOn = it; applyLimiter() }
-    if (limiterOn) {
-        LabeledSlider(
-            "Max FPS", limitVal.toFloat(), 10f..200f,
-            { limitVal = it.roundToInt() }, { applyLimiter() },
-            format = { "${it.roundToInt()}" }
-        )
-        // Quick presets: set the cap in one tap. Shares limitVal with the slider above, so the
-        // slider thumb snaps to the picked value (and the matching chip highlights on any value).
-        Spacer(Modifier.height(6.dp))
-        // Single aligned row of 4, same box style as the Fullscreen/Scaling mode buttons.
-        ModeChipGrid(
-            listOf(30, 60, 90, 120).map { preset ->
-                Triple("$preset", limitVal == preset) { limitVal = preset; applyLimiter() }
-            },
-            perRow = 4
-        )
-        Text(
-            "Caps on-screen FPS. Works with any frame-gen engine or none.",
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-            fontSize = 11.sp,
-            modifier = Modifier.padding(start = 4.dp, top = 2.dp)
-        )
-    }
-
-    // ── Refresh rate: Auto (match FPS / VRR) + manual snap to a supported panel rate ──
+    // ── Refresh rate state: Auto (match FPS / VRR) + manual snap to a supported panel rate.
+    //    Declared here; its UI lives in the Performance accordion section below. ──
     val matchRefreshRate by state.matchRefreshRate.collectAsState()
     val vrrSupported by state.vrrSupported.collectAsState()
     val manualRefreshRate by state.manualRefreshRate.collectAsState()
     val supportedRefreshRates by state.supportedRefreshRates.collectAsState()
     val currentRefreshRate by state.currentRefreshRate.collectAsState()
     var matchRefreshOn by remember(matchRefreshRate) { mutableStateOf(matchRefreshRate) }
-
-    Text("Refresh rate", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-    Spacer(Modifier.height(4.dp))
-
-    // Auto (match FPS) == the existing VRR toggle; behavior unchanged.
-    ToggleRow("Auto (match FPS)", matchRefreshOn && vrrSupported, enabled = vrrSupported) {
-        matchRefreshOn = it
-        state.setMatchRefreshRate(it)
-        state.onMatchRefreshChange?.run()
-    }
-    // Manual rate slider: selectable only when Auto is OFF and the panel can switch rates.
-    if (supportedRefreshRates.isNotEmpty()) {
-        Spacer(Modifier.height(6.dp))
-        RefreshRateSlider(supportedRefreshRates, manualRefreshRate, vrrSupported && !matchRefreshOn, currentRefreshRate) { rate ->
-            state.setManualRefreshRate(rate)
-            state.onManualRefreshChange?.run()
-        }
-    }
-    Text(
-        when {
-            !vrrSupported ->
-                "Unavailable — this display has a single refresh rate, so there's nothing to match."
-            matchRefreshOn ->
-                "Auto is on — the display follows your FPS."
-            manualRefreshRate > 0 ->
-                "Display locked to ${manualRefreshRate} Hz."
-            else ->
-                "Pick a rate to lock the display, or turn Auto on to follow your FPS."
-        },
-        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-        fontSize = 11.sp,
-        modifier = Modifier.padding(start = 4.dp, top = 2.dp)
-    )
-
-    HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
 
     fun parseConfig(s: String): Map<String, String> {
         if (s.isEmpty()) return emptyMap()
@@ -1953,6 +1903,10 @@ private fun HudContent(state: XServerDrawerState) {
     // once and drift from what's actually on screen.
     // Orientation is flipped by tapping the HUD in-game; preserve it on write-back.
     val hudMode = remember(cfg) { cfg.getOrDefault("hudMode", "vertical") }
+
+    // Master HUD on/off. When off, the activity keeps every overlay style GONE even while a game
+    // window is bound (see XServerDisplayActivity.hudCounterEnabled). The HUD group below hides.
+    var hudEnabled by remember(cfg) { mutableStateOf(b("hudEnabled", "hudEnabled", "1")) }
 
     // 4-way HUD style: classic | gamehub | gamenative | fusion.
     val styles = listOf("classic", "gamehub", "gamenative", "fusion")
@@ -2026,6 +1980,7 @@ private fun HudContent(state: XServerDrawerState) {
     // so the in-game drawer and the pre-launch dialog stay fully interchangeable.
     fun buildConfig(): String = listOf(
         "hudStyle=$hudStyle",
+        "hudEnabled=${i(hudEnabled)}",
         "hudSize=$fusionSize",
         "hudLocked=${i(hudLocked)}",
         "showVram=${i(showVram)}",
@@ -2076,131 +2031,268 @@ private fun HudContent(state: XServerDrawerState) {
 
     fun apply() { state.onFpsConfigApply?.invoke(buildConfig()) }
 
-    HudChipRow("HUD style", listOf("Classic", "GameHub", "GameNative", "Fusion"), styles.indexOf(hudStyle).coerceAtLeast(0)) { hudStyle = styles[it]; apply() }
-    Text(
-        when (hudStyle) {
-            "gamehub" -> "Rich overlay: skins, colored fields, live FPS graph. Style change applies on next launch."
-            "gamenative" -> "GameNative-style overlay: compact pill or stacked list with live graphs. Style change applies on next launch."
-            "fusion" -> "Fusion overlay: one color-coded look in 5 sizes with percentile lows, VRAM + a Mega everything-view. Tap the HUD to cycle size."
-            else -> "Classic Bannerlator overlay."
-        },
-        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), fontSize = 11.sp,
-        modifier = Modifier.padding(start = 4.dp, top = 2.dp, bottom = 4.dp)
-    )
-    if (fusion) {
-        HudChipRow("Size", listOf("Full", "Tiles", "Pill", "Minimal", "Mega"), fusionSizes.indexOf(fusionSize).coerceAtLeast(0)) { fusionSize = fusionSizes[it]; apply() }
-    }
+    // ═══ Master toggle: hides every HUD group below when off (matches the approved prototype). ═══
+    ToggleRow("Show HUD", hudEnabled) { hudEnabled = it; apply() }
 
-    HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
-
-    LabeledSlider("HUD Scale", scaleValue, 50f..150f, { scaleValue = it }, { apply() }, format = { "${it.toInt()}%" })
-    if (rich) LabeledSlider("HUD Opacity", opacityValue, 0f..100f, { opacityValue = it }, { apply() }, format = { "${it.toInt()}%" })
-    else LabeledSlider("HUD Transparency", transValue, 0f..50f, { transValue = it }, { apply() }, format = { "${it.toInt()}" })
-
-    HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
-
-    // Compact multi-select metric chips (filled = on) in a wrap layout, replacing the
-    // stacked Switch rows so ~13 metrics fit in a few rows. Each chip toggles the same
-    // config key and live-applies, exactly like the old ToggleRows.
-    Text("Metrics", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
-    Spacer(Modifier.height(4.dp))
-    // Build the currently-VISIBLE chips first (respecting per-style gating), then chunk into an
-    // aligned 3-wide grid — so hidden chips never leave holes. Each stays an independent toggle.
-    // For Fusion, show only the chips the SELECTED SIZE draws (FusionSize.supportedChips() — the same
-    // single source of truth the view uses). Other styles keep their existing gating. Hiding a chip is
-    // UI-only; buildConfig() still emits every key (strip-invariant), so toggles keep their state.
-    fun show(label: String, styleOk: Boolean): Boolean = if (fusion) label in fusionChips else styleOk
-    val metricChips = buildList<Triple<String, Boolean, () -> Unit>> {
-        if (show("FPS", true)) add(Triple("FPS", showFPS) { showFPS = !showFPS; apply() })
-        if (show("FPS graph", rich)) add(Triple("FPS graph", showGraph) { showGraph = !showGraph; apply() })
-        if (show("CPU", true)) add(Triple("CPU", showCPU) { showCPU = !showCPU; apply() })
-        if (!fusion && gameNative) add(Triple("CPU graph", showCpuGraph) { showCpuGraph = !showCpuGraph; apply() })
-        if (show("GPU", true)) add(Triple("GPU", showGPU) { showGPU = !showGPU; apply() })
-        if (!fusion && gameNative) add(Triple("GPU graph", showGpuGraph) { showGpuGraph = !showGpuGraph; apply() })
-        if (show("VRAM", false)) add(Triple("VRAM", showVram) { showVram = !showVram; apply() })
-        if (show("RAM", true)) add(Triple("RAM", showRAM) { showRAM = !showRAM; apply() })
-        if (show("Power", true)) add(Triple("Power", showPower) { showPower = !showPower; apply() })
-        if (show("Temp", true)) add(Triple("Temp", showTemp) { showTemp = !showTemp; apply() })
-        if (show("GPU temp", gameNative)) add(Triple("GPU temp", showGpuTemp) { showGpuTemp = !showGpuTemp; apply() })
-        if (show("Battery", gameNative)) add(Triple("Battery", showBattery) { showBattery = !showBattery; apply() })
-        if (!fusion && gameNative) add(Triple("Runtime", showRuntime) { showRuntime = !showRuntime; apply() })
-        if (show("0.01% low", false)) add(Triple("0.01% low", showLow001) { showLow001 = !showLow001; apply() })
-        if (show("FPS .1", false)) add(Triple("FPS .1", fpsDecimal) { fpsDecimal = !fpsDecimal; apply() })
-        // Fusion Mega-only metrics
-        if (show("Per-core", false)) add(Triple("Per-core", showPerCore) { showPerCore = !showPerCore; apply() })
-        if (show("Swap", false)) add(Triple("Swap", showSwap) { showSwap = !showSwap; apply() })
-        if (show("Network", false)) add(Triple("Network", showNet) { showNet = !showNet; apply() })
-        if (show("Resolution", false)) add(Triple("Resolution", showResolution) { showResolution = !showResolution; apply() })
-        if (show("Proton", false)) add(Triple("Proton", showProton) { showProton = !showProton; apply() })
-        if (show("Wrapper", false)) add(Triple("Wrapper", showWrapper) { showWrapper = !showWrapper; apply() })
-        if (show("DX ver", false)) add(Triple("DX ver", showDxVer) { showDxVer = !showDxVer; apply() })
-        if (show("Session", false)) add(Triple("Session", showSession) { showSession = !showSession; apply() })
-        // Clock: gamenative's own chip, and every Fusion size (subtle corner readout)
-        if (show("Clock", gameNative)) add(Triple("Clock", showClock) { showClock = !showClock; apply() })
-        if (show("Engine", true)) add(Triple("Engine", showEngine) { showEngine = !showEngine; apply() })
-        if (show("GPU model", rich)) add(Triple("GPU model", showGpuModel) { showGpuModel = !showGpuModel; apply() })
-        if (!fusion && gameHub) add(Triple("Dual battery", dualBattery) { dualBattery = !dualBattery; apply() })
-        // Global appearance control, shown for every style/size.
-        add(Triple("Lock in place", hudLocked) { hudLocked = !hudLocked; apply() })
-    }
-    ModeChipGrid(metricChips, perRow = 3)
-
-    // ── Temperature display ── only worth showing when a temperature is actually on screen.
-    if (showTemp || ((gameNative || fusion) && (showGpuTemp || showBattery))) {
-        HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
-        HudChipRow("Temp unit", listOf("°C", "°F"), if (tempUnitF) 1 else 0) {
-            tempUnitF = it == 1; apply()
+    // ── Performance group: always shown. The limiter + refresh live here regardless of the HUD. ──
+    HudGroupLabel("Performance")
+    CollapsibleSection("Frame rate & refresh", lead = "always on", initiallyExpanded = true) {
+        Text("FPS Limiter", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+        Spacer(Modifier.height(4.dp))
+        ToggleRow("Limit FPS", limiterOn) { limiterOn = it; applyLimiter() }
+        if (limiterOn) {
+            LabeledSlider(
+                "Max FPS", limitVal.toFloat(), 10f..200f,
+                { limitVal = it.roundToInt() }, { applyLimiter() },
+                format = { "${it.roundToInt()}" }
+            )
+            // Quick presets: set the cap in one tap. Shares limitVal with the slider above, so the
+            // slider thumb snaps to the picked value (and the matching chip highlights on any value).
+            Spacer(Modifier.height(6.dp))
+            ModeChipGrid(
+                listOf(30, 60, 90, 120).map { preset ->
+                    Triple("$preset", limitVal == preset) { limitVal = preset; applyLimiter() }
+                },
+                perRow = 4
+            )
+            Text(
+                "Caps on-screen FPS. Works with any frame-gen engine or none.",
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                fontSize = 11.sp,
+                modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+            )
         }
-        val bandMode = if (!tempBands) 0 else if (tempAuto) 1 else 2
-        HudChipRow("Danger colors", listOf("Off", "Auto", "Manual"), bandMode) {
-            tempBands = it != 0
-            tempAuto = it != 2
-            apply()
+
+        Spacer(Modifier.height(14.dp))
+        Text("Refresh rate", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+        Spacer(Modifier.height(4.dp))
+        // Auto (match FPS) == the existing VRR toggle; behavior unchanged.
+        ToggleRow("Auto (match FPS)", matchRefreshOn && vrrSupported, enabled = vrrSupported) {
+            matchRefreshOn = it
+            state.setMatchRefreshRate(it)
+            state.onMatchRefreshChange?.run()
+        }
+        // Manual rate slider: selectable only when Auto is OFF and the panel can switch rates.
+        if (supportedRefreshRates.isNotEmpty()) {
+            Spacer(Modifier.height(6.dp))
+            RefreshRateSlider(supportedRefreshRates, manualRefreshRate, vrrSupported && !matchRefreshOn, currentRefreshRate) { rate ->
+                state.setManualRefreshRate(rate)
+                state.onManualRefreshChange?.run()
+            }
         }
         Text(
-            when (bandMode) {
-                0 -> "Temperatures use their normal color."
-                1 -> "Thresholds read from your device's own thermal trip points, falling back to safe defaults."
-                else -> "Set the red point per sensor; amber sits just below it."
+            when {
+                !vrrSupported ->
+                    "Unavailable — this display has a single refresh rate, so there's nothing to match."
+                matchRefreshOn ->
+                    "Auto is on — the display follows your FPS."
+                manualRefreshRate > 0 ->
+                    "Display locked to ${manualRefreshRate} Hz."
+                else ->
+                    "Pick a rate to lock the display, or turn Auto on to follow your FPS."
             },
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), fontSize = 11.sp,
-            modifier = Modifier.padding(start = 4.dp, top = 2.dp, bottom = 4.dp)
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+            fontSize = 11.sp,
+            modifier = Modifier.padding(start = 4.dp, top = 2.dp)
         )
-        if (bandMode == 2) {
-            // Only the red point is exposed; amber is derived. Nobody knows their preferred amber
-            // in the abstract, and three sliders beat six. Values are always °C.
-            LabeledSlider("CPU red at", tempRedCpu, 50f..110f, { tempRedCpu = it }, { apply() }, format = { "${it.toInt()}°C" })
-            if ((gameNative || fusion) && showGpuTemp)
-                LabeledSlider("GPU red at", tempRedGpu, 50f..110f, { tempRedGpu = it }, { apply() }, format = { "${it.toInt()}°C" })
-            LabeledSlider("Battery red at", tempRedBat, 35f..60f, { tempRedBat = it }, { apply() }, format = { "${it.toInt()}°C" })
+    }
+
+    // ── HUD group: hidden entirely when the master toggle is off. ──
+    if (hudEnabled) {
+        HudGroupLabel("HUD")
+
+        CollapsibleSection("Style & Size") {
+            HudChipRow("HUD style", listOf("Classic", "GameHub", "GameNative", "Fusion"), styles.indexOf(hudStyle).coerceAtLeast(0)) { hudStyle = styles[it]; apply() }
+            Text(
+                when (hudStyle) {
+                    "gamehub" -> "Rich overlay: skins, colored fields, live FPS graph. Style change applies on next launch."
+                    "gamenative" -> "GameNative-style overlay: compact pill or stacked list with live graphs. Style change applies on next launch."
+                    "fusion" -> "Fusion overlay: one color-coded look in 5 sizes with percentile lows, VRAM + a Mega everything-view. Tap the HUD to cycle size."
+                    else -> "Classic Bannerlator overlay."
+                },
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), fontSize = 11.sp,
+                modifier = Modifier.padding(start = 4.dp, top = 2.dp, bottom = 4.dp)
+            )
+            if (fusion) {
+                HudChipRow("Size", listOf("Full", "Tiles", "Pill", "Minimal", "Mega"), fusionSizes.indexOf(fusionSize).coerceAtLeast(0)) { fusionSize = fusionSizes[it]; apply() }
+            }
+        }
+
+        // Build the currently-VISIBLE chips first (respecting per-style gating), then chunk into an
+        // aligned 3-wide grid — so hidden chips never leave holes. Each stays an independent toggle.
+        // For Fusion, show only the chips the SELECTED SIZE draws (FusionSize.supportedChips() — the same
+        // single source of truth the view uses). Other styles keep their existing gating. Hiding a chip is
+        // UI-only; buildConfig() still emits every key (strip-invariant), so toggles keep their state.
+        fun show(label: String, styleOk: Boolean): Boolean = if (fusion) label in fusionChips else styleOk
+        val metricChips = buildList<Triple<String, Boolean, () -> Unit>> {
+            if (show("FPS", true)) add(Triple("FPS", showFPS) { showFPS = !showFPS; apply() })
+            if (show("FPS graph", rich)) add(Triple("FPS graph", showGraph) { showGraph = !showGraph; apply() })
+            if (show("CPU", true)) add(Triple("CPU", showCPU) { showCPU = !showCPU; apply() })
+            if (!fusion && gameNative) add(Triple("CPU graph", showCpuGraph) { showCpuGraph = !showCpuGraph; apply() })
+            if (show("GPU", true)) add(Triple("GPU", showGPU) { showGPU = !showGPU; apply() })
+            if (!fusion && gameNative) add(Triple("GPU graph", showGpuGraph) { showGpuGraph = !showGpuGraph; apply() })
+            if (show("VRAM", false)) add(Triple("VRAM", showVram) { showVram = !showVram; apply() })
+            if (show("RAM", true)) add(Triple("RAM", showRAM) { showRAM = !showRAM; apply() })
+            if (show("Power", true)) add(Triple("Power", showPower) { showPower = !showPower; apply() })
+            if (show("Temp", true)) add(Triple("Temp", showTemp) { showTemp = !showTemp; apply() })
+            if (show("GPU temp", gameNative)) add(Triple("GPU temp", showGpuTemp) { showGpuTemp = !showGpuTemp; apply() })
+            if (show("Battery", gameNative)) add(Triple("Battery", showBattery) { showBattery = !showBattery; apply() })
+            if (!fusion && gameNative) add(Triple("Runtime", showRuntime) { showRuntime = !showRuntime; apply() })
+            if (show("0.01% low", false)) add(Triple("0.01% low", showLow001) { showLow001 = !showLow001; apply() })
+            if (show("FPS .1", false)) add(Triple("FPS .1", fpsDecimal) { fpsDecimal = !fpsDecimal; apply() })
+            // Fusion Mega-only metrics
+            if (show("Per-core", false)) add(Triple("Per-core", showPerCore) { showPerCore = !showPerCore; apply() })
+            if (show("Swap", false)) add(Triple("Swap", showSwap) { showSwap = !showSwap; apply() })
+            if (show("Network", false)) add(Triple("Network", showNet) { showNet = !showNet; apply() })
+            if (show("Resolution", false)) add(Triple("Resolution", showResolution) { showResolution = !showResolution; apply() })
+            if (show("Proton", false)) add(Triple("Proton", showProton) { showProton = !showProton; apply() })
+            if (show("Wrapper", false)) add(Triple("Wrapper", showWrapper) { showWrapper = !showWrapper; apply() })
+            if (show("DX ver", false)) add(Triple("DX ver", showDxVer) { showDxVer = !showDxVer; apply() })
+            if (show("Session", false)) add(Triple("Session", showSession) { showSession = !showSession; apply() })
+            // Clock: gamenative's own chip, and every Fusion size (subtle corner readout)
+            if (show("Clock", gameNative)) add(Triple("Clock", showClock) { showClock = !showClock; apply() })
+            if (show("Engine", true)) add(Triple("Engine", showEngine) { showEngine = !showEngine; apply() })
+            if (show("GPU model", rich)) add(Triple("GPU model", showGpuModel) { showGpuModel = !showGpuModel; apply() })
+            if (!fusion && gameHub) add(Triple("Dual battery", dualBattery) { dualBattery = !dualBattery; apply() })
+            // Global appearance control, shown for every style/size.
+            add(Triple("Lock in place", hudLocked) { hudLocked = !hudLocked; apply() })
+        }
+
+        CollapsibleSection("Metrics", lead = "${metricChips.count { it.second }} on") {
+            ModeChipGrid(metricChips, perRow = 3)
+        }
+
+        CollapsibleSection("Appearance") {
+            LabeledSlider("HUD Scale", scaleValue, 50f..150f, { scaleValue = it }, { apply() }, format = { "${it.toInt()}%" })
+            if (rich) LabeledSlider("HUD Opacity", opacityValue, 0f..100f, { opacityValue = it }, { apply() }, format = { "${it.toInt()}%" })
+            else LabeledSlider("HUD Transparency", transValue, 0f..50f, { transValue = it }, { apply() }, format = { "${it.toInt()}" })
+            if (gameHub) {
+                HudChipRow("HUD skin", listOf("Classic", "Neon", "Mono"), skins.indexOf(skin)) { skin = skins[it]; apply() }
+                HudChipRow("HUD color", listOf("Soft", "Mid", "Vivid"), colors.indexOf(color)) { color = colors[it]; apply() }
+                LabeledSlider("HUD outline", outlineValue, 0f..100f, { outlineValue = it }, { apply() }, format = { "${it.toInt()}" })
+                HudChipRow("Outline color", listOf("Gray", "Accent"), if (outlineAccent) 1 else 0) { outlineAccent = it == 1; apply() }
+            } else if (gameNative || fusion) {
+                HudChipRow("HUD color", listOf("Soft", "Mid", "Vivid"), colors.indexOf(color)) { color = colors[it]; apply() }
+                LabeledSlider("HUD outline", outlineValue, 0f..100f, { outlineValue = it }, { apply() }, format = { "${it.toInt()}" })
+                HudChipRow("Outline color", listOf("Gray", "Accent"), if (outlineAccent) 1 else 0) { outlineAccent = it == 1; apply() }
+            }
+        }
+
+        // ── Temperature display ── only worth a section when a temperature is actually on screen.
+        if (showTemp || ((gameNative || fusion) && (showGpuTemp || showBattery))) {
+            CollapsibleSection("Alerts & Temp") {
+                HudChipRow("Temp unit", listOf("°C", "°F"), if (tempUnitF) 1 else 0) {
+                    tempUnitF = it == 1; apply()
+                }
+                val bandMode = if (!tempBands) 0 else if (tempAuto) 1 else 2
+                HudChipRow("Danger colors", listOf("Off", "Auto", "Manual"), bandMode) {
+                    tempBands = it != 0
+                    tempAuto = it != 2
+                    apply()
+                }
+                Text(
+                    when (bandMode) {
+                        0 -> "Temperatures use their normal color."
+                        1 -> "Thresholds read from your device's own thermal trip points, falling back to safe defaults."
+                        else -> "Set the red point per sensor; amber sits just below it."
+                    },
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), fontSize = 11.sp,
+                    modifier = Modifier.padding(start = 4.dp, top = 2.dp, bottom = 4.dp)
+                )
+                if (bandMode == 2) {
+                    // Only the red point is exposed; amber is derived. Nobody knows their preferred amber
+                    // in the abstract, and three sliders beat six. Values are always °C.
+                    LabeledSlider("CPU red at", tempRedCpu, 50f..110f, { tempRedCpu = it }, { apply() }, format = { "${it.toInt()}°C" })
+                    if ((gameNative || fusion) && showGpuTemp)
+                        LabeledSlider("GPU red at", tempRedGpu, 50f..110f, { tempRedGpu = it }, { apply() }, format = { "${it.toInt()}°C" })
+                    LabeledSlider("Battery red at", tempRedBat, 35f..60f, { tempRedBat = it }, { apply() }, format = { "${it.toInt()}°C" })
+                }
+            }
+        }
+
+        CollapsibleSection("Tools") {
+            // General HUD action (every style): export a device sensor report silently to Downloads, so
+            // an owner can report which sysfs nodes their SoC actually exposes for any metric showing "—".
+            val diagContext = LocalContext.current
+            OutlinedButton(onClick = { exportHudDiagnostics(diagContext) }, modifier = Modifier.fillMaxWidth()) {
+                Text("Export HUD diagnostics")
+            }
+            Text(
+                "Saves a sensor report (CPU/GPU/temp/VRAM…) straight to your Downloads folder.",
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), fontSize = 11.sp,
+                modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+            )
         }
     }
+}
 
-    if (gameHub) {
-        HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
-        HudChipRow("HUD skin", listOf("Classic", "Neon", "Mono"), skins.indexOf(skin)) { skin = skins[it]; apply() }
-        HudChipRow("HUD color", listOf("Soft", "Mid", "Vivid"), colors.indexOf(color)) { color = colors[it]; apply() }
-        LabeledSlider("HUD outline", outlineValue, 0f..100f, { outlineValue = it }, { apply() }, format = { "${it.toInt()}" })
-        HudChipRow("Outline color", listOf("Gray", "Accent"), if (outlineAccent) 1 else 0) { outlineAccent = it == 1; apply() }
-    } else if (gameNative || fusion) {
-        HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
-        HudChipRow("HUD color", listOf("Soft", "Mid", "Vivid"), colors.indexOf(color)) { color = colors[it]; apply() }
-        LabeledSlider("HUD outline", outlineValue, 0f..100f, { outlineValue = it }, { apply() }, format = { "${it.toInt()}" })
-        HudChipRow("Outline color", listOf("Gray", "Accent"), if (outlineAccent) 1 else 0) { outlineAccent = it == 1; apply() }
-    }
+// ───── Accordion group label (uppercase, letter-spaced, dim) ─────
 
-    // General HUD action (every style): export a device sensor report silently to Downloads, so
-    // an owner can report which sysfs nodes their SoC actually exposes for any metric showing "—".
-    HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
-    val diagContext = LocalContext.current
-    OutlinedButton(onClick = { exportHudDiagnostics(diagContext) }, modifier = Modifier.fillMaxWidth()) {
-        Text("Export HUD diagnostics")
-    }
+@Composable
+private fun HudGroupLabel(text: String) {
     Text(
-        "Saves a sensor report (CPU/GPU/temp/VRAM…) straight to your Downloads folder.",
-        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), fontSize = 11.sp,
-        modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+        text.uppercase(),
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Bold,
+        letterSpacing = 1.5.sp,
+        modifier = Modifier.padding(start = 2.dp, top = 18.dp, bottom = 2.dp)
     )
+}
+
+// ───── Collapsible accordion section: top divider + clickable header (title + optional pill lead +
+//       rotating chevron) + AnimatedVisibility body. Expanded state is remembered per-title. ─────
+
+@Composable
+private fun CollapsibleSection(
+    title: String,
+    lead: String? = null,
+    initiallyExpanded: Boolean = false,
+    content: @Composable () -> Unit
+) {
+    var expanded by rememberSaveable(title) { mutableStateOf(initiallyExpanded) }
+    val chevronRotation by animateFloatAsState(if (expanded) 90f else 0f, label = "hudSectionChevron")
+    Column {
+        HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(top = 6.dp))
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .padding(vertical = 14.dp, horizontal = 2.dp)
+        ) {
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            if (lead != null) {
+                Spacer(Modifier.width(8.dp))
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                        .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(20.dp))
+                        .padding(horizontal = 9.dp, vertical = 2.dp)
+                ) {
+                    Text(lead, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                }
+            }
+            Spacer(Modifier.weight(1f))
+            // Text chevron rotated 0°→90° on expand (no icon dependency); ">" points right when closed.
+            Text(
+                "›",
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                modifier = Modifier.rotate(chevronRotation)
+            )
+        }
+        AnimatedVisibility(expanded) {
+            Column(modifier = Modifier.padding(bottom = 6.dp)) { content() }
+        }
+    }
 }
 
 // ───── 3-stop chip selector (skin / color / outline) ─────
