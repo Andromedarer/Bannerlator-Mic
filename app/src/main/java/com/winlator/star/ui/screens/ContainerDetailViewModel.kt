@@ -65,6 +65,13 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     // Entered via the EDIT_DEFAULTS_ID sentinel (see init); container stays null (it's a template).
     var defaultsMode by mutableStateOf(false); private set
 
+    // Which architecture's defaults profile the form is editing WHILE in defaultsMode. Defaults are
+    // stored per-arch (box64/wowbox64/FEXCore/emulator are arch-coupled), so in defaults mode an
+    // ARCHITECTURE selector replaces the Wine Version dropdown and drives the form's arch via
+    // applyArch(). arm64ec is the modern default. Meaningless outside defaultsMode (create/edit derive
+    // the arch from the real/selected wine version instead). See setDefaultsArch().
+    var defaultsArch by mutableStateOf(NewContainerDefaults.ARCH_ARM64EC); private set
+
     companion object {
         // Sentinel containerId that opens the editor in "New Container Defaults" mode. Negative like
         // the create sentinel (-1) so getContainerById is never consulted; distinct so init can tell
@@ -397,9 +404,9 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
      * exists only so loadContainerData() can read the user's saved preferences back through the exact
      * same Container getters a real container uses (round-tripped via loadData, extras included).
      */
-    private fun buildTemplateContainer(): Container? {
+    private fun buildTemplateContainer(arch: String): Container? {
         if (container != null) return null
-        val json = NewContainerDefaults.load(context) ?: return null
+        val json = NewContainerDefaults.load(context, arch) ?: return null
         return runCatching { Container(0, manager).apply { loadData(JSONObject(json)) } }.getOrNull()
     }
 
@@ -410,7 +417,18 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         // Container.DEFAULT_*. When no profile exists `template == null` so `seed == c == null` and
         // this is byte-identical to today's hardcoded-defaults create flow. Identity/per-container/
         // device fields (name, drives, registry-backed mouseWarp/runAsAdmin) stay on the REAL `c`.
-        val template = buildTemplateContainer()
+        // Resolve the architecture to seed for BEFORE building the template so create-mode pulls the
+        // ARCH-MATCHED profile (box64/wowbox64/emulator/FEXCore are arch-coupled). Defaults mode uses
+        // the explicit selector; a real new container derives it from its default wine version (the
+        // same isArm64EC refreshWineDependent would compute below); edit mode's template is unused.
+        val seedArch: String = when {
+            defaultsMode -> defaultsArch
+            c == null -> if (WineInfo.fromIdentifier(
+                    context, contentsManager, wineVersionEntries.firstOrNull() ?: ""
+                ).isArm64EC()) NewContainerDefaults.ARCH_ARM64EC else NewContainerDefaults.ARCH_X86_64
+            else -> NewContainerDefaults.ARCH_X86_64
+        }
+        val template = buildTemplateContainer(seedArch)
         val seed = c ?: template
         val prefs = PreferenceManager.getDefaultSharedPreferences(context)
 
@@ -431,11 +449,14 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             customHeight = parts.getOrElse(1) { "" }
         }
 
-        // Wine version
-        selectedWineVersion = seed?.wineVersion ?: wineVersionEntries.firstOrNull() ?: ""
-        refreshWineDependent(selectedWineVersion)
+        // Wine version — NEVER templated (profiles omit it): a new container always picks its wine
+        // fresh from the REAL container / first entry, so a saved profile can't force one. In defaults
+        // mode the arch comes from the explicit selector (applyArch), not from any wine version.
+        selectedWineVersion = c?.wineVersion ?: wineVersionEntries.firstOrNull() ?: ""
+        if (defaultsMode) applyArch(defaultsArch == NewContainerDefaults.ARCH_ARM64EC)
+        else refreshWineDependent(selectedWineVersion)
 
-        // Box64 version: refreshWineDependent() resets to entry 0 (correct on
+        // Box64 version: applyArch()/refreshWineDependent() reset to entry 0 (correct on
         // Wine-version change since the list differs for arm64ec). On initial
         // load we override that to honor the seed's saved selection.
         seed?.box64Version
@@ -610,7 +631,15 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun refreshWineDependent(wineVersion: String) {
         val wineInfo = WineInfo.fromIdentifier(context, contentsManager, wineVersion)
-        isArm64EC    = wineInfo.isArm64EC()
+        applyArch(wineInfo.isArm64EC())
+    }
+
+    // The arch-dependent slice of the form: emulator gate + the box64/wowbox64 version list & its
+    // reset. Split out of refreshWineDependent so defaults mode can drive the arch straight from its
+    // ARCHITECTURE selector (applyArch(defaultsArch == ARM64EC)) with no wine version involved, while
+    // create/edit still derive it from the wine version via refreshWineDependent.
+    private fun applyArch(arm64ec: Boolean) {
+        isArm64EC    = arm64ec
         emulatorEnabled = isArm64EC
 
         // Box64 versions
@@ -661,6 +690,18 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     fun onWineVersionChanged(version: String) {
         selectedWineVersion = version
         refreshWineDependent(version)
+    }
+
+    /**
+     * Defaults mode: switch which architecture's profile the form is editing. Reloads the WHOLE form
+     * from THAT arch's saved profile (or its built-in defaults if unset) — loadContainerData rebuilds
+     * the template from NewContainerDefaults.load(context, defaultsArch) and applies applyArch() — so
+     * flipping the selector shows exactly the other arch's saved defaults.
+     */
+    fun setDefaultsArch(arch: String) {
+        if (arch == defaultsArch) return
+        defaultsArch = arch
+        loadContainerData()
     }
 
     fun refreshWineVersions() {
@@ -1037,11 +1078,14 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             template.putExtra("runAsAdminDefault", if (runAsAdmin) "1" else "0")
 
             val profile = template.getData()
-            // name + drives are per-container (never templatable); id is meaningless for a template.
+            // name + drives are per-container and wineVersion is never templated (a new container
+            // picks its wine fresh); id is meaningless for a template. Strip all four. The profile is
+            // saved under the arch currently being edited (defaultsArch).
             profile.remove("id")
             profile.remove("name")
             profile.remove("drives")
-            NewContainerDefaults.save(context, profile.toString())
+            profile.remove("wineVersion")
+            NewContainerDefaults.save(context, defaultsArch, profile.toString())
             AppUtils.showToast(context, R.string.new_container_defaults_saved)
         } catch (e: Exception) {
             AppUtils.showToast(context, R.string.new_container_defaults_save_failed)
@@ -1049,9 +1093,9 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         onDone()
     }
 
-    /** Reset mode ✓: forget the saved profile and reload the form to the built-in app defaults. */
+    /** Reset mode ✓: forget the CURRENT arch's profile and reload the form to its built-in defaults. */
     fun resetDefaults() {
-        NewContainerDefaults.clear(context)
+        NewContainerDefaults.clear(context, defaultsArch)
         loadContainerData()   // template is now null → every field falls back to Container.DEFAULT_*
         AppUtils.showToast(context, R.string.reset_to_app_defaults)
     }

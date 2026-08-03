@@ -540,19 +540,37 @@ private fun TopLevelFields(
             Spacer(Modifier.height(8.dp))
         }
 
-        // Wine Version + download gear
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            LabeledDropdown(
-                label = stringResource(R.string.wine_version),
-                options = viewModel.wineVersionEntries,
-                selectedOption = viewModel.selectedWineVersion,
-                enabled = viewModel.wineVersionEnabled,
-                onSelect = { viewModel.onWineVersionChanged(it) },
-                modifier = Modifier.weight(1f)
+        // Wine Version (create/edit) OR Architecture selector (defaults mode). Defaults are stored
+        // per-arch (box64/wowbox64/emulator/FEXCore are arch-coupled) and wine is NEVER templated, so
+        // in defaults mode the arch selector replaces the wine version dropdown + its download gear and
+        // drives the arch-dependent fields via setDefaultsArch (which reloads that arch's profile).
+        if (viewModel.defaultsMode) {
+            val archValues = listOf(
+                com.winlator.star.core.NewContainerDefaults.ARCH_X86_64,
+                com.winlator.star.core.NewContainerDefaults.ARCH_ARM64EC,
             )
-            ContentInstallGear(onDownloadFile = onShowWineDownloadSheet)
-            IconButton(onClick = { helpRes = R.string.help_wine_version }) {
-                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+            val archLabels = listOf("x86-64", "arm64ec")
+            val archIdx = archValues.indexOf(viewModel.defaultsArch).coerceAtLeast(0)
+            LabeledDropdown(
+                label = "Architecture",
+                options = archLabels,
+                selectedOption = archLabels[archIdx],
+                onSelect = { viewModel.setDefaultsArch(archValues[archLabels.indexOf(it)]) }
+            )
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                LabeledDropdown(
+                    label = stringResource(R.string.wine_version),
+                    options = viewModel.wineVersionEntries,
+                    selectedOption = viewModel.selectedWineVersion,
+                    enabled = viewModel.wineVersionEnabled,
+                    onSelect = { viewModel.onWineVersionChanged(it) },
+                    modifier = Modifier.weight(1f)
+                )
+                ContentInstallGear(onDownloadFile = onShowWineDownloadSheet)
+                IconButton(onClick = { helpRes = R.string.help_wine_version }) {
+                    Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                }
             }
         }
         Spacer(Modifier.height(8.dp))
