@@ -1185,16 +1185,25 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                     if (containers.isEmpty()) {
                         Text("No containers found.", color = OnSurfaceVariant)
                     } else {
-                        containers.forEachIndexed { index, c ->
-                            MenuOptionCard(
-                                title = c.name,
-                                icon = Icons.Default.Folder,
-                            ) {
-                                showImportContainerPicker = false
-                                pendingImportContainerIndex = index
-                                // Ask HOW to add before asking WHAT to add: one exe, or a whole
-                                // folder of game folders.
-                                showImportMethodPicker = true
+                        // Scroll the container list so it can't be clipped when there are many
+                        // containers and vertical space is tight (landscape). "Pick via system…"
+                        // stays pinned below the scroll area so it's always reachable.
+                        Column(
+                            modifier = Modifier
+                                .heightIn(max = 420.dp)
+                                .verticalScroll(rememberScrollState()),
+                        ) {
+                            containers.forEachIndexed { index, c ->
+                                MenuOptionCard(
+                                    title = c.name,
+                                    icon = Icons.Default.Folder,
+                                ) {
+                                    showImportContainerPicker = false
+                                    pendingImportContainerIndex = index
+                                    // Ask HOW to add before asking WHAT to add: one exe, or a whole
+                                    // folder of game folders.
+                                    showImportMethodPicker = true
+                                }
                             }
                         }
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
@@ -1439,7 +1448,12 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
             onDismissRequest = { cloneTarget = null },
             title = { Text("Select container") },
             text = {
-                Column {
+                // Scroll so a long container list isn't clipped in landscape / on short screens.
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
                     containers.forEach { c ->
                         Text(
                             text = c.name,
