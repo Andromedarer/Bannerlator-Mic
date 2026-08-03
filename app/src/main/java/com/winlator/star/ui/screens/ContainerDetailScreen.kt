@@ -555,7 +555,7 @@ private fun TopLevelFields(
                 label = "Architecture",
                 options = archLabels,
                 selectedOption = archLabels[archIdx],
-                onSelect = { viewModel.setDefaultsArch(archValues[archLabels.indexOf(it)]) }
+                onSelect = { viewModel.selectDefaultsArch(archValues[archLabels.indexOf(it)]) }
             )
         } else {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {

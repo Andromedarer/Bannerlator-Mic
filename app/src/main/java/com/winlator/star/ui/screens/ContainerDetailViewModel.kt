@@ -698,7 +698,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
      * the template from NewContainerDefaults.load(context, defaultsArch) and applies applyArch() — so
      * flipping the selector shows exactly the other arch's saved defaults.
      */
-    fun setDefaultsArch(arch: String) {
+    fun selectDefaultsArch(arch: String) {
         if (arch == defaultsArch) return
         defaultsArch = arch
         loadContainerData()
