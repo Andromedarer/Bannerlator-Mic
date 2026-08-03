@@ -176,6 +176,12 @@ fun ContainersScreen(
     // clear would steamroll it on first navigation to this screen.
     LaunchedEffect(Unit) {
         topBarActions.value = {
+            // New Container Defaults — opens the SAME container editor in "defaults mode" (the ✓ saves
+            // the field state as the seed for future new containers) via the EDIT_DEFAULTS_ID sentinel.
+            // Containers screen only. Sits next to the import action.
+            IconButton(onClick = { onNavigateToDetail(ContainerDetailViewModel.EDIT_DEFAULTS_ID) }) {
+                Icon(Icons.Filled.Settings, contentDescription = "New container defaults", tint = androidx.compose.ui.graphics.Color.White)
+            }
             IconButton(onClick = { showImportPicker = true }) {
                 Icon(Icons.Filled.FileDownload, contentDescription = "Import container", tint = androidx.compose.ui.graphics.Color.White)
             }

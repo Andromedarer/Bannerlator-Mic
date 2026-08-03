@@ -382,7 +382,12 @@ private fun AppShell(
     val screenTitle = when {
         currentRoute.startsWith("container_detail") -> {
             val id = backstackEntry?.arguments?.getInt("id") ?: -1
-            if (id > 0) context.getString(R.string.edit_container) else context.getString(R.string.new_container)
+            when {
+                id == com.winlator.star.ui.screens.ContainerDetailViewModel.EDIT_DEFAULTS_ID ->
+                    context.getString(R.string.new_container_defaults)
+                id > 0 -> context.getString(R.string.edit_container)
+                else -> context.getString(R.string.new_container)
+            }
         }
         else -> Screen.drawerItems.firstOrNull { it.route == currentRoute }?.label ?: "Winlator"
     }

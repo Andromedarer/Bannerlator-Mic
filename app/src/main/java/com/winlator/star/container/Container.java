@@ -964,7 +964,18 @@ public class Container {
 
     public void saveData() {
         try {
-            JSONObject data = new JSONObject();
+            FileUtils.writeString(getConfigFile(), getData().toString());
+        }
+        catch (JSONException e) {}
+    }
+
+    // The full config JSON exactly as saveData() persists it (extraData included). Split out of
+    // saveData() so callers that need the serialized form WITHOUT writing to disk — e.g. the
+    // "New Container Defaults" profile, which templates a transient container and strips the
+    // per-container name/drives — can reuse the identical field set instead of drifting a copy.
+    public JSONObject getData() throws JSONException {
+        JSONObject data = new JSONObject();
+        {
             data.put("id", id);
             data.put("name", name);
             data.put("screenSize", screenSize);
@@ -1005,9 +1016,8 @@ public class Container {
             // Default is TRUE, so only persist the off state (absent token => correct colours).
             if (!rendererSfCompatMode) data.put("rendererSfCompatMode", false);
             if (!WineInfo.isMainWineVersion(wineVersion)) data.put("wineVersion", wineVersion);
-            FileUtils.writeString(getConfigFile(), data.toString());
         }
-        catch (JSONException e) {}
+        return data;
     }
 
 

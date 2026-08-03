@@ -115,13 +115,12 @@ fun ContainerDetailScreen(
     val cpuListWoW64Ref     = remember { mutableStateOf<CPUListView?>(null)      }
     val colorPickerViewRef  = remember { mutableStateOf<ColorPickerView?>(null)  }
 
-    val tabTitles = listOf(
-        "GENERAL",
-        "ENVIROMENT",
-        "DRIVES",
-        "WIN COMPONENTS",
-        "ADVANCED"
-    )
+    // DRIVES is per-container (letters map to real paths), so it's dropped in "New Container Defaults"
+    // mode. Content is dispatched by TITLE below (not raw index) so removing a tab never misaligns.
+    val tabTitles = if (viewModel.defaultsMode)
+        listOf("GENERAL", "ENVIROMENT", "WIN COMPONENTS", "ADVANCED")
+    else
+        listOf("GENERAL", "ENVIROMENT", "DRIVES", "WIN COMPONENTS", "ADVANCED")
 
     Scaffold(
         floatingActionButton = {
@@ -180,6 +179,17 @@ fun ContainerDetailScreen(
                 }
             }
 
+            // Defaults mode: forget the saved profile and reload the form to the built-in app defaults.
+            // Always visible (not collapsed on scroll like the glossary) so it's reachable from the top.
+            if (viewModel.defaultsMode) {
+                TextButton(
+                    onClick = { viewModel.resetDefaults() },
+                    modifier = Modifier.padding(start = 8.dp)
+                ) {
+                    Text("↺  " + stringResource(R.string.reset_to_app_defaults))
+                }
+            }
+
             // ── Tabs ───────────────────────────────────────────────────────────
             ScrollableTabRow(
                 selectedTabIndex = viewModel.selectedTab,
@@ -202,8 +212,11 @@ fun ContainerDetailScreen(
                 .weight(1f)
                 .verticalScroll(contentScroll)
                 .padding(horizontal = 12.dp, vertical = 8.dp)) {
-                when (viewModel.selectedTab) {
-                    0 -> Column {
+                // Dispatch by tab TITLE (not index): DRIVES is absent in defaults mode, so a raw
+                // index would misalign the remaining tabs. getOrNull guards a stale selectedTab if the
+                // tab list shrinks under it (e.g. defaultsMode flips on after the first composition).
+                when (tabTitles.getOrNull(viewModel.selectedTab) ?: "GENERAL") {
+                    "GENERAL" -> Column {
                         TopLevelFields(
                             viewModel = viewModel,
                             onShowGfxConfig = { showGraphicsDriverConfig = true },
@@ -215,10 +228,10 @@ fun ContainerDetailScreen(
                         )
                         WineConfigTab(viewModel, colorPickerViewRef)
                     }
-                    1 -> EnvVarsTab(viewModel)
-                    2 -> DrivesTab(viewModel)
-                    3 -> WinComponentsTab(viewModel)
-                    4 -> Column {
+                    "ENVIROMENT" -> EnvVarsTab(viewModel)
+                    "DRIVES" -> DrivesTab(viewModel)
+                    "WIN COMPONENTS" -> WinComponentsTab(viewModel)
+                    "ADVANCED" -> Column {
                         AdvancedTab(
                             viewModel,
                             cpuListViewRef,
@@ -491,14 +504,16 @@ private fun TopLevelFields(
 
     Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
 
-        // Name
-        OutlinedTextField(
-            value = viewModel.containerName,
-            onValueChange = { viewModel.containerName = it },
-            label = { Text(stringResource(R.string.name)) },
-            modifier = Modifier.fillMaxWidth()
-        )
-        Spacer(Modifier.height(8.dp))
+        // Name — per-container identity, hidden in "New Container Defaults" mode (not templatable).
+        if (!viewModel.defaultsMode) {
+            OutlinedTextField(
+                value = viewModel.containerName,
+                onValueChange = { viewModel.containerName = it },
+                label = { Text(stringResource(R.string.name)) },
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(8.dp))
+        }
 
         // Screen Size
         LabeledDropdown(
@@ -525,19 +540,37 @@ private fun TopLevelFields(
             Spacer(Modifier.height(8.dp))
         }
 
-        // Wine Version + download gear
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            LabeledDropdown(
-                label = stringResource(R.string.wine_version),
-                options = viewModel.wineVersionEntries,
-                selectedOption = viewModel.selectedWineVersion,
-                enabled = viewModel.wineVersionEnabled,
-                onSelect = { viewModel.onWineVersionChanged(it) },
-                modifier = Modifier.weight(1f)
+        // Wine Version (create/edit) OR Architecture selector (defaults mode). Defaults are stored
+        // per-arch (box64/wowbox64/emulator/FEXCore are arch-coupled) and wine is NEVER templated, so
+        // in defaults mode the arch selector replaces the wine version dropdown + its download gear and
+        // drives the arch-dependent fields via setDefaultsArch (which reloads that arch's profile).
+        if (viewModel.defaultsMode) {
+            val archValues = listOf(
+                com.winlator.star.core.NewContainerDefaults.ARCH_X86_64,
+                com.winlator.star.core.NewContainerDefaults.ARCH_ARM64EC,
             )
-            ContentInstallGear(onDownloadFile = onShowWineDownloadSheet)
-            IconButton(onClick = { helpRes = R.string.help_wine_version }) {
-                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+            val archLabels = listOf("x86-64", "arm64ec")
+            val archIdx = archValues.indexOf(viewModel.defaultsArch).coerceAtLeast(0)
+            LabeledDropdown(
+                label = "Architecture",
+                options = archLabels,
+                selectedOption = archLabels[archIdx],
+                onSelect = { viewModel.selectDefaultsArch(archValues[archLabels.indexOf(it)]) }
+            )
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                LabeledDropdown(
+                    label = stringResource(R.string.wine_version),
+                    options = viewModel.wineVersionEntries,
+                    selectedOption = viewModel.selectedWineVersion,
+                    enabled = viewModel.wineVersionEnabled,
+                    onSelect = { viewModel.onWineVersionChanged(it) },
+                    modifier = Modifier.weight(1f)
+                )
+                ContentInstallGear(onDownloadFile = onShowWineDownloadSheet)
+                IconButton(onClick = { helpRes = R.string.help_wine_version }) {
+                    Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                }
             }
         }
         Spacer(Modifier.height(8.dp))
