@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-08-03T10-38-21-e22b52",
+    "created": "2026-08-03T10:38:21.743Z",
+    "reporter": "Silvaryll",
+    "device": "poco x8pro",
+    "gpu": "Mali-G720 MC8",
+    "game": "Persona 5 royal",
+    "symptom": "Crashes / closes to home",
+    "logs": 0
+  },
+  {
     "id": "2026-08-03T02-17-44-9f1241",
     "created": "2026-08-03T02:17:44.411Z",
     "reporter": "Serg_str",
