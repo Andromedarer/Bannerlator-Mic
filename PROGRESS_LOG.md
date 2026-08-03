@@ -1,5 +1,15 @@
 # Star-Compose — Progress Log
 
+## 2026-08-03 — 💾✅ **Save restore usability — 2 fixes MERGED to main** (post-2.9.3, unreleased)
+
+> Both merged to `main` via `--no-ff` (revert tags `checkpoint-pre-*-20260803`), device-verified via staged APKs (host↔device sha256 matched). Independent siblings touching different files → merged in sequence with zero conflict/erasure (verified both present on main after the second merge).
+>
+> **1. Custom-game Restore always available** (merge `b46aef82`, tag `checkpoint-pre-custom-restore-20260803`, `SteamSaveManagerActivity.kt` Custom tab). The Restore button was `enabled = status.hasBackup` and only read Bannerlator's own vault — so a GameHub→Bannerlator user with no local backup was locked out. Now always enabled → a chooser: **"Restore latest backup"** (shown when a vault snapshot exists) or **"Restore from a file…"** → browse the **in-app file picker** (`InAppFilePicker.SAVE`) for a GameHub/Bannerlator save `.zip` → pick a target container → `GameSaveBackup.restore`. Reuses the primitive that already accepts any `Uri`.
+>
+> **2. Game ⋮ menu "Restore saves" → in-app picker** (merge `71088358`, tag `checkpoint-pre-shortcut-restore-20260803`, `ShortcutsScreen.kt`). It launched the SYSTEM SAF picker (`GetContent("application/zip")`); switched to the built-in in-app file picker (`InAppFilePicker.SAVE`), consistent with the container menu + backup flow. **No format prompt** (user chose this): `GameSaveBackup.restore` **auto-detects the layout** — `remapForRestore` translates GameHub `steamuser` ↔ our `xuser` — so a GameHub or Bannerlator save both restore through the one path. (Backup must ask Winlator-vs-GameHub because it picks an OUTPUT format; restore doesn't.)
+>
+> Branches `feat/custom-save-restore-from-file` + `feat/shortcut-restore-inapp-picker` deleted (local+remote) after verifying both merged. ⚠️ Shared-working-dir hazard continued (concurrent session + mali-report bot moved `main`'s tip) — my merges were confirmed intact on `origin/main` each time; verify `git branch --show-current` before every commit/push here.
+
 ## 2026-08-02 (PM) — 📖✅ **Container glossary + env-var editor fixes — MERGED to main** (post-2.9.3, unreleased)
 
 > A run of newcomer-help + editor-quality work, all merged to `main` after the 2.9.3 cut (trunk only — 2.9.3 stays the public build until the next release). Each landed via `--no-ff` with a `checkpoint-pre-*-20260802` revert tag.
