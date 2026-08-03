@@ -278,7 +278,11 @@ fun ContainersScreen(
                 if (backups.isEmpty()) {
                     Text("No exported containers found in Downloads/Winlator/Backups/Containers/.")
                 } else {
-                    androidx.compose.foundation.layout.Column {
+                    androidx.compose.foundation.layout.Column(
+                        modifier = Modifier
+                            .heightIn(max = 420.dp)
+                            .verticalScroll(rememberScrollState()),
+                    ) {
                         backups.forEach { dir ->
                             TextButton(
                                 onClick = {

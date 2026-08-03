@@ -10,6 +10,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +21,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -877,7 +880,11 @@ fun FileManagerScreen(
             onDismissRequest = { showContainerPicker = false },
             title = { Text("Choose container") },
             text = {
-                Column {
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
                     containers.forEach { container ->
                         Text(
                             text = container.name,
@@ -904,7 +911,11 @@ fun FileManagerScreen(
             onDismissRequest = { pendingRun = null },
             title = { Text("Run in which container?") },
             text = {
-                Column {
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
                     containers.forEach { container ->
                         Text(
                             text = container.name,
@@ -932,7 +943,11 @@ fun FileManagerScreen(
             onDismissRequest = { pendingAddShortcut = null },
             title = { Text("Add to which container?") },
             text = {
-                Column {
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
                     containers.forEach { container ->
                         Text(
                             text = container.name,
