@@ -577,9 +577,11 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     }
 
     // ── Save Backup / Restore (custom-import games only) ──────────────────────────────────────────
-    // SAF picker for a backup .zip; on pick we hold the uri and show a target-container picker.
-    val restoreSaveLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) restoreZipUri = uri
+    // In-app file picker for a backup .zip; on pick we hold the uri and show a target-container picker.
+    // (GameSaveBackup.restore auto-detects the layout — GameHub steamuser <-> our xuser — so a GameHub
+    // or Bannerlator save both restore through this one path; no format prompt needed.)
+    val restoreSaveLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK) InAppFilePicker.pickedUri(result.data)?.let { restoreZipUri = it }
     }
 
     // "Back up saves" → first pick the archive layout (Winlator vs GameHub), mirroring the Containers
@@ -611,7 +613,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     // Restore: pick a .zip (SAF) → then choose the target container (ContainerPickerDialog) → restore.
     fun startSaveRestore(shortcut: Shortcut) {
         restoreForName = shortcut.name
-        restoreSaveLauncher.launch("application/zip")
+        restoreSaveLauncher.launch(InAppFilePicker.buildIntent(context, InAppFilePicker.SAVE, "Select a save .zip"))
     }
     // Built-in in-app file picker (primary).
     val importFileInAppLauncher = rememberLauncherForActivityResult(
