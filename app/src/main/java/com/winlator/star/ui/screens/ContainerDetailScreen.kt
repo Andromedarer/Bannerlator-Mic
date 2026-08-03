@@ -2829,21 +2829,21 @@ internal fun FpsCounterConfigDialog(
     val hudMode = remember { cfg.getOrDefault("hudMode", "vertical") }
     // 4-way HUD style: classic | gamehub | gamenative | fusion.
     val styles = listOf("classic", "gamehub", "gamenative", "fusion")
-    var hudStyle by remember { mutableStateOf(cfg.getOrDefault("hudStyle", "classic")) }
+    var hudStyle by remember { mutableStateOf(cfg.getOrDefault("hudStyle", "fusion")) }
     val gameHub = hudStyle == "gamehub"
     val gameNative = hudStyle == "gamenative"
     val fusion = hudStyle == "fusion"
     val rich = gameHub || gameNative || fusion   // opacity + FPS graph + GPU model + color/outline
     // Fusion size mode (Full/Tiles/Pill/Minimal/Mega); also live-cycled by tapping the Fusion HUD in-game.
     val fusionSizes = listOf("full", "tiles", "pill", "minimal", "mega")
-    var fusionSize by remember { mutableStateOf(cfg.getOrDefault("hudSize", "full")) }
+    var fusionSize by remember { mutableStateOf(cfg.getOrDefault("hudSize", "pill")) }
     // The chips this Fusion size actually renders (single source of truth in FusionSize) — used below to
     // show only the relevant metric chips for the selected view/size.
     val fusionChips = com.winlator.star.widget.fusionhud.FusionSize.from(fusionSize).supportedChips()
     // GPU model defaults ON for Fusion (its spec), OFF for the others — matching each view's default.
-    val gpuModelDefault = if (cfg.getOrDefault("hudStyle", "classic") == "fusion") "1" else "0"
+    val gpuModelDefault = if (cfg.getOrDefault("hudStyle", "fusion") == "fusion") "1" else "0"
     // Clock defaults ON for Fusion (subtle corner readout), OFF elsewhere.
-    val clockDefault = if (cfg.getOrDefault("hudStyle", "classic") == "fusion") "1" else "0"
+    val clockDefault = if (cfg.getOrDefault("hudStyle", "fusion") == "fusion") "1" else "0"
 
     // Unified metric toggles (emitted under both classic + gamehub key names so either HUD honors them).
     var showFPS      by remember { mutableStateOf(bool("showFPS", "showFPS", "1")) }
