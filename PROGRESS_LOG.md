@@ -1,5 +1,17 @@
 # Star-Compose — Progress Log
 
+## 2026-08-03 — ⚙️✅ **User-configurable New Container Defaults (per-arch) — MERGED to main** (post-2.9.3, unreleased)
+
+> Merge `bf0329b2` (--no-ff of `feat/new-container-defaults`; revert tag `checkpoint-pre-container-defaults-20260803` → `1a1cc57f`). Device-verified. Built with android-app-engineer (2 rework rounds + 2 fix rounds).
+>
+> Every new container was seeded from hardcoded `Container.DEFAULT_*`. Now a **Settings cog on the Games/Containers top bar** opens the SAME container editor in a "New Container Defaults" mode (sentinel `EDIT_DEFAULTS_ID=-2` on the existing `container_detail?id=` route). The ✓ saves the form as a **profile** in a dedicated SharedPreferences file (`new_container_defaults` — survives in-place updates, isolated from export/import) instead of creating a container; new containers then seed their preference fields from it.
+>
+> **Per-architecture** (user's call): because emulator/box64/wowbox64/FEXCore are arch-coupled (`refreshWineDependent`→`applyArch` swaps the box64↔wowbox64 lists on `isArm64EC`), the Wine Version field is replaced in defaults mode by an **Architecture selector (x86-64 / arm64ec)** and TWO independent profiles are stored (`profile_x86_64` / `profile_arm64ec`). A new container seeds from the profile matching its wine's arch. **Wine Version + Name + Drives are never templated** (stripped from the profile; wine read from the real container only). "Reset to app defaults" clears the current arch's profile.
+>
+> Seeding: `loadContainerData` reads preference fields from `seed = container ?: buildTemplateContainer(arch)`; identity/device fields stay on the real container. `Container.getData()` split out of `saveData()` (no disk write) so the profile reuses the exact serialized field set. **No profile for an arch → seed null → byte-identical built-in defaults.** Edit mode + export/import unaffected.
+>
+> Two bugs caught on-device + fixed before merge: (1) JVM signature clash — the `defaultsArch` property's auto `setDefaultsArch` collided with an explicit `fun setDefaultsArch` → renamed to `selectDefaultsArch`. (2) **arch-flip re-seed** (user-diagnosed): create screen starts on x86-64 wine → seeds x86_64 profile; switching to an arm64ec Proton ran `applyArch` (reset box64 version) but never re-seeded from the arm64ec profile → box64 `0.3.7` / FEX stale `2508`, presets only "right" because both profiles shared them. Fixed by factoring arch-dependent seeding into `seedArchDependentDefaults(arch)` called at load AND from `onWineVersionChanged` on an arch flip in create mode (one code path, can't drift).
+
 ## 2026-08-03 — 💾✅ **Save restore usability — 2 fixes MERGED to main** (post-2.9.3, unreleased)
 
 > Both merged to `main` via `--no-ff` (revert tags `checkpoint-pre-*-20260803`), device-verified via staged APKs (host↔device sha256 matched). Independent siblings touching different files → merged in sequence with zero conflict/erasure (verified both present on main after the second merge).
