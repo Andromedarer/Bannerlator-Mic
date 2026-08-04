@@ -1,5 +1,13 @@
 # Star-Compose — Progress Log
 
+## 2026-08-04 — 🎨 **pre13 (vc66 — FROZEN) — landscape refinements: slim header, toolbar New Folder, outlined rail** (branch `feat/container-landscape-ui`)
+
+> Three UI refinements on top of pre12. versionCode frozen 66; versionName `-pre13`. Accent uses the real theme token (not hardcoded orange).
+> - **(1) Slim top header (~40%, every screen):** `ui/AppTopBar.kt` reworked from the fixed-height Material3 `TopAppBar` (~64dp) to a compact 40dp custom Row (glyph/nav + title + actions), reclaiming the extra vertical band on every app screen that uses it.
+> - **(2) New Folder → toolbar (File Manager):** removed the bottom bar that held "New Folder"; the file list reclaims that strip. Added a compact outlined "＋ New Folder" button in the top toolbar next to the grid/list toggle (hidden in pick mode / favourites view), firing the same `showNewFolderDialog`.
+> - **(3) Outlined rail selection items:** `CollapsibleRail` gained an additive `outlinedItems: Boolean = false` — each item becomes a rounded outlined button, selected = accent border + accent-dim fill. **Scope: File Manager locations only** (`outlinedItems = true`); the container tabs and Save Manager rails keep their flat rows (5 stacked outlined tabs read too heavy — the coordinator's judgment call). Additive + default false, so the other rails are unaffected.
+> ⏭️ CI (pre13) → stage pubg. ⚠️ Compose-only, not device-run.
+
 ## 2026-08-04 — 🧭 **pre12 (vc66 — FROZEN) — landscape pass COMPLETE (File Manager + Save Manager rails)** (branch `feat/container-landscape-ui`)
 
 > Finishes the landscape UI pass — parts 3 & 4 on top of pre11 (parts 1,2,5, CI-green `905d843a`). versionCode stays frozen at 66; versionName `-pre12`.

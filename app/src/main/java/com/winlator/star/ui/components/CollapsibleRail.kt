@@ -3,6 +3,7 @@ package com.winlator.star.ui.components
 import android.content.res.Configuration
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -122,6 +123,10 @@ fun CollapsibleRail(
     modifier: Modifier = Modifier,
     links: List<RailLink> = emptyList(),
     footer: (@Composable ColumnScope.() -> Unit)? = null,
+    // When true each item gets a rounded outlined-button look (the selected one takes the accent
+    // border + accent-dim fill), matching the File Manager's "New Folder" button. Off by default so
+    // the container/save rails keep their lighter flat rows (5 stacked outlined tabs read too heavy).
+    outlinedItems: Boolean = false,
 ) {
     val collapsed = state.collapsed
     val width by animateDpAsState(if (collapsed) 58.dp else 190.dp, label = "railWidth")
@@ -213,14 +218,32 @@ fun CollapsibleRail(
             }
             section.items.forEach { item ->
                 val active = item.selected
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = if (collapsed) Arrangement.Center else Arrangement.Start,
-                    modifier = Modifier
-                        .fillMaxWidth()
+                // Outlined variant: each item is a rounded outlined button; selected = accent border +
+                // accent-dim fill. Flat variant (default): a simple accent-tinted highlight for selected.
+                val shape = RoundedCornerShape(9.dp)
+                val base = Modifier.fillMaxWidth()
+                val styled = if (outlinedItems) {
+                    base
+                        .padding(horizontal = if (collapsed) 6.dp else 6.dp, vertical = 3.dp)
+                        .clip(shape)
+                        .background(if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.16f) else MaterialTheme.colorScheme.surface.copy(alpha = 0.4f))
+                        .border(
+                            1.dp,
+                            if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+                            shape,
+                        )
+                        .clickable(onClick = item.onClick)
+                        .padding(horizontal = if (collapsed) 0.dp else 11.dp, vertical = 9.dp)
+                } else {
+                    base
                         .clickable(onClick = item.onClick)
                         .background(if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else Color.Transparent)
                         .padding(horizontal = if (collapsed) 0.dp else 13.dp, vertical = 11.dp)
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = if (collapsed) Arrangement.Center else Arrangement.Start,
+                    modifier = styled,
                 ) {
                     Icon(
                         item.icon,

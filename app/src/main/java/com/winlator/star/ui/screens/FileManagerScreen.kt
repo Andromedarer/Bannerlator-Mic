@@ -1080,6 +1080,20 @@ fun FileManagerScreen(
             }
 
             if (!showFavorites) {
+                // New Folder moved off a bottom bar into the toolbar (next to the grid/list toggle),
+                // as a compact outlined button, so the file list reclaims that bottom strip.
+                if (!pickMode) {
+                    OutlinedButton(
+                        onClick = { showNewFolderDialog = true },
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                        modifier = Modifier.height(32.dp),
+                    ) {
+                        Icon(Icons.Filled.CreateNewFolder, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(5.dp))
+                        Text("New Folder", color = MaterialTheme.colorScheme.onBackground, fontSize = 12.sp)
+                    }
+                }
                 IconButton(onClick = {
                     gridView = !gridView
                     browsePrefs.edit().putBoolean("fmGridView", gridView).apply()
@@ -1342,7 +1356,7 @@ fun FileManagerScreen(
 
         Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
             if (!pickMode) {
-                CollapsibleRail(state = fmRailState, title = "Files", sections = locationSections)
+                CollapsibleRail(state = fmRailState, title = "Files", sections = locationSections, outlinedItems = true)
             }
             Box(modifier = Modifier.weight(1f).fillMaxSize()) {
         // ── Favorites list OR file list ──
@@ -1521,26 +1535,7 @@ fun FileManagerScreen(
         }
             } // end content Box (beside the rail)
         } // end rail + content Row
-
-        // ── FAB area ── (creation is gated off in pick mode)
-        if (!pickMode) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surfaceContainer)
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                OutlinedButton(
-                    onClick = { showNewFolderDialog = true },
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                ) {
-                    Icon(Icons.Filled.CreateNewFolder, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(6.dp))
-                    Text("New Folder", color = MaterialTheme.colorScheme.onBackground)
-                }
-            }
-        }
+        // (New Folder moved into the top toolbar; the bottom bar was removed to reclaim its strip.)
     }
 }
 
