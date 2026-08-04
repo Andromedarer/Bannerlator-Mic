@@ -31,6 +31,24 @@ object SevenZip {
 
     fun isAvailable(context: Context): Boolean = binary(context).canExecute()
 
+    /**
+     * The bundled 7zz is a bionic (NDK) build that dynamically links `libc++_shared.so` — shipped
+     * alongside it in the same native-lib dir. A freshly exec'd child does NOT inherit the app's
+     * linker namespaces, so we point its loader at that dir via LD_LIBRARY_PATH. Also set TMPDIR to a
+     * dir 7-Zip can actually write to.
+     *
+     * (The previous generic-Linux static build failed on-device with SIGSYS/exit 159: it inherited
+     * the app's seccomp-bpf filter and hit a syscall the filter TRAPs. A bionic build integrates with
+     * Android's seccomp — the same reason Termux's p7zip runs under an app.)
+     */
+    private fun newProcess(context: Context, vararg args: String): ProcessBuilder {
+        val libDir = context.applicationInfo.nativeLibraryDir
+        return ProcessBuilder(binary(context).absolutePath, *args).apply {
+            environment()["LD_LIBRARY_PATH"] = libDir
+            environment()["TMPDIR"] = context.cacheDir.absolutePath
+        }
+    }
+
     // Extensions the Unpack action is offered for. A superset of the plain-Extract set:
     // disc images + RAR + split volumes that commons-compress cannot read.
     private val SUPPORTED = listOf(
@@ -128,9 +146,8 @@ object SevenZip {
         val bin = binary(context)
         if (!bin.canExecute()) return false
         return try {
-            val proc = ProcessBuilder(bin.absolutePath, "l", file.absolutePath)
+            val proc = newProcess(context, "l", file.absolutePath)
                 .redirectErrorStream(true)
-                .apply { environment()["TMPDIR"] = context.cacheDir.absolutePath }
                 .start()
             val out = proc.inputStream.bufferedReader().readText()
             val code = proc.waitFor()
@@ -191,9 +208,8 @@ object SevenZip {
         val bin = binary(context)
         if (!bin.canExecute()) return null
         return try {
-            val proc = ProcessBuilder(bin.absolutePath, "l", "-slt", archive.absolutePath)
+            val proc = newProcess(context, "l", "-slt", archive.absolutePath)
                 .redirectErrorStream(true)
-                .apply { environment()["TMPDIR"] = context.cacheDir.absolutePath }
                 .start()
             var type: String? = null
             var pathCount = 0
@@ -225,7 +241,8 @@ object SevenZip {
     /** Outcome of an extraction. [exitCode] is 7-Zip's own code (0 ok, 1 warnings, ≥2 error). */
     data class Result(val exitCode: Int, val stderrTail: String)
 
-    private val PERCENT = Regex("""(\d{1,3})%""")
+    // Matches the "NN%" the instant its '%' byte arrives (digits immediately preceding the percent).
+    private val TRAILING_PCT = Regex("""(\d{1,3})%$""")
 
     /**
      * Extracts [archive] into [destDir] via `7zz x`, streaming progress to [listener].
@@ -245,17 +262,15 @@ object SevenZip {
         listener: Listener,
         onProcess: (Process) -> Unit,
     ): Result {
-        val bin = binary(context)
         destDir.mkdirs()
-        val proc = ProcessBuilder(
-            bin.absolutePath, "x", archive.absolutePath,
+        val proc = newProcess(
+            context, "x", archive.absolutePath,
             "-o${destDir.absolutePath}",
             "-y",        // assume Yes (overwrite) — the screen owns the destination folder
             "-bsp1",     // progress -> stdout so we can parse it
             "-bb1",      // log each processed file
             "-mmt=$mmt",
-        ).apply { environment()["TMPDIR"] = context.cacheDir.absolutePath }
-            .start()
+        ).start()
         onProcess(proc)
 
         // stderr collected on its own thread for the failure tail.
@@ -272,10 +287,12 @@ object SevenZip {
             }
         }.also { it.start() }
 
-        // 7-Zip redraws its progress line with carriage returns and backspaces rather than newlines,
-        // so we can't use readLine(). Accumulate raw bytes into segments split on \r / \n, dropping
-        // backspaces, then decode each segment as UTF-8 (safe: \r \n \b are single bytes in UTF-8).
-        var lastPercent = 0
+        // Device-verified stream shape (7-Zip 24.08, -bsp1 -bb1): the percentage is redrawn IN PLACE
+        // with BACKSPACES, not carriage returns/newlines — e.g. "  0%\b\b\b\b 50%\b\b\b\b100%…". So a
+        // flush-on-newline parser would erase every intermediate percent before it saw it and jump
+        // 0→100. Instead we parse the percentage inline the instant a '%' byte arrives (its digits are
+        // whatever precedes it in the buffer), and use \n-delimited segments only for the "- path"
+        // processed-file lines (-bb1). Backspaces edit the buffer; \r/\n flush it.
         val seg = ByteArrayOutputStream(256)
         val buf = ByteArray(bufferBytes.coerceAtLeast(64 * 1024))
         val input = proc.inputStream
@@ -284,13 +301,22 @@ object SevenZip {
             if (n < 0) break
             for (i in 0 until n) {
                 when (val b = buf[i].toInt()) {
-                    '\r'.code, '\n'.code -> { flushSegment(seg, listener) { lastPercent = it } }
+                    '\r'.code, '\n'.code -> flushSegment(seg, listener)
                     '\b'.code -> { val a = seg.toByteArray(); seg.reset(); if (a.isNotEmpty()) seg.write(a, 0, a.size - 1) }
-                    else -> seg.write(b)
+                    else -> {
+                        seg.write(b)
+                        if (b == '%'.code) {
+                            // Trailing "NN%" just completed — fire it live.
+                            val tail = seg.toByteArray().toString(Charsets.UTF_8)
+                            TRAILING_PCT.find(tail)?.groupValues?.get(1)?.toIntOrNull()?.let {
+                                listener.onProgress(it.coerceIn(0, 100), null)
+                            }
+                        }
+                    }
                 }
             }
         }
-        flushSegment(seg, listener) { lastPercent = it }
+        flushSegment(seg, listener)
 
         val exit = proc.waitFor()
         runCatching { errThread.join(500) }
@@ -299,25 +325,18 @@ object SevenZip {
         return Result(exit, synchronized(stderr) { stderr.toString().trim() })
     }
 
-    private inline fun flushSegment(seg: ByteArrayOutputStream, listener: Listener, onPercent: (Int) -> Unit) {
+    /** A \n/\r-delimited segment: used for the -bb1 "- path" processed-file lines (not percentages). */
+    private fun flushSegment(seg: ByteArrayOutputStream, listener: Listener) {
         if (seg.size() == 0) return
         val text = seg.toByteArray().toString(Charsets.UTF_8)
         seg.reset()
         if (text.isBlank()) return
 
-        // Filename: 7z progress lines look like " 34% 12 - path\to\file"; -bb1 lines like "- path".
         val fileName = when {
             text.contains(" - ") -> text.substringAfterLast(" - ").trim().ifBlank { null }
             text.startsWith("- ") -> text.substring(2).trim().ifBlank { null }
             else -> null
         }
-        if (fileName != null && !text.contains('%')) listener.onFile(fileName)
-
-        val pct = PERCENT.find(text)?.groupValues?.get(1)?.toIntOrNull()
-        if (pct != null) {
-            val clamped = pct.coerceIn(0, 100)
-            onPercent(clamped)
-            listener.onProgress(clamped, fileName)
-        }
+        if (fileName != null) listener.onFile(fileName)
     }
 }

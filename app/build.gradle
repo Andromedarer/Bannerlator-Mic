@@ -65,8 +65,8 @@ android {
     defaultConfig {
         minSdkVersion 26
         targetSdkVersion 28
-        versionCode 60
-        versionName "2.9.5-pre4"
+        versionCode 61
+        versionName "2.9.5-pre5"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
         externalNativeBuild {
@@ -166,6 +166,9 @@ android {
     packagingOptions {
         jniLibs {
             useLegacyPackaging = true
+            // lib7zz.so ships a bundled libc++_shared.so next to it; pickFirst in case the native
+            // build (or another prebuilt) ever emits its own copy, so packaging never fails on a dup.
+            pickFirsts += ['**/libc++_shared.so']
         }
     }
 }
