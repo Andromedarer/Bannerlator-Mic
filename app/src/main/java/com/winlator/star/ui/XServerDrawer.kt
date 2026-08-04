@@ -2299,14 +2299,12 @@ private fun CollapsibleSection(
     }
 }
 
-// ───── 3-stop chip selector (skin / color / outline) ─────
-
-@Composable
-// Live Present Mode selector (Vulkan host renderer only). Reflects the EFFECTIVE mode: while frame
-// generation is multiplying the activity forces Mailbox (effectivePresentMode()), so the Mailbox chip
-// lights up on its own. The chips stay fully interactive during FG, but FIFO/Immediate taps are BLOCKED
-// (Mailbox is required for FG's extra presents) and flash a transient note for ~2s instead of switching
-// — the user's saved preference is left untouched, so the highlight snaps back when FG turns off.
+// ───── Live Present Mode selector (Vulkan host renderer only) ─────
+// Reflects the EFFECTIVE mode: while frame generation is multiplying the activity forces Mailbox
+// (effectivePresentMode()), so the Mailbox chip lights up on its own. The chips stay fully interactive
+// during FG, but FIFO/Immediate taps are BLOCKED (Mailbox is required for FG's extra presents) and flash
+// a transient note for ~2s instead of switching — the user's saved preference is untouched, so the
+// highlight snaps back when FG turns off.
 @Composable
 private fun PresentModeSection(state: XServerDrawerState) {
     val rendererIsVulkan by state.rendererIsVulkan.collectAsState()
@@ -2356,6 +2354,7 @@ private fun PresentModeSection(state: XServerDrawerState) {
     }
 }
 
+// ───── 3-stop chip selector (skin / color / outline) ─────
 @Composable
 private fun HudChipRow(label: String, options: List<String>, selected: Int, onSelect: (Int) -> Unit) {
     val accent = MaterialTheme.colorScheme.primary
