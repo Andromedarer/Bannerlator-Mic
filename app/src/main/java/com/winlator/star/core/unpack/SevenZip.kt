@@ -75,6 +75,99 @@ object SevenZip {
     /** True when [file] is (part of) an InnoSetup repack — see [resolveInnoTarget]. */
     fun isInnoSetup(file: File): Boolean = resolveInnoTarget(file) != null
 
+    /** Which path an InnoSetup target can actually be unpacked by. */
+    enum class InnoRoute {
+        /** 7-Zip can open the installer — offer in-app payload extraction. */
+        SEVENZIP,
+        /** 7-Zip cannot read it (FreeArc etc.) — must be installed by running Setup.exe in a container. */
+        CONTAINER_ONLY,
+    }
+
+    data class InnoClassification(
+        val installer: File,
+        val route: InnoRoute,
+        /** Human compression name from Records.ini, e.g. "FreeArc", when known. */
+        val compression: String?,
+        /** Declared payload size from Records.ini (already human-formatted), when known. */
+        val declaredSize: String?,
+    )
+
+    /**
+     * Decides how an InnoSetup [installer] must be unpacked, BEFORE offering the user a doomed 7-Zip
+     * action. Most modern game repacks (FitGirl/DODI/…) are FreeArc-compressed, which 7-Zip has no
+     * support for, so pointing 7-Zip at their Setup.exe fails with "Cannot open the file as archive".
+     *
+     * Signals, in order:
+     *  1. A sibling `Records.ini` whose `Type=` starts with "Freearc" → CONTAINER_ONLY (authoritative;
+     *     the payload codec the repack's own installer uses). Its `Type` + `Size` are surfaced for UI.
+     *  2. Otherwise a fast pre-flight `7zz l <installer>` — non-zero / "Cannot open" → CONTAINER_ONLY.
+     *
+     * Runs a native exec, so call it off the main thread.
+     */
+    fun classifyInno(context: Context, installer: File): InnoClassification {
+        val records = readRecordsIni(installer.parentFile)
+        val rawType = records?.first
+        val freeArc = rawType?.trim()?.startsWith("freearc", ignoreCase = true) == true
+        val compression = rawType?.let { prettyCompression(it) }
+        val declaredSize = records?.second?.let { prettySize(it) }
+
+        // FreeArc is a certain no for 7-Zip — skip the (doomed) pre-flight. Otherwise let 7-Zip itself
+        // be the authority on whether it can open the installer.
+        val openable = if (freeArc) false else sevenZipCanOpen(context, installer)
+        return InnoClassification(
+            installer = installer,
+            route = if (openable) InnoRoute.SEVENZIP else InnoRoute.CONTAINER_ONLY,
+            compression = compression,
+            declaredSize = declaredSize,
+        )
+    }
+
+    /** Fast "can 7-Zip even open this?" pre-flight via `7zz l`. */
+    fun sevenZipCanOpen(context: Context, file: File): Boolean {
+        val bin = binary(context)
+        if (!bin.canExecute()) return false
+        return try {
+            val proc = ProcessBuilder(bin.absolutePath, "l", file.absolutePath)
+                .redirectErrorStream(true)
+                .apply { environment()["TMPDIR"] = context.cacheDir.absolutePath }
+                .start()
+            val out = proc.inputStream.bufferedReader().readText()
+            val code = proc.waitFor()
+            code == 0 && !out.contains("Cannot open the file as archive", ignoreCase = true)
+        } catch (e: Exception) {
+            Log.e(TAG, "canOpen pre-flight failed for ${file.name}", e)
+            false
+        }
+    }
+
+    /** Reads the first `Type=` and `Size=` from a repack's `Records.ini`, or null if absent. */
+    private fun readRecordsIni(dir: File?): Pair<String?, String?>? {
+        val ini = dir?.listFiles()?.firstOrNull { it.isFile && it.name.equals("Records.ini", ignoreCase = true) }
+            ?: return null
+        var type: String? = null
+        var size: String? = null
+        runCatching {
+            ini.bufferedReader().useLines { lines ->
+                for (line in lines) {
+                    val t = line.trim()
+                    if (type == null && t.startsWith("Type=", ignoreCase = true)) type = t.substringAfter('=').trim()
+                    if (size == null && t.startsWith("Size=", ignoreCase = true)) size = t.substringAfter('=').trim()
+                    if (type != null && size != null) break
+                }
+            }
+        }
+        return type to size
+    }
+
+    private fun prettyCompression(rawType: String): String = when {
+        rawType.startsWith("freearc", ignoreCase = true) -> "FreeArc"
+        else -> rawType.substringBefore('_')
+    }
+
+    /** Records.ini Size is sometimes a raw byte count, sometimes already "81GB" — normalise for display. */
+    private fun prettySize(raw: String): String =
+        raw.toLongOrNull()?.let { StringUtils.formatBytes(it) } ?: raw
+
     /** A friendly default folder name to extract [archive] into — its name minus one extension. */
     fun suggestedTargetName(archive: File): String {
         val name = archive.name

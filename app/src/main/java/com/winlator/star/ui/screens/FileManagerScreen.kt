@@ -1708,7 +1708,9 @@ private fun FileItemRow(
                     val isInno = com.winlator.star.core.unpack.SevenZip.isInnoSetup(file)
                     if (isInno || com.winlator.star.core.unpack.SevenZip.isSupported(file)) {
                         DropdownMenuItem(
-                            text = { Text(if (isInno) "Unpack game payload" else "Unpack Archive…") },
+                            // "Unpack / Install…" for InnoSetup: the screen decides between 7-Zip
+                            // payload extraction and running Setup.exe in a container (FreeArc repacks).
+                            text = { Text(if (isInno) "Unpack / Install…" else "Unpack Archive…") },
                             leadingIcon = { Icon(Icons.Filled.Unarchive, null, tint = MaterialTheme.colorScheme.primary) },
                             onClick = { onDismissMenu(); onUnpack() },
                         )
