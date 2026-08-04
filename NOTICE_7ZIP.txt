@@ -1,0 +1,31 @@
+7-Zip console binary bundled as lib7zz.so
+==========================================
+
+File in this APK:   lib7zz.so  (renamed from the upstream "7zzs" static build)
+Product:            7-Zip 24.08 (2024-08-11)
+Upstream source:    https://github.com/ip7z/7zip/releases/download/24.08/7z2408-linux-arm64.tar.xz
+ABI:                arm64-v8a (aarch64), statically linked ELF (no glibc/bionic dependency)
+Upstream sha256:    8b2683984ea10d5654d6816d9b3287a03f6d6efcd17be23bfa364ea0a5ec60db  (7zzs)
+
+Why this file lives here and is named lib7zz.so
+-----------------------------------------------
+Android extracts native libraries to the app's nativeLibraryDir, one of the few
+locations that permits exec under scoped storage / W^X. Naming the standalone
+7-Zip console binary "lib7zz.so" lets it ride that mechanism, so it can be exec'd
+directly at runtime (File(applicationInfo.nativeLibraryDir, "lib7zz.so")) without
+chmod and without exec-from-filesDir (blocked on Android 10+). The STATIC build
+(7zzs) is used so the aarch64 ELF runs on Android's kernel via raw syscalls,
+needing neither glibc nor bionic shared objects.
+
+It is used by the File Manager "Unpack Archive" feature to extract disc images
+(ISO9660/UDF), RAR (incl. multi-part), 7z, zip and split volumes in userspace,
+because the target device kernel has no iso9660/udf filesystem support and a
+loop-mount is therefore impossible.
+
+License
+-------
+7-Zip is licensed under the GNU LGPL v2.1, with additional restrictions for the
+unRAR code (the unRAR license forbids using the RAR-decompression sources to
+recreate the RAR compression algorithm). The full upstream License.txt from the
+same release is included alongside this notice as License_7zip.txt. Corresponding
+source for 7-Zip is available from the upstream project at https://github.com/ip7z/7zip .

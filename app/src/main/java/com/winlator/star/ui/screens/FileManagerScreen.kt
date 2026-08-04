@@ -1475,6 +1475,12 @@ fun FileManagerScreen(
                                     Toast.makeText(context, "RAR isn't supported yet", Toast.LENGTH_SHORT).show()
                                 } else pendingExtract = file
                             },
+                            onUnpack = {
+                                showMenuFor = null
+                                context.startActivity(
+                                    com.winlator.star.UnpackArchiveActivity.intent(context, file.absolutePath)
+                                )
+                            },
                             isFavorite = isFav,
                             onToggleFavorite = {
                                 val nowFav = FavoritesStore.toggle(context, file.absolutePath)
@@ -1545,6 +1551,7 @@ private fun FileItemRow(
     onDelete: () -> Unit,
     onRename: () -> Unit,
     onExtract: () -> Unit = {},
+    onUnpack: () -> Unit = {},
     isFavorite: Boolean = false,
     onToggleFavorite: () -> Unit = {},
 ) {
@@ -1689,6 +1696,18 @@ private fun FileItemRow(
                             text = { Text("Add to Shortcuts") },
                             leadingIcon = { Icon(Icons.Filled.Add, null, tint = MaterialTheme.colorScheme.primary) },
                             onClick = { onDismissMenu(); onAddToShortcuts() },
+                        )
+                        MenuItemDivider()
+                    }
+                    // "Unpack Archive…" routes to the bundled 7-Zip engine — the only path that
+                    // handles disc images (ISO/UDF), RAR, split volumes and 80 GB+ single files.
+                    // Offered for that whole superset; the plain "Extract" below stays for the
+                    // tar/gz/zst formats the in-app streaming extractor already does well.
+                    if (com.winlator.star.core.unpack.SevenZip.isSupported(file)) {
+                        DropdownMenuItem(
+                            text = { Text("Unpack Archive…") },
+                            leadingIcon = { Icon(Icons.Filled.Unarchive, null, tint = MaterialTheme.colorScheme.primary) },
+                            onClick = { onDismissMenu(); onUnpack() },
                         )
                         MenuItemDivider()
                     }

@@ -1,5 +1,15 @@
 # Star-Compose — Progress Log
 
+## 2026-08-04 — 📦 **File Manager "Unpack Archive" — 7-Zip userspace extractor** (branch `feat/file-manager-iso-unpack`, vc57 `2.9.5-pre1`, UNRELEASED pre-work)
+
+> New File Manager feature to extract disc images and archives the kernel can't loop-mount. Target device has NO iso9660/udf FS support (`/proc/filesystems` = fuse only), so a loop-mount fails "No such device" — extraction is done entirely in userspace by a bundled 7-Zip binary. Real input: an 82 GB UDF hybrid image holding a single 87 GB `Setup-1.bin`, extracted onto an exFAT SD/USB volume under `/storage/<UUID>/`.
+>
+> **Engine:** official 7-Zip 24.08 arm64 STANDALONE binary vendored as `app/src/main/jniLibs/arm64-v8a/lib7zz.so` (the STATIC `7zzs` build → runs on Android's kernel via raw syscalls, no glibc/bionic). Exec'd from `applicationInfo.nativeLibraryDir` (the one exec-able dir under scoped storage; NOT filesDir). `android:extractNativeLibs="true"` added. Attribution: repo-root `NOTICE_7ZIP.txt` + `License_7zip.txt` (LGPL-2.1 + unRAR). Upstream sha256 `8b2683984ea10d5654d6816d9b3287a03f6d6efcd17be23bfa364ea0a5ec60db`.
+>
+> **Files:** `core/unpack/SevenZip.kt` (list `l -slt`, extract `x -bsp1 -bb1 -mmt=N`, \r/\b-aware stdout progress parse), `core/unpack/UnpackModels.kt` (StateFlow `UnpackManager`, PowerMode, ReadBuffer), `core/unpack/UnpackService.kt` (foreground service, ongoing progress+Cancel notification, kills 7zz on cancel), `ui/screens/UnpackArchiveScreen.kt` (source/type/size, dest folder picker via existing `InAppFilePicker.buildDirIntent`, Power SegmentedButton Auto/Max/Manual + honest I/O-bound caption, Read-buffer 256K/1M/4M, %/MB-s/ETA/current-file/Cancel, Done/Error-tail), `UnpackArchiveActivity.kt`. Wired into `FileManagerScreen` ⋮ menu ("Unpack Archive…" for `SevenZip.isSupported`). Manifest: activity + `UnpackService` (dataSync FGS).
+>
+> **Honesty:** power caption states extra cores only help many-file/solid archives, a single huge file won't parallelize. All-Files-Access reused for direct `java.io.File` writes; when off + dest on `/storage`, extraction is gated with a Grant-access button (a native process can't write through SAF, so no fake SAF fallback for 80 GB). ⏭️ CI build → stage pubg APK for device test (verify `lib7zz.so` exec + real image extract).
+
 ## 2026-08-04 — 🎞️✅ **Frame-gen present-mode overhaul — MERGED to main `b82c4941`** (post-2.9.4, unreleased)
 
 > Merge `--no-ff` of `feat/framegen-mailbox-present-fix` (5 commits `ab0ab3db`→`3f308a98`), no drift/conflicts. Rolls up the whole frame-generation fix + UX.
