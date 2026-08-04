@@ -10,7 +10,9 @@
 > - **Fixes:** **log storage → Documents** fixing the "game closes mid-play" FUSE/media-service crash (`1644ad31`); **RTL "+" button** off-screen fix #200 (`facb5571`, credit @aszba258-cyber/@alroe2435-cell, verified iManiii); **Mali BCn→ASTC** transcode toggle on the default compute path (`6ff83995`/`7cb9c537`); landscape dialog scroll/clipping fixes (`53746f94`/`c48bd47e`).
 > - **Notes:** bionic-fg stays disabled (use lsfg-vk); lsfg-vk flagged experimental.
 >
-> Updater one-liner (plain, release.yml-safe): "Bannerlator 2.9.4 — HUD overhaul: Fusion is now the default overlay with a Show HUD on/off switch and a RAM readout, plus per-architecture Container Defaults, a newcomer glossary, and a fix for the log-storage bug that closed games mid-play. App-side — install over 2.9.3. Full notes below." Rich GitHub body applied post-publish via `gh release edit --notes-file`. ⚠️ release.yml tags the default branch — verify tag SHA == built commit + repoint if drifted.
+> Updater one-liner (plain, release.yml-safe): "Bannerlator 2.9.4 — HUD overhaul: Fusion is now the default overlay with a Show HUD on/off switch and a RAM readout, plus per-architecture Container Defaults, a newcomer glossary, and a fix for the log-storage bug that closed games mid-play. App-side — install over 2.9.3. Full notes below."
+>
+> **✅ LIVE + VERIFIED (2026-08-03):** release run `30863815167` success; **tag `2.9.4` landed on the built commit `e76e9b0a` — NO drift** (docs pushed before dispatch, per the 2.9.2 lesson); `isPrerelease=false`, `releases/latest → 2.9.4`; `update.json` vc56 (real one-liner, no placeholder); 3 flavor APKs + update.json attached; rich GitHub body applied post-publish via `gh release edit 2.9.4 --notes-file --latest` (layout matches 2.9.3; every non-bot/non-docs commit in `2.9.3..e76e9b0a` audited into the notes, incl. the Mali double-decode fix).
 
 ## 2026-08-03 — ⚙️✅ **User-configurable New Container Defaults (per-arch) — MERGED to main** (post-2.9.3, unreleased)
 
