@@ -6,6 +6,7 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
+import android.content.res.Configuration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -104,6 +105,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.painterResource
@@ -1069,10 +1071,14 @@ fun FileManagerScreen(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
+            } else if (LocalConfiguration.current.orientation == Configuration.ORIENTATION_PORTRAIT) {
+                // PORTRAIT: hide the current-folder name — it's redundant with the path bar directly
+                // below (which shows the full path). The spacer keeps the action icons right-aligned.
+                Spacer(Modifier.weight(1f))
             } else {
-                // The CURRENT FOLDER, not the full path. A path ellipsised on the right hides its
-                // tail — which is the only part that says where you are ("…/Winlator/Game…").
-                // The full path moves to the line below, where it has room.
+                // LANDSCAPE: the CURRENT FOLDER, not the full path. A path ellipsised on the right
+                // hides its tail — the only part that says where you are ("…/Winlator/Game…"). The
+                // full path moves to the line below, where it has room.
                 Text(
                     text = currentDir.name.ifBlank { currentDir.absolutePath },
                     color = MaterialTheme.colorScheme.onSurface,

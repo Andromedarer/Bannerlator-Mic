@@ -38,6 +38,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -52,6 +53,21 @@ data class RailItem(
 
 /** A group of [RailItem]s under an optional small section header (STORAGE / QUICK / FAVORITES …). */
 data class RailSection(val header: String?, val items: List<RailItem>)
+
+/**
+ * The tiny under-icon label for a COLLAPSED rail item. The rail width never changes, so labels must
+ * fit the narrow (~58dp) column: multi-word names wrap to a second line; single words too long to
+ * fit are abbreviated; short ones pass through. (Explicit abbreviations first, then a length guard.)
+ */
+private fun collapsedLabel(label: String): String {
+    when (label) {
+        "ENVIROMENT" -> return "ENVIRON"        // the app's existing (mis)spelling, kept uppercase
+        "WIN COMPONENTS" -> return "WIN COMP"
+        "Downloads" -> return "Downlds"
+    }
+    if (label.contains(' ')) return label       // multi-word → wraps to 2 lines
+    return if (label.length > 9) label.take(8) + "…" else label
+}
 
 /** A secondary link shown under the header (e.g. "What is all this?", "Reset to app defaults"). */
 data class RailLink(val label: String, val icon: ImageVector, val onClick: () -> Unit)
@@ -224,7 +240,7 @@ fun CollapsibleRail(
                 val base = Modifier.fillMaxWidth()
                 val styled = if (outlinedItems) {
                     base
-                        .padding(horizontal = if (collapsed) 6.dp else 6.dp, vertical = 3.dp)
+                        .padding(horizontal = 6.dp, vertical = 3.dp)
                         .clip(shape)
                         .background(if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.16f) else MaterialTheme.colorScheme.surface.copy(alpha = 0.4f))
                         .border(
@@ -233,29 +249,47 @@ fun CollapsibleRail(
                             shape,
                         )
                         .clickable(onClick = item.onClick)
-                        .padding(horizontal = if (collapsed) 0.dp else 11.dp, vertical = 9.dp)
+                        .padding(horizontal = if (collapsed) 2.dp else 11.dp, vertical = if (collapsed) 6.dp else 9.dp)
                 } else {
                     base
                         .clickable(onClick = item.onClick)
                         .background(if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else Color.Transparent)
-                        .padding(horizontal = if (collapsed) 0.dp else 13.dp, vertical = 11.dp)
+                        .padding(horizontal = if (collapsed) 2.dp else 13.dp, vertical = if (collapsed) 7.dp else 11.dp)
                 }
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = if (collapsed) Arrangement.Center else Arrangement.Start,
-                    modifier = styled,
-                ) {
-                    Icon(
-                        item.icon,
-                        contentDescription = item.label,
-                        tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp),
-                    )
-                    if (!collapsed) {
+                val iconTint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                val labelColor = if (active) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                if (collapsed) {
+                    // Icon-only width is unchanged — a TINY label goes UNDER the icon (2 lines max,
+                    // centre-aligned, wrapping/abbreviated) so every button stays identifiable without
+                    // widening the rail.
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = styled,
+                    ) {
+                        Icon(item.icon, contentDescription = item.label, tint = iconTint, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            collapsedLabel(item.label),
+                            color = labelColor,
+                            fontSize = 7.5.sp,
+                            lineHeight = 8.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            textAlign = TextAlign.Center,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                } else {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Start,
+                        modifier = styled,
+                    ) {
+                        Icon(item.icon, contentDescription = item.label, tint = iconTint, modifier = Modifier.size(20.dp))
                         Spacer(Modifier.width(11.dp))
                         Text(
                             item.label,
-                            color = if (active) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = labelColor,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 0.3.sp,
