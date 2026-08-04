@@ -1,5 +1,20 @@
 # Star-Compose — Progress Log
 
+## 2026-08-04 — 🎞️✅ **Frame-gen present-mode overhaul — MERGED to main `b82c4941`** (post-2.9.4, unreleased)
+
+> Merge `--no-ff` of `feat/framegen-mailbox-present-fix` (5 commits `ab0ab3db`→`3f308a98`), no drift/conflicts. Rolls up the whole frame-generation fix + UX.
+>
+> **Root cause found by comparing against GameNative on-device:** frame generation (lsfg-vk + bionic-fg) was crippled by the host compositor's default **FIFO** present mode — `presentPixmap()` drives the host present AND ticks the fps counter in one synchronous call, so FIFO's vsync-block **backpressured** the guest present and strangled the generated frames (they collapsed upstream, never reached the screen). Symptom: FPS *dropped* as the multiplier rose. GameNative uses **Mailbox** (`MESA_VK_WSI_PRESENT_MODE=mailbox`), which is why it worked. Full technical writeup: memory `reference_bannerlator_lsfg_fps_count_present_path`.
+>
+> **What shipped:**
+> - **Auto-mailbox during frame gen** — `effectivePresentMode()` forces Mailbox whenever FG is multiplying (mult≥2), at launch AND live via `onBionicFgConfigChange`; reverts to the user's saved mode (transient, never persisted) when FG goes off. Device-proven: DiRT 3 64.8→107/150/183 fps at 2×/3×/4×, frametime 15.4→5.5 ms; live `setPresentMode → applying=1` (Mailbox) at 2×, back to `presentMode=2` (FIFO) at Off.
+> - **Live in-game Present Mode selector** (Graphics tab) — FIFO/Mailbox/Immediate, reflects the effective mode, auto-highlights Mailbox during FG, blocks FIFO/Immediate with a ~2s note while FG runs; live-applies + persists when FG off.
+> - **FG gated to the Vulkan renderer** — dropdown greyed + runtime guard (no FG env on non-Vulkan). GL/SurfaceFlinger have no present-mode control; guest GL games still work via Zink (GL-on-Vulkan).
+> - **Present-mode "?" help + glossary** (FIFO/Mailbox/Immediate) extended into BOTH the container editor and the per-game shortcut editor (+ the container "What is all this?" glossary now in the shortcut editor too).
+> - **bionic-fg re-enabled** — the same fix resolved its old unreliability; **device-verified working** by the user. Ships un-gated (still labeled experimental in notes).
+>
+> Resolvers are shortcut-first-then-container, so all of the above works identically for container and per-game launches. Release-notes copy staged in memory `reference_bannerlator_next_release_notes` — fold into the next stable (2.9.5/3.0). Main artifacts build run `30879129898`.
+
 ## 2026-08-03 — 🏷️ **2.9.4 STABLE cut** (versionCode 56, plain tag `2.9.4`, prerelease:false, make_latest:true)
 
 > Cut from main `44795df7`. Bump `versionCode 55→56` / `versionName 2.9.3→2.9.4` in `app/build.gradle`. Stable (in-app updater offers it). Entirely app-side — no ImageFS reinstall.
