@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -108,6 +109,10 @@ fun rememberRailState(screenKey: String): RailState {
  * navigation items, replacing a top tab bar so content runs full height beside it. Width animates
  * 190dp ↔ 58dp. When collapsed it is icon-only (the caller surfaces the active item's name over the
  * content). Used by the container editors, File Manager and Save Manager.
+ *
+ * [footer] is an optional slot pinned to the bottom of the rail (a weighted spacer pushes it down),
+ * for a persistent per-screen summary (e.g. the Save Manager's "N games need syncing" line). The
+ * caller renders whatever it wants there and can key it off [RailState.collapsed] to go icon-only.
  */
 @Composable
 fun CollapsibleRail(
@@ -116,6 +121,7 @@ fun CollapsibleRail(
     sections: List<RailSection>,
     modifier: Modifier = Modifier,
     links: List<RailLink> = emptyList(),
+    footer: (@Composable ColumnScope.() -> Unit)? = null,
 ) {
     val collapsed = state.collapsed
     val width by animateDpAsState(if (collapsed) 58.dp else 190.dp, label = "railWidth")
@@ -236,6 +242,13 @@ fun CollapsibleRail(
                     }
                 }
             }
+        }
+
+        // ── Optional pinned footer (e.g. the sync summary) ──
+        if (footer != null) {
+            Spacer(Modifier.weight(1f))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+            footer()
         }
     }
 }
