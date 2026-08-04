@@ -99,6 +99,30 @@ object XServerDrawerState {
     private val _frameGenEngine = MutableStateFlow("off")
     val frameGenEngine: StateFlow<String> = _frameGenEngine
 
+    // ── Live Present Mode selector (Graphics tab, Vulkan renderer only) ──
+    // presentMode = the EFFECTIVE/displayed mode ("fifo"/"mailbox"/"immediate"). While frame gen is
+    // multiplying the activity forces "mailbox" (effectivePresentMode()) and sets presentModeLocked =
+    // true; the drawer keeps the chips interactive but BLOCKS FIFO/Immediate taps (Mailbox is required
+    // for FG's extra presents) WITHOUT touching the user's saved preference — so presentMode snaps back
+    // to their mode when FG turns off. rendererIsVulkan gates the whole section (OpenGL/SurfaceFlinger
+    // have no present-mode control). onPresentModeChange persists + applies the user's pick live.
+    private val _presentMode = MutableStateFlow("fifo")
+    val presentMode: StateFlow<String> = _presentMode
+    fun setPresentMode(v: String) { _presentMode.value = v }
+
+    private val _presentModeLocked = MutableStateFlow(false)
+    val presentModeLocked: StateFlow<Boolean> = _presentModeLocked
+    fun setPresentModeLocked(v: Boolean) { _presentModeLocked.value = v }
+
+    private val _rendererIsVulkan = MutableStateFlow(false)
+    val rendererIsVulkan: StateFlow<Boolean> = _rendererIsVulkan
+    fun setRendererIsVulkan(v: Boolean) { _rendererIsVulkan.value = v }
+
+    // Fired when the user taps a present-mode chip while FG is OFF: the activity persists the chosen
+    // mode (per-game shortcut override, else the container), re-applies it live (applyEffectivePresentMode)
+    // and echoes the effective mode back via setPresentMode. Consumer<String> so Java assigns `mode -> {}`.
+    @JvmField var onPresentModeChange: java.util.function.Consumer<String>? = null
+
     // lsfg-vk only: performance_mode (lower interpolation quality, higher FPS — for low-end devices).
     // Seeded from the container when the drawer opens; toggled live from the FG pane (rewrites conf.toml).
     private val _lsfgPerformanceMode = MutableStateFlow(false)
@@ -383,6 +407,9 @@ object XServerDrawerState {
         _frameGenFlowScale.value = 0.6f
         _frameGenModel.value = 0
         _frameGenEngine.value = "off"
+        _presentMode.value = "fifo"
+        _presentModeLocked.value = false
+        _rendererIsVulkan.value = false
         _lsfgPerformanceMode.value = false
         _fpsLimiterEnabled.value = false
         _fpsLimit.value = 60
@@ -414,6 +441,7 @@ object XServerDrawerState {
         onRelativeMouseMovement = null; onDisableMouse = null
         onNativeRenderingToggle = null; onFpsConfigApply = null
         onBionicFgConfigChange = null; onFpsLimitChange = null
+        onPresentModeChange = null
         onMatchRefreshChange = null
         onManualRefreshChange = null
         onRefreshRatePoll = null

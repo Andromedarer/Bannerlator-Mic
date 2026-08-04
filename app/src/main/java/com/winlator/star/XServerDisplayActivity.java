@@ -991,6 +991,23 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // mailbox while multiplying (FIFO backpressure would strangle the generated frames).
             applyEffectivePresentMode();
         };
+        // Live Present Mode selector (Graphics tab). The user's pick is persisted (per-game shortcut
+        // override if present, else the container) then applied live through the same choke point as the
+        // FG mailbox override (which also echoes the effective mode back to the drawer). GUARD: while FG
+        // is multiplying the mode is force-locked to Mailbox and the drawer BLOCKS the tap, so this must
+        // never fire then — but no-op defensively if it somehow does, so a stray event can't overwrite
+        // the user's saved FIFO/Immediate preference (it must survive to revert when FG turns off).
+        state.onPresentModeChange = mode -> {
+            if (frameGenGenerating()) return;   // locked to mailbox; UI blocks this — belt-and-braces
+            if (shortcut != null) {
+                shortcut.putExtra("presentMode", mode);
+                shortcut.saveData();
+            } else {
+                container.setRendererPresentMode(mode);
+                container.saveData();
+            }
+            applyEffectivePresentMode();   // applies live + echoes the effective mode back to the drawer
+        };
         // Standalone FPS limiter: paces the X11 Present extension (delays IdleNotify) so the GAME
         // itself throttles — works live with any frame-gen engine or none, all host renderers, all
         // APIs. Output of the guest present is what's capped. Persists to the container.
@@ -3245,6 +3262,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
             rendererType = "vulkan";
         }
         boolean useVulkan = "vulkan".equals(rendererType);
+        // Gate the drawer's live Present Mode selector: it only exists on the Vulkan host renderer
+        // (OpenGL/SurfaceFlinger have no present-mode control).
+        XServerDrawerState.INSTANCE.setRendererIsVulkan(useVulkan);
         xServerView.initRenderer(rendererType);
         final HostRenderer renderer = xServerView.getRenderer();
         renderer.setCursorVisible(false);
@@ -3271,9 +3291,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (useVulkan && renderer instanceof com.winlator.star.renderer.vulkan.VulkanRenderer) {
             com.winlator.star.renderer.vulkan.VulkanRenderer vkRenderer =
                 (com.winlator.star.renderer.vulkan.VulkanRenderer) renderer;
-            String pm = effectivePresentMode();   // mailbox override while frame gen multiplies
-            int pmInt = "immediate".equals(pm) ? 0 : "mailbox".equals(pm) ? 1 : 2; // VkPresentModeKHR
-            vkRenderer.setVkPresentMode(pmInt);
+            // Present mode (with the mailbox-while-FG override) AND the drawer's live selector seed both
+            // flow through the single choke point applyEffectivePresentMode() — see that method.
+            applyEffectivePresentMode();
             // Scaling mode owns the base sampler filter on Vulkan (modes 1/2 call setFilterMode
             // internally), so drive the launch through setUpscaler instead of a separate
             // setFilterMode call — keeping the in-game "Scaling mode" picker the single source of
@@ -5294,6 +5314,11 @@ return true;
             String pm = effectivePresentMode();
             int pmInt = "immediate".equals(pm) ? 0 : "mailbox".equals(pm) ? 1 : 2; // VkPresentModeKHR
             ((com.winlator.star.renderer.vulkan.VulkanRenderer) r).setVkPresentMode(pmInt);
+            // Mirror the EFFECTIVE mode into the drawer's live Present Mode selector so the highlight
+            // tracks the auto-switch to Mailbox the instant FG toggles (and reverts to the user's mode
+            // when FG goes off). presentModeLocked drives the drawer's tap-block during FG.
+            XServerDrawerState.INSTANCE.setPresentMode(pm);
+            XServerDrawerState.INSTANCE.setPresentModeLocked(frameGenGenerating());
         }
     }
 

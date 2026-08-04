@@ -498,6 +498,10 @@ private fun GraphicsContent(state: XServerDrawerState) {
     // Frame Generation pinned to the top of the Graphics tab.
     FrameGenSection(state)
 
+    // Present Mode selector (Vulkan renderer only) — directly under Frame Generation because the two
+    // interact: while FG multiplies, the host present mode is forced to Mailbox (reflected live here).
+    PresentModeSection(state)
+
     HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
 
     // Fullscreen aspect-ratio mode (#71 Stage 2): a segmented selector (Off/Fit/Stretch/Fill/Integer)
@@ -2296,6 +2300,61 @@ private fun CollapsibleSection(
 }
 
 // ───── 3-stop chip selector (skin / color / outline) ─────
+
+@Composable
+// Live Present Mode selector (Vulkan host renderer only). Reflects the EFFECTIVE mode: while frame
+// generation is multiplying the activity forces Mailbox (effectivePresentMode()), so the Mailbox chip
+// lights up on its own. The chips stay fully interactive during FG, but FIFO/Immediate taps are BLOCKED
+// (Mailbox is required for FG's extra presents) and flash a transient note for ~2s instead of switching
+// — the user's saved preference is left untouched, so the highlight snaps back when FG turns off.
+@Composable
+private fun PresentModeSection(state: XServerDrawerState) {
+    val rendererIsVulkan by state.rendererIsVulkan.collectAsState()
+    if (!rendererIsVulkan) return
+
+    val presentMode by state.presentMode.collectAsState()
+    val locked by state.presentModeLocked.collectAsState()
+
+    val modes = listOf("fifo", "mailbox", "immediate")
+    val labels = listOf(
+        stringResource(R.string.renderer_present_mode_fifo),
+        stringResource(R.string.renderer_present_mode_mailbox),
+        stringResource(R.string.renderer_present_mode_immediate)
+    )
+    val selectedIdx = modes.indexOf(presentMode).coerceAtLeast(0)
+
+    // Transient "blocked" note shown when the user taps FIFO/Immediate while FG forces Mailbox. Each
+    // rejected tap bumps blockedFlash; the LaunchedEffect shows the note and auto-hides it after ~2s.
+    var blockedFlash by remember { mutableStateOf(0) }
+    var showBlocked by remember { mutableStateOf(false) }
+    LaunchedEffect(blockedFlash) {
+        if (blockedFlash > 0) { showBlocked = true; delay(2000); showBlocked = false }
+    }
+
+    HudChipRow(
+        label = stringResource(R.string.renderer_present_mode),
+        options = labels,
+        selected = selectedIdx,
+        onSelect = { idx ->
+            val mode = modes[idx]
+            if (locked) {
+                // FG is multiplying -> Mailbox is forced. Tapping Mailbox is a harmless no-op; FIFO /
+                // Immediate are rejected WITHOUT touching the saved mode (so it reverts on FG off).
+                if (mode != "mailbox") blockedFlash++
+            } else {
+                state.onPresentModeChange?.accept(mode)
+            }
+        }
+    )
+    AnimatedVisibility(visible = showBlocked, enter = fadeIn(), exit = fadeOut()) {
+        Text(
+            stringResource(R.string.present_mode_fg_locked),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+        )
+    }
+}
 
 @Composable
 private fun HudChipRow(label: String, options: List<String>, selected: Int, onSelect: (Int) -> Unit) {
