@@ -1650,7 +1650,10 @@ private fun FileItemRow(
                     // a container (FreeArc repacks). The screen also content-sniffs (`7zz l`) so a file
                     // is judged by content, not extension.
                     val isInno = com.winlator.star.core.unpack.SevenZip.isInnoSetup(file)
-                    if (isInno || com.winlator.star.core.unpack.SevenZip.isSupported(file)) {
+                    // Content-aware: extension OR a cheap magic-byte sniff, so a .wcp/.bin/renamed
+                    // archive with an unlisted extension still gets the option (menu opens per row,
+                    // so this reads only a few header bytes on demand — never `7zz l` per entry).
+                    if (isInno || com.winlator.star.core.unpack.SevenZip.looksLikeArchive(file)) {
                         DropdownMenuItem(
                             text = { Text(if (isInno) "Unpack / Install…" else "Unpack Archive…") },
                             leadingIcon = { Icon(Icons.Filled.Unarchive, null, tint = MaterialTheme.colorScheme.primary) },

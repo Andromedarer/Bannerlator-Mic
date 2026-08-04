@@ -58,13 +58,68 @@ object SevenZip {
         // compressors + tar shorthands (strict superset of the retired Java extractor): gzip, xz,
         // bzip2, zstd — the bundled 7-Zip build supports all of these (verified via `7zz i`).
         ".gz", ".xz", ".bz2", ".zst", ".tgz", ".txz", ".tbz2", ".tzst",
+        // Winlator Component Package = a tar.zst; 7-Zip opens it as zstd.
+        ".wcp",
     )
 
-    /** True when [file] is something the 7-Zip engine can be pointed at. */
+    /** True when [file]'s extension marks it as something the 7-Zip engine can be pointed at. */
     fun isSupported(file: File): Boolean {
         if (file.isDirectory) return false
         val name = file.name.lowercase()
         return SUPPORTED.any { name.endsWith(it) }
+    }
+
+    /**
+     * True when [file] is an archive/disc-image the engine handles — by EXTENSION, else by a cheap
+     * magic-byte sniff so files with an unlisted extension (a `.wcp` before it was listed, a `.bin`
+     * that is really a 7z, a renamed archive) still get offered "Unpack Archive…". This is the
+     * ⋮-menu visibility gate: it reads only a few header bytes, never runs `7zz l` per entry (that
+     * would be far too slow for a directory listing). A false positive is harmless — the Unpack
+     * screen's real content pre-flight then shows the friendly "not a recognized archive" message.
+     */
+    fun looksLikeArchive(file: File): Boolean = isSupported(file) || sniffArchiveMagic(file)
+
+    private fun sig(head: ByteArray, vararg bytes: Int): Boolean {
+        if (head.size < bytes.size) return false
+        for (i in bytes.indices) if ((head[i].toInt() and 0xFF) != bytes[i]) return false
+        return true
+    }
+
+    /** Header-only signature check for the common archive/disc-image formats. */
+    fun sniffArchiveMagic(file: File): Boolean {
+        if (!file.isFile || file.length() < 8L) return false
+        return try {
+            java.io.RandomAccessFile(file, "r").use { raf ->
+                val head = ByteArray(16)
+                raf.seek(0)
+                val n = raf.read(head)
+                if (n >= 4 && (
+                        sig(head, 0x28, 0xB5, 0x2F, 0xFD) ||             // zstd
+                        sig(head, 0xFD, 0x37, 0x7A, 0x58, 0x5A) ||       // xz
+                        sig(head, 0x1F, 0x8B) ||                         // gzip
+                        sig(head, 0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C) || // 7z
+                        sig(head, 0x50, 0x4B, 0x03, 0x04) ||             // zip
+                        sig(head, 0x50, 0x4B, 0x05, 0x06) ||             // zip (empty)
+                        sig(head, 0x50, 0x4B, 0x07, 0x08) ||             // zip (spanned)
+                        sig(head, 0x52, 0x61, 0x72, 0x21) ||             // rar
+                        sig(head, 0x42, 0x5A, 0x68)                      // bzip2
+                    )
+                ) return true
+                // tar: "ustar" at offset 257
+                if (file.length() > 262L) {
+                    raf.seek(257); val t = ByteArray(5)
+                    if (raf.read(t) == 5 && String(t, Charsets.US_ASCII) == "ustar") return true
+                }
+                // ISO9660: "CD001" at offset 32769
+                if (file.length() > 32774L) {
+                    raf.seek(32769); val c = ByteArray(5)
+                    if (raf.read(c) == 5 && String(c, Charsets.US_ASCII) == "CD001") return true
+                }
+                false
+            }
+        } catch (e: Exception) {
+            false
+        }
     }
 
     // A Setup-1.bin / game-2.bin style InnoSetup data volume.
@@ -84,25 +139,27 @@ object SevenZip {
         val siblings = parent.listFiles() ?: return null
         val ext = file.extension.lowercase()
         val hasInnoBin = siblings.any { it.isFile && INNO_BIN.containsMatchIn(it.name) }
+        // A GOG/InnoSetup installer is named setup.exe or setup_<game>_<ver>.exe (GOG), or sits next
+        // to Setup-*.bin data volumes.
+        val looksLikeSetupExe = ext == "exe" && (hasInnoBin || file.name.startsWith("setup", ignoreCase = true))
         return when {
-            // An .exe sitting next to Setup-*.bin data (or a plainly-named setup.exe) is the installer.
-            ext == "exe" && (hasInnoBin || file.name.equals("setup.exe", ignoreCase = true)) -> file
-            // A Setup-N.bin was picked directly — point 7-Zip at the sibling installer .exe instead.
+            looksLikeSetupExe -> file
+            // A Setup-N.bin was picked directly — resolve the sibling installer .exe instead.
             ext == "bin" && INNO_BIN.containsMatchIn(file.name) ->
-                siblings.firstOrNull { it.isFile && it.extension.equals("exe", true) && it.name.contains("setup", true) }
+                siblings.firstOrNull { it.isFile && it.extension.equals("exe", true) && it.name.startsWith("setup", true) }
                     ?: siblings.firstOrNull { it.isFile && it.extension.equals("exe", true) }
             else -> null
         }
     }
 
-    /** True when [file] is (part of) an InnoSetup repack — see [resolveInnoTarget]. */
+    /** True when [file] is (part of) an InnoSetup installer/repack — see [resolveInnoTarget]. */
     fun isInnoSetup(file: File): Boolean = resolveInnoTarget(file) != null
 
-    /** Which path an InnoSetup target can actually be unpacked by. */
+    /** How an InnoSetup installer must be unpacked. */
     enum class InnoRoute {
-        /** 7-Zip can open the installer — offer in-app payload extraction. */
-        SEVENZIP,
-        /** 7-Zip cannot read it (FreeArc etc.) — must be installed by running Setup.exe in a container. */
+        /** Standard InnoSetup / GOG — extract the game files in-app with innoextract. */
+        INNOEXTRACT,
+        /** FreeArc/ISDone repack — innoextract/7-Zip can't decompress it; run Setup.exe in a container. */
         CONTAINER_ONLY,
     }
 
@@ -116,32 +173,26 @@ object SevenZip {
     )
 
     /**
-     * Decides how an InnoSetup [installer] must be unpacked, BEFORE offering the user a doomed 7-Zip
-     * action. Most modern game repacks (FitGirl/DODI/…) are FreeArc-compressed, which 7-Zip has no
-     * support for, so pointing 7-Zip at their Setup.exe fails with "Cannot open the file as archive".
+     * Decides how an InnoSetup [installer] must be unpacked. Standard InnoSetup / GOG installers are
+     * read directly by innoextract (7-Zip only sees them as a PE and cannot decompress the game).
+     * The exception is a FreeArc/ISDone repack (FitGirl/DODI/…): its game data is FreeArc-compressed,
+     * which neither innoextract nor 7-Zip can unpack — the only way in is to run Setup.exe in a Wine
+     * container so the repack's own installer decompresses it.
      *
-     * Signals, in order:
-     *  1. A sibling `Records.ini` whose `Type=` starts with "Freearc" → CONTAINER_ONLY (authoritative;
-     *     the payload codec the repack's own installer uses). Its `Type` + `Size` are surfaced for UI.
-     *  2. Otherwise a fast pre-flight `7zz l <installer>` — non-zero / "Cannot open" → CONTAINER_ONLY.
+     * Discriminator: a sibling `Records.ini` whose `Type=` starts with "Freearc" → CONTAINER_ONLY
+     * (authoritative; its `Type`/`Size` are surfaced for the UI). Everything else → INNOEXTRACT.
      *
-     * Runs a native exec, so call it off the main thread.
+     * Reads a sibling file, so call it off the main thread.
      */
     fun classifyInno(context: Context, installer: File): InnoClassification {
         val records = readRecordsIni(installer.parentFile)
         val rawType = records?.first
         val freeArc = rawType?.trim()?.startsWith("freearc", ignoreCase = true) == true
-        val compression = rawType?.let { prettyCompression(it) }
-        val declaredSize = records?.second?.let { prettySize(it) }
-
-        // FreeArc is a certain no for 7-Zip — skip the (doomed) pre-flight. Otherwise let 7-Zip itself
-        // be the authority on whether it can open the installer.
-        val openable = if (freeArc) false else sevenZipCanOpen(context, installer)
         return InnoClassification(
             installer = installer,
-            route = if (openable) InnoRoute.SEVENZIP else InnoRoute.CONTAINER_ONLY,
-            compression = compression,
-            declaredSize = declaredSize,
+            route = if (freeArc) InnoRoute.CONTAINER_ONLY else InnoRoute.INNOEXTRACT,
+            compression = rawType?.let { prettyCompression(it) },
+            declaredSize = records?.second?.let { prettySize(it) },
         )
     }
 
@@ -327,6 +378,27 @@ object SevenZip {
         // Push a final 100% so a clean finish never leaves the bar short of the end.
         if (exit <= 1) listener.onProgress(100, null)
         return Result(exit, synchronized(stderr) { stderr.toString().trim() })
+    }
+
+    /**
+     * A `.wcp`/`.tzst`/`.tar.gz`/… is a tar INSIDE a compressor, so `7zz x` yields a single inner
+     * `.tar`. If [destDir] holds exactly that — one lone `.tar` file — extract it in place and delete
+     * it, so one Unpack action lands the real files rather than a `.tar`. Best-effort: any failure
+     * leaves the `.tar` in place (still a valid result). Reuses the full [extract] pump for progress.
+     */
+    fun unwrapSingleTar(
+        context: Context,
+        destDir: File,
+        mmt: Int,
+        bufferBytes: Int,
+        listener: Listener,
+        onProcess: (Process) -> Unit,
+    ): Boolean {
+        val files = destDir.listFiles()?.toList() ?: return false
+        val tar = files.singleOrNull { it.isFile && it.extension.equals("tar", ignoreCase = true) } ?: return false
+        if (files.size != 1) return false   // only unwrap when the tar is the sole product
+        val r = extract(context, tar, destDir, mmt, bufferBytes, listener, onProcess)
+        return if (r.exitCode <= 1) { tar.delete(); true } else false
     }
 
     /** A \n/\r-delimited segment: used for the -bb1 "- path" processed-file lines (not percentages). */

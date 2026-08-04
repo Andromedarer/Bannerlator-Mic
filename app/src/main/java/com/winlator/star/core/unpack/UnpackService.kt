@@ -156,7 +156,9 @@ class UnpackService : Service() {
             )
             refresh()
 
-            val info = SevenZip.list(ctx, archive)
+            // InnoSetup targets that reach the service are always standard-Inno/GOG (FreeArc goes to
+            // the container route, never here), so isInno == "use innoextract".
+            val info = if (isInno) null else SevenZip.list(ctx, archive)
             UnpackManager.update {
                 it.copy(
                     phase = UnpackPhase.EXTRACTING,
@@ -165,54 +167,84 @@ class UnpackService : Service() {
             }
             refresh()
 
-            // Speed/ETA: 7-Zip reports percent, not bytes, so processed-bytes = percent/100 * archive
-            // size. That is genuine read throughput of the source, smoothed with a light EMA. Honest:
-            // it tracks how fast the archive is being consumed, which for one huge file is the truth.
+            // Speed/ETA: the engine reports percent, not bytes, so processed-bytes = percent/100 *
+            // source size — genuine read throughput of the source, smoothed with a light EMA.
             var lastTick = SystemClock.elapsedRealtime()
             var lastBytes = 0L
             var emaBps = 0L
             var files = 0
             val size = dataSize.coerceAtLeast(1L)
 
-            val result = runCatching {
-                SevenZip.extract(
-                    ctx, archive, destDir, mmt, buffer,
-                    object : SevenZip.Listener {
-                        override fun onProgress(percent: Int, currentFile: String?) {
-                            val now = SystemClock.elapsedRealtime()
-                            val bytes = (size * percent / 100).coerceIn(0, size)
-                            if (now - lastTick >= 500) {
-                                val dt = (now - lastTick).coerceAtLeast(1)
-                                val inst = ((bytes - lastBytes) * 1000 / dt).coerceAtLeast(0)
-                                emaBps = if (emaBps == 0L) inst else (emaBps * 2 + inst) / 3
-                                lastTick = now
-                                lastBytes = bytes
-                            }
-                            val remaining = size - bytes
-                            val eta = if (emaBps > 0) remaining / emaBps else -1L
-                            UnpackManager.update {
-                                it.copy(
-                                    phase = UnpackPhase.EXTRACTING,
-                                    percent = percent,
-                                    currentFile = currentFile ?: it.currentFile,
-                                    bytesProcessed = bytes,
-                                    speedBps = emaBps,
-                                    etaSeconds = eta,
-                                    elapsedMs = now - startMs,
-                                    filesExtracted = files,
-                                )
-                            }
-                            refresh()
-                        }
+            fun pushProgress(percent: Int, currentFile: String?) {
+                val now = SystemClock.elapsedRealtime()
+                val bytes = (size * percent / 100).coerceIn(0, size)
+                if (now - lastTick >= 500) {
+                    val dt = (now - lastTick).coerceAtLeast(1)
+                    val inst = ((bytes - lastBytes) * 1000 / dt).coerceAtLeast(0)
+                    emaBps = if (emaBps == 0L) inst else (emaBps * 2 + inst) / 3
+                    lastTick = now
+                    lastBytes = bytes
+                }
+                val eta = if (emaBps > 0) (size - bytes) / emaBps else -1L
+                UnpackManager.update {
+                    it.copy(
+                        phase = UnpackPhase.EXTRACTING, percent = percent,
+                        currentFile = currentFile ?: it.currentFile,
+                        bytesProcessed = bytes, speedBps = emaBps, etaSeconds = eta,
+                        elapsedMs = now - startMs, filesExtracted = files,
+                    )
+                }
+                refresh()
+            }
 
-                        override fun onFile(name: String) {
-                            files++
-                            UnpackManager.update { it.copy(currentFile = name, filesExtracted = files) }
-                        }
-                    },
-                    onProcess = { proc = it },
-                )
+            val result = runCatching {
+                if (isInno) {
+                    val r = Innoextract.extract(
+                        ctx, archive, destDir,
+                        listener = { percent -> pushProgress(percent, null) },
+                        onProcess = { proc = it },
+                    )
+                    // innoextract has no per-file callback; count the extracted files for the summary.
+                    if (r.exitCode == 0) files = runCatching { destDir.walk().count { it.isFile } }.getOrDefault(0)
+                    // innoextract uses 0=ok; map any non-zero to an error code (2) for the terminal logic.
+                    SevenZip.Result(if (r.exitCode == 0) 0 else 2, r.stderrTail)
+                } else {
+                    SevenZip.extract(
+                        ctx, archive, destDir, mmt, buffer,
+                        object : SevenZip.Listener {
+                            override fun onProgress(percent: Int, currentFile: String?) = pushProgress(percent, currentFile)
+                            override fun onFile(name: String) {
+                                files++
+                                UnpackManager.update { it.copy(currentFile = name, filesExtracted = files) }
+                            }
+                        },
+                        onProcess = { proc = it },
+                    )
+                }
             }.getOrElse { SevenZip.Result(-1, it.message ?: "exec failed") }
+
+            // Unwrap a single inner .tar (a .wcp/.tzst/.tar.gz decompresses to just its .tar) so one
+            // action lands the real files. 7-Zip path only; best-effort; only when the first pass won.
+            if (!isInno && !cancelled && result.exitCode <= 1) {
+                UnpackManager.update { it.copy(currentFile = "Unpacking inner archive…", percent = 0) }
+                refresh()
+                runCatching {
+                    SevenZip.unwrapSingleTar(
+                        ctx, destDir, mmt, buffer,
+                        object : SevenZip.Listener {
+                            override fun onProgress(percent: Int, currentFile: String?) {
+                                UnpackManager.update { it.copy(phase = UnpackPhase.EXTRACTING, percent = percent) }
+                                refresh()
+                            }
+                            override fun onFile(name: String) {
+                                files++
+                                UnpackManager.update { it.copy(currentFile = name, filesExtracted = files) }
+                            }
+                        },
+                        onProcess = { proc = it },
+                    )
+                }
+            }
 
             proc = null
             val elapsed = SystemClock.elapsedRealtime() - startMs

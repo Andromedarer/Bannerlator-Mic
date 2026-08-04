@@ -65,6 +65,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.LaunchedEffect
 import com.winlator.star.core.StringUtils
+import com.winlator.star.core.unpack.Innoextract
 import com.winlator.star.core.unpack.PowerMode
 import com.winlator.star.core.unpack.ReadBuffer
 import com.winlator.star.core.unpack.SevenZip
@@ -172,18 +173,17 @@ fun UnpackArchiveScreen(
 
     // InnoSetup routing (see classifyInno). While classifying we hold the action buttons.
     val innoClassifying = isInno && innoClass == null
+    // FreeArc/ISDone repack → run Setup.exe in a container; standard-Inno/GOG → innoextract.
     val innoContainerOnly = innoClass?.route == SevenZip.InnoRoute.CONTAINER_ONLY
+    val innoExtract = innoClass?.route == SevenZip.InnoRoute.INNOEXTRACT
     // Content pre-flight (not extension): a plain file is judged by whether `7zz l` could open it as
     // an archive / disc image. No recognisable container (e.g. raw .bin data) → nothing to unpack.
     val notAnArchive = !isInno && !typeLoading && detectedType == null
     // Are we still deciding what this file is? (InnoSetup pre-flight, or the plain content-sniff.)
     val checking = if (isInno) innoClassifying else typeLoading
-    // 7-Zip's extract is allowed for a plain file only once the sniff confirms it opens, and for
-    // InnoSetup only once the pre-flight says 7-Zip can actually open the installer.
-    val sevenZipAllowed = when {
-        isInno -> innoClass?.route == SevenZip.InnoRoute.SEVENZIP
-        else -> !typeLoading && detectedType != null
-    }
+    // The 7-Zip extract path is for plain (non-Inno) archives only, once the sniff confirms it opens.
+    val sevenZipAllowed = !isInno && !typeLoading && detectedType != null
+    val engineMissingInno = isInno && !Innoextract.isAvailable(context)
 
     // Battery-optimisation exemption, refreshed on resume so returning from Settings re-checks it.
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -250,10 +250,10 @@ fun UnpackArchiveScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp,
                 )
-                if (isInno && sevenZipAllowed && !innoClassifying) {
+                if (innoExtract) {
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "7-Zip will unpack the game payload from ${archive.name} and its Setup-*.bin volumes.",
+                        "innoextract will unpack the game files from ${archive.name}.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 11.sp,
                     )
@@ -262,9 +262,10 @@ fun UnpackArchiveScreen(
 
             Spacer(Modifier.height(12.dp))
 
-            // Destination + Power apply only to the 7-Zip extract path — hidden while still deciding
-            // what the file is, for the container-only (FreeArc) route, and for non-archives.
-            if (sevenZipAllowed) {
+            // Destination applies to both the 7-Zip and innoextract paths; Power (below) is 7-Zip-only.
+            // Both are hidden while still deciding what the file is, for the container-only (FreeArc)
+            // route, and for non-archives.
+            if (sevenZipAllowed || innoExtract) {
             // ── Destination ──
             SectionCard {
                 Text("Extract to", style = sectionTitle())
@@ -299,7 +300,8 @@ fun UnpackArchiveScreen(
 
             Spacer(Modifier.height(12.dp))
 
-            // ── Power ──
+            // ── Power (7-Zip only; innoextract has no thread/buffer knobs) ──
+            if (sevenZipAllowed) {
             SectionCard {
                 Text("Power", style = sectionTitle())
                 Spacer(Modifier.height(8.dp))
@@ -359,9 +361,9 @@ fun UnpackArchiveScreen(
                     fontSize = 11.sp,
                 )
             }
-
             Spacer(Modifier.height(12.dp))
-            } // end 7-Zip-only controls (Destination + Power)
+            } // end Power (7-Zip only)
+            } // end Destination + Power block
 
             // ── Permission gate ──
             if (gatedByPermission && sevenZipAllowed) {
@@ -384,7 +386,7 @@ fun UnpackArchiveScreen(
                 Spacer(Modifier.height(12.dp))
             }
 
-            if (engineMissing) {
+            if (engineMissing && !isInno) {
                 WarnCard {
                     Text(
                         "The 7-Zip engine (lib7zz.so) isn't executable on this build. Extraction is unavailable.",
@@ -488,14 +490,14 @@ fun UnpackArchiveScreen(
                 Spacer(Modifier.height(12.dp))
             }
 
-            // ── InnoSetup FreeArc / 7-Zip-can't-open → container-only route ──
+            // ── InnoSetup FreeArc/ISDone → container-only route ──
             if (!running && innoContainerOnly) {
                 val comp = innoClass?.compression ?: "FreeArc"
                 WarnCard {
                     Text("Can't unpack this repack directly", color = MaterialTheme.colorScheme.error, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "This is a $comp repack — 7-Zip can't unpack it directly. Install it by running " +
+                        "This is a $comp repack — its data can't be unpacked directly. Install it by running " +
                             "${archive.name} inside a Winlator container; the installer decompresses the game itself.",
                         color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp,
                     )
@@ -505,26 +507,53 @@ fun UnpackArchiveScreen(
                 Spacer(Modifier.height(12.dp))
             }
 
-            // ── Extract button (plain archives + 7-Zip-openable InnoSetup) ──
+            // ── InnoSetup / GOG → innoextract (primary) ──
+            if (!running && innoExtract) {
+                if (engineMissingInno) {
+                    WarnCard {
+                        Text(
+                            "The innoextract engine isn't available on this build, so this GOG/InnoSetup " +
+                                "installer can't be unpacked in-app. You can still install it by running " +
+                                "${archive.name} in a container.",
+                            color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp,
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        RunSetupInContainer(exe = archive)
+                    }
+                } else {
+                    Button(
+                        onClick = {
+                            UnpackManager.clearIfTerminal()
+                            // isInno=true selects the innoextract engine in the service.
+                            UnpackService.start(context, archive.absolutePath, destPath, 1, buffer.bytes, true, sourceSize)
+                        },
+                        enabled = !gatedByPermission && archive.isFile && !otherJobRunning,
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                    ) {
+                        Icon(Icons.Filled.Unarchive, null, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Unpack game files (innoextract)", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                    // No dead-ends: also offer the container route (e.g. if innoextract fails at runtime).
+                    Spacer(Modifier.height(8.dp))
+                    RunSetupInContainer(exe = archive)
+                }
+            }
+
+            // ── Extract button (plain, non-Inno archives) ──
             if (!running && sevenZipAllowed) {
                 Button(
                     onClick = {
                         UnpackManager.clearIfTerminal()
                         val mmt = UnpackManager.mmtFor(powerMode, manualCores)
-                        UnpackService.start(context, archive.absolutePath, destPath, mmt, buffer.bytes, isInno, sourceSize)
+                        UnpackService.start(context, archive.absolutePath, destPath, mmt, buffer.bytes, false, sourceSize)
                     },
                     enabled = !gatedByPermission && !engineMissing && archive.isFile && !otherJobRunning,
                     modifier = Modifier.fillMaxWidth().height(52.dp),
                 ) {
                     Icon(Icons.Filled.Unarchive, null, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text(if (isInno) "Unpack game payload" else "Extract", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                }
-                // No dead-ends: an InnoSetup target always offers the container route too, in case the
-                // 7-Zip attempt fails at runtime for a repack the pre-flight couldn't rule out.
-                if (isInno) {
-                    Spacer(Modifier.height(8.dp))
-                    RunSetupInContainer(exe = archive)
+                    Text("Extract", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
 
