@@ -173,9 +173,17 @@ fun UnpackArchiveScreen(
     // InnoSetup routing (see classifyInno). While classifying we hold the action buttons.
     val innoClassifying = isInno && innoClass == null
     val innoContainerOnly = innoClass?.route == SevenZip.InnoRoute.CONTAINER_ONLY
-    // 7-Zip's in-app extract is allowed for plain archives, and for InnoSetup only once the pre-flight
-    // says 7-Zip can actually open the installer.
-    val sevenZipAllowed = !isInno || innoClass?.route == SevenZip.InnoRoute.SEVENZIP
+    // Content pre-flight (not extension): a plain file is judged by whether `7zz l` could open it as
+    // an archive / disc image. No recognisable container (e.g. raw .bin data) → nothing to unpack.
+    val notAnArchive = !isInno && !typeLoading && detectedType == null
+    // Are we still deciding what this file is? (InnoSetup pre-flight, or the plain content-sniff.)
+    val checking = if (isInno) innoClassifying else typeLoading
+    // 7-Zip's extract is allowed for a plain file only once the sniff confirms it opens, and for
+    // InnoSetup only once the pre-flight says 7-Zip can actually open the installer.
+    val sevenZipAllowed = when {
+        isInno -> innoClass?.route == SevenZip.InnoRoute.SEVENZIP
+        else -> !typeLoading && detectedType != null
+    }
 
     // Battery-optimisation exemption, refreshed on resume so returning from Settings re-checks it.
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -235,7 +243,7 @@ fun UnpackArchiveScreen(
                     }
                     typeLoading -> "reading…"
                     detectedType != null -> detectedType
-                    else -> "unknown type"
+                    else -> "not an archive"
                 }
                 Text(
                     "${StringUtils.formatBytes(sourceSize)}  •  $typeText",
@@ -254,9 +262,9 @@ fun UnpackArchiveScreen(
 
             Spacer(Modifier.height(12.dp))
 
-            // Destination + Power apply only to the 7-Zip extract path — hidden while classifying an
-            // InnoSetup target and for the container-only (FreeArc) route.
-            if (sevenZipAllowed && !innoClassifying) {
+            // Destination + Power apply only to the 7-Zip extract path — hidden while still deciding
+            // what the file is, for the container-only (FreeArc) route, and for non-archives.
+            if (sevenZipAllowed) {
             // ── Destination ──
             SectionCard {
                 Text("Extract to", style = sectionTitle())
@@ -453,15 +461,29 @@ fun UnpackArchiveScreen(
                 Spacer(Modifier.height(12.dp))
             }
 
-            // ── InnoSetup: still classifying (running the 7-Zip pre-flight) ──
-            if (!running && innoClassifying) {
+            // ── Still deciding what this file is (InnoSetup pre-flight, or plain content-sniff) ──
+            if (!running && checking) {
                 SectionCard {
                     Text(
-                        "Checking how this repack is compressed…",
+                        if (isInno) "Checking how this repack is compressed…" else "Checking this file…",
                         color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp,
                     )
                     Spacer(Modifier.height(8.dp))
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(4.dp))
+                }
+                Spacer(Modifier.height(12.dp))
+            }
+
+            // ── Not a recognized archive (judged by content, not extension) ──
+            if (!running && notAnArchive) {
+                WarnCard {
+                    Text("Nothing to unpack", color = MaterialTheme.colorScheme.error, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "This file isn't a recognized archive or disc image — it looks like raw data, " +
+                            "nothing to unpack.",
+                        color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp,
+                    )
                 }
                 Spacer(Modifier.height(12.dp))
             }
@@ -484,7 +506,7 @@ fun UnpackArchiveScreen(
             }
 
             // ── Extract button (plain archives + 7-Zip-openable InnoSetup) ──
-            if (!running && sevenZipAllowed && !innoClassifying) {
+            if (!running && sevenZipAllowed) {
                 Button(
                     onClick = {
                         UnpackManager.clearIfTerminal()

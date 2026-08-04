@@ -10,7 +10,8 @@ import java.io.File
  * Thin wrapper around the bundled 7-Zip standalone console binary (`7zz`, vendored as
  * `jniLibs/arm64-v8a/lib7zz.so` — see NOTICE_7ZIP.txt for version/source/licence).
  *
- * Why a bundled native binary instead of commons-compress ([com.winlator.star.core.ArchiveExtractor]):
+ * The single extraction engine for the File Manager. Why a bundled native binary rather than a Java
+ * archive library:
  * the disc images games arrive on are ISO9660/UDF hybrids, and the target device kernel has NO
  * iso9660/udf filesystem support (`/proc/filesystems` shows only fuse*), so a loop-mount fails with
  * "No such device". Extraction therefore has to happen in userspace, and it has to handle single
@@ -53,7 +54,10 @@ object SevenZip {
     // disc images + RAR + split volumes that commons-compress cannot read.
     private val SUPPORTED = listOf(
         ".iso", ".udf", ".img", ".7z", ".zip", ".rar", ".r00", ".001", ".bin",
-        ".cab", ".wim", ".vhd", ".vhdx", ".dmg", ".cso", ".cue", ".gz", ".xz", ".bz2", ".tar",
+        ".cab", ".wim", ".vhd", ".vhdx", ".dmg", ".cso", ".cue", ".tar",
+        // compressors + tar shorthands (strict superset of the retired Java extractor): gzip, xz,
+        // bzip2, zstd — the bundled 7-Zip build supports all of these (verified via `7zz i`).
+        ".gz", ".xz", ".bz2", ".zst", ".tgz", ".txz", ".tbz2", ".tzst",
     )
 
     /** True when [file] is something the 7-Zip engine can be pointed at. */
