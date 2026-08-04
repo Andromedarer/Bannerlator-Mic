@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-08-04T02-41-38-b92741",
+    "created": "2026-08-04T02:41:38.108Z",
+    "reporter": "Cran",
+    "device": "Poco x8 pro",
+    "gpu": "Mali-G720 MC8",
+    "game": "Persona 5",
+    "symptom": "Black screen (no image)",
+    "logs": 1
+  },
+  {
     "id": "2026-08-03T10-38-21-e22b52",
     "created": "2026-08-03T10:38:21.743Z",
     "reporter": "Silvaryll",
