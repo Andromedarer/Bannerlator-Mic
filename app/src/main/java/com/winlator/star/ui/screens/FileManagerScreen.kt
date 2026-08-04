@@ -60,8 +60,6 @@ import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.SportsEsports
-import androidx.compose.ui.platform.LocalConfiguration
-import android.content.res.Configuration
 import com.winlator.star.ui.components.CollapsibleRail
 import com.winlator.star.ui.components.RailItem
 import com.winlator.star.ui.components.RailSection
@@ -342,11 +340,12 @@ fun FileManagerScreen(
     var showSortMenu by remember { mutableStateOf(false) }
     // View mode: list of cards (default) or a thumbnail grid. Density applies to the list only —
     // a grid tile has no second line to compact.
-    // Grid is the natural LANDSCAPE view (mockup Option 3), so it defaults on; the toolbar toggle
-    // still lets the user switch to rows. PORTRAIT always renders the single-column list regardless.
-    val fmLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    // The grid/list toggle is the SOURCE OF TRUTH in BOTH orientations (it drives the view and its
+    // choice persists across rotation). Grid is the default — most useful in landscape, and in
+    // portrait GridCells.Adaptive naturally renders fewer columns (~2). Do NOT force portrait to list:
+    // that broke the toggle on-device (tapping it did nothing in portrait).
     var gridView by remember { mutableStateOf(browsePrefs.getBoolean("fmGridView", true)) }
-    val showGrid = fmLandscape && gridView
+    val showGrid = gridView
     var compactRows by remember { mutableStateOf(browsePrefs.getBoolean("fmCompactRows", false)) }
     var showNewFolderDialog by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<File?>(null) }
