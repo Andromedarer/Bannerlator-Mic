@@ -68,7 +68,7 @@ android {
         // versionCode stays FROZEN across dev/pre builds — it only bumps on a STABLE cut. Reinstalling
         // the same versionCode over-the-top works, so pre-build installs are unaffected.
         versionCode 66
-        versionName "2.9.5-pre16"
+        versionName "2.9.5-pre17"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
         externalNativeBuild {

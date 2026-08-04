@@ -1,5 +1,14 @@
 # Star-Compose — Progress Log
 
+## 2026-08-04 — 🍷 **pre17 (vc66 — FROZEN) — wine-glass rail glyph + scrollable rail + Save-Manager sync badge** (branch `feat/container-landscape-ui`)
+
+> Batched shared-rail improvements. versionCode frozen 66; versionName `-pre17`.
+> - **Wine-glass container glyph** (`d47bea60`): `CollapsibleRail` gained an optional `headerIcon` drawable; the container editors (`ContainerDetailScreen`) now pass `R.drawable.icon_menu_container` — the SAME wine-glass icon the container LIST cards use (themed with the accent) — replacing the plain solid square. Scoped to the container screens only; File Manager keeps its square, Save Manager keeps its square.
+> - **Scrollable rail** (`d47bea60`): the rail's section/item list is now `weight(1f) + verticalScroll`, so a tall rail (e.g. many File Manager favourites in landscape, or all 5 container tabs on a short screen) is fully reachable; the header and the optional footer stay pinned.
+> - **Rail item badges** (`d47bea60`): `RailItem` gained `badge: Int = 0`, rendered as a small accent count badge (Material3 `BadgedBox`) on the icon in BOTH expanded and collapsed layouts.
+> - **Save Manager sync-count relocation** (`8040d0ce`, android-app-engineer subagent): removed the bottom-of-rail `footer` summary (it collapsed to a confusing bare "2"). Instead the **Steam tab RailItem now carries `badge = needSync`** (`statuses.count { it.state.needsAttention() }`), and a rounded errorContainer-tinted **"⚠️ N games need syncing" strip** appears at the top of the content pane when `needSync > 0` (hidden on the Settings tab). ⚠️ Custom tab keeps `badge = 0` — its rows load inside `CustomSaveTab`, so no per-tab count is available at the parent without lifting that state (out of scope); the content strip on the Custom tab still shows the Steam-scope count (a known nuance).
+> ⏭️ CI (pre17) → stage pubg. ⚠️ Compose-only, not device-run. (pre16 = CI-green.)
+
 ## 2026-08-04 — 🏷️ **pre16 (vc66 — FROZEN) — portrait FM folder-label hide + tiny labels under collapsed rail icons** (branch `feat/container-landscape-ui`)
 
 > - **(1) File Manager, portrait only:** hide the toolbar current-folder name (redundant with the path bar directly below). In `ORIENTATION_PORTRAIT` the folder-name `Text` is replaced by a weighted `Spacer` (keeps the action icons right-aligned); the drive selector chip + path bar stay. Landscape unchanged (folder name still shown).
