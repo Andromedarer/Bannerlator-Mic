@@ -64,7 +64,7 @@
 |---|---|
 | **App label** | `Bannerlator Bionic` (standard) · `Bannerlator Bionic PuBG` (pubg) · `Bannerlator Bionic Ludashi` (ludashi) |
 | **Packages** | `com.winlator.banner` (standard) · `com.tencent.ig` (pubg) · `com.ludashi.benchmark` (ludashi) |
-| **Version** | Bannerlator **V 2.9.3** — built from Star **marcescence** (`versionName 2.9.3`, `versionCode 55`) |
+| **Version** | Bannerlator **V 2.9.5** — built from Star **marcescence** (`versionName 2.9.5`, `versionCode 67`) |
 | **Android SDK** | `compileSdk 34` · `targetSdk 28` · `minSdk 26` (Android 8.0+) |
 | **Lineage** | Winlator → cmod → Bionic Nightly → Star Bionic → **marcescence** → **Bannerlator** |
 
@@ -95,6 +95,7 @@ Every report gets its own **public discussion thread**. You can reply as the ori
 - [📌 Project Notice](#-project-notice)
 - [ℹ️ Information](#ℹ️-information)
 - [🐛 Report a Mali GPU Issue](#-report-a-mali-gpu-game-issue)
+- [🆕 What's New in 2.9.5](#-whats-new-in-295)
 - [🆕 What's New in 2.9.4](#-whats-new-in-294)
 - [🆕 What's New in 2.9.3](#-whats-new-in-293)
 - [🆕 What's New in 2.9.2](#-whats-new-in-292)
@@ -111,6 +112,18 @@ Every report gets its own **public discussion thread**. You can reply as the ori
 - [📄 License](#-license)
 
 ---
+
+## 🆕 What's New in 2.9.5
+
+2.9.5 is a **feature release over 2.9.4**, headlined by a brand-new **Unpack Archive** tool and a full **landscape UI overhaul**. Everything from 2.9.4 is included. Like the releases before it it's **entirely app-side** — **no ImageFS reinstall** — just install over 2.9.4; your containers, themes, accent and per-game settings carry over untouched.
+
+**📦 Unpack Archive — install games right in the File Manager.** A new extractor built into the File Manager (⋮ → Unpack, or one-tap **Fast Extract**): **ISO/UDF, ZIP, RAR, 7z and the TAR family** via a bundled 7-Zip engine; **GOG installers** pulled straight out of `setup_*.exe` via a bundled innoextract; and — the headline — **native FreeArc repack install with no PC**: FitGirl/DODI-style **FreeArc** repacks (LZMA / tornado / rep) now decompress **on-device** via a bundled NDK `unarc` (srep-based repacks still need a Windows PC — the app tells you and offers the container route). Fast Extract unpacks to a new folder straight into a **minimizable progress pill** with a foreground notification, so multi-hour extracts survive backgrounding. Content-aware ⋮ menu (offers unpack on any real archive regardless of extension) plus **power/thread** and **read-buffer** controls.
+
+**🖥️ Landscape UI overhaul.** Landscape stopped wasting the top and bottom of the screen. Tabs moved to a **collapsible left rail** on the Container editors, File Manager and Save Manager — it collapses to icons (with tiny labels in portrait), **remembers per-screen**, and **reflows on rotation** without losing your tab, edits or scroll. **File Manager** gains a left **Locations rail** (Internal / SD / Downloads / Games / favourites), **grid** by default in landscape (the grid/list toggle now works in portrait too), a **New Folder** button in the toolbar, and outlined selectors. **Save Manager** gets a left Steam/Custom/Settings rail, **multi-column** game cards, and a sync-count **badge + banner**. Container editors get the rail, reclaimed bottom space, and the **Wine-glass** container glyph. A **slim top header** on every screen, plus a new **App Orientation** setting (Auto / Portrait / Landscape) that locks the app UI — **games are unaffected**.
+
+**🎞️ Frame Generation & Present Modes.** Frame-gen was being strangled by FIFO backpressure — it now **forces mailbox while FG multiplies**, and **bionic-fg is re-enabled** (device-verified). A live in-game **Present Mode selector** lands on the Graphics tab (FG gated to the **Vulkan** renderer), with **"?" help + a glossary** across the container/game editors and the shortcut editor.
+
+**🐛 Fixes.** The **GL/Zink perf-HUD now reads real FPS** (was stuck at 0.0) — it counts on the child render surface the game actually presents to. Plus the File Manager grid/list toggle now works in portrait, and assorted landscape UI polish.
 
 ## 🆕 What's New in 2.9.4
 
