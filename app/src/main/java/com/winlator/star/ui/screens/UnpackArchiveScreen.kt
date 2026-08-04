@@ -83,32 +83,48 @@ fun UnpackArchiveScreen(
     onClose: () -> Unit,
 ) {
     val context = LocalContext.current
-    val archive = remember(archivePath) { File(archivePath) }
+    val selected = remember(archivePath) { File(archivePath) }
     val cores = remember { Runtime.getRuntime().availableProcessors().coerceAtLeast(1) }
 
     val state by UnpackManager.state.collectAsState()
 
-    // Detected type comes from a quick `7zz l` (metadata only). Keyed on the archive so it reruns if
-    // the screen is reused for a different one.
+    // InnoSetup repack? Then 7-Zip must be pointed at the installer .exe (never a lone Setup-*.bin),
+    // and the whole flow is "unpack game payload" rather than "extract archive".
+    val innoTarget = remember(archivePath) { SevenZip.resolveInnoTarget(selected) }
+    val isInno = innoTarget != null
+    // What 7-Zip is actually run against: the installer .exe for InnoSetup, else the file itself.
+    val archive = remember(archivePath) { innoTarget ?: selected }
+
+    // A friendly default extract-folder name: the repack folder name for InnoSetup (so "Setup" never
+    // becomes the folder), else the archive's base name.
+    val defaultName = remember(archivePath) {
+        if (isInno) archive.parentFile?.name?.takeIf { it.isNotBlank() } ?: "game"
+        else SevenZip.suggestedTargetName(selected)
+    }
+
+    // Detected type comes from a quick `7zz l` (metadata only). Skipped for InnoSetup — we label it
+    // ourselves. Keyed on the archive so it reruns if the screen is reused for a different one.
     var detectedType by remember(archivePath) { mutableStateOf<String?>(null) }
-    var typeLoading by remember(archivePath) { mutableStateOf(true) }
+    var typeLoading by remember(archivePath) { mutableStateOf(!isInno) }
     LaunchedEffect(archivePath) {
+        if (isInno) return@LaunchedEffect
         typeLoading = true
         val info = withContext(Dispatchers.IO) { SevenZip.list(context, archive) }
         detectedType = info?.type
         typeLoading = false
     }
 
-    // Destination defaults to a sibling folder named after the archive.
+    // Destination defaults to a sibling folder (of the repack folder, for InnoSetup) named for the game.
     var destPath by remember(archivePath) {
-        mutableStateOf(File(archive.parentFile, SevenZip.suggestedTargetName(archive)).absolutePath)
+        val base = if (isInno) archive.parentFile?.parentFile ?: archive.parentFile else selected.parentFile
+        mutableStateOf(File(base, defaultName).absolutePath)
     }
     val destPicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
             com.winlator.star.util.InAppFilePicker.pickedPath(result.data)?.let {
-                // Land inside the chosen folder, in a subfolder named after the archive, so the
-                // extract never carpets someone's Games root with loose files.
-                destPath = File(it, SevenZip.suggestedTargetName(archive)).absolutePath
+                // Land inside the chosen folder, in a subfolder named for the game, so the extract
+                // never carpets someone's Games root with loose files.
+                destPath = File(it, defaultName).absolutePath
             }
         }
     }
@@ -127,6 +143,16 @@ fun UnpackArchiveScreen(
 
     val running = state.isRunning && state.archivePath == archive.absolutePath
     val engineMissing = !SevenZip.isAvailable(context)
+
+    // For display + honest speed/ETA: the data 7-Zip reads. For InnoSetup that's the Setup-*.bin
+    // payload total, not the tiny Setup.exe we point it at.
+    val sourceSize = remember(archivePath) {
+        if (isInno) {
+            archive.parentFile?.listFiles()
+                ?.filter { it.isFile && (it.extension.equals("bin", true) || it == archive) }
+                ?.sumOf { it.length() } ?: archive.length()
+        } else selected.length()
+    }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         // Header bar.
@@ -158,18 +184,27 @@ fun UnpackArchiveScreen(
             SectionCard {
                 Text("Source", style = sectionTitle())
                 Spacer(Modifier.height(6.dp))
-                Text(archive.name, color = MaterialTheme.colorScheme.onBackground, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                Text(selected.name, color = MaterialTheme.colorScheme.onBackground, fontSize = 15.sp, fontWeight = FontWeight.Medium)
                 Spacer(Modifier.height(2.dp))
                 val typeText = when {
+                    isInno -> "InnoSetup installer"
                     typeLoading -> "reading…"
                     detectedType != null -> detectedType
                     else -> "unknown type"
                 }
                 Text(
-                    "${StringUtils.formatBytes(archive.length())}  •  $typeText",
+                    "${StringUtils.formatBytes(sourceSize)}  •  $typeText",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp,
                 )
+                if (isInno) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "7-Zip will unpack the game payload from ${archive.name} and its Setup-*.bin volumes.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 11.sp,
+                    )
+                }
             }
 
             Spacer(Modifier.height(12.dp))
@@ -308,14 +343,14 @@ fun UnpackArchiveScreen(
                     onClick = {
                         UnpackManager.clearIfTerminal()
                         val mmt = UnpackManager.mmtFor(powerMode, manualCores)
-                        UnpackService.start(context, archive.absolutePath, destPath, mmt, buffer.bytes)
+                        UnpackService.start(context, archive.absolutePath, destPath, mmt, buffer.bytes, isInno, sourceSize)
                     },
                     enabled = !gatedByPermission && !engineMissing && archive.isFile,
                     modifier = Modifier.fillMaxWidth().height(52.dp),
                 ) {
                     Icon(Icons.Filled.Unarchive, null, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Extract", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    Text(if (isInno) "Unpack game payload" else "Extract", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
 
@@ -383,7 +418,20 @@ fun UnpackArchiveScreen(
                     UnpackPhase.ERROR -> {
                         Spacer(Modifier.height(4.dp))
                         WarnCard {
-                            Text("Extraction failed", color = MaterialTheme.colorScheme.error, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                            if (state.isInno) {
+                                // Some repacks use a customised InnoSetup that 7-Zip can't parse. The
+                                // honest fallback is to run the real installer inside a container.
+                                Text("Couldn't unpack this InnoSetup repack", color = MaterialTheme.colorScheme.error, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    "This InnoSetup repack must be installed by running Setup.exe inside a Winlator container.",
+                                    color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp,
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                RunSetupInContainer(exe = archive)
+                            } else {
+                                Text("Extraction failed", color = MaterialTheme.colorScheme.error, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                            }
                             state.errorTail?.let {
                                 Spacer(Modifier.height(6.dp))
                                 Text(it.takeLast(600), color = MaterialTheme.colorScheme.onSurface, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
@@ -397,6 +445,39 @@ fun UnpackArchiveScreen(
                         }
                     }
                     else -> Unit
+                }
+            }
+        }
+    }
+}
+
+/**
+ * "Run Setup.exe in a container" fallback for InnoSetup repacks 7-Zip can't unpack. Picks the sole
+ * container automatically; with several it offers a menu; with none it says so.
+ */
+@Composable
+private fun RunSetupInContainer(exe: File) {
+    val context = LocalContext.current
+    val containers = remember { com.winlator.star.util.ContainerExeRunner.containers(context) }
+    var menu by remember { mutableStateOf(false) }
+
+    fun launch(container: com.winlator.star.container.Container) {
+        val err = com.winlator.star.util.ContainerExeRunner.run(context, container, exe)
+        if (err != null) android.widget.Toast.makeText(context, err, android.widget.Toast.LENGTH_LONG).show()
+    }
+
+    when {
+        containers.isEmpty() -> Text(
+            "Create a container first, then run ${exe.name} from the File Manager.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp,
+        )
+        else -> Box {
+            Button(onClick = { if (containers.size == 1) launch(containers.first()) else menu = true }) {
+                Text("Run ${exe.name} in a container")
+            }
+            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                containers.forEach { c ->
+                    DropdownMenuItem(text = { Text(c.name) }, onClick = { menu = false; launch(c) })
                 }
             }
         }

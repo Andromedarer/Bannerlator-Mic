@@ -38,13 +38,15 @@ class UnpackService : Service() {
         const val EXTRA_DEST = "dest"
         const val EXTRA_MMT = "mmt"
         const val EXTRA_BUFFER = "buffer"
+        const val EXTRA_IS_INNO = "isInno"
+        const val EXTRA_TOTAL_SIZE = "totalSize"
 
         // Process-static so the notification's Cancel action can reach the running process even if
         // onStartCommand hasn't re-published `instance` yet.
         @Volatile private var proc: Process? = null
         @Volatile private var cancelled = false
 
-        fun start(ctx: Context, archive: String, dest: String, mmt: Int, bufferBytes: Int) {
+        fun start(ctx: Context, archive: String, dest: String, mmt: Int, bufferBytes: Int, isInno: Boolean, totalSize: Long) {
             val app = ctx.applicationContext
             val i = Intent(app, UnpackService::class.java).apply {
                 action = ACTION_START
@@ -52,6 +54,8 @@ class UnpackService : Service() {
                 putExtra(EXTRA_DEST, dest)
                 putExtra(EXTRA_MMT, mmt)
                 putExtra(EXTRA_BUFFER, bufferBytes)
+                putExtra(EXTRA_IS_INNO, isInno)
+                putExtra(EXTRA_TOTAL_SIZE, totalSize)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) app.startForegroundService(i) else app.startService(i)
         }
@@ -82,6 +86,8 @@ class UnpackService : Service() {
                 val dest = intent.getStringExtra(EXTRA_DEST)
                 val mmt = intent.getIntExtra(EXTRA_MMT, 1)
                 val buffer = intent.getIntExtra(EXTRA_BUFFER, ReadBuffer.MB1.bytes)
+                val isInno = intent.getBooleanExtra(EXTRA_IS_INNO, false)
+                val totalSize = intent.getLongExtra(EXTRA_TOTAL_SIZE, 0L)
                 if (archive == null || dest == null) { stopNow(); return START_NOT_STICKY }
                 // Refuse a second concurrent job — one at a time, like the DownloadCoordinator.
                 if (UnpackManager.current.isRunning) {
@@ -91,16 +97,19 @@ class UnpackService : Service() {
                 startForegroundCompat(buildNotification(UnpackManager.current.copy(
                     phase = UnpackPhase.LISTING, archiveName = File(archive).name,
                 )))
-                runExtraction(File(archive), File(dest), mmt, buffer)
+                runExtraction(File(archive), File(dest), mmt, buffer, isInno, totalSize)
                 return START_STICKY
             }
         }
         return START_NOT_STICKY
     }
 
-    private fun runExtraction(archive: File, destDir: File, mmt: Int, buffer: Int) {
+    private fun runExtraction(archive: File, destDir: File, mmt: Int, buffer: Int, isInno: Boolean, totalSize: Long) {
         cancelled = false
         val ctx = applicationContext
+        // Speed/ETA and the reported size track the DATA 7-Zip reads. For an InnoSetup installer that
+        // is the Setup-*.bin payload total (passed in), not the small Setup.exe we point 7-Zip at.
+        val dataSize = if (totalSize > 0) totalSize else archive.length()
         Thread {
             val startMs = SystemClock.elapsedRealtime()
 
@@ -110,14 +119,18 @@ class UnpackService : Service() {
                     archivePath = archive.absolutePath,
                     archiveName = archive.name,
                     destPath = destDir.absolutePath,
-                    archiveSize = archive.length(),
+                    archiveSize = dataSize,
+                    isInno = isInno,
                 )
             )
             refresh()
 
             val info = SevenZip.list(ctx, archive)
             UnpackManager.update {
-                it.copy(phase = UnpackPhase.EXTRACTING, archiveType = info?.type)
+                it.copy(
+                    phase = UnpackPhase.EXTRACTING,
+                    archiveType = if (isInno) "InnoSetup installer" else info?.type,
+                )
             }
             refresh()
 
@@ -128,7 +141,7 @@ class UnpackService : Service() {
             var lastBytes = 0L
             var emaBps = 0L
             var files = 0
-            val size = archive.length().coerceAtLeast(1L)
+            val size = dataSize.coerceAtLeast(1L)
 
             val result = runCatching {
                 SevenZip.extract(
@@ -176,7 +189,7 @@ class UnpackService : Service() {
                 cancelled -> UnpackState(
                     phase = UnpackPhase.CANCELLED, archivePath = archive.absolutePath,
                     archiveName = archive.name, destPath = destDir.absolutePath, elapsedMs = elapsed,
-                    filesExtracted = files, archiveSize = archive.length(),
+                    filesExtracted = files, archiveSize = dataSize, isInno = isInno,
                 )
                 result.exitCode <= 1 -> UnpackManager.current.copy(
                     phase = UnpackPhase.DONE, percent = 100, elapsedMs = elapsed,

@@ -43,6 +43,8 @@ data class UnpackState(
     val etaSeconds: Long = -1L,
     val elapsedMs: Long = 0L,
     val errorTail: String? = null,
+    /** True when 7-Zip was pointed at an InnoSetup installer (payload extraction), not a plain archive. */
+    val isInno: Boolean = false,
 ) {
     val isRunning: Boolean get() = phase == UnpackPhase.LISTING || phase == UnpackPhase.EXTRACTING
 }

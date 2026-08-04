@@ -1700,12 +1700,15 @@ private fun FileItemRow(
                         MenuItemDivider()
                     }
                     // "Unpack Archive…" routes to the bundled 7-Zip engine — the only path that
-                    // handles disc images (ISO/UDF), RAR, split volumes and 80 GB+ single files.
+                    // handles disc images (ISO/UDF), RAR, split volumes and 80 GB+ single files. For
+                    // an InnoSetup repack (Setup.exe + Setup-*.bin) it becomes "Unpack game payload",
+                    // pointing 7-Zip at the installer to unpack the game behind the .bin volumes.
                     // Offered for that whole superset; the plain "Extract" below stays for the
                     // tar/gz/zst formats the in-app streaming extractor already does well.
-                    if (com.winlator.star.core.unpack.SevenZip.isSupported(file)) {
+                    val isInno = com.winlator.star.core.unpack.SevenZip.isInnoSetup(file)
+                    if (isInno || com.winlator.star.core.unpack.SevenZip.isSupported(file)) {
                         DropdownMenuItem(
-                            text = { Text("Unpack Archive…") },
+                            text = { Text(if (isInno) "Unpack game payload" else "Unpack Archive…") },
                             leadingIcon = { Icon(Icons.Filled.Unarchive, null, tint = MaterialTheme.colorScheme.primary) },
                             onClick = { onDismissMenu(); onUnpack() },
                         )

@@ -44,6 +44,37 @@ object SevenZip {
         return SUPPORTED.any { name.endsWith(it) }
     }
 
+    // A Setup-1.bin / game-2.bin style InnoSetup data volume.
+    private val INNO_BIN = Regex("""(?i)-\d+\.bin$""")
+
+    /**
+     * If [file] is part of an InnoSetup repack (the layout games arrive in — a `Setup.exe` next to
+     * `Setup-1.bin`, `Setup-2.bin`, …), returns the installer `.exe` that 7-Zip must be pointed at to
+     * unpack the game payload; otherwise null. 7-Zip opens the payload behind the `.bin` volumes only
+     * when given the `.exe`, never a lone `.bin`.
+     *
+     * Handles both entry points: the user selecting `Setup.exe`, or selecting a `Setup-N.bin` volume.
+     */
+    fun resolveInnoTarget(file: File): File? {
+        if (file.isDirectory) return null
+        val parent = file.parentFile ?: return null
+        val siblings = parent.listFiles() ?: return null
+        val ext = file.extension.lowercase()
+        val hasInnoBin = siblings.any { it.isFile && INNO_BIN.containsMatchIn(it.name) }
+        return when {
+            // An .exe sitting next to Setup-*.bin data (or a plainly-named setup.exe) is the installer.
+            ext == "exe" && (hasInnoBin || file.name.equals("setup.exe", ignoreCase = true)) -> file
+            // A Setup-N.bin was picked directly — point 7-Zip at the sibling installer .exe instead.
+            ext == "bin" && INNO_BIN.containsMatchIn(file.name) ->
+                siblings.firstOrNull { it.isFile && it.extension.equals("exe", true) && it.name.contains("setup", true) }
+                    ?: siblings.firstOrNull { it.isFile && it.extension.equals("exe", true) }
+            else -> null
+        }
+    }
+
+    /** True when [file] is (part of) an InnoSetup repack — see [resolveInnoTarget]. */
+    fun isInnoSetup(file: File): Boolean = resolveInnoTarget(file) != null
+
     /** A friendly default folder name to extract [archive] into — its name minus one extension. */
     fun suggestedTargetName(archive: File): String {
         val name = archive.name
