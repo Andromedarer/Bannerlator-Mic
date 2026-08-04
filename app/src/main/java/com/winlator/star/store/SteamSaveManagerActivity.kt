@@ -278,13 +278,9 @@ internal fun SaveManagerScreen(
         }
     }
 
+    // Steam-list needs-sync count. Drives BOTH the Steam tab's rail badge and the content-pane
+    // warning strip below. (Custom rows load inside their own tab, so this is Steam scope only.)
     val needSync = statuses.count { it.state.needsAttention() }
-    val summary = when {
-        loading -> "Loading…"
-        statuses.isEmpty() -> "No Steam cloud saves or local Library folders yet."
-        needSync == 0 -> "All ${statuses.size} game${plural(statuses.size)} in sync."
-        else -> "$needSync game${plural(needSync)} need syncing."
-    }
 
     Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         // Header bar — mirrors the Steam Library header idiom (back + title).
@@ -323,9 +319,10 @@ internal fun SaveManagerScreen(
         }
 
         // ── Shared collapsible left rail (mockup "Option 2") + content ──────────────────────────
-        // Steam / Custom / Settings move off the old top TabRow into the rail; the persistent sync
-        // summary is pinned in the rail footer. Landscape: expanded by default + per-screen memory;
-        // portrait: always collapsed icon-only (the active section name is surfaced over the content).
+        // Steam / Custom / Settings move off the old top TabRow into the rail; the needs-sync count
+        // surfaces as a badge on the Steam tab + a warning strip over the content (no rail footer).
+        // Landscape: expanded by default + per-screen memory; portrait: always collapsed icon-only
+        // (the active section name is surfaced over the content).
         val railState = rememberRailState("savemanager")
         val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
         val cols = if (isLandscape) 2 else 1
@@ -343,39 +340,12 @@ internal fun SaveManagerScreen(
                     RailSection(
                         header = null,
                         items = listOf(
-                            RailItem("Steam", Icons.Filled.VideogameAsset, selectedTab == 0) { selectedTab = 0 },
+                            RailItem("Steam", Icons.Filled.VideogameAsset, selectedTab == 0, { selectedTab = 0 }, badge = needSync),
                             RailItem("Custom", Icons.Filled.Folder, selectedTab == 1) { selectedTab = 1 },
                             RailItem("Settings", Icons.Filled.Settings, selectedTab == 2) { selectedTab = 2 },
                         ),
                     ),
                 ),
-                footer = {
-                    // Persistent sync summary (mockup ".rstat"). Icon-only count when the rail is
-                    // collapsed so it still reads at a glance. Reflects the Steam list's needs-sync
-                    // count (the only status set the parent holds; Custom rows load inside their tab).
-                    if (railState.collapsed) {
-                        if (needSync > 0) {
-                            Box(
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(
-                                    text = needSync.toString(),
-                                    color = MaterialTheme.colorScheme.primary,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                )
-                            }
-                        }
-                    } else {
-                        Text(
-                            text = summary,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 11.sp,
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
-                        )
-                    }
-                },
             )
 
             // ── Content: full height beside the rail ─────────────────────────────────────────────
@@ -391,6 +361,27 @@ internal fun SaveManagerScreen(
                         letterSpacing = 0.6.sp,
                         modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 2.dp),
                     )
+                }
+
+                // Content-pane warning strip — how many games still need syncing (Steam-list scope).
+                // Shown only when there's something to sync, and not on the Settings tab; hidden at 0.
+                if (needSync > 0 && selectedTab != 2) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(MaterialTheme.colorScheme.errorContainer)
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                    ) {
+                        Text(
+                            text = "⚠️ $needSync game${plural(needSync)} need syncing",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
                 }
 
                 when (selectedTab) {
