@@ -69,6 +69,7 @@ import com.winlator.star.core.unpack.Innoextract
 import com.winlator.star.core.unpack.PowerMode
 import com.winlator.star.core.unpack.ReadBuffer
 import com.winlator.star.core.unpack.SevenZip
+import com.winlator.star.core.unpack.Unarc
 import com.winlator.star.core.unpack.UnpackManager
 import com.winlator.star.core.unpack.UnpackPhase
 import com.winlator.star.core.unpack.UnpackService
@@ -154,11 +155,22 @@ fun UnpackArchiveScreen(
     val destOnSharedStorage = destPath.startsWith("/storage/") && !destPath.startsWith(context.filesDir.absolutePath)
     val gatedByPermission = destOnSharedStorage && !hasAllFiles
 
-    val running = state.isRunning && state.archivePath == archive.absolutePath
+    // InnoSetup routing (see classifyInno). While classifying we hold the action buttons.
+    val innoClassifying = isInno && innoClass == null
+    // FreeArc/ISDone repack → decode natively with unarc; standard-Inno/GOG → innoextract; neither
+    // available (or srep) → run Setup.exe in a container.
+    val innoContainerOnly = innoClass?.route == SevenZip.InnoRoute.CONTAINER_ONLY
+    val innoExtract = innoClass?.route == SevenZip.InnoRoute.INNOEXTRACT
+    val innoFreeArc = innoClass?.route == SevenZip.InnoRoute.FREEARC_NATIVE
+    // The path actually handed to the service (its job key): FreeArc runs on the first Setup-*.bin
+    // volume; everything else on `archive` (the resolved Setup.exe or the plain file).
+    val jobArchive = if (innoFreeArc) (innoClass?.freeArcArchive ?: archive) else archive
+
+    val running = state.isRunning && state.archivePath == jobArchive.absolutePath
     val engineMissing = !SevenZip.isAvailable(context)
 
-    // For display + honest speed/ETA: the data 7-Zip reads. For InnoSetup that's the Setup-*.bin
-    // payload total, not the tiny Setup.exe we point it at.
+    // For display + honest speed/ETA: the payload data. For InnoSetup that's the Setup-*.bin total,
+    // not the tiny Setup.exe.
     val sourceSize = remember(archivePath) {
         if (isInno) {
             archive.parentFile?.listFiles()
@@ -167,15 +179,9 @@ fun UnpackArchiveScreen(
         } else selected.length()
     }
 
-    // Only one extraction at a time (matches the service's own guard) so the progress pill and
-    // notification are never ambiguous.
-    val otherJobRunning = state.isRunning && state.archivePath != archive.absolutePath
+    // Only one extraction at a time (matches the service's own guard).
+    val otherJobRunning = state.isRunning && state.archivePath != jobArchive.absolutePath
 
-    // InnoSetup routing (see classifyInno). While classifying we hold the action buttons.
-    val innoClassifying = isInno && innoClass == null
-    // FreeArc/ISDone repack → run Setup.exe in a container; standard-Inno/GOG → innoextract.
-    val innoContainerOnly = innoClass?.route == SevenZip.InnoRoute.CONTAINER_ONLY
-    val innoExtract = innoClass?.route == SevenZip.InnoRoute.INNOEXTRACT
     // Content pre-flight (not extension): a plain file is judged by whether `7zz l` could open it as
     // an archive / disc image. No recognisable container (e.g. raw .bin data) → nothing to unpack.
     val notAnArchive = !isInno && !typeLoading && detectedType == null
@@ -183,7 +189,7 @@ fun UnpackArchiveScreen(
     val checking = if (isInno) innoClassifying else typeLoading
     // The 7-Zip extract path is for plain (non-Inno) archives only, once the sniff confirms it opens.
     val sevenZipAllowed = !isInno && !typeLoading && detectedType != null
-    val engineMissingInno = isInno && !Innoextract.isAvailable(context)
+    val engineMissingInno = innoExtract && !Innoextract.isAvailable(context)
 
     // Battery-optimisation exemption, refreshed on resume so returning from Settings re-checks it.
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -258,14 +264,21 @@ fun UnpackArchiveScreen(
                         fontSize = 11.sp,
                     )
                 }
+                if (innoFreeArc) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "unarc will decode the FreeArc data (${jobArchive.name} + its Setup-*.bin volumes) directly.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 11.sp,
+                    )
+                }
             }
 
             Spacer(Modifier.height(12.dp))
 
-            // Destination applies to both the 7-Zip and innoextract paths; Power (below) is 7-Zip-only.
-            // Both are hidden while still deciding what the file is, for the container-only (FreeArc)
-            // route, and for non-archives.
-            if (sevenZipAllowed || innoExtract) {
+            // Destination applies to the 7-Zip, innoextract AND FreeArc/unarc paths; Power (below) is
+            // 7-Zip-only. All hidden while still deciding, for the container-only route, and non-archives.
+            if (sevenZipAllowed || innoExtract || innoFreeArc) {
             // ── Destination ──
             SectionCard {
                 Text("Extract to", style = sectionTitle())
@@ -490,15 +503,44 @@ fun UnpackArchiveScreen(
                 Spacer(Modifier.height(12.dp))
             }
 
-            // ── InnoSetup FreeArc/ISDone → container-only route ──
+            // ── FreeArc repack → native unarc (primary) ──
+            if (!running && innoFreeArc) {
+                SectionCard {
+                    Text(
+                        "FreeArc decompression is I/O-bound: unarc already auto-parallelizes (4x4), so the " +
+                            "real limit is writing the game to your storage — a faster card / internal " +
+                            "storage helps far more than anything else. There's no thread knob to tune.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp,
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                Button(
+                    onClick = {
+                        UnpackManager.clearIfTerminal()
+                        UnpackService.start(context, jobArchive.absolutePath, destPath, 1, buffer.bytes, true, sourceSize, "unarc")
+                    },
+                    enabled = !gatedByPermission && jobArchive.isFile && !otherJobRunning,
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                ) {
+                    Icon(Icons.Filled.Unarchive, null, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Unpack game natively (unarc)", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                }
+                // No dead-ends: also offer the container route (e.g. srep, or if unarc fails at runtime).
+                Spacer(Modifier.height(8.dp))
+                RunSetupInContainer(exe = archive)
+                Spacer(Modifier.height(12.dp))
+            }
+
+            // ── Can't unpack in-app (unarc unavailable / srep) → container-only route ──
             if (!running && innoContainerOnly) {
                 val comp = innoClass?.compression ?: "FreeArc"
                 WarnCard {
-                    Text("Can't unpack this repack directly", color = MaterialTheme.colorScheme.error, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Can't unpack this repack in-app", color = MaterialTheme.colorScheme.error, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "This is a $comp repack — its data can't be unpacked directly. Install it by running " +
-                            "${archive.name} inside a Winlator container; the installer decompresses the game itself.",
+                        "This is a $comp repack whose data can't be decoded in-app (it may use SREP). Install it " +
+                            "by running ${archive.name} inside a Winlator container, or unpack it on a PC.",
                         color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp,
                     )
                     Spacer(Modifier.height(10.dp))
@@ -613,7 +655,7 @@ fun UnpackArchiveScreen(
             }
 
             // ── Terminal result ──
-            if (state.archivePath == archive.absolutePath && !running) {
+            if (state.archivePath == jobArchive.absolutePath && !running) {
                 when (state.phase) {
                     UnpackPhase.DONE -> {
                         Spacer(Modifier.height(4.dp))
@@ -632,12 +674,20 @@ fun UnpackArchiveScreen(
                         Spacer(Modifier.height(4.dp))
                         WarnCard {
                             if (state.isInno) {
-                                // Some repacks use a customised InnoSetup that 7-Zip can't parse. The
-                                // honest fallback is to run the real installer inside a container.
-                                Text("Couldn't unpack this InnoSetup repack", color = MaterialTheme.colorScheme.error, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                                // The honest fallback for any InnoSetup/repack failure is to run the
+                                // real installer inside a container. FreeArc failures may be SREP.
+                                val freeArc = state.engine == "unarc"
+                                Text(
+                                    if (freeArc) "Couldn't decode this FreeArc repack" else "Couldn't unpack this InnoSetup repack",
+                                    color = MaterialTheme.colorScheme.error, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                                )
                                 Spacer(Modifier.height(6.dp))
                                 Text(
-                                    "This InnoSetup repack must be installed by running Setup.exe inside a Winlator container.",
+                                    if (freeArc)
+                                        "It may use SREP or a codec this build can't decode. Install it by running " +
+                                            "Setup.exe inside a Winlator container, or unpack it on a PC."
+                                    else
+                                        "This InnoSetup repack must be installed by running Setup.exe inside a Winlator container.",
                                     color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp,
                                 )
                                 Spacer(Modifier.height(8.dp))
