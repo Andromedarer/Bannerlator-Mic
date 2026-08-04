@@ -43,8 +43,10 @@ data class UnpackState(
     val etaSeconds: Long = -1L,
     val elapsedMs: Long = 0L,
     val errorTail: String? = null,
-    /** True when 7-Zip was pointed at an InnoSetup installer (payload extraction), not a plain archive. */
+    /** True when the source is an InnoSetup installer/repack (not a plain archive). */
     val isInno: Boolean = false,
+    /** Which engine ran: "7z" | "inno" | "unarc". Lets the error UI tailor its guidance. */
+    val engine: String = "7z",
 ) {
     val isRunning: Boolean get() = phase == UnpackPhase.LISTING || phase == UnpackPhase.EXTRACTING
 }

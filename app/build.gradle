@@ -65,8 +65,8 @@ android {
     defaultConfig {
         minSdkVersion 26
         targetSdkVersion 28
-        versionCode 63
-        versionName "2.9.5-pre7"
+        versionCode 64
+        versionName "2.9.5-pre8"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
         externalNativeBuild {

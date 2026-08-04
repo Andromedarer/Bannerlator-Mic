@@ -159,7 +159,9 @@ object SevenZip {
     enum class InnoRoute {
         /** Standard InnoSetup / GOG — extract the game files in-app with innoextract. */
         INNOEXTRACT,
-        /** FreeArc/ISDone repack — innoextract/7-Zip can't decompress it; run Setup.exe in a container. */
+        /** FreeArc/ISDone repack — decode the Setup-*.bin FreeArc volumes in-app with unarc. */
+        FREEARC_NATIVE,
+        /** Can't be unpacked in-app (unarc unavailable, or srep-layered) — run Setup.exe in a container. */
         CONTAINER_ONLY,
     }
 
@@ -170,7 +172,15 @@ object SevenZip {
         val compression: String?,
         /** Declared payload size from Records.ini (already human-formatted), when known. */
         val declaredSize: String?,
+        /** For FREEARC_NATIVE: the first Setup-*.bin FreeArc volume to hand to unarc. */
+        val freeArcArchive: File? = null,
     )
+
+    /** The lowest-numbered `Setup-N.bin` FreeArc data volume next to [installer] (the unarc entry point). */
+    private fun firstFreeArcVolume(installer: File): File? =
+        installer.parentFile?.listFiles()
+            ?.filter { it.isFile && INNO_BIN.containsMatchIn(it.name) }
+            ?.minByOrNull { INNO_BIN.find(it.name)?.groupValues?.get(0)?.filter { c -> c.isDigit() }?.toIntOrNull() ?: Int.MAX_VALUE }
 
     /**
      * Decides how an InnoSetup [installer] must be unpacked. Standard InnoSetup / GOG installers are
@@ -188,11 +198,21 @@ object SevenZip {
         val records = readRecordsIni(installer.parentFile)
         val rawType = records?.first
         val freeArc = rawType?.trim()?.startsWith("freearc", ignoreCase = true) == true
+        // FreeArc → decode the Setup-*.bin volumes natively with unarc when it's available; otherwise
+        // fall back to the container installer. (A srep-layered repack that unarc can't decode fails at
+        // runtime, and the UI turns that into the honest container/PC message — no proactive probe.)
+        val firstBin = if (freeArc) firstFreeArcVolume(installer) else null
+        val route = when {
+            !freeArc -> InnoRoute.INNOEXTRACT
+            firstBin != null && Unarc.isAvailable(context) -> InnoRoute.FREEARC_NATIVE
+            else -> InnoRoute.CONTAINER_ONLY
+        }
         return InnoClassification(
             installer = installer,
-            route = if (freeArc) InnoRoute.CONTAINER_ONLY else InnoRoute.INNOEXTRACT,
+            route = route,
             compression = rawType?.let { prettyCompression(it) },
             declaredSize = records?.second?.let { prettySize(it) },
+            freeArcArchive = firstBin,
         )
     }
 

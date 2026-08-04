@@ -41,13 +41,14 @@ class UnpackService : Service() {
         const val EXTRA_BUFFER = "buffer"
         const val EXTRA_IS_INNO = "isInno"
         const val EXTRA_TOTAL_SIZE = "totalSize"
+        const val EXTRA_ENGINE = "engine"   // "7z" | "inno" | "unarc"
 
         // Process-static so the notification's Cancel action can reach the running process even if
         // onStartCommand hasn't re-published `instance` yet.
         @Volatile private var proc: Process? = null
         @Volatile private var cancelled = false
 
-        fun start(ctx: Context, archive: String, dest: String, mmt: Int, bufferBytes: Int, isInno: Boolean, totalSize: Long) {
+        fun start(ctx: Context, archive: String, dest: String, mmt: Int, bufferBytes: Int, isInno: Boolean, totalSize: Long, engine: String = "7z") {
             val app = ctx.applicationContext
             val i = Intent(app, UnpackService::class.java).apply {
                 action = ACTION_START
@@ -57,6 +58,7 @@ class UnpackService : Service() {
                 putExtra(EXTRA_BUFFER, bufferBytes)
                 putExtra(EXTRA_IS_INNO, isInno)
                 putExtra(EXTRA_TOTAL_SIZE, totalSize)
+                putExtra(EXTRA_ENGINE, engine)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) app.startForegroundService(i) else app.startService(i)
         }
@@ -117,6 +119,7 @@ class UnpackService : Service() {
                 val buffer = intent.getIntExtra(EXTRA_BUFFER, ReadBuffer.MB1.bytes)
                 val isInno = intent.getBooleanExtra(EXTRA_IS_INNO, false)
                 val totalSize = intent.getLongExtra(EXTRA_TOTAL_SIZE, 0L)
+                val engine = intent.getStringExtra(EXTRA_ENGINE) ?: "7z"
                 if (archive == null || dest == null) { stopNow(); return START_NOT_STICKY }
                 // Refuse a second concurrent job — one at a time, like the DownloadCoordinator.
                 if (UnpackManager.current.isRunning) {
@@ -126,18 +129,18 @@ class UnpackService : Service() {
                 startForegroundCompat(buildNotification(UnpackManager.current.copy(
                     phase = UnpackPhase.LISTING, archiveName = File(archive).name,
                 )))
-                runExtraction(File(archive), File(dest), mmt, buffer, isInno, totalSize)
+                runExtraction(File(archive), File(dest), mmt, buffer, isInno, totalSize, engine)
                 return START_STICKY
             }
         }
         return START_NOT_STICKY
     }
 
-    private fun runExtraction(archive: File, destDir: File, mmt: Int, buffer: Int, isInno: Boolean, totalSize: Long) {
+    private fun runExtraction(archive: File, destDir: File, mmt: Int, buffer: Int, isInno: Boolean, totalSize: Long, engine: String) {
         cancelled = false
         val ctx = applicationContext
-        // Speed/ETA and the reported size track the DATA 7-Zip reads. For an InnoSetup installer that
-        // is the Setup-*.bin payload total (passed in), not the small Setup.exe we point 7-Zip at.
+        // Speed/ETA and the reported size track the DATA the engine reads. For an InnoSetup installer
+        // that is the Setup-*.bin payload total (passed in), not the small Setup.exe.
         val dataSize = if (totalSize > 0) totalSize else archive.length()
         Thread {
             acquireWakeLock()
@@ -152,17 +155,21 @@ class UnpackService : Service() {
                     destPath = destDir.absolutePath,
                     archiveSize = dataSize,
                     isInno = isInno,
+                    engine = engine,
                 )
             )
             refresh()
 
-            // InnoSetup targets that reach the service are always standard-Inno/GOG (FreeArc goes to
-            // the container route, never here), so isInno == "use innoextract".
+            // engine: "unarc" = FreeArc native, "inno" = innoextract (standard-Inno/GOG), else 7-Zip.
             val info = if (isInno) null else SevenZip.list(ctx, archive)
             UnpackManager.update {
                 it.copy(
                     phase = UnpackPhase.EXTRACTING,
-                    archiveType = if (isInno) "InnoSetup installer" else info?.type,
+                    archiveType = when {
+                        engine == "unarc" -> "FreeArc repack"
+                        isInno -> "InnoSetup installer"
+                        else -> info?.type
+                    },
                 )
             }
             refresh()
@@ -198,7 +205,49 @@ class UnpackService : Service() {
             }
 
             val result = runCatching {
-                if (isInno) {
+                if (engine == "unarc") {
+                    // FreeArc: unarc block-buffers stdout, so drive progress by POLLING the destination
+                    // size against the total from `unarc l` (140 GB-class). Speed/ETA from the byte delta.
+                    val unarcTotal = Unarc.list(ctx, archive)?.totalBytes?.takeIf { it > 0 } ?: dataSize
+                    UnpackManager.update { it.copy(archiveSize = unarcTotal) }
+                    val polling = java.util.concurrent.atomic.AtomicBoolean(true)
+                    val poller = Thread {
+                        var pLastB = 0L; var pLastT = SystemClock.elapsedRealtime(); var pEma = 0L
+                        while (polling.get()) {
+                            runCatching { Thread.sleep(2500) }
+                            val (count, bytes) = runCatching {
+                                var c = 0; var b = 0L
+                                destDir.walkTopDown().forEach { if (it.isFile) { c++; b += it.length() } }
+                                c to b
+                            }.getOrDefault(0 to 0L)
+                            val now = SystemClock.elapsedRealtime()
+                            val dt = (now - pLastT).coerceAtLeast(1)
+                            val inst = ((bytes - pLastB) * 1000 / dt).coerceAtLeast(0)
+                            pEma = if (pEma == 0L) inst else (pEma * 2 + inst) / 3
+                            pLastB = bytes; pLastT = now
+                            val pct = (bytes * 100 / unarcTotal.coerceAtLeast(1)).toInt().coerceIn(0, 100)
+                            val eta = if (pEma > 0) (unarcTotal - bytes) / pEma else -1L
+                            files = count
+                            UnpackManager.update {
+                                it.copy(
+                                    phase = UnpackPhase.EXTRACTING, percent = pct,
+                                    bytesProcessed = bytes, speedBps = pEma, etaSeconds = eta,
+                                    elapsedMs = now - startMs, filesExtracted = count,
+                                )
+                            }
+                            refresh()
+                        }
+                    }.also { it.name = "unarc-poller"; it.start() }
+                    val r = Unarc.extract(
+                        ctx, archive, destDir,
+                        listener = { name -> UnpackManager.update { it.copy(currentFile = name) } },
+                        onProcess = { proc = it },
+                    )
+                    polling.set(false)
+                    runCatching { poller.join(3000) }
+                    if (r.exitCode == 0) files = runCatching { destDir.walkTopDown().count { it.isFile } }.getOrDefault(files)
+                    SevenZip.Result(if (r.exitCode == 0) 0 else 2, r.stderrTail)
+                } else if (isInno) {
                     val r = Innoextract.extract(
                         ctx, archive, destDir,
                         listener = { percent -> pushProgress(percent, null) },
@@ -252,7 +301,7 @@ class UnpackService : Service() {
                 cancelled -> UnpackState(
                     phase = UnpackPhase.CANCELLED, archivePath = archive.absolutePath,
                     archiveName = archive.name, destPath = destDir.absolutePath, elapsedMs = elapsed,
-                    filesExtracted = files, archiveSize = dataSize, isInno = isInno,
+                    filesExtracted = files, archiveSize = dataSize, isInno = isInno, engine = engine,
                 )
                 result.exitCode <= 1 -> UnpackManager.current.copy(
                     phase = UnpackPhase.DONE, percent = 100, elapsedMs = elapsed,
