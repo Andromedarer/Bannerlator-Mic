@@ -35,6 +35,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
@@ -1419,6 +1420,25 @@ fun FileManagerScreen(
                             onCut = { clipboardFiles = listOf(file); isCutOperation = true; showMenuFor = null },
                             onDelete = { selectedEntry = file; showMenuFor = null },
                             onRename = { renameTarget = file; showMenuFor = null },
+                            onFastExtract = {
+                                showMenuFor = null
+                                scope.launch {
+                                    when (val o = com.winlator.star.core.unpack.FastExtract.start(context, file)) {
+                                        is com.winlator.star.core.unpack.FastExtract.Outcome.Started ->
+                                            Toast.makeText(context, "Unpacking ${o.name}…", Toast.LENGTH_SHORT).show()
+                                        com.winlator.star.core.unpack.FastExtract.Outcome.Busy ->
+                                            Toast.makeText(context, "Another unpack is already in progress", Toast.LENGTH_SHORT).show()
+                                        is com.winlator.star.core.unpack.FastExtract.Outcome.NotArchive ->
+                                            Toast.makeText(context, "Not a recognized archive — nothing to unpack", Toast.LENGTH_SHORT).show()
+                                        is com.winlator.star.core.unpack.FastExtract.Outcome.OpenScreen -> {
+                                            o.toast?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
+                                            context.startActivity(
+                                                com.winlator.star.UnpackArchiveActivity.intent(context, o.archivePath)
+                                            )
+                                        }
+                                    }
+                                }
+                            },
                             onUnpack = {
                                 showMenuFor = null
                                 context.startActivity(
@@ -1495,6 +1515,7 @@ private fun FileItemRow(
     onDelete: () -> Unit,
     onRename: () -> Unit,
     onUnpack: () -> Unit = {},
+    onFastExtract: () -> Unit = {},
     isFavorite: Boolean = false,
     onToggleFavorite: () -> Unit = {},
 ) {
@@ -1658,6 +1679,14 @@ private fun FileItemRow(
                             text = { Text(if (isInno) "Unpack / Install…" else "Unpack Archive…") },
                             leadingIcon = { Icon(Icons.Filled.Unarchive, null, tint = MaterialTheme.colorScheme.primary) },
                             onClick = { onDismissMenu(); onUnpack() },
+                        )
+                        MenuItemDivider()
+                        // Convenience: one tap, no screen — pre-fill defaults (new sibling folder, Auto
+                        // power) and start straight into the progress pill. Same engines/throughput.
+                        DropdownMenuItem(
+                            text = { Text("Fast Extract") },
+                            leadingIcon = { Icon(Icons.Filled.Bolt, null, tint = MaterialTheme.colorScheme.primary) },
+                            onClick = { onDismissMenu(); onFastExtract() },
                         )
                         MenuItemDivider()
                     }

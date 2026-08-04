@@ -1,5 +1,9 @@
 # Star-Compose — Progress Log
 
+## 2026-08-04 — ⚡ **pre9 (vc65) — "Fast Extract" one-tap ⋮ action** (branch `feat/freearc-native-install`)
+
+> Convenience shortcut: a new **"Fast Extract"** ⋮-menu item beside "Unpack Archive…" (same content-aware visibility). "Fast" = fast-to-START (one tap, no screen) — NOT a new/faster engine; identical throughput, reuses the exact same engines/routing/service. New `core/unpack/FastExtract.kt`: classifies via the EXISTING logic (`resolveInnoTarget`/`classifyInno`/`SevenZip.list`), picks the screen's default dest (new sibling folder named for the archive/game, uniquified) + Auto power + 1 MB buffer, and calls `UnpackService.start` directly → the app-wide pill takes over (no `UnpackArchiveActivity`). Graceful edges (no dead-ends): not-an-archive (content pre-flight null) → toast "Not a recognized archive — nothing to unpack" (no job); CONTAINER_ONLY srep/unopenable → toast + opens the full screen so the container card shows; All-Files-Access off → opens the full screen (grant card); already running → "Another unpack is already in progress". Routes 7-Zip / innoextract / native-unarc identically (incl. unarc's mandatory `-ld-`, size-poll progress, wakelock, notification, cancel). "Unpack Archive…" stays the full-control primary (folder picker / Power / buffer). Wired via `onFastExtract` on `FileItemRow`. ⏭️ CI (pre9) → stage pubg.
+
 ## 2026-08-04 — 🗜️ **pre8 (vc64) — native FreeArc `unarc` in-app extraction** (branch `feat/freearc-native-install`, off merged main incl. pre7)
 
 > Phase 3: FreeArc repacks (FitGirl/DODI; Crimson Desert = the proven case) now extract IN-APP instead of only via the container installer. The compat engineer proved a byte-exact/CRC-verified bionic `unarc` (NDK r29) at `/home/claude-user/freearc-port/unarc.stripped` (deps: system libc/m/dl + libc++_shared, already bundled).
