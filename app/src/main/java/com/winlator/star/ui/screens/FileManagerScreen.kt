@@ -56,6 +56,16 @@ import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Smartphone
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.SportsEsports
+import androidx.compose.ui.platform.LocalConfiguration
+import android.content.res.Configuration
+import com.winlator.star.ui.components.CollapsibleRail
+import com.winlator.star.ui.components.RailItem
+import com.winlator.star.ui.components.RailSection
+import com.winlator.star.ui.components.rememberRailState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -332,7 +342,11 @@ fun FileManagerScreen(
     var showSortMenu by remember { mutableStateOf(false) }
     // View mode: list of cards (default) or a thumbnail grid. Density applies to the list only —
     // a grid tile has no second line to compact.
-    var gridView by remember { mutableStateOf(browsePrefs.getBoolean("fmGridView", false)) }
+    // Grid is the natural LANDSCAPE view (mockup Option 3), so it defaults on; the toolbar toggle
+    // still lets the user switch to rows. PORTRAIT always renders the single-column list regardless.
+    val fmLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    var gridView by remember { mutableStateOf(browsePrefs.getBoolean("fmGridView", true)) }
+    val showGrid = fmLandscape && gridView
     var compactRows by remember { mutableStateOf(browsePrefs.getBoolean("fmCompactRows", false)) }
     var showNewFolderDialog by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<File?>(null) }
@@ -1296,6 +1310,41 @@ fun FileManagerScreen(
             }
         }
 
+        // ── Left locations rail (mockup Option 2) + content ──
+        // Shared collapsible rail: landscape expanded by default, portrait collapsed icon-only. Not
+        // shown in pick mode (the themed picker keeps its slim layout). Built each recompose (cheap)
+        // so it tracks the current drive/favourites without stale click lambdas.
+        val fmRailState = rememberRailState("filemanager")
+        fun locItem(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, dir: File) =
+            RailItem(label, icon, !showFavorites && currentRoot.absolutePath == dir.absolutePath) {
+                showFavorites = false; openDrive(dir)
+            }
+        val storageItems = buildList {
+            add(locItem("Internal", Icons.Filled.Smartphone, File("/storage/emulated/0")))
+            drives.filter { it.removable }.forEach { d ->
+                add(RailItem(d.label, Icons.Filled.SdStorage, !showFavorites && currentRoot.absolutePath == d.dir.absolutePath) {
+                    showFavorites = false; if (d.readable) openDrive(d.dir)
+                })
+            }
+        }
+        val quickItems = buildList {
+            File("/storage/emulated/0/Download").takeIf { it.isDirectory }?.let { add(locItem("Downloads", Icons.Filled.Download, it)) }
+            File("/storage/emulated/0/Winlator/Games").takeIf { it.isDirectory }?.let { add(locItem("Games", Icons.Filled.SportsEsports, it)) }
+            File("/storage/emulated/0/Pictures").takeIf { it.isDirectory }?.let { add(locItem("Pictures", Icons.Filled.Image, it)) }
+        }
+        val favItems = remember(favTick) { FavoritesStore.list(context).map(::File).filter { it.exists() } }
+            .map { d -> RailItem(d.name, Icons.Filled.Star, false) { showFavorites = false; openDrive(d) } }
+        val locationSections = buildList {
+            add(RailSection("STORAGE", storageItems))
+            if (quickItems.isNotEmpty()) add(RailSection("QUICK", quickItems))
+            if (favItems.isNotEmpty()) add(RailSection("★ FAVORITES", favItems))
+        }
+
+        Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            if (!pickMode) {
+                CollapsibleRail(state = fmRailState, title = "Files", sections = locationSections)
+            }
+            Box(modifier = Modifier.weight(1f).fillMaxSize()) {
         // ── Favorites list OR file list ──
         if (showFavorites) {
             FavoritesList(
@@ -1317,20 +1366,19 @@ fun FileManagerScreen(
                     favTick++
                     Toast.makeText(context, "Removed \"${dir.name}\" from Favorites", Toast.LENGTH_SHORT).show()
                 },
-                modifier = Modifier.weight(1f).fillMaxWidth(),
+                modifier = Modifier.fillMaxSize(),
             )
         } else {
         // ── File list (pull down to refresh) ──
         Box(
             modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
+                .fillMaxSize()
                 .nestedScroll(pullState.nestedScrollConnection),
         ) {
             val shownEntries = if (searchQuery.isBlank()) entries
             else entries.filter { it.name.contains(searchQuery, ignoreCase = true) }
 
-            if (gridView && entries.isNotEmpty()) {
+            if (showGrid && entries.isNotEmpty()) {
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = 104.dp),
                     modifier = Modifier.fillMaxSize(),
@@ -1471,6 +1519,8 @@ fun FileManagerScreen(
             }
         }
         }
+            } // end content Box (beside the rail)
+        } // end rail + content Row
 
         // ── FAB area ── (creation is gated off in pick mode)
         if (!pickMode) {
