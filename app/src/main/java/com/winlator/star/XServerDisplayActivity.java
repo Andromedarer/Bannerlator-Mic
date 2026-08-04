@@ -665,27 +665,29 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (frameRatingWindowId == -1) return;                 // HUD inactive -> never count
         if (wid != frameRatingWindowId && wid != glZinkHealedWindowId) {
             if (!guestGlIsZink()) return;                      // only the GL/Zink present topology
+            // Device-observed (Stronghold Crusader / Zink): the window the game actually presents to is
+            // a CHILD GL render surface with no WM class — NOT a top-level application window — while the
+            // HUD's _MESA_DRV binding sits on the top-level game window. So we must NOT require the
+            // presenter itself to be an application window (an earlier version did, and threw the real
+            // presenter away -> 0 fps). Instead: count the presenter as long as a real game application
+            // window is currently FOCUSED (we're in a game, not sitting at the desktop shell) and the
+            // presenter isn't itself the desktop shell. Follow whatever window is presenting.
+            Window focused = xServer.windowManager.getFocusedWindow();
+            boolean gameFocused = focused != null && focused.isApplicationWindow() && !focused.isDesktopWindow();
             Window w = xServer.windowManager.getWindow(wid);
-            boolean ok = w != null && w.isApplicationWindow() && !w.isDesktopWindow()
-                    && w == xServer.windowManager.getFocusedWindow();
-            if (!ok) {
-                // DIAGNOSTIC (strip before merge): explain WHY this presenting window was not counted,
-                // once per distinct wid. Pinpoints the real GL/Zink topology on device.
+            boolean presenterOk = (w == null) || !w.isDesktopWindow();
+            if (!gameFocused || !presenterOk) {
+                // DIAGNOSTIC (strip before merge): explain a rejection once per distinct wid.
                 if (wid != lastHealRejectWid) {
                     lastHealRejectWid = wid;
-                    Window fw = xServer.windowManager.getFocusedWindow();
-                    Log.d("XServerDisplayActivity", "HUD tick skip: wid=" + wid
-                            + " bound=" + frameRatingWindowId
-                            + " healed=" + glZinkHealedWindowId
-                            + " isApp=" + (w != null && w.isApplicationWindow())
-                            + " isDesktop=" + (w != null && w.isDesktopWindow())
-                            + " focusedId=" + (fw != null ? fw.id : -1)
-                            + " cls=" + (w != null ? w.getClassName() : "null"));
+                    Log.d("XServerDisplayActivity", "HUD tick skip: wid=" + wid + " bound=" + frameRatingWindowId
+                            + " gameFocused=" + gameFocused + " focusedId=" + (focused != null ? focused.id : -1)
+                            + " presenterCls=" + (w != null ? w.getClassName() : "null"));
                 }
                 return;
             }
-            Log.d("XServerDisplayActivity", "GL/Zink HUD self-heal: counting FPS on presenting window "
-                    + wid + " (HUD bound to " + frameRatingWindowId + ")");
+            Log.d("XServerDisplayActivity", "GL/Zink HUD self-heal: counting FPS on presenting window " + wid
+                    + " (focused game " + focused.id + ", HUD bound to " + frameRatingWindowId + ")");
             glZinkHealedWindowId = wid;
         }
         fpsCounter.tick();
