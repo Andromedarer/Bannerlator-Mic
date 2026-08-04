@@ -1,5 +1,9 @@
 # Star-Compose — Progress Log
 
+## 2026-08-04 — 🔧 **pre17b (vc66 — FROZEN) — fix: RailItem param order broke call sites** (branch `feat/container-landscape-ui`)
+
+> pre17 (`d5ed8ec7`) failed CI: I'd added `badge: Int` as the LAST param of `RailItem`, so the trailing `onClick` lambda at every existing call site bound to `badge` (Int mismatch + "no value for onClick") — SteamSaveManager:343-345, ContainerDetail:200, FileManager:1344/1350/1361. Fix: keep `onClick: () -> Unit` LAST and put `badge: Int = 0` (defaulted) BEFORE it, so trailing-lambda call sites resolve unchanged and only the Steam site passes `badge = needSync` (now via named `badge = …, onClick = { … }`). All 7 `RailItem(` call sites re-checked. versionCode frozen 66.
+
 ## 2026-08-04 — 🍷 **pre17 (vc66 — FROZEN) — wine-glass rail glyph + scrollable rail + Save-Manager sync badge** (branch `feat/container-landscape-ui`)
 
 > Batched shared-rail improvements. versionCode frozen 66; versionName `-pre17`.

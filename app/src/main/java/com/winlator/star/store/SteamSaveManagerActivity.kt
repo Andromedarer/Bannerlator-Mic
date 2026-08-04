@@ -340,7 +340,7 @@ internal fun SaveManagerScreen(
                     RailSection(
                         header = null,
                         items = listOf(
-                            RailItem("Steam", Icons.Filled.VideogameAsset, selectedTab == 0, { selectedTab = 0 }, badge = needSync),
+                            RailItem("Steam", Icons.Filled.VideogameAsset, selectedTab == 0, badge = needSync, onClick = { selectedTab = 0 }),
                             RailItem("Custom", Icons.Filled.Folder, selectedTab == 1) { selectedTab = 1 },
                             RailItem("Settings", Icons.Filled.Settings, selectedTab == 2) { selectedTab = 2 },
                         ),

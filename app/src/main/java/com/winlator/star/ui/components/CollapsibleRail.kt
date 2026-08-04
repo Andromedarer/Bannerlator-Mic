@@ -54,9 +54,11 @@ data class RailItem(
     val label: String,
     val icon: ImageVector,
     val selected: Boolean,
-    val onClick: () -> Unit,
     /** >0 shows a small accent count badge on the item's icon (expanded and collapsed). */
     val badge: Int = 0,
+    // onClick stays LAST so existing call sites can pass it as a trailing lambda; badge is an
+    // optional named param before it (default 0).
+    val onClick: () -> Unit,
 )
 
 /** A group of [RailItem]s under an optional small section header (STORAGE / QUICK / FAVORITES …). */
