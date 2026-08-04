@@ -315,7 +315,8 @@ fun ContainerDetailScreen(
                 viewModel.rendererSfCompatMode = m["sfCompatMode"] != "false"
                 showVulkanConfig = false
             },
-            onDismiss = { showVulkanConfig = false }
+            onDismiss = { showVulkanConfig = false },
+            frameGenSelected = viewModel.frameGenEngine != "off"
         )
     }
 
@@ -384,7 +385,10 @@ private fun parseVulkanConfig(s: String): Map<String, String> =
 internal fun VulkanSettingsDialog(
     initialConfig: String,
     onConfirm: (newConfig: String) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    // The FG engine dropdown lives on the main screen, not in this dialog — pass whether one is
+    // selected so we can caption the Present Mode field about the temporary auto-switch to Mailbox.
+    frameGenSelected: Boolean = false
 ) {
     // The config string is SEMICOLON-separated (see the confirm button below), so parse it that way.
     // (The old KeyValueSet path split on commas and silently returned every default.)
@@ -446,6 +450,14 @@ internal fun VulkanSettingsDialog(
                     IconButton(onClick = { helpRes = R.string.renderer_present_mode_help_content }) {
                         Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
                     }
+                }
+                // FG temporarily forces Mailbox; caption the field so FIFO-while-FG-selected isn't confusing.
+                if (frameGenSelected) {
+                    Text(
+                        stringResource(R.string.renderer_present_mode_fg_note),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
 
                 // NOTE: the "Renderer Driver" (System/Turnip) dropdown was removed — it was vestigial:
@@ -792,13 +804,27 @@ private fun TopLevelFields(
             if (!lsfgDllAvailable) add(fgEngineLabels[2])   // lsfg-vk — needs an imported Lossless.dll
         }
         val fgSelIdx = fgEngines.indexOf(viewModel.frameGenEngine).coerceAtLeast(0)
+        // FG's present-mode/mailbox delivery only exists on the Vulkan host renderer; OpenGL (GLRenderer)
+        // and SurfaceFlinger (ASR) have no present-mode control, so FG is unsupported there — gate the
+        // whole dropdown on Vulkan and grey it out otherwise (combined with the lsfg-DLL option gate).
+        val fgVulkan = viewModel.selectedRenderer == "Vulkan"
         LabeledDropdown(
             label = stringResource(R.string.frame_generation),
             options = fgEngineLabels,
             selectedOption = fgEngineLabels[fgSelIdx],
             onSelect = { viewModel.frameGenEngine = fgEngines[fgEngineLabels.indexOf(it)] },
-            disabledOptions = fgDisabledOpts
+            enabled = fgVulkan,
+            disabledOptions = fgDisabledOpts,
+            modifier = if (!fgVulkan) Modifier.alpha(0.5f) else Modifier
         )
+        if (!fgVulkan) {
+            Text(
+                text = stringResource(R.string.frame_generation_requires_vulkan),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 52.dp, top = 2.dp, bottom = 4.dp)
+            )
+        }
         if (!lsfgDllAvailable) {
             Text(
                 text = stringResource(R.string.frame_generation_lsfg_needs_dll),

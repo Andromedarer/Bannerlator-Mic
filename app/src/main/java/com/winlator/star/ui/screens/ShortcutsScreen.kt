@@ -6264,6 +6264,14 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                                 Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
                             }
                         }
+                        // FG temporarily forces Mailbox; caption the field so FIFO-while-FG-selected isn't confusing.
+                        if (frameGenEngine != "off") {
+                            Text(
+                                stringResource(R.string.renderer_present_mode_fg_note),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
 
                     // Render scale (supersampling) — per-game override of the container default.
@@ -6326,17 +6334,30 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                             stringResource(R.string.frame_generation_lsfg)
                         )
                         val fgIdx = fgEngines.indexOf(frameGenEngine).coerceAtLeast(0)
+                        // FG's mailbox/present-mode delivery only exists on the Vulkan host renderer, so
+                        // gate the whole dropdown on Vulkan (grey it out otherwise) — combined with the
+                        // existing lsfg-DLL option gate. See ContainerDetailScreen for the rationale.
+                        val fgVulkan = selectedRenderer == "Vulkan"
                         DpDrop(
                             dp, "frameGen",
                             label = stringResource(R.string.frame_generation),
                             options = fgLabels,
                             selected = fgLabels[fgIdx],
                             onSelect = { frameGenEngine = fgEngines[fgLabels.indexOf(it)] },
+                            enabled = fgVulkan,
                             disabledOptions = buildSet {
                                 // bionic-fg re-enabled (2.9.4+) — see ContainerDetailScreen note.
                                 if (!lsfgDllAvailable) add(fgLabels[2])   // lsfg-vk — needs an imported Lossless.dll
-                            }
+                            },
+                            modifier = if (!fgVulkan) Modifier.alpha(0.5f) else Modifier
                         )
+                        if (!fgVulkan) {
+                            Text(
+                                text = stringResource(R.string.frame_generation_requires_vulkan),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                         if (!lsfgDllAvailable) {
                             Text(
                                 text = stringResource(R.string.frame_generation_lsfg_needs_dll),

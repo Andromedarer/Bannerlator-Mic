@@ -3043,6 +3043,15 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // overrides (else the container's value), matching the drawer sync above.
             // NOTE: the FPS limiter is no longer wired here — it's a standalone host-side pacer
             // applied to the renderer (see renderer.setFpsLimit below), independent of frame gen.
+            //
+            // Runtime safety gate: FG's mailbox/present-mode delivery only exists on the Vulkan host
+            // renderer — OpenGL (GLRenderer) and SurfaceFlinger (ASR) have no present-mode control, so
+            // loading the FG layer there is inert/broken. The editors now forbid FG unless the renderer
+            // is Vulkan; honor the same rule here so a stale "FG on + non-Vulkan renderer" config simply
+            // doesn't run FG (no broken layer). Conservative: a SurfaceFlinger config that would fall
+            // back to Vulkan (ASR unsupported) also skips FG — safe, and the editor prevents that combo.
+            boolean fgRendererVulkan = "vulkan".equalsIgnoreCase(resolvedRenderer());
+            if (fgRendererVulkan) {
             if (resolvedFrameGenEngine().equals("lsfg")) {
                 // lsfg-vk engine (mutually exclusive with bionic-fg). Opt-in via ENABLE_LSFG so the
                 // staged layer stays inert elsewhere. Driven by conf.toml (NOT the LSFG_LEGACY env):
@@ -3082,6 +3091,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
                             0,
                             resolvedFrameGenModel());
                 }
+            }
+            } else if (!"off".equals(resolvedFrameGenEngine())) {
+                // Stale config: FG selected on a non-Vulkan renderer — skip the layer (see note above).
+                Log.w("XServerDisplayActivity", "Frame gen (" + resolvedFrameGenEngine()
+                        + ") requested but host renderer is " + resolvedRenderer()
+                        + " — skipping FG layer (Vulkan required).");
             }
 
             if (shortcut != null) envVars.putAll(shortcut.getExtra("envVars"));
