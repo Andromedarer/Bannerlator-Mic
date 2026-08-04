@@ -87,6 +87,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Help
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
@@ -220,6 +221,7 @@ import com.winlator.star.core.GameFolderScanner
 import com.winlator.star.core.CustomSaveVault
 import com.winlator.star.core.GameSaveBackup
 import com.winlator.star.core.KeyValueSet
+import com.winlator.star.ui.components.ContainerGlossarySheet
 import com.winlator.star.ui.components.DraggableAddButton
 import com.winlator.star.ui.theme.DangerRed
 import com.winlator.star.core.LogInventory
@@ -5767,6 +5769,10 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
     var showGfxConfig by remember { mutableStateOf(false) }
     var showDxvkConfig by remember { mutableStateOf(false) }
     var showWineD3DConfig by remember { mutableStateOf(false) }
+    // Per-field "?" help (helpRes) + the newcomer glossary ("What is all this?"), mirrored from the
+    // container editor. null = hidden; glossaryQuery == "" opens the glossary unfiltered.
+    var helpRes by remember { mutableStateOf<Int?>(null) }
+    var glossaryQuery by remember { mutableStateOf<String?>(null) }
     var showBox64DownloadSheet by remember { mutableStateOf(false) }
     var showFexCoreDownloadSheet by remember { mutableStateOf(false) }
     var showDxvkDownloadSheet by remember { mutableStateOf(false) }
@@ -6111,6 +6117,12 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                         }
                     }
 
+                    // "What is all this?" — the same newcomer glossary the container editor shows,
+                    // reused verbatim so the per-game editor's terms match the container's.
+                    TextButton(onClick = { glossaryQuery = "" }) {
+                        Text("❔  What is all this?")
+                    }
+
                     // Graphics Driver + wrapper manager (cloud)
                     var showWrapperManager by remember { mutableStateOf(false) }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -6123,6 +6135,9 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                             modifier = Modifier.weight(1f),
                             onRightId = "gfxWrapper"
                         )
+                        IconButton(onClick = { helpRes = R.string.help_graphics_driver }) {
+                            Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                        }
                         DpButton(dp, "gfxWrapper", onActivate = { showWrapperManager = true }, onLeftId = "gfxDriver") {
                             IconButton(onClick = { showWrapperManager = true }) {
                                 Icon(Icons.Default.CloudDownload, contentDescription = stringResource(R.string.wrapper_manager_open))
@@ -6140,13 +6155,19 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                     }
 
                     // DX Wrapper
-                    DpDrop(
-                        dp, "dxWrapper",
-                        label = stringResource(R.string.dxwrapper),
-                        options = dxWrapperEntries,
-                        selected = selectedDxWrapper,
-                        onSelect = { selectedDxWrapper = it }
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        DpDrop(
+                            dp, "dxWrapper",
+                            label = stringResource(R.string.dxwrapper),
+                            options = dxWrapperEntries,
+                            selected = selectedDxWrapper,
+                            onSelect = { selectedDxWrapper = it },
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(onClick = { helpRes = R.string.dxwrapper_help_content }) {
+                            Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                        }
+                    }
                     DpButton(dp, "dxConfig", onActivate = {
                         val w = StringUtils.parseIdentifier(selectedDxWrapper)
                         if (w.contains("dxvk") || w.contains("vegas")) showDxvkConfig = true
@@ -6164,17 +6185,23 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
 
                     // Renderer (host) — per-game override of the container's OpenGL/Vulkan choice.
                     var showSfWarning by remember { mutableStateOf(false) }
-                    DpDrop(
-                        dp, "renderer",
-                        label = stringResource(R.string.renderer),
-                        options = listOf("OpenGL", "Vulkan", "SurfaceFlinger"),
-                        selected = selectedRenderer,
-                        onSelect = {
-                            // SurfaceFlinger is experimental and can reboot some devices — require opt-in.
-                            if (it == "SurfaceFlinger" && selectedRenderer != "SurfaceFlinger") showSfWarning = true
-                            else selectedRenderer = it
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        DpDrop(
+                            dp, "renderer",
+                            label = stringResource(R.string.renderer),
+                            options = listOf("OpenGL", "Vulkan", "SurfaceFlinger"),
+                            selected = selectedRenderer,
+                            onSelect = {
+                                // SurfaceFlinger is experimental and can reboot some devices — require opt-in.
+                                if (it == "SurfaceFlinger" && selectedRenderer != "SurfaceFlinger") showSfWarning = true
+                                else selectedRenderer = it
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(onClick = { helpRes = R.string.help_renderer }) {
+                            Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
                         }
-                    )
+                    }
                     if (showSfWarning) {
                         SurfaceFlingerWarningDialog(
                             onConfirm = { selectedRenderer = "SurfaceFlinger"; showSfWarning = false },
@@ -6223,15 +6250,28 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                             stringResource(R.string.renderer_present_mode_immediate)
                         )
                         val vkPmIdx = vkPmValues.indexOf(vkPresentMode).coerceAtLeast(0)
-                        DpDrop(
-                            dp, "vkPresent",
-                            label = stringResource(R.string.renderer_present_mode),
-                            options = vkPmLabels,
-                            selected = vkPmLabels[vkPmIdx],
-                            onSelect = { vkPresentMode = vkPmValues[vkPmLabels.indexOf(it)] },
-                            enabled = !vkNative,
-                            modifier = if (vkNative) Modifier.alpha(0.5f) else Modifier
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            DpDrop(
+                                dp, "vkPresent",
+                                label = stringResource(R.string.renderer_present_mode),
+                                options = vkPmLabels,
+                                selected = vkPmLabels[vkPmIdx],
+                                onSelect = { vkPresentMode = vkPmValues[vkPmLabels.indexOf(it)] },
+                                enabled = !vkNative,
+                                modifier = (if (vkNative) Modifier.alpha(0.5f) else Modifier).weight(1f)
+                            )
+                            IconButton(onClick = { helpRes = R.string.renderer_present_mode_help_content }) {
+                                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                            }
+                        }
+                        // FG temporarily forces Mailbox; caption the field so FIFO-while-FG-selected isn't confusing.
+                        if (frameGenEngine != "off") {
+                            Text(
+                                stringResource(R.string.renderer_present_mode_fg_note),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
 
                     // Render scale (supersampling) — per-game override of the container default.
@@ -6294,17 +6334,30 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                             stringResource(R.string.frame_generation_lsfg)
                         )
                         val fgIdx = fgEngines.indexOf(frameGenEngine).coerceAtLeast(0)
+                        // FG's mailbox/present-mode delivery only exists on the Vulkan host renderer, so
+                        // gate the whole dropdown on Vulkan (grey it out otherwise) — combined with the
+                        // existing lsfg-DLL option gate. See ContainerDetailScreen for the rationale.
+                        val fgVulkan = selectedRenderer == "Vulkan"
                         DpDrop(
                             dp, "frameGen",
                             label = stringResource(R.string.frame_generation),
                             options = fgLabels,
                             selected = fgLabels[fgIdx],
                             onSelect = { frameGenEngine = fgEngines[fgLabels.indexOf(it)] },
+                            enabled = fgVulkan,
                             disabledOptions = buildSet {
-                                add(fgLabels[1])                          // bionic-fg — grayed out for now (WIP; re-enable once proven)
+                                // bionic-fg re-enabled (2.9.4+) — see ContainerDetailScreen note.
                                 if (!lsfgDllAvailable) add(fgLabels[2])   // lsfg-vk — needs an imported Lossless.dll
-                            }
+                            },
+                            modifier = if (!fgVulkan) Modifier.alpha(0.5f) else Modifier
                         )
+                        if (!fgVulkan) {
+                            Text(
+                                text = stringResource(R.string.frame_generation_requires_vulkan),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                         if (!lsfgDllAvailable) {
                             Text(
                                 text = stringResource(R.string.frame_generation_lsfg_needs_dll),
@@ -6703,6 +6756,11 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
             onDismiss = { showWineD3DConfig = false }
         )
     }
+
+    // Per-field "?" help + newcomer glossary — composed INSIDE the settings Dialog's window (like the
+    // config dialogs above) so HelpDialog / the glossary ModalBottomSheet render on top of it.
+    helpRes?.let { HelpDialog(it) { helpRes = null } }
+    glossaryQuery?.let { ContainerGlossarySheet(initialQuery = it, onDismiss = { glossaryQuery = null }) }
 
     if (showBox64DownloadSheet) {
         ContentDownloadSheet(

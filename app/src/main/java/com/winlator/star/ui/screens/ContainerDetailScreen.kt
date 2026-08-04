@@ -315,7 +315,8 @@ fun ContainerDetailScreen(
                 viewModel.rendererSfCompatMode = m["sfCompatMode"] != "false"
                 showVulkanConfig = false
             },
-            onDismiss = { showVulkanConfig = false }
+            onDismiss = { showVulkanConfig = false },
+            frameGenSelected = viewModel.frameGenEngine != "off"
         )
     }
 
@@ -384,7 +385,10 @@ private fun parseVulkanConfig(s: String): Map<String, String> =
 internal fun VulkanSettingsDialog(
     initialConfig: String,
     onConfirm: (newConfig: String) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    // The FG engine dropdown lives on the main screen, not in this dialog — pass whether one is
+    // selected so we can caption the Present Mode field about the temporary auto-switch to Mailbox.
+    frameGenSelected: Boolean = false
 ) {
     // The config string is SEMICOLON-separated (see the confirm button below), so parse it that way.
     // (The old KeyValueSet path split on commas and silently returned every default.)
@@ -399,6 +403,11 @@ internal fun VulkanSettingsDialog(
     // SurfaceFlinger (ASR) BGRA->RGBA colour correction (GN #1620). Default ON — an absent token
     // (old config) resolves to true. ASR-only; independent of swapRB (Vulkan/GL).
     var sfCompatMode by remember { mutableStateOf(cfg["sfCompatMode"] != "false") }
+
+    // Per-field "?" help — this dialog is its own composable, so it carries its own helpRes.
+    // HelpDialog renders as a Dialog on top of this AlertDialog (fine — same pattern as elsewhere).
+    var helpRes by remember { mutableStateOf<Int?>(null) }
+    helpRes?.let { HelpDialog(it) { helpRes = null } }
 
     OutlinedAlertDialog(
         onDismissRequest = onDismiss,
@@ -429,14 +438,27 @@ internal fun VulkanSettingsDialog(
                 val selectedPresentIdx = presentModes.indexOf(presentMode).coerceAtLeast(0)
                 // Present mode is ignored under Native Rendering (direct scanout goes straight to
                 // SurfaceFlinger, bypassing the swapchain), so grey it out while native is on.
-                LabeledDropdown(
-                    label = stringResource(R.string.renderer_present_mode),
-                    options = presentModeLabels,
-                    selectedOption = presentModeLabels[selectedPresentIdx],
-                    onSelect = { presentMode = presentModes[presentModeLabels.indexOf(it)] },
-                    enabled = !nativeRender,
-                    modifier = if (nativeRender) Modifier.alpha(0.5f) else Modifier
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LabeledDropdown(
+                        label = stringResource(R.string.renderer_present_mode),
+                        options = presentModeLabels,
+                        selectedOption = presentModeLabels[selectedPresentIdx],
+                        onSelect = { presentMode = presentModes[presentModeLabels.indexOf(it)] },
+                        enabled = !nativeRender,
+                        modifier = (if (nativeRender) Modifier.alpha(0.5f) else Modifier).weight(1f)
+                    )
+                    IconButton(onClick = { helpRes = R.string.renderer_present_mode_help_content }) {
+                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                    }
+                }
+                // FG temporarily forces Mailbox; caption the field so FIFO-while-FG-selected isn't confusing.
+                if (frameGenSelected) {
+                    Text(
+                        stringResource(R.string.renderer_present_mode_fg_note),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
 
                 // NOTE: the "Renderer Driver" (System/Turnip) dropdown was removed — it was vestigial:
                 // its value (driverId) was stored + round-tripped but NEVER read at runtime (the actual
@@ -777,17 +799,32 @@ private fun TopLevelFields(
         )
         val lsfgDllAvailable = remember { java.io.File(context.filesDir, "lsfg-vk/Lossless.dll").isFile }
         val fgDisabledOpts = buildSet {
-            add(fgEngineLabels[1])                          // bionic-fg — grayed out for now (WIP; re-enable once proven)
+            // bionic-fg re-enabled (2.9.4+): the FIFO-backpressure present-mode fix is the likely
+            // root of its old "doesn't reliably work" reports; still experimental — see the note below.
             if (!lsfgDllAvailable) add(fgEngineLabels[2])   // lsfg-vk — needs an imported Lossless.dll
         }
         val fgSelIdx = fgEngines.indexOf(viewModel.frameGenEngine).coerceAtLeast(0)
+        // FG's present-mode/mailbox delivery only exists on the Vulkan host renderer; OpenGL (GLRenderer)
+        // and SurfaceFlinger (ASR) have no present-mode control, so FG is unsupported there — gate the
+        // whole dropdown on Vulkan and grey it out otherwise (combined with the lsfg-DLL option gate).
+        val fgVulkan = viewModel.selectedRenderer == "Vulkan"
         LabeledDropdown(
             label = stringResource(R.string.frame_generation),
             options = fgEngineLabels,
             selectedOption = fgEngineLabels[fgSelIdx],
             onSelect = { viewModel.frameGenEngine = fgEngines[fgEngineLabels.indexOf(it)] },
-            disabledOptions = fgDisabledOpts
+            enabled = fgVulkan,
+            disabledOptions = fgDisabledOpts,
+            modifier = if (!fgVulkan) Modifier.alpha(0.5f) else Modifier
         )
+        if (!fgVulkan) {
+            Text(
+                text = stringResource(R.string.frame_generation_requires_vulkan),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 52.dp, top = 2.dp, bottom = 4.dp)
+            )
+        }
         if (!lsfgDllAvailable) {
             Text(
                 text = stringResource(R.string.frame_generation_lsfg_needs_dll),

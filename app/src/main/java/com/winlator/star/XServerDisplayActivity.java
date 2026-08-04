@@ -974,6 +974,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 // lsfg multiplier may have crossed the >=2 threshold -> re-evaluate the limiter
                 // guard (lsfgGovernsFps) so the cap steps aside / resumes without extra user action.
                 reapplyFpsLimit();
+                // ... and re-apply the host present mode: mailbox while multiplying (so the generated
+                // frames aren't strangled by FIFO backpressure), back to the user's mode when off.
+                applyEffectivePresentMode();
                 return;
             }
             // FPS limiter is no longer part of frame gen — it's a standalone host pacer
@@ -984,6 +987,26 @@ public class XServerDisplayActivity extends AppCompatActivity {
             container.setFrameGenFlowScale(flow);
             container.setFrameGenModel(fgModel);
             container.saveData();
+            // Same present-mode override as lsfg: bionic-fg inserts extra presents too, so force
+            // mailbox while multiplying (FIFO backpressure would strangle the generated frames).
+            applyEffectivePresentMode();
+        };
+        // Live Present Mode selector (Graphics tab). The user's pick is persisted (per-game shortcut
+        // override if present, else the container) then applied live through the same choke point as the
+        // FG mailbox override (which also echoes the effective mode back to the drawer). GUARD: while FG
+        // is multiplying the mode is force-locked to Mailbox and the drawer BLOCKS the tap, so this must
+        // never fire then — but no-op defensively if it somehow does, so a stray event can't overwrite
+        // the user's saved FIFO/Immediate preference (it must survive to revert when FG turns off).
+        state.onPresentModeChange = mode -> {
+            if (frameGenGenerating()) return;   // locked to mailbox; UI blocks this — belt-and-braces
+            if (shortcut != null) {
+                shortcut.putExtra("presentMode", mode);
+                shortcut.saveData();
+            } else {
+                container.setRendererPresentMode(mode);
+                container.saveData();
+            }
+            applyEffectivePresentMode();   // applies live + echoes the effective mode back to the drawer
         };
         // Standalone FPS limiter: paces the X11 Present extension (delays IdleNotify) so the GAME
         // itself throttles — works live with any frame-gen engine or none, all host renderers, all
@@ -3037,6 +3060,15 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // overrides (else the container's value), matching the drawer sync above.
             // NOTE: the FPS limiter is no longer wired here — it's a standalone host-side pacer
             // applied to the renderer (see renderer.setFpsLimit below), independent of frame gen.
+            //
+            // Runtime safety gate: FG's mailbox/present-mode delivery only exists on the Vulkan host
+            // renderer — OpenGL (GLRenderer) and SurfaceFlinger (ASR) have no present-mode control, so
+            // loading the FG layer there is inert/broken. The editors now forbid FG unless the renderer
+            // is Vulkan; honor the same rule here so a stale "FG on + non-Vulkan renderer" config simply
+            // doesn't run FG (no broken layer). Conservative: a SurfaceFlinger config that would fall
+            // back to Vulkan (ASR unsupported) also skips FG — safe, and the editor prevents that combo.
+            boolean fgRendererVulkan = "vulkan".equalsIgnoreCase(resolvedRenderer());
+            if (fgRendererVulkan) {
             if (resolvedFrameGenEngine().equals("lsfg")) {
                 // lsfg-vk engine (mutually exclusive with bionic-fg). Opt-in via ENABLE_LSFG so the
                 // staged layer stays inert elsewhere. Driven by conf.toml (NOT the LSFG_LEGACY env):
@@ -3076,6 +3108,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
                             0,
                             resolvedFrameGenModel());
                 }
+            }
+            } else if (!"off".equals(resolvedFrameGenEngine())) {
+                // Stale config: FG selected on a non-Vulkan renderer — skip the layer (see note above).
+                Log.w("XServerDisplayActivity", "Frame gen (" + resolvedFrameGenEngine()
+                        + ") requested but host renderer is " + resolvedRenderer()
+                        + " — skipping FG layer (Vulkan required).");
             }
 
             if (shortcut != null) envVars.putAll(shortcut.getExtra("envVars"));
@@ -3224,6 +3262,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
             rendererType = "vulkan";
         }
         boolean useVulkan = "vulkan".equals(rendererType);
+        // Gate the drawer's live Present Mode selector: it only exists on the Vulkan host renderer
+        // (OpenGL/SurfaceFlinger have no present-mode control).
+        XServerDrawerState.INSTANCE.setRendererIsVulkan(useVulkan);
         xServerView.initRenderer(rendererType);
         final HostRenderer renderer = xServerView.getRenderer();
         renderer.setCursorVisible(false);
@@ -3250,9 +3291,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (useVulkan && renderer instanceof com.winlator.star.renderer.vulkan.VulkanRenderer) {
             com.winlator.star.renderer.vulkan.VulkanRenderer vkRenderer =
                 (com.winlator.star.renderer.vulkan.VulkanRenderer) renderer;
-            String pm = resolvedRendererPresentMode();
-            int pmInt = "immediate".equals(pm) ? 0 : "mailbox".equals(pm) ? 1 : 2; // VkPresentModeKHR
-            vkRenderer.setVkPresentMode(pmInt);
+            // Present mode (with the mailbox-while-FG override) AND the drawer's live selector seed both
+            // flow through the single choke point applyEffectivePresentMode() — see that method.
+            applyEffectivePresentMode();
             // Scaling mode owns the base sampler filter on Vulkan (modes 1/2 call setFilterMode
             // internally), so drive the launch through setUpscaler instead of a separate
             // setFilterMode call — keeping the in-game "Scaling mode" picker the single source of
@@ -5244,6 +5285,41 @@ return true;
 
     private String resolvedFrameGenEngine() {
         return shortcut != null ? shortcut.getExtra("frameGenEngine", container.getFrameGenEngine()) : container.getFrameGenEngine();
+    }
+
+    // Any frame-gen engine (lsfg-vk OR bionic-fg) actively multiplying (mult >= 2) inserts extra
+    // presents at the guest swapchain. The host compositor MUST be mailbox for those to reach the
+    // screen: FIFO vsync-blocks the host present, which backpressures the guest present and strangles
+    // the generated frames (device-verified — fifo makes FG "fps drops", mailbox makes it base×N).
+    // Off / passthrough (mult < 2) keeps the user's configured mode (fifo = power-efficient, no waste).
+    private boolean frameGenGenerating() {
+        XServerDrawerState s = XServerDrawerState.INSTANCE;
+        return !"off".equals(resolvedFrameGenEngine())
+            && s.getFrameGenEnabled().getValue()
+            && s.getFrameGenMultiplier().getValue() >= 2;
+    }
+
+    // Host present mode with the frame-gen mailbox override applied.
+    private String effectivePresentMode() {
+        return frameGenGenerating() ? "mailbox" : resolvedRendererPresentMode();
+    }
+
+    // (Re)apply the effective host present mode to the live Vulkan renderer — called at launch and
+    // whenever frame gen toggles / the multiplier changes, so the mailbox override tracks FG live
+    // (and reverts to the user's mode when FG goes off). No-op on non-Vulkan renderers / before setup.
+    private void applyEffectivePresentMode() {
+        if (xServerView == null) return;
+        HostRenderer r = xServerView.getRenderer();
+        if (r instanceof com.winlator.star.renderer.vulkan.VulkanRenderer) {
+            String pm = effectivePresentMode();
+            int pmInt = "immediate".equals(pm) ? 0 : "mailbox".equals(pm) ? 1 : 2; // VkPresentModeKHR
+            ((com.winlator.star.renderer.vulkan.VulkanRenderer) r).setVkPresentMode(pmInt);
+            // Mirror the EFFECTIVE mode into the drawer's live Present Mode selector so the highlight
+            // tracks the auto-switch to Mailbox the instant FG toggles (and reverts to the user's mode
+            // when FG goes off). presentModeLocked drives the drawer's tap-block during FG.
+            XServerDrawerState.INSTANCE.setPresentMode(pm);
+            XServerDrawerState.INSTANCE.setPresentModeLocked(frameGenGenerating());
+        }
     }
 
     // ── Power-user performance toggles (non-root). LOCKED two-level resolution chain:
