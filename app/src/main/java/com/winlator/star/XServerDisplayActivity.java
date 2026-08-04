@@ -1548,6 +1548,31 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     if (frameRatingHorizontal != null) frameRatingHorizontal.update();
                     if (perfHud != null) perfHud.update();
                 }
+                // GL/Zink FPS self-heal. Under Zink (GL-on-Vulkan) the _MESA_DRV property that binds
+                // the HUD rides a render window that is NOT the one actually composited to screen — so
+                // the strict id match above never fires for the presenting window and the counter reads
+                // 0.0 fps even though the game is drawing fine (D3D/Vulkan titles are unaffected: their
+                // _MESA_DRV window IS the composited window, so the match above always wins and this
+                // branch stays inert). Detect the case — we're bound to a _MESA_DRV window, yet THIS
+                // content update is coming from the focused top-level application window which carries no
+                // _MESA_DRV of its own — and follow the presenting window, the same philosophy as the
+                // unmap re-bind fallback in changeFrameRatingVisibility(). Mark it as a recognized render
+                // window so that logic's "upgrade off a fallback" check can't steal the binding back.
+                else if (frameRatingWindowId != -1
+                        && guestGlIsZink()
+                        && mesaDrvWindowIds.contains(frameRatingWindowId)
+                        && !mesaDrvWindowIds.contains(window.id)
+                        && window.isApplicationWindow()
+                        && window == xServer.windowManager.getFocusedWindow()) {
+                    Log.d("XServerDisplayActivity", "GL/Zink HUD self-heal: re-binding FPS from window "
+                            + frameRatingWindowId + " to presenting window " + window.id);
+                    frameRatingWindowId = window.id;
+                    mesaDrvWindowIds.add(window.id);
+                    fpsCounter.tick();
+                    if (frameRating != null) frameRating.update();
+                    if (frameRatingHorizontal != null) frameRatingHorizontal.update();
+                    if (perfHud != null) perfHud.update();
+                }
             }
 
             @Override
