@@ -1,5 +1,15 @@
 # Star-Compose — Progress Log
 
+## 2026-08-04 — 🧭 **pre10 (vc66) — container editors: collapsible left rail + landscape vertical fill** (branch `feat/container-landscape-ui`)
+
+> **RECON (reported):** New Container, Edit Container AND New Container Defaults **all share ONE scaffold** — `ui/screens/ContainerDetailScreen.kt` (`viewModel.defaultsMode` = the `EDIT_DEFAULTS_ID=-2` sentinel drops DRIVES + adds the Reset link; New=id-1, Edit=id>0). So the redesign is a single change. **Rotation state is already safe:** `MainActivity` has `orientation|screenSize|screenLayout|smallestScreenSize|density` in `configChanges` (NO Activity recreate), and `selectedTab` + all fields live in `ContainerDetailViewModel` → tab/values/scroll preserved across rotation. The per-game shortcut editor (`ShortcutsScreen`) has its own separate TabRow scaffold — OUT of scope, unchanged.
+>
+> **PART 1 — collapsible left rail (mockup Option 3):** replaced the top `ScrollableTabRow` + the "What is all this?"/Reset header with a new `SettingsRail` composable on the LEFT (app glyph + title, help + reset links, and the GENERAL/ENVIRONMENT/DRIVES/WIN COMPONENTS/ADVANCED items with Material icons + accent-highlighted active row). Content now runs full height beside it. Collapsible via a ‹‹/›› handle: animated width 190dp↔58dp (`animateDpAsState`); collapsed = icons only, header = just the glyph, help/reset become icon buttons, and the **active tab name shows as a small header over the content** so you keep your place. **Persistence = Option A:** manual choice persists in prefs (`containerRailCollapsed`/`containerRailUserChose`) and is NEVER overridden by rotation; orientation only sets the INITIAL state until the first manual toggle (landscape→expanded, portrait→collapsed), re-evaluated on rotation only while unchosen (`rememberSaveable` + a `LaunchedEffect(isLandscape)`).
+>
+> **PART 2 — landscape vertical fill:** removed the fixed `Spacer(80.dp)` dead band below the scroll area; the content Box now `fillMaxSize().verticalScroll()` beside the rail and reserves only a bottom buffer = 72dp (save FAB clearance) + the system nav-bar inset, appended INSIDE the scroll — so content reaches near the bottom (respecting the gesture/nav inset) instead of a large empty zone, and content-heavy tabs are no longer cut off. Save ✓ FAB stays bottom-right via the Scaffold, above the buffer/inset.
+>
+> ⏭️ CI (pre10) → stage pubg; device-verify rail expand/collapse + persistence across rotation + vertical fill across the 5 tabs × 3 modes × both orientations. ⚠️ Compose-only change, not yet device-run.
+
 ## 2026-08-04 — 🏁 **Unpack-Archive suite MERGED to main → 2.9.5; native FreeArc DEVICE-PROVEN in-app** (`main` `17f9e986`, vc65 2.9.5-pre9)
 
 > The whole Unpack-Archive feature suite is on main, headed to **2.9.5**. Two merges today (both `--no-ff [skip ci]`): pre7 (7-Zip engine + GOG/innoextract + `.wcp` content-aware menu) → `023d012b`; pre8+pre9 (native FreeArc `unarc` + Fast Extract) → `17f9e986`. Artifacts-only build on main **GREEN** (run `30944487397`, headSha `17f9e986`).
