@@ -627,6 +627,56 @@ public class XServerDisplayActivity extends AppCompatActivity {
             || "zink".equals(envVars.get("MESA_LOADER_DRIVER_OVERRIDE"));
     }
 
+    // Window the FPS counter self-healed onto for the GL/Zink present topology (see
+    // driveHudFrameTick). Written and read only from the present/tick threads and kept as a plain
+    // volatile int — never a shared collection — so the tick path never mutates the WM-owned
+    // frameRatingWindowId / mesaDrvWindowIds off-thread and can't race changeFrameRatingVisibility().
+    // Reset to -1 when the HUD unbinds.
+    private volatile int glZinkHealedWindowId = -1;
+
+    /**
+     * Drive every perf-HUD overlay for one presented frame on window {@code wid}. Single entry point
+     * for all four present/tick paths (SHM copyArea content-update, Vulkan AHB copy, GL/Vulkan native
+     * scanout, and ASR) so FPS counting behaves identically however a game presents.
+     *
+     * <p>Normally only the window the HUD is bound to counts — {@code frameRatingWindowId}, seeded from
+     * the guest {@code _MESA_DRV} property. But under Zink (GL-on-Vulkan) that {@code _MESA_DRV} window
+     * is frequently NOT the window actually presenting frames (it rides a render surface distinct from
+     * the composited application window), so the strict id match never fires and the HUD reads 0.0 fps
+     * while the game renders fine. D3D/DXVK/Vulkan titles keep {@code _MESA_DRV} on their render window,
+     * so they always take the strict path and this heuristic stays inert for them.
+     *
+     * <p>Self-heal: when the presenting window is the focused, viewable, top-level application window,
+     * count it too and remember it in {@link #glZinkHealedWindowId} so later frames take the fast path
+     * without re-touching WM state off-thread. We deliberately do NOT reassign {@code frameRatingWindowId}
+     * or {@code mesaDrvWindowIds} here (those are owned by the WM thread) — the volatile int is enough.
+     */
+    private void driveHudFrameTick(int wid) {
+        if (frameRatingWindowId == -1) return;                 // HUD inactive -> never count
+        if (wid != frameRatingWindowId && wid != glZinkHealedWindowId) {
+            if (!guestGlIsZink()) return;                      // only the GL/Zink present topology
+            // Device-observed (Stronghold Crusader / Zink): the window the game actually presents to is
+            // a CHILD GL render surface with no WM class — NOT a top-level application window — while the
+            // HUD's _MESA_DRV binding sits on the top-level game window. So we must NOT require the
+            // presenter itself to be an application window (an earlier version did, and threw the real
+            // presenter away -> 0 fps). Instead: count the presenter as long as a real game application
+            // window is currently FOCUSED (we're in a game, not sitting at the desktop shell) and the
+            // presenter isn't itself the desktop shell. Follow whatever window is presenting.
+            Window focused = xServer.windowManager.getFocusedWindow();
+            boolean gameFocused = focused != null && focused.isApplicationWindow() && !focused.isDesktopWindow();
+            Window w = xServer.windowManager.getWindow(wid);
+            boolean presenterOk = (w == null) || !w.isDesktopWindow();
+            if (!gameFocused || !presenterOk) return;
+            Log.d("XServerDisplayActivity", "GL/Zink HUD self-heal: counting FPS on presenting window " + wid
+                    + " (focused game " + focused.id + ", HUD bound to " + frameRatingWindowId + ")");
+            glZinkHealedWindowId = wid;
+        }
+        fpsCounter.tick();
+        if (frameRating != null) frameRating.update();
+        if (frameRatingHorizontal != null) frameRatingHorizontal.update();
+        if (perfHud != null) perfHud.update();
+    }
+
     /**
      * Continuously track the active graphics API and keep EVERY HUD's label live, like the other
      * metrics. Runs on a background thread at a ~2s cadence (off the render path, so it never stalls a
@@ -1542,12 +1592,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
                         preloaderDialog::closeOnUiThread, LAUNCH_OVERLAY_GRACE_MS);
                 }
                     
-                if (frameRatingWindowId == window.id) {
-                    fpsCounter.tick();
-                    if (frameRating != null) frameRating.update();
-                    if (frameRatingHorizontal != null) frameRatingHorizontal.update();
-                    if (perfHud != null) perfHud.update();
-                }
+                // SHM/copyArea present path — count the frame (self-heals onto the real presenting
+                // window for GL/Zink titles; see driveHudFrameTick).
+                driveHudFrameTick(window.id);
             }
 
             @Override
@@ -3346,15 +3393,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // hide the in-game Native toggle too; otherwise forcing it on would re-break the colors.
             XServerDrawerState.INSTANCE.setNativeRenderingSupported(!resolvedRendererSwapRB());
             // Tick the perf HUD per present (the Vulkan AHB path bypasses copyArea, which normally
-            // drives it). Gate on the FPS window so we only count game frames.
-            vkRenderer.setHudFrameTick(wid -> {
-                if (wid == frameRatingWindowId) {
-                    fpsCounter.tick();
-                    if (frameRating != null) frameRating.update();
-                    if (frameRatingHorizontal != null) frameRatingHorizontal.update();
-                    if (perfHud != null) perfHud.update();
-                }
-            });
+            // drives it). driveHudFrameTick gates on the FPS window (self-healing onto the real
+            // presenting window for GL/Zink) so we only count game frames.
+            vkRenderer.setHudFrameTick(this::driveHudFrameTick);
         }
 
         // GL renderer: apply the container's filter mode to the window/content sampler. The Vulkan
@@ -3385,14 +3426,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             XServerDrawerState.INSTANCE.setNativeRenderingSupported(false);    // hide the drawer toggle on GL
             // GL native (FLIP/scanout) bypasses both onDrawFrame and copyArea, so drive the perf HUD
             // per present here (same as the Vulkan/ASR ticks) — otherwise the HUD freezes in native mode.
-            glr.setHudFrameTick(wid -> {
-                if (wid == frameRatingWindowId) {
-                    fpsCounter.tick();
-                    if (frameRating != null) frameRating.update();
-                    if (frameRatingHorizontal != null) frameRatingHorizontal.update();
-                    if (perfHud != null) perfHud.update();
-                }
-            });
+            glr.setHudFrameTick(this::driveHudFrameTick);
         }
 
         // ASR has no compositor copyArea path either, so drive the perf HUD per present (same as
@@ -3404,14 +3438,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // the surface is created. Mirrors the Vulkan/GL setSwapRB launch seeds; ASR-only, independent
             // of swapRB. Default TRUE = correct colours.
             asr.setSfCompatMode(resolvedSfCompatMode());
-            asr.setHudFrameTick(wid -> {
-                if (wid == frameRatingWindowId) {
-                    fpsCounter.tick();
-                    if (frameRating != null) frameRating.update();
-                    if (frameRatingHorizontal != null) frameRatingHorizontal.update();
-                    if (perfHud != null) perfHud.update();
-                }
-            });
+            asr.setHudFrameTick(this::driveHudFrameTick);
         }
 
         if (shortcut != null) {
@@ -6344,6 +6371,9 @@ return true;
             // swap to the real render window, re-bind to another still-mapped _MESA_DRV window before
             // giving up — otherwise the HUD vanishes permanently when the intro window closes.
             if (frameRatingWindowId != -1 && window.id == frameRatingWindowId) {
+                // The bound render window went away — any GL/Zink self-heal target is now stale, so
+                // clear it and let driveHudFrameTick re-evaluate against the new binding.
+                glZinkHealedWindowId = -1;
                 Integer next = mesaDrvWindowIds.isEmpty() ? null : mesaDrvWindowIds.iterator().next();
                 // GLX/OpenGL fallback: _MESA_DRV rides the Vulkan surface, so a GL/Zink title that
                 // recreates its render window (e.g. the AIO test's OpenGL cube) leaves NO _MESA_DRV
