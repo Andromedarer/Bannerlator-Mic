@@ -13,6 +13,10 @@
 </p>
 
 <p align="center">
+  <a href="https://ko-fi.com/the412banner"><img src="https://img.shields.io/badge/Ko--fi-Support%20the%20project-ff5e5b?style=flat-square&logo=ko-fi&logoColor=white" alt="Support on Ko-fi"></a>
+</p>
+
+<p align="center">
   <a href="https://github.com/The412Banner/Bannerlator/releases/latest">
     <img src="https://img.shields.io/badge/⬇%20Download-Latest%20Release-ff2d9b?style=for-the-badge&logo=android&logoColor=white" alt="Download Latest Release">
   </a>
