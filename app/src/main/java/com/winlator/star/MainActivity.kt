@@ -147,6 +147,9 @@ class MainActivity : AppCompatActivity() {
 
         PACKAGE_NAME = applicationContext.packageName
         AppThemeState.init(this)
+        // Apply the user's App-orientation preference to THIS app-UI activity only (the game's
+        // XServerDisplayActivity manages its own orientation and is unaffected).
+        com.winlator.star.core.AppOrientation.apply(this)
 
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
 

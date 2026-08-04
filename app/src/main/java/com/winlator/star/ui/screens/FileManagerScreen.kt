@@ -6,7 +6,9 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
+import android.content.res.Configuration
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -56,6 +58,14 @@ import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Smartphone
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.SportsEsports
+import com.winlator.star.ui.components.CollapsibleRail
+import com.winlator.star.ui.components.RailItem
+import com.winlator.star.ui.components.RailSection
+import com.winlator.star.ui.components.rememberRailState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -95,6 +105,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.painterResource
@@ -332,7 +343,12 @@ fun FileManagerScreen(
     var showSortMenu by remember { mutableStateOf(false) }
     // View mode: list of cards (default) or a thumbnail grid. Density applies to the list only —
     // a grid tile has no second line to compact.
-    var gridView by remember { mutableStateOf(browsePrefs.getBoolean("fmGridView", false)) }
+    // The grid/list toggle is the SOURCE OF TRUTH in BOTH orientations (it drives the view and its
+    // choice persists across rotation). Grid is the default — most useful in landscape, and in
+    // portrait GridCells.Adaptive naturally renders fewer columns (~2). Do NOT force portrait to list:
+    // that broke the toggle on-device (tapping it did nothing in portrait).
+    var gridView by remember { mutableStateOf(browsePrefs.getBoolean("fmGridView", true)) }
+    val showGrid = gridView
     var compactRows by remember { mutableStateOf(browsePrefs.getBoolean("fmCompactRows", false)) }
     var showNewFolderDialog by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<File?>(null) }
@@ -967,16 +983,21 @@ fun FileManagerScreen(
             // Dim the drive chip while the Favorites list is open (it's not the active context).
             val driveChipAlpha = if (showFavorites) 0.45f else 1f
             Box {
+                // The drive/location selector opens the drive dropdown, so give it the same outlined
+                // look as the "New Folder" button + the rail location items — it reads as a button, not
+                // plain text. Border uses the theme accent token; behaviour unchanged.
+                val driveChipShape = RoundedCornerShape(8.dp)
                 Text(
-                    text = "  $currentDriveLabel  ",
+                    text = "  $currentDriveLabel  ▾",
                     color = MaterialTheme.colorScheme.onBackground.copy(alpha = driveChipAlpha),
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
+                        .clip(driveChipShape)
                         .background(MaterialTheme.colorScheme.surfaceContainer)
+                        .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f), driveChipShape)
                         .clickable { showDriveMenu = true }
-                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
                 )
                 DropdownMenu(
                     expanded = showDriveMenu,
@@ -1050,10 +1071,14 @@ fun FileManagerScreen(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
+            } else if (LocalConfiguration.current.orientation == Configuration.ORIENTATION_PORTRAIT) {
+                // PORTRAIT: hide the current-folder name — it's redundant with the path bar directly
+                // below (which shows the full path). The spacer keeps the action icons right-aligned.
+                Spacer(Modifier.weight(1f))
             } else {
-                // The CURRENT FOLDER, not the full path. A path ellipsised on the right hides its
-                // tail — which is the only part that says where you are ("…/Winlator/Game…").
-                // The full path moves to the line below, where it has room.
+                // LANDSCAPE: the CURRENT FOLDER, not the full path. A path ellipsised on the right
+                // hides its tail — the only part that says where you are ("…/Winlator/Game…"). The
+                // full path moves to the line below, where it has room.
                 Text(
                     text = currentDir.name.ifBlank { currentDir.absolutePath },
                     color = MaterialTheme.colorScheme.onSurface,
@@ -1066,6 +1091,20 @@ fun FileManagerScreen(
             }
 
             if (!showFavorites) {
+                // New Folder moved off a bottom bar into the toolbar (next to the grid/list toggle),
+                // as a compact outlined button, so the file list reclaims that bottom strip.
+                if (!pickMode) {
+                    OutlinedButton(
+                        onClick = { showNewFolderDialog = true },
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                        modifier = Modifier.height(32.dp),
+                    ) {
+                        Icon(Icons.Filled.CreateNewFolder, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(5.dp))
+                        Text("New Folder", color = MaterialTheme.colorScheme.onBackground, fontSize = 12.sp)
+                    }
+                }
                 IconButton(onClick = {
                     gridView = !gridView
                     browsePrefs.edit().putBoolean("fmGridView", gridView).apply()
@@ -1296,6 +1335,41 @@ fun FileManagerScreen(
             }
         }
 
+        // ── Left locations rail (mockup Option 2) + content ──
+        // Shared collapsible rail: landscape expanded by default, portrait collapsed icon-only. Not
+        // shown in pick mode (the themed picker keeps its slim layout). Built each recompose (cheap)
+        // so it tracks the current drive/favourites without stale click lambdas.
+        val fmRailState = rememberRailState("filemanager")
+        fun locItem(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, dir: File) =
+            RailItem(label, icon, !showFavorites && currentRoot.absolutePath == dir.absolutePath) {
+                showFavorites = false; openDrive(dir)
+            }
+        val storageItems = buildList {
+            add(locItem("Internal", Icons.Filled.Smartphone, File("/storage/emulated/0")))
+            drives.filter { it.removable }.forEach { d ->
+                add(RailItem(d.label, Icons.Filled.SdStorage, !showFavorites && currentRoot.absolutePath == d.dir.absolutePath) {
+                    showFavorites = false; if (d.readable) openDrive(d.dir)
+                })
+            }
+        }
+        val quickItems = buildList {
+            File("/storage/emulated/0/Download").takeIf { it.isDirectory }?.let { add(locItem("Downloads", Icons.Filled.Download, it)) }
+            File("/storage/emulated/0/Winlator/Games").takeIf { it.isDirectory }?.let { add(locItem("Games", Icons.Filled.SportsEsports, it)) }
+            File("/storage/emulated/0/Pictures").takeIf { it.isDirectory }?.let { add(locItem("Pictures", Icons.Filled.Image, it)) }
+        }
+        val favItems = remember(favTick) { FavoritesStore.list(context).map(::File).filter { it.exists() } }
+            .map { d -> RailItem(d.name, Icons.Filled.Star, false) { showFavorites = false; openDrive(d) } }
+        val locationSections = buildList {
+            add(RailSection("STORAGE", storageItems))
+            if (quickItems.isNotEmpty()) add(RailSection("QUICK", quickItems))
+            if (favItems.isNotEmpty()) add(RailSection("★ FAVORITES", favItems))
+        }
+
+        Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            if (!pickMode) {
+                CollapsibleRail(state = fmRailState, title = "Files", sections = locationSections, outlinedItems = true)
+            }
+            Box(modifier = Modifier.weight(1f).fillMaxSize()) {
         // ── Favorites list OR file list ──
         if (showFavorites) {
             FavoritesList(
@@ -1317,20 +1391,19 @@ fun FileManagerScreen(
                     favTick++
                     Toast.makeText(context, "Removed \"${dir.name}\" from Favorites", Toast.LENGTH_SHORT).show()
                 },
-                modifier = Modifier.weight(1f).fillMaxWidth(),
+                modifier = Modifier.fillMaxSize(),
             )
         } else {
         // ── File list (pull down to refresh) ──
         Box(
             modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
+                .fillMaxSize()
                 .nestedScroll(pullState.nestedScrollConnection),
         ) {
             val shownEntries = if (searchQuery.isBlank()) entries
             else entries.filter { it.name.contains(searchQuery, ignoreCase = true) }
 
-            if (gridView && entries.isNotEmpty()) {
+            if (showGrid && entries.isNotEmpty()) {
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = 104.dp),
                     modifier = Modifier.fillMaxSize(),
@@ -1471,26 +1544,9 @@ fun FileManagerScreen(
             }
         }
         }
-
-        // ── FAB area ── (creation is gated off in pick mode)
-        if (!pickMode) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surfaceContainer)
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                OutlinedButton(
-                    onClick = { showNewFolderDialog = true },
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                ) {
-                    Icon(Icons.Filled.CreateNewFolder, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(6.dp))
-                    Text("New Folder", color = MaterialTheme.colorScheme.onBackground)
-                }
-            }
-        }
+            } // end content Box (beside the rail)
+        } // end rail + content Row
+        // (New Folder moved into the top toolbar; the bottom bar was removed to reclaim its strip.)
     }
 }
 

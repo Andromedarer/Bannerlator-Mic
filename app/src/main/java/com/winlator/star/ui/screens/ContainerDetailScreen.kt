@@ -24,10 +24,16 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Help
+import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Widgets
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -80,8 +86,13 @@ import com.winlator.star.widget.perfhud.parseHudOutline
 import com.winlator.star.widget.exportHudDiagnostics
 import com.winlator.star.widget.ColorPickerView
 import com.winlator.star.widget.CPUListView
+import com.winlator.star.ui.components.CollapsibleRail
 import com.winlator.star.ui.components.ContainerGlossarySheet
 import com.winlator.star.ui.components.EnvVarsEditor
+import com.winlator.star.ui.components.RailItem
+import com.winlator.star.ui.components.RailLink
+import com.winlator.star.ui.components.RailSection
+import com.winlator.star.ui.components.rememberRailState
 
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
@@ -156,96 +167,105 @@ fun ContainerDetailScreen(
             }
         }
     ) { padding ->
-        // The glossary button + tab row are a FIXED header (outer Column does NOT scroll); only the
-        // tab content below scrolls (the content Box owns the scroll + weight(1f)). This keeps the
-        // GENERAL/ENVIRONMENT/DRIVES/… tabs pinned and tappable while scrolling a long settings tab.
         val contentScroll = rememberScrollState()
-        // The "What is all this?" button collapses once you scroll into the content and returns at the
-        // top. derivedStateOf so only the header recomposes, and only when it crosses the very top.
-        val atTop by remember { derivedStateOf { contentScroll.value == 0 } }
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-        ) {
-            // "What is all this?" — newcomer glossary of the setup terms (DXVK, Mali/Adreno, BCn,
-            // colours, glibc/bionic, …). Placed above the tabs so it's reachable from every tab.
-            AnimatedVisibility(visible = atTop) {
-                TextButton(
-                    onClick = { glossaryQuery = "" },
-                    modifier = Modifier.padding(start = 8.dp, top = 4.dp)
-                ) {
-                    Text("❔  What is all this?")
-                }
-            }
 
-            // Defaults mode: forget the saved profile and reload the form to the built-in app defaults.
-            // Always visible (not collapsed on scroll like the glossary) so it's reachable from the top.
+        // ── Shared collapsible left rail (landscape: expanded by default + per-screen persistence A;
+        //    portrait: always collapsed, no toggle). See ui/components/CollapsibleRail. ─────────────
+        val railState = rememberRailState("containers")
+        val railCollapsed = railState.collapsed
+
+        val activeTab = tabTitles.getOrNull(viewModel.selectedTab) ?: "GENERAL"
+        val screenTitle = when {
+            viewModel.defaultsMode -> "New Container Defaults"
+            containerId <= 0 -> "New Container"
+            else -> "Edit Container"
+        }
+        val railLinks = buildList {
+            add(RailLink("What is all this?", Icons.Filled.Help) { glossaryQuery = "" })
             if (viewModel.defaultsMode) {
-                TextButton(
-                    onClick = { viewModel.resetDefaults() },
-                    modifier = Modifier.padding(start = 8.dp)
-                ) {
-                    Text("↺  " + stringResource(R.string.reset_to_app_defaults))
-                }
+                add(RailLink(stringResource(R.string.reset_to_app_defaults), Icons.Filled.Restore) { viewModel.resetDefaults() })
             }
+        }
 
-            // ── Tabs ───────────────────────────────────────────────────────────
-            ScrollableTabRow(
-                selectedTabIndex = viewModel.selectedTab,
-                containerColor = MaterialTheme.colorScheme.surface,
-                contentColor = MaterialTheme.colorScheme.onSurface,
-                edgePadding = 0.dp
-            ) {
-                tabTitles.forEachIndexed { index, title ->
-                    Tab(
-                        selected = viewModel.selectedTab == index,
-                        onClick = { viewModel.selectedTab = index },
-                        text = { Text(title, fontSize = 12.sp) }
+        Row(modifier = Modifier.fillMaxSize().padding(padding)) {
+            CollapsibleRail(
+                state = railState,
+                title = screenTitle,
+                headerIcon = R.drawable.icon_menu_container,
+                links = railLinks,
+                sections = listOf(
+                    RailSection(
+                        header = null,
+                        items = tabTitles.mapIndexed { index, tab ->
+                            RailItem(tab, tabIcon(tab), index == viewModel.selectedTab) { viewModel.selectedTab = index }
+                        },
+                    )
+                ),
+            )
+
+            // ── Content: full height beside the rail ───────────────────────────────────────────
+            Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                // Collapsed rail hides the tab labels, so surface the active tab name over the content
+                // (mockup: "ctxhdr") — the user never loses their place.
+                if (railCollapsed) {
+                    Text(
+                        activeTab,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.6.sp,
+                        modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 2.dp),
                     )
                 }
-            }
-
-            // ── Tab content (the ONLY scrolling region now — header above stays pinned) ──────────
-            Box(modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .verticalScroll(contentScroll)
-                .padding(horizontal = 12.dp, vertical = 8.dp)) {
-                // Dispatch by tab TITLE (not index): DRIVES is absent in defaults mode, so a raw
-                // index would misalign the remaining tabs. getOrNull guards a stale selectedTab if the
-                // tab list shrinks under it (e.g. defaultsMode flips on after the first composition).
-                when (tabTitles.getOrNull(viewModel.selectedTab) ?: "GENERAL") {
-                    "GENERAL" -> Column {
-                        TopLevelFields(
-                            viewModel = viewModel,
-                            onShowGfxConfig = { showGraphicsDriverConfig = true },
-                            onShowDxvkConfig = { showDxvkConfig = true },
-                            onShowWineD3DConfig = { showWineD3DConfig = true },
-                            onShowFpsConfig = { showFpsConfig = true },
-                            onShowWineDownloadSheet = { showWineDownloadSheet = true },
-                            onShowVulkanConfig = { showVulkanConfig = true },
-                        )
-                        WineConfigTab(viewModel, colorPickerViewRef)
-                    }
-                    "ENVIROMENT" -> EnvVarsTab(viewModel)
-                    "DRIVES" -> DrivesTab(viewModel)
-                    "WIN COMPONENTS" -> WinComponentsTab(viewModel)
-                    "ADVANCED" -> Column {
-                        AdvancedTab(
-                            viewModel,
-                            cpuListViewRef,
-                            cpuListWoW64Ref,
-                            onShowBox64DownloadSheet = { showBox64DownloadSheet = true },
-                            onShowFexCoreDownloadSheet = { showFexCoreDownloadSheet = true },
-                        )
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-                        XRTab(viewModel)
+                // The ONLY scrolling region. Fills the full height beside the rail; a bottom buffer
+                // (FAB + system nav-bar inset + small margin) is the ONLY reserved space, so content
+                // reaches near the bottom instead of stopping in a dead zone.
+                val bottomBuffer = 72.dp +
+                    WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(contentScroll)
+                        .padding(horizontal = 12.dp)
+                        .padding(top = 8.dp)
+                ) {
+                    Column {
+                        // Dispatch by tab TITLE (not index): DRIVES is absent in defaults mode, so a
+                        // raw index would misalign the remaining tabs.
+                        when (activeTab) {
+                            "GENERAL" -> Column {
+                                TopLevelFields(
+                                    viewModel = viewModel,
+                                    onShowGfxConfig = { showGraphicsDriverConfig = true },
+                                    onShowDxvkConfig = { showDxvkConfig = true },
+                                    onShowWineD3DConfig = { showWineD3DConfig = true },
+                                    onShowFpsConfig = { showFpsConfig = true },
+                                    onShowWineDownloadSheet = { showWineDownloadSheet = true },
+                                    onShowVulkanConfig = { showVulkanConfig = true },
+                                )
+                                WineConfigTab(viewModel, colorPickerViewRef)
+                            }
+                            "ENVIROMENT" -> EnvVarsTab(viewModel)
+                            "DRIVES" -> DrivesTab(viewModel)
+                            "WIN COMPONENTS" -> WinComponentsTab(viewModel)
+                            "ADVANCED" -> Column {
+                                AdvancedTab(
+                                    viewModel,
+                                    cpuListViewRef,
+                                    cpuListWoW64Ref,
+                                    onShowBox64DownloadSheet = { showBox64DownloadSheet = true },
+                                    onShowFexCoreDownloadSheet = { showFexCoreDownloadSheet = true },
+                                )
+                                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                                XRTab(viewModel)
+                            }
+                        }
+                        // Clears the save FAB + nav-bar inset so the last setting can scroll above them,
+                        // leaving only a small buffer rather than a large empty band.
+                        Spacer(modifier = Modifier.height(bottomBuffer))
                     }
                 }
             }
-
-            Spacer(modifier = Modifier.height(80.dp)) // room for FAB
         }
     }
 
@@ -380,6 +400,16 @@ private fun parseVulkanConfig(s: String): Map<String, String> =
         val i = it.indexOf('=')
         if (i <= 0) null else it.substring(0, i) to it.substring(i + 1)
     }.toMap()
+
+/** The Material icon for each container-settings tab (mirrors the mockup's glyphs). */
+private fun tabIcon(title: String): ImageVector = when (title) {
+    "GENERAL" -> Icons.Filled.Settings
+    "ENVIROMENT" -> Icons.Filled.Extension
+    "DRIVES" -> Icons.Filled.Storage
+    "WIN COMPONENTS" -> Icons.Filled.Widgets
+    "ADVANCED" -> Icons.Filled.Tune
+    else -> Icons.Filled.Settings
+}
 
 @Composable
 internal fun VulkanSettingsDialog(
