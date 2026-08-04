@@ -100,6 +100,7 @@ Every report gets its own **public discussion thread**. You can reply as the ori
 - [🆕 What's New in 2.9.2](#-whats-new-in-292)
 - [🆕 What's New in 2.9.1](#-whats-new-in-291)
 - [🆕 What's New in 2.9](#-whats-new-in-29)
+- [🎞️ Frame Generation & Present Modes](#-frame-generation--present-modes)
 - [✨ Full Features](#-full-features)
 - [🎨 Adding your own ReShade effects](#-adding-your-own-reshade-effects)
 - [🎮 Frontends Workaround](#-frontends-workaround)
@@ -374,6 +375,31 @@ Every report gets its own **public discussion thread**. You can reply as the ori
 </details>
 
 </details>
+
+---
+
+## 🎞️ Frame Generation & Present Modes
+
+**Frame generation** (lsfg-vk and bionic-fg) inserts AI-generated in-between frames to make motion look smoother — it helps most when a game runs *below* your screen's refresh rate. It runs on the **Vulkan renderer**.
+
+**Present mode** decides how finished frames are handed to your screen:
+
+| Mode | What it does |
+|---|---|
+| **FIFO** (default) | "Vsync on" — smooth, tear-free, most battery-friendly, but it makes the game wait for the display. |
+| **Mailbox** | "Fast vsync" — never makes the game wait, still tear-free. The right mode for frame generation, so its extra frames actually reach the screen. |
+| **Immediate** | "Vsync off" — lowest input lag, but can tear. |
+
+Bannerlator **automatically switches to Mailbox while frame generation is running**, then restores your chosen mode when it turns off — because FIFO would otherwise throttle the generated frames before they reach the screen. You can also switch modes live from the **Present Mode selector** in the in-game Graphics tab, and every mode is explained by a **"?"** button and in the in-app **"What is all this?"** glossary.
+
+### Why is my FPS reading different from another emulator?
+
+With frame generation on, two apps' FPS numbers can look very different — because they **count frames at different points in the pipeline**:
+
+- An app that reads the game's **raw output** shows a clean **2× / 3× / 4×** — impressive, but it counts frames your screen never actually displays.
+- Bannerlator's HUD counts frames as they **reach the display pipeline**, so it reflects the *real* gain — not a perfectly clean multiple, and always capped by your screen's refresh rate.
+
+**Neither number is "frames on glass."** Your panel's refresh rate (e.g. 120 or 144 Hz) is the true ceiling — above it, frames are generated but not shown. A result like **65 → 107 fps at 2×** on a demanding game, with the frametime roughly **halving**, is frame generation working correctly.
 
 ---
 
