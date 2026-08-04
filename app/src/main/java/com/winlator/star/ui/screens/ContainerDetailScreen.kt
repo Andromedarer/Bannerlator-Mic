@@ -33,10 +33,7 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Widgets
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.graphics.vector.ImageVector
-import android.content.res.Configuration
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -46,7 +43,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
@@ -90,8 +86,13 @@ import com.winlator.star.widget.perfhud.parseHudOutline
 import com.winlator.star.widget.exportHudDiagnostics
 import com.winlator.star.widget.ColorPickerView
 import com.winlator.star.widget.CPUListView
+import com.winlator.star.ui.components.CollapsibleRail
 import com.winlator.star.ui.components.ContainerGlossarySheet
 import com.winlator.star.ui.components.EnvVarsEditor
+import com.winlator.star.ui.components.RailItem
+import com.winlator.star.ui.components.RailLink
+import com.winlator.star.ui.components.RailSection
+import com.winlator.star.ui.components.rememberRailState
 
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
@@ -168,23 +169,10 @@ fun ContainerDetailScreen(
     ) { padding ->
         val contentScroll = rememberScrollState()
 
-        // ── Collapsible left rail: state + persistence (Option A) ───────────────────────────────
-        // The user's manual collapse/expand choice PERSISTS and is never overridden by rotation.
-        // Orientation only picks the INITIAL state until the user first toggles: landscape→expanded,
-        // portrait→collapsed. The Activity has orientation in configChanges (no recreate) so state is
-        // preserved across rotation; rememberSaveable additionally survives process death.
-        val prefs = remember { androidx.preference.PreferenceManager.getDefaultSharedPreferences(context) }
-        val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
-        var railUserChose by rememberSaveable { mutableStateOf(prefs.getBoolean("containerRailUserChose", false)) }
-        var railCollapsed by rememberSaveable {
-            mutableStateOf(
-                if (prefs.getBoolean("containerRailUserChose", false)) prefs.getBoolean("containerRailCollapsed", false)
-                else !isLandscape
-            )
-        }
-        // Re-evaluate the initial rail state on rotation ONLY while the user hasn't chosen manually.
-        LaunchedEffect(isLandscape) { if (!railUserChose) railCollapsed = !isLandscape }
-        val railWidth by animateDpAsState(if (railCollapsed) 58.dp else 190.dp, label = "railWidth")
+        // ── Shared collapsible left rail (landscape: expanded by default + per-screen persistence A;
+        //    portrait: always collapsed, no toggle). See ui/components/CollapsibleRail. ─────────────
+        val railState = rememberRailState("containers")
+        val railCollapsed = railState.collapsed
 
         val activeTab = tabTitles.getOrNull(viewModel.selectedTab) ?: "GENERAL"
         val screenTitle = when {
@@ -192,26 +180,26 @@ fun ContainerDetailScreen(
             containerId <= 0 -> "New Container"
             else -> "Edit Container"
         }
+        val railLinks = buildList {
+            add(RailLink("What is all this?", Icons.Filled.Help) { glossaryQuery = "" })
+            if (viewModel.defaultsMode) {
+                add(RailLink(stringResource(R.string.reset_to_app_defaults), Icons.Filled.Restore) { viewModel.resetDefaults() })
+            }
+        }
 
         Row(modifier = Modifier.fillMaxSize().padding(padding)) {
-            SettingsRail(
-                widthDp = railWidth,
-                collapsed = railCollapsed,
+            CollapsibleRail(
+                state = railState,
                 title = screenTitle,
-                showReset = viewModel.defaultsMode,
-                tabs = tabTitles,
-                selected = viewModel.selectedTab,
-                onSelect = { viewModel.selectedTab = it },
-                onToggle = {
-                    railCollapsed = !railCollapsed
-                    railUserChose = true
-                    prefs.edit()
-                        .putBoolean("containerRailUserChose", true)
-                        .putBoolean("containerRailCollapsed", railCollapsed)
-                        .apply()
-                },
-                onHelp = { glossaryQuery = "" },
-                onReset = { viewModel.resetDefaults() },
+                links = railLinks,
+                sections = listOf(
+                    RailSection(
+                        header = null,
+                        items = tabTitles.mapIndexed { index, tab ->
+                            RailItem(tab, tabIcon(tab), index == viewModel.selectedTab) { viewModel.selectedTab = index }
+                        },
+                    )
+                ),
             )
 
             // ── Content: full height beside the rail ───────────────────────────────────────────
@@ -420,132 +408,6 @@ private fun tabIcon(title: String): ImageVector = when (title) {
     "WIN COMPONENTS" -> Icons.Filled.Widgets
     "ADVANCED" -> Icons.Filled.Tune
     else -> Icons.Filled.Settings
-}
-
-/**
- * Collapsible left rail for the container editors (mockup "Option 3"): title + app glyph, the
- * "What is all this?" / "Reset to app defaults" links, and the tab items — replacing the old top tab
- * bar so the content runs full height beside it. Collapses to icon-only (~58dp) ↔ expanded (~190dp)
- * with a smooth width animation; the width is animated by the caller and passed in as [widthDp].
- */
-@Composable
-private fun SettingsRail(
-    widthDp: androidx.compose.ui.unit.Dp,
-    collapsed: Boolean,
-    title: String,
-    showReset: Boolean,
-    tabs: List<String>,
-    selected: Int,
-    onSelect: (Int) -> Unit,
-    onToggle: () -> Unit,
-    onHelp: () -> Unit,
-    onReset: () -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .width(widthDp)
-            .fillMaxHeight()
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-    ) {
-        // ── Header: app glyph + title + collapse handle ──
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = if (collapsed) Arrangement.Center else Arrangement.Start,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = if (collapsed) 0.dp else 10.dp, vertical = 8.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(22.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(MaterialTheme.colorScheme.primary)
-            )
-            if (!collapsed) {
-                Spacer(Modifier.width(9.dp))
-                Text(
-                    title,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                IconButton(onClick = onToggle, modifier = Modifier.size(28.dp)) {
-                    Text("‹‹", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 15.sp)
-                }
-            }
-        }
-        if (collapsed) {
-            IconButton(onClick = onToggle, modifier = Modifier.fillMaxWidth().height(24.dp)) {
-                Text("››", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 15.sp)
-            }
-        }
-
-        // ── Help / Reset links ──
-        if (collapsed) {
-            Row(
-                horizontalArrangement = Arrangement.Center,
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-            ) {
-                IconButton(onClick = onHelp, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Filled.Help, "What is all this?", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                }
-                if (showReset) {
-                    IconButton(onClick = onReset, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Filled.Restore, "Reset to app defaults", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                    }
-                }
-            }
-        } else {
-            TextButton(onClick = onHelp, modifier = Modifier.padding(start = 4.dp)) {
-                Text("❔  What is all this?", fontSize = 11.sp)
-            }
-            if (showReset) {
-                TextButton(onClick = onReset, modifier = Modifier.padding(start = 4.dp)) {
-                    Text("↺  " + stringResource(R.string.reset_to_app_defaults), fontSize = 11.sp)
-                }
-            }
-        }
-
-        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
-
-        // ── Tab items ──
-        tabs.forEachIndexed { index, tab ->
-            val active = index == selected
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = if (collapsed) Arrangement.Center else Arrangement.Start,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onSelect(index) }
-                    .background(
-                        if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else Color.Transparent
-                    )
-                    .padding(horizontal = if (collapsed) 0.dp else 13.dp, vertical = 12.dp)
-            ) {
-                Icon(
-                    tabIcon(tab),
-                    contentDescription = tab,
-                    tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(20.dp),
-                )
-                if (!collapsed) {
-                    Spacer(Modifier.width(11.dp))
-                    Text(
-                        tab,
-                        color = if (active) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.3.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-        }
-    }
 }
 
 @Composable

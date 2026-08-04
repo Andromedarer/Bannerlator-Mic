@@ -22,8 +22,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.ui.platform.LocalContext
+import com.winlator.star.core.AppOrientation
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -57,10 +63,12 @@ import com.winlator.star.ui.theme.OnSurface
 import com.winlator.star.ui.theme.OnSurfaceVariant
 import com.winlator.star.ui.theme.themePresets
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppearanceScreen() {
     val selectedIndex by AppThemeState.presetIndex.collectAsState()
     val customAccent by AppThemeState.customAccent.collectAsState()
+    val context = LocalContext.current
 
     Column(
         modifier = Modifier
@@ -134,6 +142,43 @@ fun AppearanceScreen() {
             subtitle = "Only appears when a card is in the device",
             checked = showSd,
             onCheckedChange = { AppThemeState.setShowSdStorage(it) },
+        )
+
+        Spacer(Modifier.height(4.dp))
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Divider))
+
+        // ── App orientation ──────────────────────────────────────────────
+        SectionLabel("App Orientation")
+        Text(
+            text = "Applies to the app's own screens only — games keep their own orientation.",
+            color = OnSurfaceVariant,
+            fontSize = 12.sp,
+        )
+        Spacer(Modifier.height(6.dp))
+        var orientationMode by remember { mutableStateOf(AppOrientation.mode(context)) }
+        val orientationOptions = listOf(
+            AppOrientation.AUTO to "Auto",
+            AppOrientation.PORTRAIT to "Portrait",
+            AppOrientation.LANDSCAPE to "Landscape",
+        )
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            orientationOptions.forEachIndexed { index, (mode, label) ->
+                SegmentedButton(
+                    selected = orientationMode == mode,
+                    onClick = {
+                        orientationMode = mode
+                        AppOrientation.setMode(context, mode)
+                        (context as? android.app.Activity)?.let { AppOrientation.apply(it) }
+                    },
+                    shape = SegmentedButtonDefaults.itemShape(index, orientationOptions.size),
+                ) { Text(label) }
+            }
+        }
+        Text(
+            text = "Auto follows device rotation (default).",
+            color = OnSurfaceVariant,
+            fontSize = 11.sp,
+            modifier = Modifier.padding(top = 4.dp),
         )
 
         Spacer(Modifier.height(16.dp))
