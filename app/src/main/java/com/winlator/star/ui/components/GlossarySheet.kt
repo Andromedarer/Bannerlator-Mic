@@ -96,6 +96,8 @@ internal val CONTAINER_GLOSSARY: List<GlossarySection> = listOf(
             "Renders the game at a higher resolution and shrinks it for a sharper image (costs performance), or at a lower resolution for more FPS."),
         GlossaryEntry("Frame generation",
             "Inserts AI-generated in-between frames to make motion look smoother. It can add a little input latency and occasional artifacts, so it's optional."),
+        GlossaryEntry("Frame-gen FPS numbers",
+            "With frame generation on, two apps' FPS readings won't match — they count at different points. A counter that reads the game's raw output shows a clean 2x/3x/4x (impressive, but it counts frames your screen never actually displays). Bannerlator's HUD counts frames as they reach the display pipeline, so it shows the real gain — not a perfectly clean multiple, and always capped by your screen's refresh rate. Neither number is 'frames on glass'; your panel's refresh rate is the true ceiling."),
         GlossaryEntry("DXVK HUD / overlay",
             "An on-screen readout (FPS, frame times, GPU load, driver info) for diagnosing performance. Purely informational — it doesn't change the game."),
         GlossaryEntry("Present mode",
