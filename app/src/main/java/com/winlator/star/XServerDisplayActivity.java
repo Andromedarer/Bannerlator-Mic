@@ -633,11 +633,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // frameRatingWindowId / mesaDrvWindowIds off-thread and can't race changeFrameRatingVisibility().
     // Reset to -1 when the HUD unbinds.
     private volatile int glZinkHealedWindowId = -1;
-    // DIAGNOSTIC (strip before merge): last window id whose tick we rejected, so we log each distinct
-    // rejected presenter exactly once instead of every frame.
-    private volatile int lastHealRejectWid = -1;
-    // DIAGNOSTIC (strip before merge): count of driveHudFrameTick invocations, for a throttled entry log.
-    private int hudTickCallCount = 0;
 
     /**
      * Drive every perf-HUD overlay for one presented frame on window {@code wid}. Single entry point
@@ -657,11 +652,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
      * or {@code mesaDrvWindowIds} here (those are owned by the WM thread) — the volatile int is enough.
      */
     private void driveHudFrameTick(int wid) {
-        // DIAGNOSTIC (strip before merge): prove invocation + show the ids, throttled ~1/300 frames.
-        if ((++hudTickCallCount % 300) == 1) {
-            Log.d("XServerDisplayActivity", "driveHudFrameTick #" + hudTickCallCount + " wid=" + wid
-                    + " bound=" + frameRatingWindowId + " healed=" + glZinkHealedWindowId);
-        }
         if (frameRatingWindowId == -1) return;                 // HUD inactive -> never count
         if (wid != frameRatingWindowId && wid != glZinkHealedWindowId) {
             if (!guestGlIsZink()) return;                      // only the GL/Zink present topology
@@ -676,16 +666,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             boolean gameFocused = focused != null && focused.isApplicationWindow() && !focused.isDesktopWindow();
             Window w = xServer.windowManager.getWindow(wid);
             boolean presenterOk = (w == null) || !w.isDesktopWindow();
-            if (!gameFocused || !presenterOk) {
-                // DIAGNOSTIC (strip before merge): explain a rejection once per distinct wid.
-                if (wid != lastHealRejectWid) {
-                    lastHealRejectWid = wid;
-                    Log.d("XServerDisplayActivity", "HUD tick skip: wid=" + wid + " bound=" + frameRatingWindowId
-                            + " gameFocused=" + gameFocused + " focusedId=" + (focused != null ? focused.id : -1)
-                            + " presenterCls=" + (w != null ? w.getClassName() : "null"));
-                }
-                return;
-            }
+            if (!gameFocused || !presenterOk) return;
             Log.d("XServerDisplayActivity", "GL/Zink HUD self-heal: counting FPS on presenting window " + wid
                     + " (focused game " + focused.id + ", HUD bound to " + frameRatingWindowId + ")");
             glZinkHealedWindowId = wid;
@@ -3415,7 +3396,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // drives it). driveHudFrameTick gates on the FPS window (self-healing onto the real
             // presenting window for GL/Zink) so we only count game frames.
             vkRenderer.setHudFrameTick(this::driveHudFrameTick);
-            Log.d("XServerDisplayActivity", "HUD frame tick wired: VulkanRenderer"); // DIAGNOSTIC (strip before merge)
         }
 
         // GL renderer: apply the container's filter mode to the window/content sampler. The Vulkan
@@ -3447,7 +3427,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // GL native (FLIP/scanout) bypasses both onDrawFrame and copyArea, so drive the perf HUD
             // per present here (same as the Vulkan/ASR ticks) — otherwise the HUD freezes in native mode.
             glr.setHudFrameTick(this::driveHudFrameTick);
-            Log.d("XServerDisplayActivity", "HUD frame tick wired: GLRenderer"); // DIAGNOSTIC (strip before merge)
         }
 
         // ASR has no compositor copyArea path either, so drive the perf HUD per present (same as
@@ -3460,7 +3439,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // of swapRB. Default TRUE = correct colours.
             asr.setSfCompatMode(resolvedSfCompatMode());
             asr.setHudFrameTick(this::driveHudFrameTick);
-            Log.d("XServerDisplayActivity", "HUD frame tick wired: ASurfaceRenderer"); // DIAGNOSTIC (strip before merge)
         }
 
         if (shortcut != null) {

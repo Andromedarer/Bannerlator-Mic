@@ -1,7 +1,5 @@
 package com.winlator.star.xserver.extensions;
 
-import android.util.Log;
-
 import static com.winlator.star.xserver.XClientRequestHandler.RESPONSE_CODE_SUCCESS;
 
 import android.util.SparseArray;
@@ -29,8 +27,6 @@ import com.winlator.star.xserver.events.PresentIdleNotify;
 import java.io.IOException;
 
 public class PresentExtension implements Extension {
-    // DIAGNOSTIC (strip before merge)
-    private int dbgPresentCount = 0;
     public static final byte MAJOR_OPCODE = -103;
     private static final int FAKE_INTERVAL = 1000000 / 60;
     public enum Kind {PIXMAP, MSC_NOTIFY}
@@ -278,7 +274,6 @@ public class PresentExtension implements Extension {
         //      so its real pixels are available to the CPU copy / GL texture).
         synchronized (content.renderLock) {
             boolean isNative = vr != null && vr.isNativeMode();
-            if ((++dbgPresentCount % 300) == 1) Log.d("PresentExtDBG", "PRESENT_ENTER win=" + window.id + " mapped=" + window.attributes.isMapped() + " native=" + isNative + " xr=" + (xr!=null?xr.getClass().getSimpleName():"null"));
 
             if (xr instanceof com.winlator.star.renderer.ASurfaceRenderer) {
                 // SurfaceFlinger (ASR): hand the pixmap's AHB to the window's own SurfaceControl
@@ -302,7 +297,6 @@ public class PresentExtension implements Extension {
                 content.setTexture(pixmap.drawable.getTexture());
                 content.setDirectScanout(true);
                 sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.FLIP, ust, msc);
-                if ((dbgPresentCount % 300) == 1) Log.d("PresentExtDBG", "branch=VK_FLIP win=" + window.id);
                 if (window.attributes.isMapped()) vr.onUpdateWindowContent(window);
                 emitIdleNotify(window, pixmap, serial, idleFence, targetFps, vr);
             } else if (vr != null && window.attributes.isMapped()
@@ -310,7 +304,6 @@ public class PresentExtension implements Extension {
                     && ((GPUImage) pixmap.drawable.getTexture()).getHardwareBufferPtr() != 0) {
                 sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.COPY, ust, msc);
                 vr.onUpdateWindowContentDirect(window, pixmap.drawable, xOff, yOff);
-                if ((dbgPresentCount % 300) == 1) Log.d("PresentExtDBG", "branch=VK_COPY_DIRECT win=" + window.id + " mapped=" + window.attributes.isMapped() + " native=" + isNative);
                 emitIdleNotify(window, pixmap, serial, idleFence, targetFps, vr);
             } else if (xr instanceof com.winlator.star.renderer.GLRenderer
                     && ((com.winlator.star.renderer.GLRenderer) xr).isNativeMode()
@@ -326,7 +319,6 @@ public class PresentExtension implements Extension {
                 ((com.winlator.star.renderer.GLRenderer) xr).presentScanout(window, content);
                 emitIdleNotify(window, pixmap, serial, idleFence, targetFps, null);
             } else {
-                if ((dbgPresentCount % 300) == 1) Log.d("PresentExtDBG", "branch=FALLBACK_COPYAREA win=" + window.id);
                 content.copyArea((short)0, (short)0, xOff, yOff, pixmap.drawable.width, pixmap.drawable.height, pixmap.drawable);
                 sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.COPY, ust, msc);
                 emitIdleNotify(window, pixmap, serial, idleFence, targetFps, vr);
