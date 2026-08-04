@@ -468,6 +468,12 @@ private fun AppShell(
                     startRoute = startRoute,
                     modifier = Modifier.weight(1f),
                 )
+                // App-wide minimized progress pill for a running archive unpack. Renders nothing when
+                // idle; sits below the nav content so it floats over every screen. Hidden in Big
+                // Picture (fullscreen) mode.
+                if (!isBigPicture) {
+                    com.winlator.star.ui.UnpackProgressPill()
+                }
             }
         }
     }

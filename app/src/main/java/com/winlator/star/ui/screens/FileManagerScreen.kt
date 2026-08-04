@@ -109,7 +109,6 @@ import com.winlator.star.MainActivity
 import com.winlator.star.R
 import com.winlator.star.XServerDisplayActivity
 import com.winlator.star.container.Container
-import com.winlator.star.core.ArchiveExtractor
 import com.winlator.star.core.FileUtils
 import com.winlator.star.core.PeIconExtractor
 import com.winlator.star.core.StorageRoots
@@ -118,7 +117,6 @@ import com.winlator.star.core.GameIdentifier
 import com.winlator.star.core.WinePath
 import com.winlator.star.util.FavoritesStore
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -331,7 +329,6 @@ fun FileManagerScreen(
     var sortDesc by remember { mutableStateOf(browsePrefs.getBoolean("fmSortDesc", false)) }
     var showHidden by remember { mutableStateOf(browsePrefs.getBoolean("fmShowHidden", true)) }
     var showSortMenu by remember { mutableStateOf(false) }
-    var pendingExtract by remember { mutableStateOf<File?>(null) }
     // View mode: list of cards (default) or a thumbnail grid. Density applies to the list only —
     // a grid tile has no second line to compact.
     var gridView by remember { mutableStateOf(browsePrefs.getBoolean("fmGridView", false)) }
@@ -622,39 +619,6 @@ fun FileManagerScreen(
         }
     }
 
-    fun performExtract(archive: File) {
-        // Always into a subfolder named after the archive, never "here": a zip with 400 loose
-        // entries would otherwise carpet the current folder with no way to undo it.
-        val target = uniqueDestination(archive.parentFile ?: currentDir, ArchiveExtractor.suggestedTargetName(archive))
-        operationJob = scope.launch {
-            operationProgress = 0f
-            operationDeterminate = true
-            operationLabel = "Extracting ${archive.name}"
-            isOperationRunning = true
-            var lastPct = -1
-            val ok = withContext(Dispatchers.IO) {
-                ArchiveExtractor.extract(
-                    archive, target,
-                    progress = { written, total ->
-                        val pct = if (total > 0) ((written * 100) / total).toInt() else 0
-                        if (pct != lastPct) { lastPct = pct; operationProgress = pct / 100f }
-                    },
-                    // Cancel button cancels the Job; isActive is how that reaches the IO loop.
-                    shouldContinue = { isActive },
-                )
-            }
-            isOperationRunning = false
-            operationDeterminate = false
-            operationJob = null
-            loadDirectory(currentDir, resetScroll = false)
-            Toast.makeText(
-                context,
-                if (ok) "Extracted to \"${target.name}\"" else "Extract failed",
-                Toast.LENGTH_SHORT,
-            ).show()
-        }
-    }
-
     fun performRename(file: File, newName: String) {
         val target = File(file.parentFile, newName)
         if (target.exists()) {
@@ -764,20 +728,6 @@ fun FileManagerScreen(
                 }) { Text("Delete") }
             },
             dismissButton = { TextButton(onClick = { selectedEntry = null }) { Text("Cancel") } },
-        )
-    }
-
-    pendingExtract?.let { archive ->
-        OutlinedAlertDialog(
-            onDismissRequest = { pendingExtract = null },
-            title = { Text("Extract archive") },
-            text = {
-                Text("Extract \"${archive.name}\" into a new folder \"${ArchiveExtractor.suggestedTargetName(archive)}\"?")
-            },
-            confirmButton = {
-                TextButton(onClick = { pendingExtract = null; performExtract(archive) }) { Text("Extract") }
-            },
-            dismissButton = { TextButton(onClick = { pendingExtract = null }) { Text("Cancel") } },
         )
     }
 
@@ -1469,11 +1419,11 @@ fun FileManagerScreen(
                             onCut = { clipboardFiles = listOf(file); isCutOperation = true; showMenuFor = null },
                             onDelete = { selectedEntry = file; showMenuFor = null },
                             onRename = { renameTarget = file; showMenuFor = null },
-                            onExtract = {
+                            onUnpack = {
                                 showMenuFor = null
-                                if (ArchiveExtractor.isUnsupportedArchive(file)) {
-                                    Toast.makeText(context, "RAR isn't supported yet", Toast.LENGTH_SHORT).show()
-                                } else pendingExtract = file
+                                context.startActivity(
+                                    com.winlator.star.UnpackArchiveActivity.intent(context, file.absolutePath)
+                                )
                             },
                             isFavorite = isFav,
                             onToggleFavorite = {
@@ -1544,7 +1494,7 @@ private fun FileItemRow(
     onCut: () -> Unit,
     onDelete: () -> Unit,
     onRename: () -> Unit,
-    onExtract: () -> Unit = {},
+    onUnpack: () -> Unit = {},
     isFavorite: Boolean = false,
     onToggleFavorite: () -> Unit = {},
 ) {
@@ -1692,11 +1642,22 @@ private fun FileItemRow(
                         )
                         MenuItemDivider()
                     }
-                    if (ArchiveExtractor.isArchive(file) || ArchiveExtractor.isUnsupportedArchive(file)) {
+                    // The SINGLE extraction action: the bundled 7-Zip engine handles a strict superset
+                    // of everything the old in-app extractor did (zip, 7z, tar, gzip, bzip2, xz, zstd)
+                    // PLUS disc images (ISO/UDF), RAR, cab, wim, split volumes and 80 GB+ single files.
+                    // For an InnoSetup repack (Setup.exe + Setup-*.bin) it becomes "Unpack / Install…",
+                    // where the screen decides between 7-Zip payload extraction and running Setup.exe in
+                    // a container (FreeArc repacks). The screen also content-sniffs (`7zz l`) so a file
+                    // is judged by content, not extension.
+                    val isInno = com.winlator.star.core.unpack.SevenZip.isInnoSetup(file)
+                    // Content-aware: extension OR a cheap magic-byte sniff, so a .wcp/.bin/renamed
+                    // archive with an unlisted extension still gets the option (menu opens per row,
+                    // so this reads only a few header bytes on demand — never `7zz l` per entry).
+                    if (isInno || com.winlator.star.core.unpack.SevenZip.looksLikeArchive(file)) {
                         DropdownMenuItem(
-                            text = { Text("Extract") },
+                            text = { Text(if (isInno) "Unpack / Install…" else "Unpack Archive…") },
                             leadingIcon = { Icon(Icons.Filled.Unarchive, null, tint = MaterialTheme.colorScheme.primary) },
-                            onClick = { onDismissMenu(); onExtract() },
+                            onClick = { onDismissMenu(); onUnpack() },
                         )
                         MenuItemDivider()
                     }
