@@ -37,6 +37,9 @@
     <!-- Held only while a depot download is running (SteamDepotDownloader) so the aggressive OEM
          task-killer can't kill the process mid-download and cause a LogonSessionReplaced churn. -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Lets the user exempt the app from battery optimisation so a multi-hour background
+         extraction (UnpackService) isn't paused/killed by aggressive OEM power managers. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission
         android:name="android.permission.WRITE_SECURE_SETTINGS"

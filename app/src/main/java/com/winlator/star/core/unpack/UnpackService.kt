@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
 import com.winlator.star.UnpackArchiveActivity
@@ -66,6 +67,11 @@ class UnpackService : Service() {
         }
     }
 
+    // Held for the whole extraction so the CPU keeps running with the screen off — screen-off CPU
+    // suspend is the main reason a long background extraction appears to "pause". Balanced by a
+    // finally in the worker thread AND onDestroy, so it can never leak.
+    @Volatile private var wakeLock: PowerManager.WakeLock? = null
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -73,8 +79,31 @@ class UnpackService : Service() {
         createChannel()
     }
 
+    private fun acquireWakeLock() {
+        if (wakeLock?.isHeld == true) return
+        val pm = getSystemService(POWER_SERVICE) as PowerManager
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "bannerlator:unpack").apply {
+            setReferenceCounted(false)
+            acquire()
+        }
+    }
+
+    private fun releaseWakeLock() {
+        wakeLock?.let { if (it.isHeld) runCatching { it.release() } }
+        wakeLock = null
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
+        // START_STICKY restart re-delivers a null intent. The worker thread and the 7zz process died
+        // with the old process (7-Zip extraction isn't resumable), and our process-static state reset
+        // to IDLE, so there is nothing to resume — clear any stale notification and stop cleanly. The
+        // wake lock + battery-optimisation exemption are what prevent this kill in the first place.
+        if (intent == null || intent.action == null) {
+            (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).cancel(NOTIFICATION_ID)
+            stopNow()
+            return START_NOT_STICKY
+        }
+        when (intent.action) {
             ACTION_CANCEL -> {
                 cancelled = true
                 runCatching { proc?.destroy() }
@@ -111,6 +140,8 @@ class UnpackService : Service() {
         // is the Setup-*.bin payload total (passed in), not the small Setup.exe we point 7-Zip at.
         val dataSize = if (totalSize > 0) totalSize else archive.length()
         Thread {
+            acquireWakeLock()
+            try {
             val startMs = SystemClock.elapsedRealtime()
 
             UnpackManager.set(
@@ -203,8 +234,17 @@ class UnpackService : Service() {
             UnpackManager.set(terminal)
             postTerminalNotification(terminal)
             stopForeground(Service.STOP_FOREGROUND_DETACH)
-            stopSelf()
+            } finally {
+                // Balanced release on EVERY exit path (success, error, cancel, process death).
+                releaseWakeLock()
+                stopSelf()
+            }
         }.also { it.name = "unpack-worker"; it.start() }
+    }
+
+    override fun onDestroy() {
+        releaseWakeLock()   // backstop — the worker's finally already releases on normal exits
+        super.onDestroy()
     }
 
     // ── Notification ──

@@ -45,7 +45,9 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -53,6 +55,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -153,6 +158,27 @@ fun UnpackArchiveScreen(
                 ?.sumOf { it.length() } ?: archive.length()
         } else selected.length()
     }
+
+    // Only one extraction at a time (matches the service's own guard) so the progress pill and
+    // notification are never ambiguous.
+    val otherJobRunning = state.isRunning && state.archivePath != archive.absolutePath
+
+    // Battery-optimisation exemption, refreshed on resume so returning from Settings re-checks it.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var resumeTick by remember { mutableIntStateOf(0) }
+    DisposableEffect(lifecycleOwner) {
+        val obs = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_RESUME) resumeTick++ }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+    val ignoringBattery = remember(resumeTick) {
+        val pm = context.getSystemService(android.os.PowerManager::class.java)
+        pm?.isIgnoringBatteryOptimizations(context.packageName) ?: true
+    }
+
+    // One-time dismissible aggressive-OEM hint.
+    val prefs = remember { androidx.preference.PreferenceManager.getDefaultSharedPreferences(context) }
+    var oemHintDismissed by remember { mutableStateOf(prefs.getBoolean("unpackOemHintDismissed", false)) }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         // Header bar.
@@ -337,6 +363,73 @@ fun UnpackArchiveScreen(
                 Spacer(Modifier.height(12.dp))
             }
 
+            // ── Battery-optimisation exemption (recommended, non-blocking) ──
+            if (!running && !ignoringBattery) {
+                WarnCard {
+                    Text(
+                        "For a job this long, exempt the app from battery optimisation so the system " +
+                            "doesn't pause or kill it in the background. Recommended for 80 GB extracts.",
+                        color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Button(onClick = {
+                        runCatching {
+                            context.startActivity(
+                                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                                    .setData(Uri.parse("package:${context.packageName}"))
+                            )
+                        }
+                    }) { Text("Allow background running") }
+                }
+                Spacer(Modifier.height(12.dp))
+            }
+
+            // ── Aggressive-OEM hint (one-time, dismissible) ──
+            if (!oemHintDismissed) {
+                SectionCard {
+                    Text(
+                        "On HONOR/Huawei/Xiaomi/OPPO devices, also lock this app in Recents and set its " +
+                            "battery to \"No restrictions\", or the system may still pause background extraction.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row {
+                        OutlinedButton(
+                            onClick = {
+                                runCatching {
+                                    context.startActivity(
+                                        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                                            .setData(Uri.parse("package:${context.packageName}"))
+                                    )
+                                }
+                            },
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                        ) { Text("App settings", color = MaterialTheme.colorScheme.onBackground) }
+                        Spacer(Modifier.width(8.dp))
+                        OutlinedButton(
+                            onClick = {
+                                oemHintDismissed = true
+                                prefs.edit().putBoolean("unpackOemHintDismissed", true).apply()
+                            },
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                        ) { Text("Got it", color = MaterialTheme.colorScheme.onBackground) }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+            }
+
+            // ── One extraction at a time ──
+            if (!running && otherJobRunning) {
+                WarnCard {
+                    Text(
+                        "Another unpack is already in progress. Only one runs at a time — wait for it to " +
+                            "finish (tap its progress pill to watch), then start this one.",
+                        color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp,
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+            }
+
             // ── Extract button ──
             if (!running) {
                 Button(
@@ -345,7 +438,7 @@ fun UnpackArchiveScreen(
                         val mmt = UnpackManager.mmtFor(powerMode, manualCores)
                         UnpackService.start(context, archive.absolutePath, destPath, mmt, buffer.bytes, isInno, sourceSize)
                     },
-                    enabled = !gatedByPermission && !engineMissing && archive.isFile,
+                    enabled = !gatedByPermission && !engineMissing && archive.isFile && !otherJobRunning,
                     modifier = Modifier.fillMaxWidth().height(52.dp),
                 ) {
                     Icon(Icons.Filled.Unarchive, null, modifier = Modifier.size(20.dp))
@@ -391,11 +484,21 @@ fun UnpackArchiveScreen(
                         Spacer(Modifier.height(2.dp))
                         Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Safe to leave — this keeps running in the background. Reopen it from the progress " +
+                            "pill or the notification.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp,
+                    )
                     Spacer(Modifier.height(10.dp))
-                    OutlinedButton(
-                        onClick = { UnpackService.cancel(context) },
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error),
-                    ) { Text("Cancel", color = MaterialTheme.colorScheme.error) }
+                    Row {
+                        OutlinedButton(
+                            onClick = { UnpackService.cancel(context) },
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error),
+                        ) { Text("Cancel", color = MaterialTheme.colorScheme.error) }
+                        Spacer(Modifier.width(8.dp))
+                        Button(onClick = onClose) { Text("Minimize") }
+                    }
                 }
             }
 
