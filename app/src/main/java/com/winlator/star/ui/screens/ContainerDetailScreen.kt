@@ -400,6 +400,11 @@ internal fun VulkanSettingsDialog(
     // (old config) resolves to true. ASR-only; independent of swapRB (Vulkan/GL).
     var sfCompatMode by remember { mutableStateOf(cfg["sfCompatMode"] != "false") }
 
+    // Per-field "?" help — this dialog is its own composable, so it carries its own helpRes.
+    // HelpDialog renders as a Dialog on top of this AlertDialog (fine — same pattern as elsewhere).
+    var helpRes by remember { mutableStateOf<Int?>(null) }
+    helpRes?.let { HelpDialog(it) { helpRes = null } }
+
     OutlinedAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.vulkan_settings)) },
@@ -429,14 +434,19 @@ internal fun VulkanSettingsDialog(
                 val selectedPresentIdx = presentModes.indexOf(presentMode).coerceAtLeast(0)
                 // Present mode is ignored under Native Rendering (direct scanout goes straight to
                 // SurfaceFlinger, bypassing the swapchain), so grey it out while native is on.
-                LabeledDropdown(
-                    label = stringResource(R.string.renderer_present_mode),
-                    options = presentModeLabels,
-                    selectedOption = presentModeLabels[selectedPresentIdx],
-                    onSelect = { presentMode = presentModes[presentModeLabels.indexOf(it)] },
-                    enabled = !nativeRender,
-                    modifier = if (nativeRender) Modifier.alpha(0.5f) else Modifier
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LabeledDropdown(
+                        label = stringResource(R.string.renderer_present_mode),
+                        options = presentModeLabels,
+                        selectedOption = presentModeLabels[selectedPresentIdx],
+                        onSelect = { presentMode = presentModes[presentModeLabels.indexOf(it)] },
+                        enabled = !nativeRender,
+                        modifier = (if (nativeRender) Modifier.alpha(0.5f) else Modifier).weight(1f)
+                    )
+                    IconButton(onClick = { helpRes = R.string.renderer_present_mode_help_content }) {
+                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                    }
+                }
 
                 // NOTE: the "Renderer Driver" (System/Turnip) dropdown was removed — it was vestigial:
                 // its value (driverId) was stored + round-tripped but NEVER read at runtime (the actual
