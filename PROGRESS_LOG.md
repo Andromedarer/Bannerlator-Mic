@@ -1,5 +1,9 @@
 # Star-Compose — Progress Log
 
+## 2026-08-04 — 🎨 **pre15 (vc66 — FROZEN) — outline the File Manager drive selector** (branch `feat/container-landscape-ui`)
+
+> Styling tweak: the toolbar drive/location selector (the `currentDriveLabel` chip next to the back arrow that opens the Drive C:/Z:/Internal/SD dropdown) was plain text. Gave it the same outlined-button look as "＋ New Folder" + the rail location items — rounded `RoundedCornerShape(8.dp)` + `border(1.dp, primary.copy(alpha=0.6f))` (theme accent token, not hardcoded) over the existing surfaceContainer fill, plus a ▾ caret so it reads as a tappable button. Dropdown behaviour unchanged. Added the `foundation.border` import. versionCode frozen 66; versionName `-pre15`. (pre14 grid-toggle fix = CI-green, 3 artifacts.)
+
 ## 2026-08-04 — 🐛 **pre14 (vc66 — FROZEN) — fix: File Manager grid/list toggle dead in portrait** (branch `feat/container-landscape-ui`)
 
 > On-device bug from the part-3 landscape refactor: the grid/list toggle did nothing in PORTRAIT — `FileManagerScreen` forced `val showGrid = fmLandscape && gridView`, so portrait was pinned to the single-column list and ignored `fmGridView`. Fix: `showGrid = gridView` — the toggle is now the source of truth in BOTH orientations (choice persists across rotation). Grid stays the default (pref default true); portrait grid renders ~2 cols via the existing `GridCells.Adaptive(104dp)`; the toggle icon/state already reflects `gridView`, so it's correct in portrait now. Removed the now-unused `LocalConfiguration`/`Configuration` imports. versionCode frozen 66; versionName `-pre14` (supersedes the pre13 CI run).

@@ -7,6 +7,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -980,16 +981,21 @@ fun FileManagerScreen(
             // Dim the drive chip while the Favorites list is open (it's not the active context).
             val driveChipAlpha = if (showFavorites) 0.45f else 1f
             Box {
+                // The drive/location selector opens the drive dropdown, so give it the same outlined
+                // look as the "New Folder" button + the rail location items — it reads as a button, not
+                // plain text. Border uses the theme accent token; behaviour unchanged.
+                val driveChipShape = RoundedCornerShape(8.dp)
                 Text(
-                    text = "  $currentDriveLabel  ",
+                    text = "  $currentDriveLabel  ▾",
                     color = MaterialTheme.colorScheme.onBackground.copy(alpha = driveChipAlpha),
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
+                        .clip(driveChipShape)
                         .background(MaterialTheme.colorScheme.surfaceContainer)
+                        .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f), driveChipShape)
                         .clickable { showDriveMenu = true }
-                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
                 )
                 DropdownMenu(
                     expanded = showDriveMenu,
