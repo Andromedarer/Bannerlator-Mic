@@ -191,6 +191,7 @@ fun ContainerDetailScreen(
             CollapsibleRail(
                 state = railState,
                 title = screenTitle,
+                headerIcon = R.drawable.icon_menu_container,
                 links = railLinks,
                 sections = listOf(
                     RailSection(

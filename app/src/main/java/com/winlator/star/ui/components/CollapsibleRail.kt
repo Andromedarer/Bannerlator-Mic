@@ -5,6 +5,8 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +20,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -37,6 +41,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.annotation.DrawableRes
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -49,6 +55,8 @@ data class RailItem(
     val icon: ImageVector,
     val selected: Boolean,
     val onClick: () -> Unit,
+    /** >0 shows a small accent count badge on the item's icon (expanded and collapsed). */
+    val badge: Int = 0,
 )
 
 /** A group of [RailItem]s under an optional small section header (STORAGE / QUICK / FAVORITES …). */
@@ -67,6 +75,25 @@ private fun collapsedLabel(label: String): String {
     }
     if (label.contains(' ')) return label       // multi-word → wraps to 2 lines
     return if (label.length > 9) label.take(8) + "…" else label
+}
+
+/** A rail item's 20dp icon, with a small accent count badge on its corner when [badge] > 0. */
+@Composable
+private fun RailItemIcon(item: RailItem, tint: androidx.compose.ui.graphics.Color) {
+    if (item.badge > 0) {
+        BadgedBox(
+            badge = {
+                Badge(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                ) { Text(if (item.badge > 9) "9+" else item.badge.toString(), fontSize = 8.sp) }
+            },
+        ) {
+            Icon(item.icon, contentDescription = item.label, tint = tint, modifier = Modifier.size(20.dp))
+        }
+    } else {
+        Icon(item.icon, contentDescription = item.label, tint = tint, modifier = Modifier.size(20.dp))
+    }
 }
 
 /** A secondary link shown under the header (e.g. "What is all this?", "Reset to app defaults"). */
@@ -139,6 +166,9 @@ fun CollapsibleRail(
     modifier: Modifier = Modifier,
     links: List<RailLink> = emptyList(),
     footer: (@Composable ColumnScope.() -> Unit)? = null,
+    // Optional header glyph (a themed drawable). When null the rail shows its plain solid square.
+    // Used by the container editors to show the wine-glass container icon; other rails leave it null.
+    @DrawableRes headerIcon: Int? = null,
     // When true each item gets a rounded outlined-button look (the selected one takes the accent
     // border + accent-dim fill), matching the File Manager's "New Folder" button. Off by default so
     // the container/save rails keep their lighter flat rows (5 stacked outlined tabs read too heavy).
@@ -161,12 +191,21 @@ fun CollapsibleRail(
                 .fillMaxWidth()
                 .padding(horizontal = if (collapsed) 0.dp else 10.dp, vertical = 8.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .size(22.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(MaterialTheme.colorScheme.primary)
-            )
+            if (headerIcon != null) {
+                Icon(
+                    painter = painterResource(headerIcon),
+                    contentDescription = title,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(22.dp),
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(22.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(MaterialTheme.colorScheme.primary)
+                )
+            }
             if (!collapsed) {
                 Spacer(Modifier.width(9.dp))
                 Text(
@@ -215,7 +254,13 @@ fun CollapsibleRail(
 
         HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
 
-        // ── Sections + items ──
+        // ── Sections + items (SCROLLABLE so a tall rail — e.g. many File Manager favourites — is
+        //    fully reachable in both orientations; the header above and footer below stay pinned) ──
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+        ) {
         sections.forEach { section ->
             if (!collapsed && section.header != null) {
                 Text(
@@ -266,7 +311,7 @@ fun CollapsibleRail(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = styled,
                     ) {
-                        Icon(item.icon, contentDescription = item.label, tint = iconTint, modifier = Modifier.size(20.dp))
+                        RailItemIcon(item, iconTint)
                         Spacer(Modifier.height(2.dp))
                         Text(
                             collapsedLabel(item.label),
@@ -285,7 +330,7 @@ fun CollapsibleRail(
                         horizontalArrangement = Arrangement.Start,
                         modifier = styled,
                     ) {
-                        Icon(item.icon, contentDescription = item.label, tint = iconTint, modifier = Modifier.size(20.dp))
+                        RailItemIcon(item, iconTint)
                         Spacer(Modifier.width(11.dp))
                         Text(
                             item.label,
@@ -301,9 +346,10 @@ fun CollapsibleRail(
             }
         }
 
+        } // end scrollable section list (its weight fills the gap so the footer stays pinned)
+
         // ── Optional pinned footer (e.g. the sync summary) ──
         if (footer != null) {
-            Spacer(Modifier.weight(1f))
             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
             footer()
         }
