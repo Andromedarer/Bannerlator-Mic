@@ -3241,6 +3241,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
             );
         }
 
+        // Turnip TU_DEBUG composition (per-container + per-game). Runs AFTER every env source is
+        // merged (container DEFAULT_ENV_VARS, shortcut envVars, overrideEnvVars) so it unions with —
+        // never clobbers — a manually-set TU_DEBUG. Additive by contract: emits NOTHING (leaves the
+        // environment byte-for-byte unchanged) when the resolved contribution is empty, i.e. the
+        // default Auto/no-tokens config on a non-710/720/722 GPU.
+        applyTurnipTuDebug();
+
         // Pass final envVars to the launcher
         guestProgramLauncherComponent.setEnvVars(envVars);
         final boolean launchLoggingEnabled = isLaunchLoggingEnabled();
@@ -5285,6 +5292,64 @@ return true;
     // Per-game overrides for renderer / frame-gen engine / fps limiter: use the shortcut's value if it
     // has one, otherwise follow the container. Read-only — never written back to the container, so a
     // per-game choice can't leak into the container's saved settings (the in-game toggle calls saveData).
+    // Turnip TU_DEBUG assembly. Two contributors, both resolved through the already per-game-merged
+    // graphicsDriverConfig map (shortcut override won over container at parse time, line ~1521):
+    //   • Task #1 — "turnipGmem" tri-state: auto | on | off (default auto). Auto adds the `gmem`
+    //     token ONLY on Adreno 710/720/722 (the parts that need it on a STOCK driver); On always
+    //     adds it; Off never does (the escape hatch — Off means "don't add gmem", it does NOT force
+    //     sysmem).
+    //   • Task #2 — "turnipTokens": opt-in advanced tokens from a fixed allowlist (forcecb, nocb,
+    //     deck_emu, sysmem). deck_emu only means anything on a Banners-Turnip driver; harmless else.
+    // The two are comma-joined + de-duplicated, then UNIONED into any TU_DEBUG already in envVars
+    // (container DEFAULT_ENV_VARS ships "noconform,sysmem"; a shortcut or manual env may override).
+    // When the contribution set is empty we return WITHOUT touching envVars, so a default config on a
+    // non-target GPU leaves the environment exactly as it was assembled. Read-only w.r.t. persistence
+    // — same discipline as the resolved* helpers; never writes anything back.
+    private void applyTurnipTuDebug() {
+        if (graphicsDriverConfig == null) return;
+
+        java.util.LinkedHashSet<String> add = new java.util.LinkedHashSet<>();
+
+        // Task #1 — GMEM tri-state.
+        String gmemMode = graphicsDriverConfig.get("turnipGmem");
+        if (gmemMode == null || gmemMode.isEmpty()) gmemMode = "auto";
+        boolean addGmem = "on".equals(gmemMode)
+                || ("auto".equals(gmemMode) && GPUInformation.isAutoGmemGpu(this));
+        if (addGmem) add.add("gmem");
+
+        // Task #2 — advanced opt-in tokens (allowlist only; gmem/sysmem-vs-gmem collision avoided by
+        // NOT listing gmem here — task #1 owns it).
+        String tokens = graphicsDriverConfig.get("turnipTokens");
+        if (tokens != null && !tokens.isEmpty()) {
+            for (String t : tokens.split(",")) {
+                t = t.trim();
+                switch (t) {
+                    case "forcecb": case "nocb": case "deck_emu": case "sysmem":
+                        add.add(t);
+                        break;
+                    default:
+                        break; // ignore anything not on the allowlist
+                }
+            }
+        }
+
+        if (add.isEmpty()) return; // default case — emit an unchanged environment
+
+        // Union with any TU_DEBUG already present, preserving existing tokens and order.
+        java.util.LinkedHashSet<String> merged = new java.util.LinkedHashSet<>();
+        String existing = envVars.get("TU_DEBUG");
+        if (existing != null && !existing.isEmpty()) {
+            for (String t : existing.split(",")) {
+                t = t.trim();
+                if (!t.isEmpty()) merged.add(t);
+            }
+        }
+        merged.addAll(add);
+        envVars.put("TU_DEBUG", String.join(",", merged));
+        Log.d("XServerDisplayActivity", "Composed TU_DEBUG=" + envVars.get("TU_DEBUG")
+                + " (gmemMode=" + gmemMode + ")");
+    }
+
     private String resolvedRenderer() {
         if (container == null) return "vulkan";
         return shortcut != null ? shortcut.getExtra("renderer", container.getRenderer()) : container.getRenderer();

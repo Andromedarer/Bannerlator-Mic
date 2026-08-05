@@ -88,6 +88,32 @@ public abstract class GPUInformation {
         }
     }
 
+    /**
+     * Whether the device GPU is one of the Adreno parts that benefit from forcing Turnip's GMEM
+     * (tiled) rendering path via {@code TU_DEBUG=gmem} — Adreno <b>710 / 720 / 722</b> only (NOT 732).
+     * Used by the "Turnip GMEM = Auto" resolution in {@link com.winlator.star.XServerDisplayActivity}:
+     * Auto adds {@code gmem} ONLY when this returns true, so every other GPU keeps an unchanged
+     * environment. Reuses the same {@link #extractModelName} normalization as the perf HUD / compat
+     * gate so the match is robust against the wrapper/driver scaffolding in the raw renderer string.
+     */
+    public static boolean isAutoGmemGpu(Context context) {
+        return isAutoGmemGpu(getRenderer(null, context));
+    }
+
+    public static boolean isAutoGmemGpu(String renderer) {
+        String model = extractModelName(renderer);
+        if (model == null) return false;
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("(?i)Adreno\\s*(\\d+)").matcher(model);
+        if (!m.find()) return false;
+        switch (m.group(1)) {
+            case "710": case "720": case "722":
+                return true;
+            default:
+                return false;
+        }
+    }
+
     public native static String getVulkanVersion(String driverName, Context context);
     public native static int getVendorID(String driverName, Context context);
     public native static String getRenderer(String driverName, Context context);

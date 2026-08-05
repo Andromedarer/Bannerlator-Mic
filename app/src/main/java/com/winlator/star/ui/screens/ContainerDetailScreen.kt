@@ -2036,6 +2036,20 @@ internal fun GraphicsDriverConfigDialog(
     var disablePresentWait by remember { mutableStateOf(cfg["disablePresentWait"] == "1") }
     var fdDevFeatures    by remember { mutableStateOf(cfg["fdDevFeatures"] == "1") }
 
+    // --- Turnip GMEM tri-state (task #1) + advanced TU_DEBUG tokens (task #2) ---
+    // turnipGmem: "auto" (default) | "on" | "off". Auto adds the `gmem` token only on Adreno
+    // 710/720/722 at launch (resolved in XServerDisplayActivity). turnip* token flags map to the
+    // opt-in advanced TU_DEBUG tokens, stored comma-joined under "turnipTokens".
+    var turnipGmem       by remember { mutableStateOf(cfg["turnipGmem"] ?: "auto") }
+    val initialTurnipTokens = remember(initialConfig) {
+        (cfg["turnipTokens"] ?: "").split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+    }
+    var turnipForceCb    by remember { mutableStateOf("forcecb" in initialTurnipTokens) }
+    var turnipNoCb       by remember { mutableStateOf("nocb" in initialTurnipTokens) }
+    var turnipSysmem     by remember { mutableStateOf("sysmem" in initialTurnipTokens) }
+    var turnipDeckEmu    by remember { mutableStateOf("deck_emu" in initialTurnipTokens) }
+    var turnipSectionExpanded by remember { mutableStateOf(false) }
+
     // --- #132 Smart Wrapper Manager: capability + GPU gating (replaces the old exact-name gates) ---
     // Gate the BCn options by WHAT THE WRAPPER CONTAINS, not by its identifier string. capsFor()
     // returns a bundled driver's known caps, or — for an imported wrapper — the caps detected from
@@ -2299,6 +2313,74 @@ internal fun GraphicsDriverConfigDialog(
                     Text("OneUI / HyperOS Fix")
                 }
 
+                // --- Turnip GMEM (task #1) — always visible: this is the escape hatch for 710/720/722
+                // users on a STOCK driver. Tri-state maps to whether `gmem` joins TU_DEBUG at launch. ---
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "Turnip GMEM",
+                    style = MaterialTheme.typography.titleSmall
+                )
+                Spacer(Modifier.height(4.dp))
+                val gmemLabels = listOf("Auto (Adreno 710/720/722)", "Force On", "Force Off")
+                val gmemValues = listOf("auto", "on", "off")
+                val gmemSel = gmemLabels[gmemValues.indexOf(turnipGmem).coerceAtLeast(0)]
+                LabeledDropdown("GMEM (tiled rendering)", gmemLabels, gmemSel, { picked ->
+                    turnipGmem = gmemValues[gmemLabels.indexOf(picked).coerceAtLeast(0)]
+                })
+                Text(
+                    "Auto forces GMEM tiled rendering (TU_DEBUG=gmem) only on Adreno 710/720/722; " +
+                        "Force On applies it on any GPU; Force Off never applies it. Leave on Auto unless a " +
+                        "game misbehaves.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                // --- Advanced TU_DEBUG tokens (task #2) — collapsed expert section, off by default. ---
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { turnipSectionExpanded = !turnipSectionExpanded }
+                ) {
+                    Text(
+                        (if (turnipSectionExpanded) "▾  " else "▸  ") + "Advanced Turnip (TU_DEBUG)",
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                if (turnipSectionExpanded) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "Expert-only Turnip debug tokens. Off by default — enable only if you know what " +
+                            "they do. These are unioned with the GMEM setting above into TU_DEBUG.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = turnipForceCb, onCheckedChange = { turnipForceCb = it })
+                        Text("forcecb — force concurrent binning")
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = turnipNoCb, onCheckedChange = { turnipNoCb = it })
+                        Text("nocb — disable concurrent binning")
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = turnipSysmem, onCheckedChange = { turnipSysmem = it })
+                        Text("sysmem — force sysmem (bypass GMEM)")
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = turnipDeckEmu, onCheckedChange = { turnipDeckEmu = it })
+                        Text("deck_emu — advertise as SteamDeck")
+                    }
+                    Text(
+                        "deck_emu requires a Banners-Turnip driver (ignored on stock Turnip).",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
                 // BCn Layer Settings — shown when the wrapper carries a BCn layer as an implicit
                 // overlay: bundled wrapper-bcn_layer, or an imported wrapper whose .tzst contains
                 // libbcn_layer.so (e.g. "112"). Detected via caps, not the driver name.
@@ -2500,7 +2582,14 @@ internal fun GraphicsDriverConfigDialog(
                     "bcnCompatSparse=${if (bcnCompatSparse) "1" else "0"};" +
                     "compatUseGamenative=${if (compatUseGamenative) "1" else "0"};" +
                     "gpuName=$gpuName" +
-                    ";fdDevFeatures=${if (fdDevFeatures) "1" else "0"}"
+                    ";fdDevFeatures=${if (fdDevFeatures) "1" else "0"}" +
+                    ";turnipGmem=$turnipGmem" +
+                    ";turnipTokens=" + buildList {
+                        if (turnipForceCb) add("forcecb")
+                        if (turnipNoCb) add("nocb")
+                        if (turnipSysmem) add("sysmem")
+                        if (turnipDeckEmu) add("deck_emu")
+                    }.joinToString(",")
                 // #132 Layer 1: append auto-detected wrapper settings under their RAW ENV KEY. Sanitise
                 // values so they can't break the ";"/"=" k=v format the config round-trips through.
                 val detectedPart = detectedKeys.joinToString("") { key ->
