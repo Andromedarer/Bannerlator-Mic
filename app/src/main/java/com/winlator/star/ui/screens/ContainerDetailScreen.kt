@@ -456,6 +456,9 @@ internal fun VulkanSettingsDialog(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(stringResource(R.string.renderer_native), Modifier.weight(1f))
+                    IconButton(onClick = { helpRes = R.string.help_renderer_native }) {
+                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                    }
                     Switch(checked = nativeRender, onCheckedChange = { nativeRender = it })
                 }
 
@@ -508,12 +511,18 @@ internal fun VulkanSettingsDialog(
                 // Backed by the same `swapRB` boolean (BGRA=false, RGBA=true); RGBA (swap) routes the
                 // container through the compositor (native scanout can't swap channels).
                 val colorOrders = listOf("BGRA", "RGBA")
-                LabeledDropdown(
-                    label = stringResource(R.string.renderer_colors),
-                    options = colorOrders,
-                    selectedOption = if (swapRB) "RGBA" else "BGRA",
-                    onSelect = { swapRB = (it == "RGBA") }
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LabeledDropdown(
+                        label = stringResource(R.string.renderer_colors),
+                        options = colorOrders,
+                        selectedOption = if (swapRB) "RGBA" else "BGRA",
+                        onSelect = { swapRB = (it == "RGBA") },
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = { helpRes = R.string.help_renderer_colors }) {
+                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                    }
+                }
                 // NOTE: "Correct SurfaceFlinger colours" (sfCompatMode) is NOT shown here — this
                 // dialog only opens for the Vulkan renderer, and that toggle only affects
                 // SurfaceFlinger. It's surfaced inline under the Renderer dropdown instead (see
@@ -720,6 +729,9 @@ private fun TopLevelFields(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                IconButton(onClick = { helpRes = R.string.help_renderer_sf_compat }) {
+                    Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                }
                 Switch(
                     checked = viewModel.rendererSfCompatMode,
                     onCheckedChange = { viewModel.rendererSfCompatMode = it }
@@ -757,12 +769,18 @@ private fun TopLevelFields(
         Spacer(Modifier.height(8.dp))
 
         // Audio Driver
-        LabeledDropdown(
-            label = stringResource(R.string.audio_driver),
-            options = viewModel.audioDriverEntries,
-            selectedOption = viewModel.selectedAudioDriver,
-            onSelect = { viewModel.selectedAudioDriver = it }
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            LabeledDropdown(
+                label = stringResource(R.string.audio_driver),
+                options = viewModel.audioDriverEntries,
+                selectedOption = viewModel.selectedAudioDriver,
+                onSelect = { viewModel.selectedAudioDriver = it },
+                modifier = Modifier.weight(1f)
+            )
+            IconButton(onClick = { helpRes = R.string.help_audio_driver }) {
+                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+            }
+        }
         Spacer(Modifier.height(8.dp))
 
         // Emulator (arm64ec only)
@@ -838,15 +856,20 @@ private fun TopLevelFields(
         // and SurfaceFlinger (ASR) have no present-mode control, so FG is unsupported there — gate the
         // whole dropdown on Vulkan and grey it out otherwise (combined with the lsfg-DLL option gate).
         val fgVulkan = viewModel.selectedRenderer == "Vulkan"
-        LabeledDropdown(
-            label = stringResource(R.string.frame_generation),
-            options = fgEngineLabels,
-            selectedOption = fgEngineLabels[fgSelIdx],
-            onSelect = { viewModel.frameGenEngine = fgEngines[fgEngineLabels.indexOf(it)] },
-            enabled = fgVulkan,
-            disabledOptions = fgDisabledOpts,
-            modifier = if (!fgVulkan) Modifier.alpha(0.5f) else Modifier
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            LabeledDropdown(
+                label = stringResource(R.string.frame_generation),
+                options = fgEngineLabels,
+                selectedOption = fgEngineLabels[fgSelIdx],
+                onSelect = { viewModel.frameGenEngine = fgEngines[fgEngineLabels.indexOf(it)] },
+                enabled = fgVulkan,
+                disabledOptions = fgDisabledOpts,
+                modifier = (if (!fgVulkan) Modifier.alpha(0.5f) else Modifier).weight(1f)
+            )
+            IconButton(onClick = { helpRes = R.string.help_frame_generation }) {
+                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+            }
+        }
         if (!fgVulkan) {
             Text(
                 text = stringResource(R.string.frame_generation_requires_vulkan),
@@ -943,6 +966,9 @@ private fun TopLevelFields(
             )
             Spacer(Modifier.width(8.dp))
             Text(stringResource(R.string.fps_limiter), modifier = Modifier.weight(1f))
+            IconButton(onClick = { helpRes = R.string.help_fps_limiter }) {
+                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+            }
         }
         if (viewModel.fpsLimiterEnabled) {
             Text(
@@ -1516,15 +1542,24 @@ private fun AdvancedTab(
                         onSelect = { viewModel.selectedFEXCoreVersion = it },
                         modifier = Modifier.weight(1f)
                     )
+                    IconButton(onClick = { helpRes = R.string.help_fexcore_version }) {
+                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                    }
                     ContentInstallGear(onDownloadFile = onShowFexCoreDownloadSheet)
                 }
                 Spacer(Modifier.height(8.dp))
-                LabeledDropdown(
-                    label = stringResource(R.string.fexcore_preset),
-                    options = viewModel.fexCorePresetEntries,
-                    selectedOption = viewModel.fexCorePresetEntries.getOrElse(viewModel.selectedFEXCorePresetIndex) { "" },
-                    onSelect = { opt -> viewModel.selectedFEXCorePresetIndex = viewModel.fexCorePresetEntries.indexOf(opt).coerceAtLeast(0) }
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LabeledDropdown(
+                        label = stringResource(R.string.fexcore_preset),
+                        options = viewModel.fexCorePresetEntries,
+                        selectedOption = viewModel.fexCorePresetEntries.getOrElse(viewModel.selectedFEXCorePresetIndex) { "" },
+                        onSelect = { opt -> viewModel.selectedFEXCorePresetIndex = viewModel.fexCorePresetEntries.indexOf(opt).coerceAtLeast(0) },
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = { helpRes = R.string.help_fexcore_preset }) {
+                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                    }
+                }
             }
         }
 
@@ -1622,38 +1657,50 @@ private fun AdvancedTab(
                     stringResource(R.string.gyro_mode_rate),
                     stringResource(R.string.gyro_mode_orientation),
                 )
-                LabeledDropdown(
-                    label = stringResource(R.string.gyro_mode_label),
-                    options = gyroModeLabels,
-                    selectedOption = gyroModeLabels.getOrElse(viewModel.gyroMode) {
-                        gyroModeLabels[Container.GYRO_MODE_DEFAULT]
-                    },
-                    onSelect = { opt ->
-                        val mode = gyroModeLabels.indexOf(opt).coerceAtLeast(0)
-                        viewModel.gyroMode = mode
-                        if (mode == Container.GYRO_MODE_ORIENTATION && viewModel.gyroTarget == Container.GYRO_TARGET_MOUSE)
-                            viewModel.gyroTarget = Container.GYRO_TARGET_DEFAULT
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LabeledDropdown(
+                        label = stringResource(R.string.gyro_mode_label),
+                        options = gyroModeLabels,
+                        selectedOption = gyroModeLabels.getOrElse(viewModel.gyroMode) {
+                            gyroModeLabels[Container.GYRO_MODE_DEFAULT]
+                        },
+                        onSelect = { opt ->
+                            val mode = gyroModeLabels.indexOf(opt).coerceAtLeast(0)
+                            viewModel.gyroMode = mode
+                            if (mode == Container.GYRO_MODE_ORIENTATION && viewModel.gyroTarget == Container.GYRO_TARGET_MOUSE)
+                                viewModel.gyroTarget = Container.GYRO_TARGET_DEFAULT
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = { helpRes = R.string.help_gyro_mode }) {
+                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
                     }
-                )
+                }
                 Spacer(Modifier.height(8.dp))
                 val gyroTargetLabels = listOf(
                     stringResource(R.string.gyro_target_right_stick),
                     stringResource(R.string.gyro_target_left_stick),
                     stringResource(R.string.gyro_target_mouse),
                 )
-                LabeledDropdown(
-                    label = stringResource(R.string.gyro_target_label),
-                    options = gyroTargetLabels,
-                    selectedOption = gyroTargetLabels.getOrElse(viewModel.gyroTarget) {
-                        gyroTargetLabels[Container.GYRO_TARGET_DEFAULT]
-                    },
-                    onSelect = { opt ->
-                        val target = gyroTargetLabels.indexOf(opt).coerceAtLeast(0)
-                        viewModel.gyroTarget = target
-                        if (target == Container.GYRO_TARGET_MOUSE)
-                            viewModel.gyroMode = Container.GYRO_MODE_RATE
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LabeledDropdown(
+                        label = stringResource(R.string.gyro_target_label),
+                        options = gyroTargetLabels,
+                        selectedOption = gyroTargetLabels.getOrElse(viewModel.gyroTarget) {
+                            gyroTargetLabels[Container.GYRO_TARGET_DEFAULT]
+                        },
+                        onSelect = { opt ->
+                            val target = gyroTargetLabels.indexOf(opt).coerceAtLeast(0)
+                            viewModel.gyroTarget = target
+                            if (target == Container.GYRO_TARGET_MOUSE)
+                                viewModel.gyroMode = Container.GYRO_MODE_RATE
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = { helpRes = R.string.help_gyro_target }) {
+                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
                     }
-                )
+                }
                 val gyroActivatorLabels = listOf(
                     stringResource(R.string.gyro_activator_l1),
                     stringResource(R.string.gyro_activator_l2),
@@ -1662,14 +1709,20 @@ private fun AdvancedTab(
                     stringResource(R.string.gyro_activator_always),
                 )
                 Spacer(Modifier.height(8.dp))
-                LabeledDropdown(
-                    label = stringResource(R.string.gyro_activator_label),
-                    options = gyroActivatorLabels,
-                    selectedOption = gyroActivatorLabels.getOrElse(viewModel.gyroActivator) {
-                        gyroActivatorLabels[Container.GYRO_ACTIVATOR_DEFAULT]
-                    },
-                    onSelect = { opt -> viewModel.gyroActivator = gyroActivatorLabels.indexOf(opt).coerceAtLeast(0) }
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LabeledDropdown(
+                        label = stringResource(R.string.gyro_activator_label),
+                        options = gyroActivatorLabels,
+                        selectedOption = gyroActivatorLabels.getOrElse(viewModel.gyroActivator) {
+                            gyroActivatorLabels[Container.GYRO_ACTIVATOR_DEFAULT]
+                        },
+                        onSelect = { opt -> viewModel.gyroActivator = gyroActivatorLabels.indexOf(opt).coerceAtLeast(0) },
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = { helpRes = R.string.help_gyro_activator }) {
+                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                    }
+                }
                 // Hold vs Toggle for that button. Pointless with "Always On" (no button to latch), so
                 // the picker is hidden rather than greyed here — an editor row has no live state to
                 // explain, unlike the in-game drawer where the row stays visible but disabled.
@@ -1679,20 +1732,32 @@ private fun AdvancedTab(
                         stringResource(R.string.gyro_activation_toggle),
                     )
                     Spacer(Modifier.height(8.dp))
-                    LabeledDropdown(
-                        label = stringResource(R.string.gyro_activation_mode_label),
-                        options = gyroActivationModeLabels,
-                        selectedOption = gyroActivationModeLabels.getOrElse(viewModel.gyroActivationMode) {
-                            gyroActivationModeLabels[Container.GYRO_ACTIVATION_MODE_DEFAULT]
-                        },
-                        onSelect = { opt -> viewModel.gyroActivationMode = gyroActivationModeLabels.indexOf(opt).coerceAtLeast(0) }
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        LabeledDropdown(
+                            label = stringResource(R.string.gyro_activation_mode_label),
+                            options = gyroActivationModeLabels,
+                            selectedOption = gyroActivationModeLabels.getOrElse(viewModel.gyroActivationMode) {
+                                gyroActivationModeLabels[Container.GYRO_ACTIVATION_MODE_DEFAULT]
+                            },
+                            onSelect = { opt -> viewModel.gyroActivationMode = gyroActivationModeLabels.indexOf(opt).coerceAtLeast(0) },
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(onClick = { helpRes = R.string.help_gyro_activation_mode }) {
+                            Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                        }
+                    }
                 }
                 Spacer(Modifier.height(8.dp))
-                Text(
-                    "${stringResource(R.string.gyro_sensitivity_label)}: ${"%.1f".format(viewModel.gyroSensitivity)}",
-                    style = MaterialTheme.typography.bodySmall
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "${stringResource(R.string.gyro_sensitivity_label)}: ${"%.1f".format(viewModel.gyroSensitivity)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = { helpRes = R.string.help_gyro_sensitivity }) {
+                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                    }
+                }
                 Slider(
                     value = viewModel.gyroSensitivity,
                     onValueChange = { viewModel.gyroSensitivity = it },
@@ -1736,12 +1801,18 @@ private fun AdvancedTab(
         }
 
         // Startup Selection
-        LabeledDropdown(
-            label = stringResource(R.string.startup_selection),
-            options = viewModel.startupSelectionEntries,
-            selectedOption = viewModel.startupSelectionEntries.getOrElse(viewModel.selectedStartupSelection) { "" },
-            onSelect = { opt -> viewModel.selectedStartupSelection = viewModel.startupSelectionEntries.indexOf(opt).coerceAtLeast(0) }
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            LabeledDropdown(
+                label = stringResource(R.string.startup_selection),
+                options = viewModel.startupSelectionEntries,
+                selectedOption = viewModel.startupSelectionEntries.getOrElse(viewModel.selectedStartupSelection) { "" },
+                onSelect = { opt -> viewModel.selectedStartupSelection = viewModel.startupSelectionEntries.indexOf(opt).coerceAtLeast(0) },
+                modifier = Modifier.weight(1f)
+            )
+            IconButton(onClick = { helpRes = R.string.help_startup_selection }) {
+                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+            }
+        }
 
         // Custom per-service toggles — only shown when "Custom" (index 3) is selected.
         if (viewModel.selectedStartupSelection == Container.STARTUP_SELECTION_CUSTOM.toInt()) {
@@ -2228,30 +2299,68 @@ internal fun GraphicsDriverConfigDialog(
                     .heightIn(max = maxContentHeight)
                     .verticalScroll(rememberScrollState())
             ) {
-                LabeledDropdown(stringResource(R.string.graphics_driver_vulkan_version), vulkanVersions, vulkanVersion, { vulkanVersion = it })
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LabeledDropdown(stringResource(R.string.graphics_driver_vulkan_version), vulkanVersions, vulkanVersion, { vulkanVersion = it }, modifier = Modifier.weight(1f))
+                    IconButton(onClick = { helpRes = R.string.help_vulkan_version }) {
+                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                    }
+                }
                 Spacer(Modifier.height(8.dp))
-                LabeledDropdown(stringResource(R.string.graphics_driver_version), driverVersions, version, { version = it })
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LabeledDropdown(stringResource(R.string.graphics_driver_version), driverVersions, version, { version = it }, modifier = Modifier.weight(1f))
+                    IconButton(onClick = { helpRes = R.string.help_graphics_driver_version }) {
+                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                    }
+                }
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = showAllDrivers, onCheckedChange = { showAllDrivers = it })
-                    Text(stringResource(R.string.graphics_driver_show_incompatible))
+                    Text(stringResource(R.string.graphics_driver_show_incompatible), modifier = Modifier.weight(1f))
+                    IconButton(onClick = { helpRes = R.string.help_show_incompatible_drivers }) {
+                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                    }
                 }
                 Spacer(Modifier.height(8.dp))
-                OutlinedButton(
-                    onClick = { showExtPicker = true },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    val enabled = allExtensions.size - blacklisted.size
-                    Text(stringResource(R.string.graphics_driver_available_extensions) + " ($enabled/${allExtensions.size})")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedButton(
+                        onClick = { showExtPicker = true },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        val enabled = allExtensions.size - blacklisted.size
+                        Text(stringResource(R.string.graphics_driver_available_extensions) + " ($enabled/${allExtensions.size})")
+                    }
+                    IconButton(onClick = { helpRes = R.string.help_available_extensions }) {
+                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                    }
                 }
                 Spacer(Modifier.height(8.dp))
-                LabeledDropdown(stringResource(R.string.gpu_name), gpuNames, gpuName, { gpuName = it })
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LabeledDropdown(stringResource(R.string.gpu_name), gpuNames, gpuName, { gpuName = it }, modifier = Modifier.weight(1f))
+                    IconButton(onClick = { helpRes = R.string.help_gpu_name }) {
+                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                    }
+                }
                 Spacer(Modifier.height(8.dp))
-                LabeledDropdown(stringResource(R.string.graphics_driver_max_device_memory), deviceMemoryEntries, selectedMemoryEntry, { selectedMemoryEntry = it })
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LabeledDropdown(stringResource(R.string.graphics_driver_max_device_memory), deviceMemoryEntries, selectedMemoryEntry, { selectedMemoryEntry = it }, modifier = Modifier.weight(1f))
+                    IconButton(onClick = { helpRes = R.string.help_max_device_memory }) {
+                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                    }
+                }
                 Spacer(Modifier.height(8.dp))
-                LabeledDropdown(stringResource(R.string.graphics_driver_present_modes), presentModeEntries, presentMode, { presentMode = it })
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LabeledDropdown(stringResource(R.string.graphics_driver_present_modes), presentModeEntries, presentMode, { presentMode = it }, modifier = Modifier.weight(1f))
+                    IconButton(onClick = { helpRes = R.string.help_wrapper_present_modes }) {
+                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                    }
+                }
                 Spacer(Modifier.height(8.dp))
-                LabeledDropdown(stringResource(R.string.graphics_driver_resource_type), resourceTypeEntries, resourceType, { resourceType = it })
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LabeledDropdown(stringResource(R.string.graphics_driver_resource_type), resourceTypeEntries, resourceType, { resourceType = it }, modifier = Modifier.weight(1f))
+                    IconButton(onClick = { helpRes = R.string.help_resource_type }) {
+                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                    }
+                }
                 Spacer(Modifier.height(8.dp))
                 // #132 GPU-context note: BCn transcode/emulation (and the compat layers) only do
                 // anything on Mali/non-Qualcomm GPUs — Adreno has native BCn. Surface the real chip so
@@ -2263,7 +2372,12 @@ internal fun GraphicsDriverConfigDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(Modifier.height(8.dp))
-                LabeledDropdown(stringResource(R.string.graphics_driver_bcn_emulation), bcnEmulationEntries, bcnEmulation, { bcnEmulation = it })
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LabeledDropdown(stringResource(R.string.graphics_driver_bcn_emulation), bcnEmulationEntries, bcnEmulation, { bcnEmulation = it }, modifier = Modifier.weight(1f))
+                    IconButton(onClick = { helpRes = R.string.help_bcn_emulation }) {
+                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                    }
+                }
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     LabeledDropdown(stringResource(R.string.graphics_driver_bcn_emulation_type), bcnTypeEntries, bcnEmulationType, { bcnEmulationType = it }, modifier = Modifier.weight(1f))

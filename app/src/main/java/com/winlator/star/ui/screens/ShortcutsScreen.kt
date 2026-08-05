@@ -6221,6 +6221,9 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
+                            IconButton(onClick = { helpRes = R.string.help_renderer_sf_compat }) {
+                                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                            }
                             DpSwitch(dp, "sfCompat", checked = sfCompatMode, onCheckedChange = { sfCompatMode = it })
                         }
                     }
@@ -6229,19 +6232,28 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                     if (selectedRenderer == "Vulkan") {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(stringResource(R.string.renderer_native), Modifier.weight(1f))
+                            IconButton(onClick = { helpRes = R.string.help_renderer_native }) {
+                                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                            }
                             DpSwitch(dp, "vkNative", checked = vkNative, onCheckedChange = { vkNative = it })
                         }
                         // Colors = the game buffer's channel order. BGRA (default) presents as-is; RGBA
                         // swaps R/B (routes through the compositor — native can't swap). Per-game so one
                         // game can differ from the container / its siblings.
                         val vkColorOrders = listOf("BGRA", "RGBA")
-                        DpDrop(
-                            dp, "vkColors",
-                            label = stringResource(R.string.renderer_colors),
-                            options = vkColorOrders,
-                            selected = if (vkSwapRB) "RGBA" else "BGRA",
-                            onSelect = { vkSwapRB = (it == "RGBA") }
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            DpDrop(
+                                dp, "vkColors",
+                                label = stringResource(R.string.renderer_colors),
+                                options = vkColorOrders,
+                                selected = if (vkSwapRB) "RGBA" else "BGRA",
+                                onSelect = { vkSwapRB = (it == "RGBA") },
+                                modifier = Modifier.weight(1f)
+                            )
+                            IconButton(onClick = { helpRes = R.string.help_renderer_colors }) {
+                                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                            }
+                        }
                         // Present mode is ignored under Native Rendering (direct scanout), so grey it out.
                         val vkPmValues = listOf("fifo", "mailbox", "immediate")
                         val vkPmLabels = listOf(
@@ -6338,19 +6350,24 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                         // gate the whole dropdown on Vulkan (grey it out otherwise) — combined with the
                         // existing lsfg-DLL option gate. See ContainerDetailScreen for the rationale.
                         val fgVulkan = selectedRenderer == "Vulkan"
-                        DpDrop(
-                            dp, "frameGen",
-                            label = stringResource(R.string.frame_generation),
-                            options = fgLabels,
-                            selected = fgLabels[fgIdx],
-                            onSelect = { frameGenEngine = fgEngines[fgLabels.indexOf(it)] },
-                            enabled = fgVulkan,
-                            disabledOptions = buildSet {
-                                // bionic-fg re-enabled (2.9.4+) — see ContainerDetailScreen note.
-                                if (!lsfgDllAvailable) add(fgLabels[2])   // lsfg-vk — needs an imported Lossless.dll
-                            },
-                            modifier = if (!fgVulkan) Modifier.alpha(0.5f) else Modifier
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            DpDrop(
+                                dp, "frameGen",
+                                label = stringResource(R.string.frame_generation),
+                                options = fgLabels,
+                                selected = fgLabels[fgIdx],
+                                onSelect = { frameGenEngine = fgEngines[fgLabels.indexOf(it)] },
+                                enabled = fgVulkan,
+                                disabledOptions = buildSet {
+                                    // bionic-fg re-enabled (2.9.4+) — see ContainerDetailScreen note.
+                                    if (!lsfgDllAvailable) add(fgLabels[2])   // lsfg-vk — needs an imported Lossless.dll
+                                },
+                                modifier = (if (!fgVulkan) Modifier.alpha(0.5f) else Modifier).weight(1f)
+                            )
+                            IconButton(onClick = { helpRes = R.string.help_frame_generation }) {
+                                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                            }
+                        }
                         if (!fgVulkan) {
                             Text(
                                 text = stringResource(R.string.frame_generation_requires_vulkan),
@@ -6372,6 +6389,9 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                         DpSwitch(dp, "fpsLimiter", checked = fpsLimiterEnabled, onCheckedChange = { fpsLimiterEnabled = it })
                         Spacer(Modifier.width(8.dp))
                         Text(stringResource(R.string.fps_limiter), modifier = Modifier.weight(1f))
+                        IconButton(onClick = { helpRes = R.string.help_fps_limiter }) {
+                            Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                        }
                     }
 
                     // Power-user performance toggles — per-game overrides. A row shows "override" vs
@@ -6406,13 +6426,19 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                     }
 
                     // Audio driver
-                    DpDrop(
-                        dp, "audio",
-                        label = stringResource(R.string.audio_driver),
-                        options = audioDriverEntries,
-                        selected = selectedAudioDriver,
-                        onSelect = { selectedAudioDriver = it }
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        DpDrop(
+                            dp, "audio",
+                            label = stringResource(R.string.audio_driver),
+                            options = audioDriverEntries,
+                            selected = selectedAudioDriver,
+                            onSelect = { selectedAudioDriver = it },
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(onClick = { helpRes = R.string.help_audio_driver }) {
+                            Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                        }
+                    }
 
                     // Emulator
                     DpDrop(
@@ -6486,6 +6512,9 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                             )
                             Spacer(Modifier.width(8.dp))
                             Text(stringResource(R.string.enable_xinput_for_wine_game), modifier = Modifier.weight(1f))
+                            IconButton(onClick = { helpRes = R.string.help_xinput }) {
+                                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                            }
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             DpSwitch(
@@ -6496,6 +6525,9 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                             )
                             Spacer(Modifier.width(8.dp))
                             Text(stringResource(R.string.enable_dinput_for_wine_game), modifier = Modifier.weight(1f))
+                            IconButton(onClick = { helpRes = R.string.help_dinput }) {
+                                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                            }
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             DpSwitch(
@@ -6509,6 +6541,9 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                             )
                             Spacer(Modifier.width(8.dp))
                             Text("Exclusive Input", modifier = Modifier.weight(1f))
+                            IconButton(onClick = { helpRes = R.string.help_exclusive_xinput }) {
+                                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                            }
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             DpCheck(dp, "disableXInput", checked = disabledXInput, onCheckedChange = { disabledXInput = it })
@@ -6541,38 +6576,50 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                                 stringResource(R.string.gyro_mode_rate),
                                 stringResource(R.string.gyro_mode_orientation),
                             )
-                            DpDrop(
-                                dp, "gyroMode",
-                                label = stringResource(R.string.gyro_mode_label),
-                                options = gyroModeLabels,
-                                selected = gyroModeLabels.getOrElse(gyroMode) {
-                                    gyroModeLabels[Container.GYRO_MODE_DEFAULT]
-                                },
-                                onSelect = { opt ->
-                                    gyroMode = gyroModeLabels.indexOf(opt).coerceAtLeast(0)
-                                    if (gyroMode == Container.GYRO_MODE_ORIENTATION && gyroTarget == Container.GYRO_TARGET_MOUSE)
-                                        gyroTarget = Container.GYRO_TARGET_DEFAULT
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                DpDrop(
+                                    dp, "gyroMode",
+                                    label = stringResource(R.string.gyro_mode_label),
+                                    options = gyroModeLabels,
+                                    selected = gyroModeLabels.getOrElse(gyroMode) {
+                                        gyroModeLabels[Container.GYRO_MODE_DEFAULT]
+                                    },
+                                    onSelect = { opt ->
+                                        gyroMode = gyroModeLabels.indexOf(opt).coerceAtLeast(0)
+                                        if (gyroMode == Container.GYRO_MODE_ORIENTATION && gyroTarget == Container.GYRO_TARGET_MOUSE)
+                                            gyroTarget = Container.GYRO_TARGET_DEFAULT
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                IconButton(onClick = { helpRes = R.string.help_gyro_mode }) {
+                                    Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
                                 }
-                            )
+                            }
                             Spacer(Modifier.height(8.dp))
                             val gyroTargetLabels = listOf(
                                 stringResource(R.string.gyro_target_right_stick),
                                 stringResource(R.string.gyro_target_left_stick),
                                 stringResource(R.string.gyro_target_mouse),
                             )
-                            DpDrop(
-                                dp, "gyroTarget",
-                                label = stringResource(R.string.gyro_target_label),
-                                options = gyroTargetLabels,
-                                selected = gyroTargetLabels.getOrElse(gyroTarget) {
-                                    gyroTargetLabels[Container.GYRO_TARGET_DEFAULT]
-                                },
-                                onSelect = { opt ->
-                                    gyroTarget = gyroTargetLabels.indexOf(opt).coerceAtLeast(0)
-                                    if (gyroTarget == Container.GYRO_TARGET_MOUSE)
-                                        gyroMode = Container.GYRO_MODE_RATE
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                DpDrop(
+                                    dp, "gyroTarget",
+                                    label = stringResource(R.string.gyro_target_label),
+                                    options = gyroTargetLabels,
+                                    selected = gyroTargetLabels.getOrElse(gyroTarget) {
+                                        gyroTargetLabels[Container.GYRO_TARGET_DEFAULT]
+                                    },
+                                    onSelect = { opt ->
+                                        gyroTarget = gyroTargetLabels.indexOf(opt).coerceAtLeast(0)
+                                        if (gyroTarget == Container.GYRO_TARGET_MOUSE)
+                                            gyroMode = Container.GYRO_MODE_RATE
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                IconButton(onClick = { helpRes = R.string.help_gyro_target }) {
+                                    Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
                                 }
-                            )
+                            }
                             val gyroActivatorLabels = listOf(
                                 stringResource(R.string.gyro_activator_l1),
                                 stringResource(R.string.gyro_activator_l2),
@@ -6580,15 +6627,21 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                                 stringResource(R.string.gyro_activator_r3),
                                 stringResource(R.string.gyro_activator_always),
                             )
-                            DpDrop(
-                                dp, "gyroActivator",
-                                label = stringResource(R.string.gyro_activator_label),
-                                options = gyroActivatorLabels,
-                                selected = gyroActivatorLabels.getOrElse(gyroActivator) {
-                                    gyroActivatorLabels[Container.GYRO_ACTIVATOR_DEFAULT]
-                                },
-                                onSelect = { opt -> gyroActivator = gyroActivatorLabels.indexOf(opt).coerceAtLeast(0) }
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                DpDrop(
+                                    dp, "gyroActivator",
+                                    label = stringResource(R.string.gyro_activator_label),
+                                    options = gyroActivatorLabels,
+                                    selected = gyroActivatorLabels.getOrElse(gyroActivator) {
+                                        gyroActivatorLabels[Container.GYRO_ACTIVATOR_DEFAULT]
+                                    },
+                                    onSelect = { opt -> gyroActivator = gyroActivatorLabels.indexOf(opt).coerceAtLeast(0) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                IconButton(onClick = { helpRes = R.string.help_gyro_activator }) {
+                                    Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                                }
+                            }
                             // Hold vs Toggle for that button — hidden under "Always On", which has no
                             // button to latch (same call the container editor makes).
                             if (gyroActivator != Container.GYRO_ACTIVATOR_ALWAYS) {
@@ -6596,20 +6649,32 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                                     stringResource(R.string.gyro_activation_hold),
                                     stringResource(R.string.gyro_activation_toggle),
                                 )
-                                DpDrop(
-                                    dp, "gyroActivationMode",
-                                    label = stringResource(R.string.gyro_activation_mode_label),
-                                    options = gyroActivationModeLabels,
-                                    selected = gyroActivationModeLabels.getOrElse(gyroActivationMode) {
-                                        gyroActivationModeLabels[Container.GYRO_ACTIVATION_MODE_DEFAULT]
-                                    },
-                                    onSelect = { opt -> gyroActivationMode = gyroActivationModeLabels.indexOf(opt).coerceAtLeast(0) }
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    DpDrop(
+                                        dp, "gyroActivationMode",
+                                        label = stringResource(R.string.gyro_activation_mode_label),
+                                        options = gyroActivationModeLabels,
+                                        selected = gyroActivationModeLabels.getOrElse(gyroActivationMode) {
+                                            gyroActivationModeLabels[Container.GYRO_ACTIVATION_MODE_DEFAULT]
+                                        },
+                                        onSelect = { opt -> gyroActivationMode = gyroActivationModeLabels.indexOf(opt).coerceAtLeast(0) },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    IconButton(onClick = { helpRes = R.string.help_gyro_activation_mode }) {
+                                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                                    }
+                                }
                             }
-                            Text(
-                                "${stringResource(R.string.gyro_sensitivity_label)}: ${"%.1f".format(gyroSensitivity)}",
-                                style = MaterialTheme.typography.bodySmall
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    "${stringResource(R.string.gyro_sensitivity_label)}: ${"%.1f".format(gyroSensitivity)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                IconButton(onClick = { helpRes = R.string.help_gyro_sensitivity }) {
+                                    Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                                }
+                            }
                             DpSlider(
                                 dp, "gyroSensitivity",
                                 value = gyroSensitivity,
@@ -6911,6 +6976,10 @@ private fun ScAdvancedTab(
     // the container editor). The dropdown data already reads the right content type; only the label
     // was hardcoded "Box64".
     val emulatorLabel = if (isArm64EC) "WOWBox64" else "Box64"
+    // Per-field "?" help — this tab is its own composable, so it carries its own helpRes
+    // (mirrors the container editor's per-composable HelpDialog pattern).
+    var helpRes by remember { mutableStateOf<Int?>(null) }
+    helpRes?.let { HelpDialog(it) { helpRes = null } }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         SectionBox(title = emulatorLabel) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -6951,6 +7020,9 @@ private fun ScAdvancedTab(
                         onSelect = onFexVersionChange,
                         modifier = Modifier.weight(1f)
                     )
+                    IconButton(onClick = { helpRes = R.string.help_fexcore_version }) {
+                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                    }
                     OutlinedButton(
                         onClick = onShowFexCoreDownloadSheet,
                         modifier = Modifier.size(40.dp),
@@ -6963,12 +7035,18 @@ private fun ScAdvancedTab(
                 }
                 Spacer(Modifier.height(8.dp))
                 val fexNames = fexCorePresets.map { it.name }
-                LabeledDropdown(
-                    label = stringResource(R.string.fexcore_preset),
-                    options = fexNames,
-                    selectedOption = fexNames.getOrElse(selectedFexPresetIndex) { "" },
-                    onSelect = { opt -> onFexPresetIndexChange(fexNames.indexOf(opt).coerceAtLeast(0)) }
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LabeledDropdown(
+                        label = stringResource(R.string.fexcore_preset),
+                        options = fexNames,
+                        selectedOption = fexNames.getOrElse(selectedFexPresetIndex) { "" },
+                        onSelect = { opt -> onFexPresetIndexChange(fexNames.indexOf(opt).coerceAtLeast(0)) },
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = { helpRes = R.string.help_fexcore_preset }) {
+                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                    }
+                }
             }
         }
 
@@ -6981,12 +7059,18 @@ private fun ScAdvancedTab(
             onSelect = { opt -> onControlsProfileChange(profileNames.indexOf(opt).coerceAtLeast(0)) }
         )
 
-        LabeledDropdown(
-            label = stringResource(R.string.startup_selection),
-            options = startupSelectionEntries,
-            selectedOption = selectedStartupSelection,
-            onSelect = onStartupChange
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            LabeledDropdown(
+                label = stringResource(R.string.startup_selection),
+                options = startupSelectionEntries,
+                selectedOption = selectedStartupSelection,
+                onSelect = onStartupChange,
+                modifier = Modifier.weight(1f)
+            )
+            IconButton(onClick = { helpRes = R.string.help_startup_selection }) {
+                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+            }
+        }
 
         // Custom per-service toggles — only shown when "Custom" (index 3) is selected. Shares the
         // container editor's list composable so the two screens can't drift.

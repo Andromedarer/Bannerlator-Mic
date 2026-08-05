@@ -360,6 +360,107 @@
         Instead of fully decompressing emulated BCn textures, this repacks them into ASTC — a compressed texture format that Mali and other mobile GPUs support in hardware. Can save memory and improve performance on those GPUs. Only honored by BCn-capable drivers; no effect on Adreno (native BCn).
     ]]></string>
 
+    <!-- Graphics driver dialog (top section) + graphics/perf/compat fields — plain-language help -->
+    <string name="help_vulkan_version"><![CDATA[
+        <b>Vulkan Version</b><br /><br />
+        The Vulkan version the graphics driver reports to the DirectX translator (DXVK / VKD3D). A higher number can unlock newer features some games ask for. It\'s automatically capped to what your driver actually supports, so picking a version above your driver\'s does nothing. Leave it at the default unless a game specifically needs a higher Vulkan level.
+    ]]></string>
+    <string name="help_graphics_driver_version"><![CDATA[
+        <b>Graphics Driver Version</b><br /><br />
+        Which build of the GPU driver (Turnip / the Vulkan wrapper) to use for this game. Newer builds often fix bugs or add speed, but a specific game can run better on an older one. If a game glitches or won\'t start, try a different version here. Manage and import more drivers with the cloud button.
+    ]]></string>
+    <string name="help_show_incompatible_drivers"><![CDATA[
+        <b>Show incompatible drivers</b><br /><br />
+        Also lists driver versions that Bannerlator thinks won\'t work with your phone\'s GPU. They\'re hidden by default to keep you from picking one that fails. Turn this on only if you want to experiment — an incompatible driver may crash or show a black screen.
+    ]]></string>
+    <string name="help_gpu_name"><![CDATA[
+        <b>GPU Name (spoofing)</b><br /><br />
+        Makes games see a different graphics card than your real one. Some games unlock better graphics options, or simply run, when they recognise a specific GPU. Leave it on \'Device\' to report your real GPU; pick a name to spoof it. Ignored when the DX wrapper is set to WineD3D.
+    ]]></string>
+    <string name="help_max_device_memory"><![CDATA[
+        <b>Max Device Memory</b><br /><br />
+        Caps how much video memory (VRAM) the driver tells games it has. \'Default\' lets the driver report its own amount. Setting a specific limit can stop a game from trying to use more memory than your phone has — a fix for out-of-memory crashes or stutter in a few titles. Leave on Default unless a game misbehaves.
+    ]]></string>
+    <string name="help_wrapper_present_modes"><![CDATA[
+        <b>Present Modes</b><br /><br />
+        How finished frames are handed to the screen.<br /><br />
+        <b>mailbox</b> — low latency, always shows the newest frame (triple-buffered); the smooth default.<br />
+        <b>fifo</b> — classic V-Sync: frames wait for the display, no tearing but can feel less responsive.<br />
+        <b>immediate</b> — sends frames the instant they\'re ready: lowest latency but can tear.<br /><br />
+        Leave on mailbox unless you\'re chasing lower latency or fixing tearing.
+    ]]></string>
+    <string name="help_resource_type"><![CDATA[
+        <b>Memory Resource Type</b><br /><br />
+        How the driver shares image memory between the game and the display. <b>auto</b> lets it choose the best method for your device and is right for almost everyone. The other options (dmabuf / AHB / opaque) are fallbacks — only switch if a game shows corrupted graphics or won\'t display on your specific phone.
+    ]]></string>
+    <string name="help_bcn_emulation"><![CDATA[
+        <b>BCn Emulation</b><br /><br />
+        Whether to emulate the compressed (BCn / DXT) textures that PC games use, for GPUs that can\'t read them natively — Mali and other non-Adreno chips. <b>auto</b> turns it on only where it\'s needed; <b>full</b> forces it; <b>partial</b> does a subset; <b>none</b> disables it. Has no effect on Adreno, which reads BCn textures in hardware. Leave on auto unless textures look wrong.
+    ]]></string>
+    <string name="help_available_extensions"><![CDATA[
+        <b>Available Extensions</b><br /><br />
+        Opens the list of optional Vulkan features (extensions) the driver offers, and lets you blacklist individual ones. This is an expert tool — turning an extension off can work around a driver bug that makes a specific game crash or render wrong. Leave everything enabled unless you\'re following a known fix.
+    ]]></string>
+    <string name="help_renderer_colors"><![CDATA[
+        <b>Colors (BGRA / RGBA)</b><br /><br />
+        The order of the red and blue colour channels in the game\'s image. <b>BGRA</b> (the default) is correct for almost every game. Switch to <b>RGBA</b> only if a game\'s colours look swapped — blue where red should be. RGBA routes through the compositor, so it can\'t be combined with Native rendering.
+    ]]></string>
+    <string name="help_renderer_native"><![CDATA[
+        <b>Native Renderer</b><br /><br />
+        Sends the game\'s image straight to the screen instead of through Bannerlator\'s compositor. This lowers latency and can improve performance, but disables features that need the compositor — colour swapping (RGBA) and the present-mode control. Turn it off if a game shows the wrong colours or won\'t display correctly.
+    ]]></string>
+    <string name="help_renderer_sf_compat"><![CDATA[
+        <b>Correct SurfaceFlinger colours</b><br /><br />
+        On the SurfaceFlinger renderer, a game\'s red and blue channels can come out swapped. This fixes that (BGRA→RGBA). Leave it <b>ON</b> — turn it off only if a game\'s colours already look correct without it, or look wrong with it on.
+    ]]></string>
+    <string name="help_fps_limiter"><![CDATA[
+        <b>FPS Limiter</b><br /><br />
+        Loads the frame-rate limiter for this game. Turning it on just enables the feature — you set the actual cap (10–200 fps) live from the in-game FPS menu. Capping fps can cut heat and battery use, and smooth out an unstable frame rate. (Frame Generation loads the same limiter, so you only need this on its own if you want a cap without frame generation.)
+    ]]></string>
+    <string name="help_frame_generation"><![CDATA[
+        <b>Frame Generation</b><br /><br />
+        Inserts AI-generated in-between frames to make a game look smoother than it actually renders. Two engines:<br /><br />
+        <b>bionic-fg</b> — built in, no extra files needed.<br />
+        <b>lsfg-vk</b> — uses Lossless Scaling; needs a Lossless.dll you import in Settings.<br /><br />
+        Needs the Vulkan renderer. Still experimental — it can add visible artefacts or cost more than it gains, so try it per game. The multiplier and flow scale are tuned live from the in-game side menu.
+    ]]></string>
+    <string name="help_audio_driver"><![CDATA[
+        <b>Audio Driver</b><br /><br />
+        How the game\'s sound reaches Android. <b>ALSA</b> is the simple, low-overhead default and works for most games. <b>PulseAudio</b> is a more capable sound server that some games or voice features need. Switch to PulseAudio if a game has no sound or crackles; otherwise leave it on ALSA.
+    ]]></string>
+    <string name="help_fexcore_preset"><![CDATA[
+        <b>FEXCore Preset</b><br /><br />
+        FEXCore runs x86 games on your ARM phone. This preset trades accuracy for speed by tuning how faithfully it emulates the PC\'s memory ordering (TSO). <b>Stability / Compatibility</b> keep it fully accurate (safest, a little slower); <b>Performance</b> relaxes it for more fps (can break some games); the in-between and <b>Denuvo</b> presets are middle grounds for specific titles. Start on the default and move toward Performance only if a game runs but is slow.
+    ]]></string>
+    <string name="help_fexcore_version"><![CDATA[
+        <b>FEXCore Version</b><br /><br />
+        Which build of the FEXCore x86-to-ARM translator to use for this game. Newer builds usually run more games and run them faster, but a specific title can prefer an older one. If a game crashes or won\'t start under FEXCore, try a different version. Import more with the download button.
+    ]]></string>
+    <string name="help_startup_selection"><![CDATA[
+        <b>Startup Selection</b><br /><br />
+        How many Windows background services Wine starts before your game. <b>Normal</b> loads them all (most compatible); <b>Essential</b> loads only the important ones; <b>Aggressive</b> stops extras to save memory and start faster. <b>Custom</b> lets you pick services one by one. If a game fails to launch, move back toward Normal.
+    ]]></string>
+    <string name="help_gyro_mode"><![CDATA[
+        <b>Gyro Mode</b><br /><br />
+        How tilting the phone moves the aim. <b>Rate</b> — tilt SPEED aims, and it recentres when you hold still (like a mouse). <b>Tilt to Aim</b> — the ANGLE you hold aims, so a held tilt keeps aiming. Rate suits most shooters; Tilt to Aim suits fine, held adjustments. (Tilt to Aim can\'t drive the Mouse target.)
+    ]]></string>
+    <string name="help_gyro_activator"><![CDATA[
+        <b>Gyro Activator</b><br /><br />
+        Which controller button switches gyro aiming on, so the phone isn\'t always steering. Pick a button you can hold while aiming (for example L2), or choose <b>Always On</b> to leave gyro active the whole time.
+    ]]></string>
+    <string name="help_gyro_activation_mode"><![CDATA[
+        <b>Gyro Activation Mode</b><br /><br />
+        How the activator button behaves. <b>Hold</b> — gyro aims only while you hold the button. <b>Toggle</b> — one press turns gyro on, another turns it off. Hold suits quick aim bursts; Toggle suits leaving it on hands-free.
+    ]]></string>
+    <string name="help_gyro_sensitivity"><![CDATA[
+        <b>Gyro Sensitivity</b><br /><br />
+        How far the aim moves for a given tilt. Higher values turn faster from a small movement; lower values give steadier, finer aim. Tune it to taste — start in the middle and adjust until aiming feels natural.
+    ]]></string>
+    <string name="help_gyro_target"><![CDATA[
+        <b>Gyro Target</b><br /><br />
+        What the phone\'s tilt actually controls. <b>Right stick</b> (the usual choice) aims like the right analog stick; <b>Left stick</b> moves like the left stick; <b>Mouse</b> drives the pointer for mouse-aim games. The Mouse target always uses Rate mode.
+    ]]></string>
+
     <string name="box64_env_var_help__dynarec_safeflags"><![CDATA[
         Handling of flags on CALL/RET opcodes<br /><br />
         <b>0</b> : Treats CALL/RET as if it never needed flags (faster, unstable)<br />
