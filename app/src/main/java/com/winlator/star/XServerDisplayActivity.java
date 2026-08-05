@@ -2851,15 +2851,27 @@ public class XServerDisplayActivity extends AppCompatActivity {
     //         Log.d("XServerDisplayActivity", "Failed to extract input dlls");
     // }
 
+    // Bump when the bundled container_pattern_common.tzst CONTENT changes but the
+    // versionCode does not (it is frozen at 67 between stable releases). This forces
+    // an existing container to re-run applyGeneralPatches on its next launch so newly
+    // bundled pattern files land in already-created prefixes. The re-extract is an
+    // additive tar overlay (no wipe, no .reg in the pattern), so existing game data and
+    // registry customisations are preserved. Empty on legacy containers -> trips once.
+    // History: "1" = add Pale Moon browser (2026-08-05).
+    private static final String PATTERN_CONTENT_VERSION = "1";
+
     private void setupWineSystemFiles() {
         String appVersion = String.valueOf(AppUtils.getVersionCode(this));
         String imgVersion = String.valueOf(imageFs.getVersion());
         boolean containerDataChanged = false;
 
-        if (!container.getExtra("appVersion").equals(appVersion) || !container.getExtra("imgVersion").equals(imgVersion)) {
+        if (!container.getExtra("appVersion").equals(appVersion)
+                || !container.getExtra("imgVersion").equals(imgVersion)
+                || !container.getExtra("patternVersion").equals(PATTERN_CONTENT_VERSION)) {
             applyGeneralPatches(container);
             container.putExtra("appVersion", appVersion);
             container.putExtra("imgVersion", imgVersion);
+            container.putExtra("patternVersion", PATTERN_CONTENT_VERSION);
             containerDataChanged = true;
         }
 
