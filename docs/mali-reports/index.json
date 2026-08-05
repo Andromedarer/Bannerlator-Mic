@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-08-05T11-01-56-77ad96",
+    "created": "2026-08-05T11:01:56.661Z",
+    "reporter": "kLow",
+    "device": "Redmi Turbo 5 max",
+    "gpu": "Mali-G925-Immortalis-MC12",
+    "game": "Hellblade Senua's Sacrifice",
+    "symptom": "Freezes / hangs",
+    "logs": 1
+  },
+  {
     "id": "2026-08-05T00-05-49-501296",
     "created": "2026-08-05T00:05:49.843Z",
     "reporter": "Ipaw",
