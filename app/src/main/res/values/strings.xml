@@ -316,6 +316,50 @@
         <b>Tip:</b> Bannerlator automatically switches to Mailbox while frame generation is multiplying, then back to your setting when it\'s off.
     ]]></string>
     <string name="renderer_present_mode_fg_note">Frame generation temporarily switches this to Mailbox while it\'s running, then restores your choice.</string>
+
+    <!-- Turnip / Wrapper Driver Configuration — per-option plain-language help -->
+    <string name="help_turnip_gmem"><![CDATA[
+        <b>GMEM (tiled rendering)</b><br /><br />
+        How the GPU draws each frame. GMEM (tiled) rendering splits the screen into small tiles and draws them in ultra-fast on-chip memory — the efficient, mobile-native way.<br /><br />
+        <b>Auto</b> turns it on only for Adreno 710/720/722 (which need it to avoid glitches); <b>Force On</b> applies it to any GPU; <b>Force Off</b> never does. Leave on Auto unless a game misbehaves. Its opposite is \'sysmem\'.
+    ]]></string>
+    <string name="help_turnip_sysmem"><![CDATA[
+        <b>sysmem</b><br /><br />
+        Forces the GPU to draw straight to main memory instead of the fast on-chip tile memory — the opposite of GMEM. It\'s the most compatible option (and the default), but uses more memory bandwidth. Use it if forcing GMEM makes a game glitch.
+    ]]></string>
+    <string name="help_sync_every_frame"><![CDATA[
+        <b>Sync Every Frame</b><br /><br />
+        Makes the GPU fully finish and show each frame before starting the next (synchronous presentation). Turn it <b>ON</b> to fix tearing, flicker, or glitchy on-screen frames; leave it <b>OFF</b> for best performance, since it can cost some fps by stopping the CPU and GPU from working ahead of each other.
+    ]]></string>
+    <string name="help_turnip_concurrent_binning"><![CDATA[
+        <b>forcecb / nocb (concurrent binning)</b><br /><br />
+        Binning is the step where the GPU sorts what belongs in each on-screen tile. \'forcecb\' forces it to run alongside rendering (can help performance); \'nocb\' turns it off (can fix glitches on some games). Expert options — only touch them if a specific game needs it.
+    ]]></string>
+    <string name="help_turnip_deck_emu"><![CDATA[
+        <b>deck_emu</b><br /><br />
+        Makes the GPU report itself to the game as a Steam Deck, which can unlock better graphics settings or code paths in some games. Only works on Bannerlator\'s own (Banners-Turnip) drivers — ignored on stock Turnip.
+    ]]></string>
+    <string name="help_disable_present_wait"><![CDATA[
+        <b>Disable KHR_present_wait</b><br /><br />
+        Some GPU drivers implement Vulkan\'s \'present wait\' feature — which lets a game wait until a frame has actually appeared on screen — incorrectly, causing stalls or hangs. Turn this <b>ON</b> to make the driver stop using it, as a compatibility fallback. Leave it <b>OFF</b> unless a game freezes or won\'t display.
+    ]]></string>
+    <string name="help_oneui_hyperos_fix"><![CDATA[
+        <b>One UI / HyperOS Fix</b><br /><br />
+        A compatibility workaround for some Samsung (One UI) and Xiaomi (HyperOS) phones, whose GPU drivers need an extra texture-compression hint to render correctly. Turn it <b>ON</b> only if games show corruption or crash on those devices; leave it <b>OFF</b> otherwise.
+    ]]></string>
+    <string name="help_bcn_emulation_type"><![CDATA[
+        <b>BCn Emulation Type</b><br /><br />
+        Chooses HOW compressed game textures (BCn / DXT) are unpacked on GPUs that can\'t read them natively — Mali and other non-Adreno chips. <b>Compute</b> uses a GPU compute-shader layer (usually faster); <b>software</b> uses the wrapper\'s built-in decoder. No effect on Adreno, which reads BCn textures natively. Switch options if textures look wrong or a game runs slowly.
+    ]]></string>
+    <string name="help_bcn_emulation_cache"><![CDATA[
+        <b>BCn Emulation Cache</b><br /><br />
+        When a GPU has to emulate compressed (BCn) textures, this keeps the already-decoded textures in a cache so they don\'t have to be unpacked again — reducing stutter and CPU/GPU work, at the cost of a little extra memory. No effect on Adreno (native BCn).
+    ]]></string>
+    <string name="help_bcn_transcode_astc"><![CDATA[
+        <b>Transcode to ASTC</b><br /><br />
+        Instead of fully decompressing emulated BCn textures, this repacks them into ASTC — a compressed texture format that Mali and other mobile GPUs support in hardware. Can save memory and improve performance on those GPUs. Only honored by BCn-capable drivers; no effect on Adreno (native BCn).
+    ]]></string>
+
     <string name="box64_env_var_help__dynarec_safeflags"><![CDATA[
         Handling of flags on CALL/RET opcodes<br /><br />
         <b>0</b> : Treats CALL/RET as if it never needed flags (faster, unstable)<br />

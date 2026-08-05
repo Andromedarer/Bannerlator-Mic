@@ -2209,6 +2209,11 @@ internal fun GraphicsDriverConfigDialog(
     val bcnTypeEntries      = remember { context.resources.getStringArray(R.array.bcn_emulation_type_entries).toList() }
     val bcnCacheEntries     = remember { context.resources.getStringArray(R.array.bcn_emulation_cache_entries).toList() }
 
+    // Per-option "?" help — this dialog is its own composable, so it carries its own helpRes.
+    // HelpDialog renders as a Dialog on top of this AlertDialog (same pattern as elsewhere).
+    var helpRes by remember { mutableStateOf<Int?>(null) }
+    helpRes?.let { HelpDialog(it) { helpRes = null } }
+
     OutlinedAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.graphics_driver_configuration)) },
@@ -2260,9 +2265,19 @@ internal fun GraphicsDriverConfigDialog(
                 Spacer(Modifier.height(8.dp))
                 LabeledDropdown(stringResource(R.string.graphics_driver_bcn_emulation), bcnEmulationEntries, bcnEmulation, { bcnEmulation = it })
                 Spacer(Modifier.height(8.dp))
-                LabeledDropdown(stringResource(R.string.graphics_driver_bcn_emulation_type), bcnTypeEntries, bcnEmulationType, { bcnEmulationType = it })
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LabeledDropdown(stringResource(R.string.graphics_driver_bcn_emulation_type), bcnTypeEntries, bcnEmulationType, { bcnEmulationType = it }, modifier = Modifier.weight(1f))
+                    IconButton(onClick = { helpRes = R.string.help_bcn_emulation_type }) {
+                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                    }
+                }
                 Spacer(Modifier.height(8.dp))
-                LabeledDropdown(stringResource(R.string.graphics_driver_bcn_emulation_cache), bcnCacheEntries, bcnEmulationCache, { bcnEmulationCache = it })
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LabeledDropdown(stringResource(R.string.graphics_driver_bcn_emulation_cache), bcnCacheEntries, bcnEmulationCache, { bcnEmulationCache = it }, modifier = Modifier.weight(1f))
+                    IconButton(onClick = { helpRes = R.string.help_bcn_emulation_cache }) {
+                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                    }
+                }
                 Spacer(Modifier.height(8.dp))
                 // ASTC transcode is offered by any integrated-BCn wrapper ICD (bundled Wrapper-
                 // gamenative, or an imported wrapper whose archive carries a BCn layer). The standalone
@@ -2271,7 +2286,10 @@ internal fun GraphicsDriverConfigDialog(
                 if (isIntegratedBcn) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(checked = bcnEmulationAstc, onCheckedChange = { bcnEmulationAstc = it })
-                        Text(stringResource(R.string.graphics_driver_bcn_emulation_astc))
+                        Text(stringResource(R.string.graphics_driver_bcn_emulation_astc), modifier = Modifier.weight(1f))
+                        IconButton(onClick = { helpRes = R.string.help_bcn_transcode_astc }) {
+                            Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                        }
                     }
                     if (isQualcomm) {
                         Text(
@@ -2290,7 +2308,10 @@ internal fun GraphicsDriverConfigDialog(
                     (bcnEmulation == "auto" || bcnEmulation == "full")) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(checked = bcnTranscodeAstc, onCheckedChange = { bcnTranscodeAstc = it })
-                        Text(stringResource(R.string.bcn_layer_transcode_astc))
+                        Text(stringResource(R.string.bcn_layer_transcode_astc), modifier = Modifier.weight(1f))
+                        IconButton(onClick = { helpRes = R.string.help_bcn_transcode_astc }) {
+                            Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                        }
                     }
                     if (isQualcomm) {
                         Text(
@@ -2302,15 +2323,24 @@ internal fun GraphicsDriverConfigDialog(
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = syncFrame, onCheckedChange = { syncFrame = it })
-                    Text(stringResource(R.string.graphics_driver_sync_frame))
+                    Text(stringResource(R.string.graphics_driver_sync_frame), modifier = Modifier.weight(1f))
+                    IconButton(onClick = { helpRes = R.string.help_sync_every_frame }) {
+                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                    }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = disablePresentWait, onCheckedChange = { disablePresentWait = it })
-                    Text(stringResource(R.string.graphics_driver_disable_present_wait))
+                    Text(stringResource(R.string.graphics_driver_disable_present_wait), modifier = Modifier.weight(1f))
+                    IconButton(onClick = { helpRes = R.string.help_disable_present_wait }) {
+                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                    }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = fdDevFeatures, onCheckedChange = { fdDevFeatures = it })
-                    Text("OneUI / HyperOS Fix")
+                    Text("OneUI / HyperOS Fix", modifier = Modifier.weight(1f))
+                    IconButton(onClick = { helpRes = R.string.help_oneui_hyperos_fix }) {
+                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                    }
                 }
 
                 // --- Turnip GMEM (task #1) — always visible: this is the escape hatch for 710/720/722
@@ -2324,9 +2354,14 @@ internal fun GraphicsDriverConfigDialog(
                 val gmemLabels = listOf("Auto (Adreno 710/720/722)", "Force On", "Force Off")
                 val gmemValues = listOf("auto", "on", "off")
                 val gmemSel = gmemLabels[gmemValues.indexOf(turnipGmem).coerceAtLeast(0)]
-                LabeledDropdown("GMEM (tiled rendering)", gmemLabels, gmemSel, { picked ->
-                    turnipGmem = gmemValues[gmemLabels.indexOf(picked).coerceAtLeast(0)]
-                })
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LabeledDropdown("GMEM (tiled rendering)", gmemLabels, gmemSel, { picked ->
+                        turnipGmem = gmemValues[gmemLabels.indexOf(picked).coerceAtLeast(0)]
+                    }, modifier = Modifier.weight(1f))
+                    IconButton(onClick = { helpRes = R.string.help_turnip_gmem }) {
+                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                    }
+                }
                 Text(
                     "Auto forces GMEM tiled rendering (TU_DEBUG=gmem) only on Adreno 710/720/722; " +
                         "Force On applies it on any GPU; Force Off never applies it. Leave on Auto unless a " +
@@ -2360,11 +2395,17 @@ internal fun GraphicsDriverConfigDialog(
                     Spacer(Modifier.height(4.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(checked = turnipForceCb, onCheckedChange = { turnipForceCb = it })
-                        Text("forcecb — force concurrent binning")
+                        Text("forcecb — force concurrent binning", modifier = Modifier.weight(1f))
+                        IconButton(onClick = { helpRes = R.string.help_turnip_concurrent_binning }) {
+                            Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                        }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(checked = turnipNoCb, onCheckedChange = { turnipNoCb = it })
-                        Text("nocb — disable concurrent binning")
+                        Text("nocb — disable concurrent binning", modifier = Modifier.weight(1f))
+                        IconButton(onClick = { helpRes = R.string.help_turnip_concurrent_binning }) {
+                            Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                        }
                     }
                     // sysmem is the direct opposite of gmem and Turnip lets it defeat gmem, so when
                     // GMEM = Force On the two would contradict. Grey out the pick (gmem always wins the
@@ -2378,9 +2419,13 @@ internal fun GraphicsDriverConfigDialog(
                         )
                         Text(
                             "sysmem — force sysmem (bypass GMEM)",
+                            modifier = Modifier.weight(1f),
                             color = if (sysmemBlockedByGmem) MaterialTheme.colorScheme.onSurfaceVariant
                                     else Color.Unspecified
                         )
+                        IconButton(onClick = { helpRes = R.string.help_turnip_sysmem }) {
+                            Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                        }
                     }
                     if (sysmemBlockedByGmem) {
                         Text(
@@ -2391,7 +2436,10 @@ internal fun GraphicsDriverConfigDialog(
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(checked = turnipDeckEmu, onCheckedChange = { turnipDeckEmu = it })
-                        Text("deck_emu — advertise as SteamDeck")
+                        Text("deck_emu — advertise as SteamDeck", modifier = Modifier.weight(1f))
+                        IconButton(onClick = { helpRes = R.string.help_turnip_deck_emu }) {
+                            Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                        }
                     }
                     Text(
                         "deck_emu requires a Banners-Turnip driver (ignored on stock Turnip).",
