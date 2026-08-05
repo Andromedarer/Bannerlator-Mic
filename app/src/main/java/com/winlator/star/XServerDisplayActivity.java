@@ -5345,6 +5345,13 @@ return true;
             }
         }
         merged.addAll(add);
+        // GMEM must win over sysmem: Turnip's `sysmem` flag forces the direct/bypass path and defeats
+        // `gmem`, so a default container (DEFAULT_ENV_VARS ships "noconform,sysmem") would silently
+        // no-op the feature. When we're contributing gmem, strip sysmem from the FINAL set — from both
+        // the pre-existing tokens AND any task-2 sysmem pick — so gmem takes effect (matches
+        // GameNative #1656's sysmem→gmem replacement). Force Off / Auto-on-non-target never reach here
+        // (empty `add` early-returns above), so a user who wants sysmem simply leaves GMEM off.
+        if (add.contains("gmem")) merged.remove("sysmem");
         envVars.put("TU_DEBUG", String.join(",", merged));
         Log.d("XServerDisplayActivity", "Composed TU_DEBUG=" + envVars.get("TU_DEBUG")
                 + " (gmemMode=" + gmemMode + ")");

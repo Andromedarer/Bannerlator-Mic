@@ -2366,9 +2366,28 @@ internal fun GraphicsDriverConfigDialog(
                         Checkbox(checked = turnipNoCb, onCheckedChange = { turnipNoCb = it })
                         Text("nocb — disable concurrent binning")
                     }
+                    // sysmem is the direct opposite of gmem and Turnip lets it defeat gmem, so when
+                    // GMEM = Force On the two would contradict. Grey out the pick (gmem always wins the
+                    // launch-time merge anyway) so the UI can't express the contradiction.
+                    val sysmemBlockedByGmem = turnipGmem == "on"
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(checked = turnipSysmem, onCheckedChange = { turnipSysmem = it })
-                        Text("sysmem — force sysmem (bypass GMEM)")
+                        Checkbox(
+                            checked = turnipSysmem && !sysmemBlockedByGmem,
+                            onCheckedChange = { turnipSysmem = it },
+                            enabled = !sysmemBlockedByGmem
+                        )
+                        Text(
+                            "sysmem — force sysmem (bypass GMEM)",
+                            color = if (sysmemBlockedByGmem) MaterialTheme.colorScheme.onSurfaceVariant
+                                    else Color.Unspecified
+                        )
+                    }
+                    if (sysmemBlockedByGmem) {
+                        Text(
+                            "Disabled — Turnip GMEM = Force On overrides sysmem.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(checked = turnipDeckEmu, onCheckedChange = { turnipDeckEmu = it })
@@ -2587,7 +2606,9 @@ internal fun GraphicsDriverConfigDialog(
                     ";turnipTokens=" + buildList {
                         if (turnipForceCb) add("forcecb")
                         if (turnipNoCb) add("nocb")
-                        if (turnipSysmem) add("sysmem")
+                        // Don't persist sysmem when GMEM = Force On overrides it (matches the greyed-out
+                        // checkbox); the launch-time merge would strip it anyway.
+                        if (turnipSysmem && turnipGmem != "on") add("sysmem")
                         if (turnipDeckEmu) add("deck_emu")
                     }.joinToString(",")
                 // #132 Layer 1: append auto-detected wrapper settings under their RAW ENV KEY. Sanitise
