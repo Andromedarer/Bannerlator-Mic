@@ -1,5 +1,25 @@
 [
   {
+    "id": "2026-08-05T11-01-56-77ad96",
+    "created": "2026-08-05T11:01:56.661Z",
+    "reporter": "kLow",
+    "device": "Redmi Turbo 5 max",
+    "gpu": "Mali-G925-Immortalis-MC12",
+    "game": "Hellblade Senua's Sacrifice",
+    "symptom": "Freezes / hangs",
+    "logs": 1
+  },
+  {
+    "id": "2026-08-05T00-05-49-501296",
+    "created": "2026-08-05T00:05:49.843Z",
+    "reporter": "Ipaw",
+    "device": "Samsung Galaxy M22",
+    "gpu": "Mali-G52 MC2",
+    "game": "Pro Evolution Soccer 2013",
+    "symptom": "Graphical glitches (corruption, flicker, missing textures)",
+    "logs": 1
+  },
+  {
     "id": "2026-08-04T18-12-08-a9e547",
     "created": "2026-08-04T18:12:08.601Z",
     "reporter": "Fasil",
