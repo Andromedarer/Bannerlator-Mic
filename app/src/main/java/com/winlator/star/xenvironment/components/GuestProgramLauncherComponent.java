@@ -5,6 +5,8 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.net.ConnectivityManager;
+import android.net.LinkProperties;
+import android.net.Network;
 import android.os.Process;
 import android.util.Log;
 
@@ -37,13 +39,13 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
-import java.util.ArrayList;
 
 public class GuestProgramLauncherComponent extends EnvironmentComponent {
     private String guestExecutable;
@@ -411,11 +413,28 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
  
         envVars.put("ANDROID_SYSVSHM_SERVER", rootDir.getPath() + UnixSocketConfig.SYSVSHM_SERVER_PATH);
 
+        // Pick the first USABLE IPv4 resolver, not blindly getDnsServers().get(0).
+        // The guest netstack can't use an IPv6 link-local server (the %wlan0 scope
+        // is meaningless inside the container), and dual-stack networks frequently
+        // list an fe80:: address first — taking [0] then handed the guest an
+        // unresolvable DNS (connectivity fine, every hostname lookup failed).
+        // Fall back to 8.8.4.4 when the active network exposes no usable IPv4 server.
         String primaryDNS = "8.8.4.4";
         ConnectivityManager connectivityManager = (ConnectivityManager) context.getSystemService(Service.CONNECTIVITY_SERVICE);
-        if (connectivityManager.getActiveNetwork() != null) {
-            ArrayList<InetAddress> dnsServers = new ArrayList<>(connectivityManager.getLinkProperties(connectivityManager.getActiveNetwork()).getDnsServers());
-            primaryDNS = dnsServers.get(0).toString().substring(1);
+        Network activeNetwork = connectivityManager.getActiveNetwork();
+        if (activeNetwork != null) {
+            LinkProperties linkProperties = connectivityManager.getLinkProperties(activeNetwork);
+            if (linkProperties != null) {
+                for (InetAddress dnsServer : linkProperties.getDnsServers()) {
+                    if (dnsServer instanceof Inet4Address
+                            && !dnsServer.isLoopbackAddress()
+                            && !dnsServer.isAnyLocalAddress()
+                            && !dnsServer.isLinkLocalAddress()) {
+                        primaryDNS = dnsServer.getHostAddress();
+                        break;
+                    }
+                }
+            }
         }
         envVars.put("ANDROID_RESOLV_DNS", primaryDNS);
         envVars.put("WINE_NEW_NDIS", "1");
