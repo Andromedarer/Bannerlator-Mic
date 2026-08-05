@@ -1,6 +1,9 @@
 # Star-Compose — Progress Log
 
-## 2026-08-04 — 🏁 **CUT 2.9.5 STABLE** (versionCode 66→**67**, versionName `2.9.5`)
+## 2026-08-04 — 🏁 **CUT 2.9.5 STABLE — ✅ DONE & VERIFIED-LIVE** (versionCode 66→**67**, versionName `2.9.5`)
+> ✅ Second dispatch `30961554997` (`6d98a0ae`) ALL-GREEN + PUBLISHED. Verified: isPrerelease=false, `releases/latest`→**2.9.5**, tag `2.9.5`→built commit **`6d98a0ae`** (no drift — docs pushed before dispatch), served `update.json` = **vc67 / 2.9.5** with all 3 flavor APK names + the frame-gen ⚠️ in notes, 3 APKs + update.json attached. Pubg APK (`1e6b0fce`) already staged to `/sdcard/Download`. vc now FROZEN at 67 for dev/pre until next stable. Release-history + MEMORY.md + freeze-vc memory (grep-gotcha) all updated.
+>
+> **(original cut record:)**
 > Explicit user go ("cut 2.9.5 and fast forward to version code 67"). Bumped `app/build.gradle` (vc 67, name `2.9.5`), README version table → 2.9.5/vc67 + What's-New-2.9.5 section + TOC, release body = `scratchpad/release_body_2.9.5.md`. Contents = the 4 pillars in the checkpoint below. make_prerelease=false → make_latest. After cut → back to frozen-vc/artifact-only until next stable.
 >
 > **⚠️ First dispatch (`30960991777`, `fc2219e4`) FAILED — builds green, `release` job died.** Root cause: `release.yml` does `grep versionCode app/build.gradle | head -1`, and the **frozen-vc explainer comment I'd added said "versionCode" ABOVE the real line** → grep hit the comment → empty vc → `jq --argjson vc ""` invalid JSON → job exit 2. (APKs themselves were fine — Gradle reads the real `versionCode 67`.) **FIX:** reworded the comment to "version code" (no literal token) + added a NB warning in-file. Also added user-requested frame-gen ⚠️ ("still experimental/WIP, no magic, varies game/device/components") to body + README. Re-dispatching on the fixed commit.
