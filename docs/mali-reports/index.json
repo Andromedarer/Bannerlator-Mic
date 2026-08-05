@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-08-05T14-52-07-cd04fe",
+    "created": "2026-08-05T14:52:07.264Z",
+    "reporter": "Alex",
+    "device": "Motorola Moto G72",
+    "gpu": "Mali-G57 MC2",
+    "game": "Factorio",
+    "symptom": "Crashes / closes to home",
+    "logs": 1
+  },
+  {
     "id": "2026-08-05T11-01-56-77ad96",
     "created": "2026-08-05T11:01:56.661Z",
     "reporter": "kLow",
