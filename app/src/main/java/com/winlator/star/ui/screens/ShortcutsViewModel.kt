@@ -1141,6 +1141,12 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun refresh() {
+        // Re-scan the home dir first: this manager is constructed once and lives for the whole
+        // session, so a container created in the container editor (its own ContainerManager
+        // instance) is otherwise absent from our in-memory list until the ViewModel is rebuilt.
+        // That's the "new container doesn't show in the add-game picker until you launch/restart"
+        // bug — refresh() runs on ON_RESUME, so re-scanning here surfaces it on return to the tab.
+        manager.reloadContainers()
         val raw = manager.loadShortcuts()
         // filter out corrupted entries (matches original Fragment logic)
         _shortcuts.value = raw.filter { it != null && it.file != null && it.file.name.isNotEmpty() }

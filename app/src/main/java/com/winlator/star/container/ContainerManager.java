@@ -108,6 +108,15 @@ public class ContainerManager {
         return containers;
     }
 
+    // Re-scan the home dir so this instance's in-memory list picks up containers created (or removed)
+    // by a *different* ContainerManager instance since construction. Each screen news up its own
+    // manager, so a container created in the editor is otherwise invisible to a long-lived manager
+    // (e.g. ShortcutsViewModel's) until that ViewModel is reconstructed. Cheap disk walk; call it
+    // before reading getContainers() on a manager that outlives a create/delete elsewhere.
+    public void reloadContainers() {
+        loadContainers();
+    }
+
     // Load containers from the home directory
     private void loadContainers() {
         containers.clear();
