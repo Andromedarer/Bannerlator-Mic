@@ -187,6 +187,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // Single authoritative FPS source: ticked once per present, read by every overlay so they all
     // show the identical number (there is one place per renderer to feed).
     private final FpsCounter fpsCounter = new FpsCounter();
+    // Lazily built when the Task Manager first polls; snapshots CPU/GPU/RAM/battery for the header.
+    private com.winlator.star.widget.HudMetrics tmHudMetrics;
     private boolean fpsHudHorizontal = false;   // active FPS-overlay orientation (tap to toggle in-game)
     // Async-arriving HUD labels are cached so a HUD built live (style swapped mid-game) is populated too.
     private String hudRendererLabel = null;     // full "Vulkan | DXVK" label for classic FrameRating.setRenderer
@@ -6981,7 +6983,30 @@ return true;
 
         registerTmProcessInfoListener();
 
+        ds.setTmContainerInfo(buildTmContainerInfo());
         updateTmCpuMemory(ds);
+    }
+
+    // The active container's config for the Task Manager header. Set once (it doesn't change while
+    // the game runs). Uses the same resolved getters the launch path uses so it reflects per-game
+    // shortcut overrides, not just the raw container.
+    private XServerDialogState.TmContainerInfo buildTmContainerInfo() {
+        try {
+            String wine = wineInfo != null ? wineInfo.toString() : "—";
+            String res = container != null ? container.getScreenSize() : "—";
+            int cores = Runtime.getRuntime().availableProcessors();
+            String soc = "";
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S
+                    && android.os.Build.SOC_MODEL != null && !android.os.Build.SOC_MODEL.isEmpty()) {
+                soc = " · " + android.os.Build.SOC_MODEL;
+            }
+            String device = android.os.Build.MODEL + soc + " · " + cores + " cores · Android "
+                + android.os.Build.VERSION.RELEASE;
+            return new XServerDialogState.TmContainerInfo(
+                wine, dxwrapper, resolvedRenderer(), graphicsDriver, res, device);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private void registerTmProcessInfoListener() {
@@ -7039,6 +7064,24 @@ return true;
             ds.setTmMemTitle("Memory (" + memPct + "%)");
             ds.setTmMemInfo(StringUtils.formatBytes(used, false) + " / " +
                 StringUtils.formatBytes(mi.totalMem));
+        } catch (Exception ignored) {}
+
+        // Enriched header — one HudMetrics snapshot + live FPS, pushed to the TM header grid.
+        try {
+            if (tmHudMetrics == null) tmHudMetrics = new com.winlator.star.widget.HudMetrics(this);
+            com.winlator.star.widget.HudMetrics.Snapshot s = tmHudMetrics.snapshot();
+            java.util.ArrayList<Integer> perCore = new java.util.ArrayList<>();
+            for (int mhz : s.perCoreClockMhz) perCore.add(mhz);
+            String swap = (s.swapUsedText() != null && s.swapTotalText() != null)
+                ? (s.swapUsedText() + "/" + s.swapTotalText()) : null;
+            ds.setTmHeader(new XServerDialogState.TmHeaderStats(
+                s.cpuPercent, s.cpuTempC,
+                s.gpuPercent, s.gpuTempC, s.gpuClockMhz,
+                Math.round(fpsCounter.getCurrentFPS()), fpsCounter.getMinFPS(),
+                s.ramUsedText(), s.ramTotalText(),
+                swap,
+                s.battery.percent, s.battery.watts, s.battery.tempC, s.battery.charging,
+                perCore));
         } catch (Exception ignored) {}
     }
 

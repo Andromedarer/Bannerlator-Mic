@@ -545,6 +545,30 @@ object XServerDialogState {
     fun setTmMemInfo(s: String)               { _tmMemInfo.value = s }
     fun setTmCount(n: Int)                    { _tmCount.value = n }
 
+    // Enriched Task Manager header: live perf stats (polled ~1s) + the running container's config
+    // (set once — it doesn't change mid-session). Nullable Int = metric unreadable (show "—").
+    data class TmHeaderStats(
+        val cpuPct: Int?, val cpuTempC: Int?,
+        val gpuPct: Int?, val gpuTempC: Int?, val gpuClockMhz: Int?,
+        val fps: Int, val fpsMin: Int,
+        val ramUsed: String, val ramTotal: String,
+        val swap: String?,
+        val batteryPct: Int?, val batteryWatts: Float, val batteryTempC: Int?, val charging: Boolean,
+        val perCoreMhz: List<Int>,
+    )
+    data class TmContainerInfo(
+        val wine: String, val dxWrapper: String, val renderer: String,
+        val graphicsDriver: String, val resolution: String, val device: String,
+    )
+
+    private val _tmHeader = MutableStateFlow<TmHeaderStats?>(null)
+    val tmHeader: StateFlow<TmHeaderStats?> = _tmHeader
+    private val _tmContainerInfo = MutableStateFlow<TmContainerInfo?>(null)
+    val tmContainerInfo: StateFlow<TmContainerInfo?> = _tmContainerInfo
+
+    fun setTmHeader(v: TmHeaderStats?)          { _tmHeader.value = v }
+    fun setTmContainerInfo(v: TmContainerInfo?) { _tmContainerInfo.value = v }
+
     @JvmField var onTmRefresh: Runnable? = null
     @JvmField var onTmDismissed: Runnable? = null
     // Opens the New Task prompt. Wired to show the Compose NEW_TASK dialog (it used to fire a native

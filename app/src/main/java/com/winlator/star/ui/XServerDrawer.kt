@@ -11,6 +11,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -3169,6 +3170,8 @@ private fun TmContent() {
     val memTitle by XServerDialogState.tmMemTitle.collectAsState()
     val memInfo by XServerDialogState.tmMemInfo.collectAsState()
     val count by XServerDialogState.tmCount.collectAsState()
+    val header by XServerDialogState.tmHeader.collectAsState()
+    val containerInfo by XServerDialogState.tmContainerInfo.collectAsState()
 
     // Polling is driven by a render-independent Handler timer in XServerDisplayActivity
     // (started via onTaskManager). A Compose LaunchedEffect delay() loop here stalls on the
@@ -3183,6 +3186,12 @@ private fun TmContent() {
     }
 
     SectionHeader("Task Manager")
+
+    // Enriched header: live perf stat grid + per-core clocks + collapsible container config.
+    TmStatGrid(header)
+    TmCoreStrip(header)
+    TmContainerPanel(containerInfo)
+    Spacer(Modifier.height(8.dp))
 
     Text(
         text = "Processes: $count",
@@ -3211,38 +3220,6 @@ private fun TmContent() {
                 TmProcessRow(proc)
             }
         }
-    }
-
-    Spacer(Modifier.height(10.dp))
-
-    // CPU info
-    Text(cpuTitle, color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-    Spacer(Modifier.height(2.dp))
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(10.dp)
-    ) {
-        cpuCores.forEach { core ->
-            Text(core, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, modifier = Modifier.padding(vertical = 1.dp))
-        }
-    }
-
-    Spacer(Modifier.height(8.dp))
-
-    // Memory info
-    Text(memTitle, color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-    Spacer(Modifier.height(2.dp))
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(10.dp)
-    ) {
-        Text(memInfo, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
     }
 
     Spacer(Modifier.height(10.dp))
@@ -3480,6 +3457,136 @@ private fun AffinityCheckRow(
             label,
             fontSize = 14.sp,
             fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal,
+        )
+    }
+}
+
+// ───── Enriched Task Manager header ─────
+
+/** Compact live-stat grid (2 tiles per row) fed by the polled HudMetrics snapshot + FPS. */
+@Composable
+private fun TmStatGrid(h: XServerDialogState.TmHeaderStats?) {
+    if (h == null) return
+    val tiles: List<Pair<String, String>> = buildList {
+        add("CPU" to ((h.cpuPct?.let { "$it%" } ?: "—") + (h.cpuTempC?.let { "  $it°" } ?: "")))
+        add("GPU" to ((h.gpuPct?.let { "$it%" } ?: "—") + (h.gpuTempC?.let { "  $it°" } ?: "")))
+        add("GPU CLK" to (h.gpuClockMhz?.let { "$it MHz" } ?: "—"))
+        add("FPS" to ("${h.fps}" + (if (h.fpsMin > 0) "  ·${h.fpsMin}min" else "")))
+        add("RAM" to "${h.ramUsed} / ${h.ramTotal}")
+        if (h.swap != null) add("SWAP" to h.swap)
+        add("BAT" to ((h.batteryPct?.let { "$it%" } ?: "—") + "  " +
+            String.format("%.1f", h.batteryWatts) + "W" + (if (h.charging) " ⚡" else "")))
+        if (h.batteryTempC != null) add("BAT °C" to "${h.batteryTempC}°")
+    }
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        tiles.chunked(2).forEach { rowTiles ->
+            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                rowTiles.forEachIndexed { i, (k, v) ->
+                    StatTile(k, v, Modifier.weight(1f))
+                    if (i < rowTiles.size - 1) Spacer(Modifier.width(6.dp))
+                }
+                if (rowTiles.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatTile(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(9.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 8.dp, vertical = 6.dp)
+    ) {
+        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+        Text(value, color = MaterialTheme.colorScheme.primary, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+    }
+}
+
+/** Horizontal, scrollable per-core current-clock strip (C0..Cn in GHz). */
+@Composable
+private fun TmCoreStrip(h: XServerDialogState.TmHeaderStats?) {
+    val cores = h?.perCoreMhz ?: return
+    if (cores.isEmpty()) return
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        cores.forEachIndexed { i, mhz ->
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(7.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            ) {
+                Text("C$i", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    if (mhz > 0) String.format("%.1f", mhz / 1000f) else "—",
+                    color = MaterialTheme.colorScheme.primary, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+    }
+}
+
+/** Collapsible panel showing the running container's config (Wine/DX/renderer/driver/res/device). */
+@Composable
+private fun TmContainerPanel(info: XServerDialogState.TmContainerInfo?) {
+    if (info == null) return
+    var expanded by remember { mutableStateOf(true) }
+    Column(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(6.dp))
+                .clickable { expanded = !expanded }
+                .padding(vertical = 3.dp),
+        ) {
+            Icon(
+                if (expanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(4.dp))
+            Text("CONTAINER", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp)
+        }
+        if (expanded) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .padding(10.dp)
+            ) {
+                ContainerInfoRow("Wine", info.wine)
+                ContainerInfoRow("DX wrapper", info.dxWrapper)
+                ContainerInfoRow("Renderer", info.renderer)
+                ContainerInfoRow("Graphics driver", info.graphicsDriver)
+                ContainerInfoRow("Resolution", info.resolution)
+                ContainerInfoRow("Device", info.device)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ContainerInfoRow(label: String, value: String) {
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, modifier = Modifier.weight(0.42f))
+        Text(
+            value,
+            color = MaterialTheme.colorScheme.onSurface,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.End,
+            modifier = Modifier.weight(0.58f),
         )
     }
 }
