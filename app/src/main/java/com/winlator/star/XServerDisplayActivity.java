@@ -2902,7 +2902,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
     //          "3" = AIO Graphics Test 2.0.0 added alongside v1 (2026-08-05).
     //          "4" = AIO Graphics Test 2.0.0 fixed exe — default now opens the v2 shell (supersedes the "3" test bake).
     //          "5" = AIO Graphics Test 2.0.1 (+ OpenGL start-menu entry) (2026-08-06).
-    private static final String PATTERN_CONTENT_VERSION = "5";
+    //          "6" = drop Pale Moon DESKTOP shortcut (kept in Start Menu only); the repacked
+    //                pattern no longer ships it, and existing containers get it deleted on next
+    //                launch via removePaleMoonDesktopShortcut() (2026-08-06).
+    private static final String PATTERN_CONTENT_VERSION = "6";
 
     private void setupWineSystemFiles() {
         String appVersion = String.valueOf(AppUtils.getVersionCode(this));
@@ -6125,9 +6128,26 @@ return true;
         File rootDir = imageFs.getRootDir();
         TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "container_pattern_common.tzst", rootDir);
         TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "pulseaudio.tzst", new File(getFilesDir(), "pulseaudio"));
+        removePaleMoonDesktopShortcut(container);
         WineUtils.applySystemTweaks(this, wineInfo);
         container.putExtra("graphicsDriver", null);
         container.putExtra("desktopTheme", null);
+    }
+
+    // Pale Moon ships only as a START MENU launcher now — never as a desktop shortcut. The repacked
+    // container_pattern_common.tzst no longer contains the Desktop "Pale Moon.lnk", but the overlay
+    // extract above is purely additive (it can't remove a file an EXISTING container already got from
+    // an older pattern), so delete the Desktop shortcut here. This runs once per container when the
+    // PATTERN_CONTENT_VERSION gate trips, cleaning already-created containers too. getStartMenuDir()
+    // is deliberately left untouched so Pale Moon stays launchable from the Windows Start Menu. The
+    // sibling ".desktop" is the file ContainerManager.loadShortcuts() lazily generates from the .lnk,
+    // so removing both also clears the stray Pale Moon entry from the Games tab. (2026-08-06)
+    private void removePaleMoonDesktopShortcut(Container container) {
+        File desktopDir = container.getDesktopDir();
+        File lnk = new File(desktopDir, "Pale Moon.lnk");
+        File desktop = new File(desktopDir, "Pale Moon.desktop");
+        if (lnk.isFile()) lnk.delete();
+        if (desktop.isFile()) desktop.delete();
     }
 
     private void assignTaskAffinity(Window window) {
