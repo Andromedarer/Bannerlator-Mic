@@ -514,6 +514,9 @@ object XServerDialogState {
         val name: String,
         val formattedMemory: String,
         val wow64: Boolean,
+        // Current CPU-affinity bitmask (bit i = CPU i) reported by the guest's GetProcessAffinityMask.
+        // Feeds the Processor Affinity picker so it opens pre-ticked to the process's live cores.
+        val affinityMask: Int,
         val icon: Bitmap?
     )
 

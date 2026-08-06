@@ -7003,7 +7003,7 @@ return true;
                         if (index == 0) buffer.clear();
                         buffer.add(new XServerDialogState.TmProcess(
                             index, info.pid, info.name,
-                            info.getFormattedMemoryUsage(), info.wow64Process, finalIcon));
+                            info.getFormattedMemoryUsage(), info.wow64Process, info.affinityMask, finalIcon));
                         if (numProcesses == 0 || index == numProcesses - 1) {
                             ds.setTmProcesses(new ArrayList<>(buffer));
                             ds.setTmCount(numProcesses);

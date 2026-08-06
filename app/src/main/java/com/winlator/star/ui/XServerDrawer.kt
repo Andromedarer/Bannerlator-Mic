@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FlipToFront
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -51,6 +52,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -3261,6 +3263,11 @@ private fun TmContent() {
 private fun TmProcessRow(proc: XServerDialogState.TmProcess) {
     val accent = MaterialTheme.colorScheme.primary
     var menuExpanded by remember { mutableStateOf(false) }
+    var showAffinity by remember { mutableStateOf(false) }
+
+    if (showAffinity) {
+        ProcessorAffinityDialog(proc = proc, onDismiss = { showAffinity = false })
+    }
 
     // Card per process, matching the app File Manager item style (rounded surfaceContainer
     // panel + outline border + vertical margin) instead of a flat divider-separated row.
@@ -3322,6 +3329,22 @@ private fun TmProcessRow(proc: XServerDialogState.TmProcess) {
                 modifier = Modifier.outlinedMenuCard()
             ) {
                 DropdownMenuItem(
+                    text = { Text("Processor Affinity") },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Default.Memory,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    },
+                    onClick = {
+                        menuExpanded = false
+                        showAffinity = true
+                    },
+                )
+                MenuItemDivider()
+                DropdownMenuItem(
                     text = { Text("Bring to Front") },
                     leadingIcon = {
                         Icon(
@@ -3355,5 +3378,108 @@ private fun TmProcessRow(proc: XServerDialogState.TmProcess) {
             }
         }
       }
+    }
+}
+
+/**
+ * Windows Task Manager-style "Set affinity" for one running process/service. A checkbox per logical
+ * CPU (plus "<All Processors>"), pre-ticked to the process's current mask, pins that PID to the
+ * chosen cores live via the already-wired [XServerDialogState.onTmSetAffinity]. Not persisted — it
+ * resets if the process restarts, exactly like Windows.
+ */
+@Composable
+private fun ProcessorAffinityDialog(
+    proc: XServerDialogState.TmProcess,
+    onDismiss: () -> Unit,
+) {
+    val coreCount = remember { Runtime.getRuntime().availableProcessors().coerceIn(1, 32) }
+    val allMask = remember(coreCount) { if (coreCount >= 32) -1 else (1 shl coreCount) - 1 }
+    // Open pre-ticked to the process's live cores; if the guest reported nothing, default to all.
+    var mask by remember(proc.pid) {
+        val m = proc.affinityMask and allMask
+        mutableStateOf(if (m == 0) allMask else m)
+    }
+    val allChecked = (mask and allMask) == allMask
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Default.Memory,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("Processor Affinity")
+            }
+        },
+        text = {
+            Column {
+                Text(
+                    "Which processors are allowed to run \"${proc.name}\"?",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(10.dp))
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 260.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    AffinityCheckRow(
+                        label = "<All Processors>",
+                        checked = allChecked,
+                        bold = true,
+                        onToggle = { mask = if (allChecked) 0 else allMask },
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+                    for (i in 0 until coreCount) {
+                        val on = (mask shr i) and 1 == 1
+                        AffinityCheckRow(
+                            label = "CPU $i",
+                            checked = on,
+                            onToggle = { mask = (mask xor (1 shl i)) and allMask },
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = (mask and allMask) != 0,
+                onClick = {
+                    XServerDialogState.onTmSetAffinity?.invoke(proc.pid, mask and allMask)
+                    onDismiss()
+                },
+            ) { Text("OK") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun AffinityCheckRow(
+    label: String,
+    checked: Boolean,
+    bold: Boolean = false,
+    onToggle: () -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .clickable { onToggle() }
+            .padding(vertical = 2.dp, horizontal = 4.dp),
+    ) {
+        Checkbox(checked = checked, onCheckedChange = { onToggle() })
+        Spacer(Modifier.width(4.dp))
+        Text(
+            label,
+            fontSize = 14.sp,
+            fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal,
+        )
     }
 }
