@@ -16,6 +16,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.runtime.derivedStateOf
@@ -45,6 +46,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import android.content.res.Configuration
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -187,83 +189,105 @@ fun ContainerDetailScreen(
             }
         }
 
-        Row(modifier = Modifier.fillMaxSize().padding(padding)) {
-            CollapsibleRail(
-                state = railState,
-                title = screenTitle,
-                headerIcon = R.drawable.icon_menu_container,
-                links = railLinks,
-                sections = listOf(
-                    RailSection(
-                        header = null,
-                        items = tabTitles.mapIndexed { index, tab ->
-                            RailItem(tab, tabIcon(tab), index == viewModel.selectedTab) { viewModel.selectedTab = index }
-                        },
-                    )
-                ),
-            )
+        val isPortrait = LocalConfiguration.current.orientation == Configuration.ORIENTATION_PORTRAIT
 
-            // ── Content: full height beside the rail ───────────────────────────────────────────
-            Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
-                // Collapsed rail hides the tab labels, so surface the active tab name over the content
-                // (mockup: "ctxhdr") — the user never loses their place.
-                if (railCollapsed) {
-                    Text(
-                        activeTab,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.6.sp,
-                        modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 2.dp),
-                    )
-                }
-                // The ONLY scrolling region. Fills the full height beside the rail; a bottom buffer
-                // (FAB + system nav-bar inset + small margin) is the ONLY reserved space, so content
-                // reaches near the bottom instead of stopping in a dead zone.
-                val bottomBuffer = 72.dp +
-                    WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .verticalScroll(contentScroll)
-                        .padding(horizontal = 12.dp)
-                        .padding(top = 8.dp)
-                ) {
-                    Column {
-                        // Dispatch by tab TITLE (not index): DRIVES is absent in defaults mode, so a
-                        // raw index would misalign the remaining tabs.
-                        when (activeTab) {
-                            "GENERAL" -> Column {
-                                TopLevelFields(
-                                    viewModel = viewModel,
-                                    onShowGfxConfig = { showGraphicsDriverConfig = true },
-                                    onShowDxvkConfig = { showDxvkConfig = true },
-                                    onShowWineD3DConfig = { showWineD3DConfig = true },
-                                    onShowFpsConfig = { showFpsConfig = true },
-                                    onShowWineDownloadSheet = { showWineDownloadSheet = true },
-                                    onShowVulkanConfig = { showVulkanConfig = true },
-                                )
-                                WineConfigTab(viewModel, colorPickerViewRef)
-                            }
-                            "ENVIROMENT" -> EnvVarsTab(viewModel)
-                            "DRIVES" -> DrivesTab(viewModel)
-                            "WIN COMPONENTS" -> WinComponentsTab(viewModel)
-                            "ADVANCED" -> Column {
-                                AdvancedTab(
-                                    viewModel,
-                                    cpuListViewRef,
-                                    cpuListWoW64Ref,
-                                    onShowBox64DownloadSheet = { showBox64DownloadSheet = true },
-                                    onShowFexCoreDownloadSheet = { showFexCoreDownloadSheet = true },
-                                )
-                                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-                                XRTab(viewModel)
-                            }
+        // The single scrolling content region — identical in portrait and landscape, so both layouts
+        // reuse it. A bottom buffer (FAB + nav-bar inset + margin) is the ONLY reserved space, so
+        // content reaches near the bottom instead of stopping in a dead zone.
+        val mainContent: @Composable () -> Unit = {
+            val bottomBuffer = 72.dp +
+                WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(contentScroll)
+                    .padding(horizontal = 12.dp)
+                    .padding(top = 8.dp)
+            ) {
+                Column {
+                    // Dispatch by tab TITLE (not index): DRIVES is absent in defaults mode, so a
+                    // raw index would misalign the remaining tabs.
+                    when (activeTab) {
+                        "GENERAL" -> Column {
+                            TopLevelFields(
+                                viewModel = viewModel,
+                                onShowGfxConfig = { showGraphicsDriverConfig = true },
+                                onShowDxvkConfig = { showDxvkConfig = true },
+                                onShowWineD3DConfig = { showWineD3DConfig = true },
+                                onShowFpsConfig = { showFpsConfig = true },
+                                onShowWineDownloadSheet = { showWineDownloadSheet = true },
+                                onShowVulkanConfig = { showVulkanConfig = true },
+                            )
+                            WineConfigTab(viewModel, colorPickerViewRef)
                         }
-                        // Clears the save FAB + nav-bar inset so the last setting can scroll above them,
-                        // leaving only a small buffer rather than a large empty band.
-                        Spacer(modifier = Modifier.height(bottomBuffer))
+                        "ENVIROMENT" -> EnvVarsTab(viewModel)
+                        "DRIVES" -> DrivesTab(viewModel)
+                        "WIN COMPONENTS" -> WinComponentsTab(viewModel)
+                        "ADVANCED" -> Column {
+                            AdvancedTab(
+                                viewModel,
+                                cpuListViewRef,
+                                cpuListWoW64Ref,
+                                onShowBox64DownloadSheet = { showBox64DownloadSheet = true },
+                                onShowFexCoreDownloadSheet = { showFexCoreDownloadSheet = true },
+                            )
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                            XRTab(viewModel)
+                        }
                     }
+                    // Clears the save FAB + nav-bar inset so the last setting can scroll above them,
+                    // leaving only a small buffer rather than a large empty band.
+                    Spacer(modifier = Modifier.height(bottomBuffer))
+                }
+            }
+        }
+
+        if (isPortrait) {
+            // PORTRAIT (the 3 container screens): tabs run across the TOP as a horizontal icon bar,
+            // with the help/reset links in a slim row above them; content gets the full width. The
+            // collapsible left rail is landscape-only. Same icons/labels as the rail — repositioned.
+            Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+                ContainerTopTabs(
+                    tabs = tabTitles,
+                    selected = viewModel.selectedTab,
+                    links = railLinks,
+                    onSelect = { viewModel.selectedTab = it },
+                )
+                mainContent()
+            }
+        } else {
+            // LANDSCAPE: unchanged — the shared collapsible left rail beside full-height content.
+            Row(modifier = Modifier.fillMaxSize().padding(padding)) {
+                CollapsibleRail(
+                    state = railState,
+                    title = screenTitle,
+                    headerIcon = R.drawable.icon_menu_container,
+                    links = railLinks,
+                    sections = listOf(
+                        RailSection(
+                            header = null,
+                            items = tabTitles.mapIndexed { index, tab ->
+                                RailItem(tab, tabIcon(tab), index == viewModel.selectedTab) { viewModel.selectedTab = index }
+                            },
+                        )
+                    ),
+                )
+
+                // ── Content: full height beside the rail ───────────────────────────────────────
+                Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                    // Collapsed rail hides the tab labels, so surface the active tab name over the
+                    // content (mockup: "ctxhdr") — the user never loses their place.
+                    if (railCollapsed) {
+                        Text(
+                            activeTab,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.6.sp,
+                            modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 2.dp),
+                        )
+                    }
+                    mainContent()
                 }
             }
         }
@@ -409,6 +433,94 @@ private fun tabIcon(title: String): ImageVector = when (title) {
     "WIN COMPONENTS" -> Icons.Filled.Widgets
     "ADVANCED" -> Icons.Filled.Tune
     else -> Icons.Filled.Settings
+}
+
+/** Abbreviates the two long tab titles so the portrait top bar stays tidy (mirrors the rail's
+ *  collapsed labels). */
+private fun topTabLabel(title: String): String = when (title) {
+    "ENVIROMENT" -> "ENVIRON"
+    "WIN COMPONENTS" -> "WIN COMP"
+    else -> title
+}
+
+/**
+ * Portrait-only: the container-editor tabs as a horizontal icon bar across the top (landscape keeps
+ * the collapsible left rail instead). Same icons and labels as the rail — just repositioned. The
+ * help / reset-to-defaults links sit in a slim right-aligned row above the tabs. The bar scrolls
+ * horizontally if the tabs don't fit. Used by all 3 container screens (New / Edit / Defaults).
+ */
+@Composable
+private fun ContainerTopTabs(
+    tabs: List<String>,
+    selected: Int,
+    links: List<RailLink>,
+    onSelect: (Int) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        if (links.isNotEmpty()) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                links.forEach { link ->
+                    IconButton(onClick = link.onClick, modifier = Modifier.size(36.dp)) {
+                        Icon(
+                            link.icon,
+                            contentDescription = link.label,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
+            }
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 4.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            tabs.forEachIndexed { index, tab ->
+                val active = index == selected
+                val tint = if (active) MaterialTheme.colorScheme.primary
+                           else MaterialTheme.colorScheme.onSurfaceVariant
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(
+                            if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                            else Color.Transparent
+                        )
+                        .clickable { onSelect(index) }
+                        .widthIn(min = 56.dp)
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                ) {
+                    Icon(tabIcon(tab), contentDescription = tab, tint = tint, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        topTabLabel(tab),
+                        color = tint,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.3.sp,
+                        maxLines = 1,
+                    )
+                    Spacer(Modifier.height(3.dp))
+                    // Active-tab underline indicator (collapses to zero width when inactive).
+                    Box(
+                        modifier = Modifier
+                            .height(2.5.dp)
+                            .width(if (active) 20.dp else 0.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(if (active) MaterialTheme.colorScheme.primary else Color.Transparent),
+                    )
+                }
+            }
+        }
+        HorizontalDivider()
+    }
 }
 
 @Composable
