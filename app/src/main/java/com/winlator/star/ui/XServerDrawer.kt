@@ -10,6 +10,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -29,6 +30,7 @@ import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -95,6 +97,9 @@ import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -3400,9 +3405,12 @@ private fun ProcessorAffinityDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(10.dp))
+                // "<All Processors>" stays a full-width row; the per-CPU toggles are laid out in a
+                // 2-column grid so an 8-core device fits without scrolling (4 rows instead of 8). A
+                // heightIn + scroll fallback keeps very high core counts (up to the 32 cap) usable.
                 Column(
                     modifier = Modifier
-                        .heightIn(max = 260.dp)
+                        .heightIn(max = 320.dp)
                         .verticalScroll(rememberScrollState())
                 ) {
                     AffinityCheckRow(
@@ -3410,15 +3418,22 @@ private fun ProcessorAffinityDialog(
                         checked = allChecked,
                         bold = true,
                         onToggle = { mask = if (allChecked) 0 else allMask },
+                        modifier = Modifier.fillMaxWidth(),
                     )
                     HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
-                    for (i in 0 until coreCount) {
-                        val on = (mask shr i) and 1 == 1
-                        AffinityCheckRow(
-                            label = "CPU $i",
-                            checked = on,
-                            onToggle = { mask = (mask xor (1 shl i)) and allMask },
-                        )
+                    (0 until coreCount).chunked(2).forEach { pair ->
+                        Row(modifier = Modifier.fillMaxWidth()) {
+                            pair.forEach { i ->
+                                val on = (mask shr i) and 1 == 1
+                                AffinityCheckRow(
+                                    label = "CPU $i",
+                                    checked = on,
+                                    onToggle = { mask = (mask xor (1 shl i)) and allMask },
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                            if (pair.size == 1) Spacer(Modifier.weight(1f))
+                        }
                     }
                 }
             }
@@ -3440,149 +3455,246 @@ private fun ProcessorAffinityDialog(
 private fun AffinityCheckRow(
     label: String,
     checked: Boolean,
+    modifier: Modifier = Modifier,
     bold: Boolean = false,
     onToggle: () -> Unit,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
+        modifier = modifier
             .clip(RoundedCornerShape(8.dp))
             .clickable { onToggle() }
-            .padding(vertical = 2.dp, horizontal = 4.dp),
+            .padding(vertical = 1.dp, horizontal = 2.dp),
     ) {
         Checkbox(checked = checked, onCheckedChange = { onToggle() })
-        Spacer(Modifier.width(4.dp))
+        Spacer(Modifier.width(2.dp))
         Text(
             label,
-            fontSize = 14.sp,
+            fontSize = 13.sp,
             fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
 
 // ───── Enriched Task Manager header ─────
 
-/** Compact live-stat grid (2 tiles per row) fed by the polled HudMetrics snapshot + FPS. */
+/** One stat tile's content: tiny caption + a big value with a smaller muted suffix, tinted. */
+private data class TmTile(val caption: String, val big: String, val small: String, val tint: Color)
+
+/** Small uppercase section label with a hairline rule filling the remaining row width. Mirrors the
+ *  mockup's `.seclabel::after`. [leading] slots an icon before the text (used by the CONTAINER header). */
+@Composable
+private fun TmSectionLabel(
+    text: String,
+    modifier: Modifier = Modifier,
+    leading: (@Composable () -> Unit)? = null,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier.fillMaxWidth().padding(vertical = 2.dp),
+    ) {
+        leading?.invoke()
+        Text(
+            text,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontSize = 9.5.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.7.sp,
+        )
+        Spacer(Modifier.width(8.dp))
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            thickness = 1.dp,
+            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f),
+        )
+    }
+}
+
+/** Dense 4-column stat-tile grid fed by the polled HudMetrics snapshot + FPS (mockup's PERFORMANCE
+ *  block). CPU/GPU are accent-tinted, FPS reads "ok" green, battery reads "warn" amber; every
+ *  nullable/Mali metric still renders gracefully as "—". */
 @Composable
 private fun TmStatGrid(h: XServerDialogState.TmHeaderStats?) {
     if (h == null) return
-    val tiles: List<Pair<String, String>> = buildList {
-        add("CPU" to ((h.cpuPct?.let { "$it%" } ?: "—") + (h.cpuTempC?.let { "  $it°" } ?: "")))
-        add("GPU" to ((h.gpuPct?.let { "$it%" } ?: "—") + (h.gpuTempC?.let { "  $it°" } ?: "")))
-        add("GPU CLK" to (h.gpuClockMhz?.let { "$it MHz" } ?: "—"))
-        add("FPS" to ("${h.fps}" + (if (h.fpsMin > 0) "  ·${h.fpsMin}min" else "")))
-        add("RAM" to "${h.ramUsed} / ${h.ramTotal}")
-        if (h.swap != null) add("SWAP" to h.swap)
-        add("BAT" to ((h.batteryPct?.let { "$it%" } ?: "—") + "  " +
-            String.format("%.1f", h.batteryWatts) + "W" + (if (h.charging) " ⚡" else "")))
-        if (h.batteryTempC != null) add("BAT °C" to "${h.batteryTempC}°")
+    val accent = MaterialTheme.colorScheme.primary
+    val onSurf = MaterialTheme.colorScheme.onSurface
+    val dark = isSystemInDarkTheme()
+    val ok = if (dark) Color(0xFF6FDF9A) else Color(0xFF1F9D57)     // FPS — reads on both themes
+    val warn = if (dark) Color(0xFFE2B06F) else Color(0xFFB5761A)   // battery
+
+    // Leading numeric part of a "5.3GiB" style string, and a compact "GiB"->"G" unit form.
+    fun numOf(s: String) = s.takeWhile { it.isDigit() || it == '.' }.ifEmpty { s }
+    fun compact(s: String) = s.replace("iB", "")
+
+    val tiles = buildList {
+        add(TmTile("CPU", h.cpuPct?.let { "$it%" } ?: "—", h.cpuTempC?.let { " $it°" } ?: "", accent))
+        add(TmTile("GPU", h.gpuPct?.let { "$it%" } ?: "—", h.gpuTempC?.let { " $it°" } ?: "", accent))
+        add(TmTile("GPU CLK", h.gpuClockMhz?.let { "$it" } ?: "—", if (h.gpuClockMhz != null) "MHz" else "", onSurf))
+        add(TmTile("FPS", "${h.fps}", if (h.fpsMin > 0) " ·${h.fpsMin}min" else "", ok))
+        add(TmTile("RAM", numOf(h.ramUsed), "/" + compact(h.ramTotal), onSurf))
+        if (h.swap != null) {
+            add(TmTile("SWAP", numOf(h.swap.substringBefore("/")), "/" + compact(h.swap.substringAfter("/")), onSurf))
+        } else {
+            add(TmTile("SWAP", "—", "", onSurf))
+        }
+        add(TmTile("BAT", h.batteryPct?.let { "$it%" } ?: "—",
+            " " + String.format("%.1f", h.batteryWatts) + "W" + (if (h.charging) " ⚡" else ""), warn))
+        add(TmTile("BAT °C", h.batteryTempC?.let { "$it°" } ?: "—", "", onSurf))
     }
+
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-        tiles.chunked(2).forEach { rowTiles ->
-            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-                rowTiles.forEachIndexed { i, (k, v) ->
-                    StatTile(k, v, Modifier.weight(1f))
-                    if (i < rowTiles.size - 1) Spacer(Modifier.width(6.dp))
+        TmSectionLabel("PERFORMANCE")
+        Spacer(Modifier.height(4.dp))
+        tiles.chunked(4).forEach { rowTiles ->
+            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.5.dp)) {
+                rowTiles.forEachIndexed { i, t ->
+                    StatTile(t, Modifier.weight(1f))
+                    if (i < rowTiles.size - 1) Spacer(Modifier.width(5.dp))
                 }
-                if (rowTiles.size == 1) Spacer(Modifier.weight(1f))
+                // Pad a short final row so tiles keep the 4-column width.
+                repeat(4 - rowTiles.size) {
+                    Spacer(Modifier.width(5.dp))
+                    Spacer(Modifier.weight(1f))
+                }
             }
         }
     }
 }
 
 @Composable
-private fun StatTile(label: String, value: String, modifier: Modifier = Modifier) {
+private fun StatTile(tile: TmTile, modifier: Modifier = Modifier) {
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(9.dp))
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(horizontal = 8.dp, vertical = 6.dp)
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(9.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+            .padding(horizontal = 7.dp, vertical = 6.dp),
     ) {
-        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-        Text(value, color = MaterialTheme.colorScheme.primary, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        Text(
+            tile.caption,
+            color = muted,
+            fontSize = 8.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.4.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            buildAnnotatedString {
+                withStyle(SpanStyle(fontSize = 13.sp, fontWeight = FontWeight.Bold, color = tile.tint)) {
+                    append(tile.big)
+                }
+                if (tile.small.isNotEmpty()) {
+                    withStyle(SpanStyle(fontSize = 9.sp, fontWeight = FontWeight.Medium, color = muted)) {
+                        append(tile.small)
+                    }
+                }
+            },
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 1.dp),
+        )
     }
 }
 
-/** Horizontal, scrollable per-core current-clock strip (C0..Cn in GHz). */
+/** Horizontal, scrollable per-core current-clock strip. Values are shown in FULL MHz (the raw
+ *  perCoreMhz integer, NOT abbreviated to GHz) with a tiny "MHz" unit. */
 @Composable
 private fun TmCoreStrip(h: XServerDialogState.TmHeaderStats?) {
     val cores = h?.perCoreMhz ?: return
     if (cores.isEmpty()) return
+    val accent = MaterialTheme.colorScheme.primary
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState())
-            .padding(vertical = 2.dp),
+            .padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         cores.forEachIndexed { i, mhz ->
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
+                    .widthIn(min = 44.dp)
                     .clip(RoundedCornerShape(7.dp))
-                    .background(MaterialTheme.colorScheme.surface)
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(7.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
             ) {
-                Text("C$i", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                Text("C$i", color = muted, fontSize = 8.sp, fontWeight = FontWeight.Bold)
                 Text(
-                    if (mhz > 0) String.format("%.1f", mhz / 1000f) else "—",
-                    color = MaterialTheme.colorScheme.primary, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                    buildAnnotatedString {
+                        withStyle(SpanStyle(fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = accent)) {
+                            append(if (mhz > 0) "$mhz" else "—")
+                        }
+                        if (mhz > 0) {
+                            withStyle(SpanStyle(fontSize = 7.sp, fontWeight = FontWeight.Medium, color = muted)) {
+                                append(" MHz")
+                            }
+                        }
+                    },
+                    maxLines = 1,
                 )
             }
         }
     }
 }
 
-/** Collapsible panel showing the running container's config (Wine/DX/renderer/driver/res/device). */
+/** Collapsible panel showing the running container's config (Wine/DX/renderer/driver/res/device).
+ *  DX wrapper + Renderer render in the accent colour; the raw resolved ids are prettified. */
 @Composable
 private fun TmContainerPanel(info: XServerDialogState.TmContainerInfo?) {
     if (info == null) return
+    val accent = MaterialTheme.colorScheme.primary
     var expanded by remember { mutableStateOf(true) }
     Column(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
+        TmSectionLabel(
+            "CONTAINER",
             modifier = Modifier
-                .fillMaxWidth()
                 .clip(RoundedCornerShape(6.dp))
-                .clickable { expanded = !expanded }
-                .padding(vertical = 3.dp),
-        ) {
-            Icon(
-                if (expanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(16.dp),
-            )
-            Spacer(Modifier.width(4.dp))
-            Text("CONTAINER", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp)
-        }
+                .clickable { expanded = !expanded },
+            leading = {
+                Icon(
+                    if (expanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(14.dp),
+                )
+                Spacer(Modifier.width(3.dp))
+            },
+        )
         if (expanded) {
+            Spacer(Modifier.height(4.dp))
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(10.dp))
-                    .background(MaterialTheme.colorScheme.surface)
-                    .padding(10.dp)
+                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
             ) {
                 ContainerInfoRow("Wine", info.wine)
-                ContainerInfoRow("DX wrapper", info.dxWrapper)
-                ContainerInfoRow("Renderer", info.renderer)
+                ContainerInfoRow("DX wrapper", prettyDxWrapper(info.dxWrapper), accent)
+                ContainerInfoRow("Renderer", prettyRenderer(info.renderer), accent)
                 ContainerInfoRow("Graphics driver", info.graphicsDriver)
                 ContainerInfoRow("Resolution", info.resolution)
-                ContainerInfoRow("Device", info.device)
+                ContainerInfoRow("Device", tidyDevice(info.device))
             }
         }
     }
 }
 
 @Composable
-private fun ContainerInfoRow(label: String, value: String) {
+private fun ContainerInfoRow(label: String, value: String, valueColor: Color? = null) {
     Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
         Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, modifier = Modifier.weight(0.42f))
         Text(
             value,
-            color = MaterialTheme.colorScheme.onSurface,
+            color = valueColor ?: MaterialTheme.colorScheme.onSurface,
             fontSize = 11.sp,
             fontWeight = FontWeight.SemiBold,
             textAlign = TextAlign.End,
@@ -3590,3 +3702,30 @@ private fun ContainerInfoRow(label: String, value: String) {
         )
     }
 }
+
+/** Prettify a raw dxwrapper id (e.g. "dxvk+vkd3d") to its display form ("DXVK+VKD3D"). */
+private fun prettyDxWrapper(raw: String): String {
+    if (raw.isBlank() || raw == "—") return raw
+    return raw.split("+").joinToString("+") { token ->
+        when (token.trim().lowercase()) {
+            "dxvk" -> "DXVK"
+            "vkd3d" -> "VKD3D"
+            "wined3d" -> "WineD3D"
+            "vegas" -> "VEGAS"
+            else -> token.trim().uppercase()
+        }
+    }
+}
+
+/** Prettify a raw renderer id (e.g. "vulkan") to its display form ("Vulkan"). */
+private fun prettyRenderer(raw: String): String = when (raw.trim().lowercase()) {
+    "" -> raw
+    "vulkan" -> "Vulkan"
+    "gl", "opengl", "gles" -> "OpenGL"
+    "vortek" -> "Vortek"
+    else -> raw.trim().replaceFirstChar { it.uppercase() }
+}
+
+/** Tidy the device line: "8 cores" -> "8c" so it fits the narrow value column without wrapping to a
+ *  dangling separator. */
+private fun tidyDevice(raw: String): String = raw.replace(" cores", "c")
