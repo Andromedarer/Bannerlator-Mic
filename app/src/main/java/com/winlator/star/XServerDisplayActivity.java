@@ -2858,7 +2858,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // additive tar overlay (no wipe, no .reg in the pattern), so existing game data and
     // registry customisations are preserved. Empty on legacy containers -> trips once.
     // History: "1" = add Pale Moon browser (2026-08-05).
-    private static final String PATTERN_CONTENT_VERSION = "1";
+    //          "2" = Banner File Manager 1.2.0 — fast large folders + version metadata (2026-08-05).
+    private static final String PATTERN_CONTENT_VERSION = "2";
 
     private void setupWineSystemFiles() {
         String appVersion = String.valueOf(AppUtils.getVersionCode(this));
