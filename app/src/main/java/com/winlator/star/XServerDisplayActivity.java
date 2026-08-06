@@ -627,6 +627,46 @@ public class XServerDisplayActivity extends AppCompatActivity {
             || "zink".equals(envVars.get("MESA_LOADER_DRIVER_OVERRIDE"));
     }
 
+    // ---- App-declared active graphics API (general opt-in override for the perf HUD) --------------
+    // A guest Windows app can publish its TRUE active graphics API by writing a tiny JSON status file
+    // into the container's SHARED tmp — guest-writable AND host-readable because both sides resolve to
+    // the same dir:
+    //   host  read path : <filesDir>/imagefs/usr/tmp/hud_active_api.json  (imageFs.getTmpDir())
+    //   guest write path: Z:\usr\tmp\hud_active_api.json  (Z: is symlinked to the imagefs root — see
+    //                     WineUtils.createDosdevicesSymlinks — so it is prefix-independent, i.e. it
+    //                     does NOT depend on drive_c / %TEMP% / the wine prefix layout).
+    //   schema          : {"label":"D3D9 · DXVK","path":"d3d9 → DXVK → Turnip","ts":<epoch_ms>}
+    //   freshness gate  : now - ts < APP_DECLARED_API_TTL_MS, else fall back to detectActiveDxApi.
+    // Why it exists: a compositor-style app (AIO Graphics Test v2) renders every backend offscreen and
+    // presents through ONE D3D11 swapchain, so /proc/maps module scanning would forever read "D3D11"
+    // even while a Vulkan backend is exercised. The freshness gate keeps NORMAL games unaffected — they
+    // never write the file, so detection stays exactly as before.
+    private static final String APP_DECLARED_API_FILE = "hud_active_api.json";
+    private static final long APP_DECLARED_API_TTL_MS = 2000L;
+
+    /**
+     * The app-declared active graphics API label, or null when there is no FRESH declaration (file
+     * missing, stale, empty, or unparseable) — in which case the caller keeps the existing present-
+     * path/DLL detection unchanged. GENERAL: any guest app that writes {@link #APP_DECLARED_API_FILE}
+     * lights this up; it is NOT hardcoded to any one app. All IO/parse failures fall back to null
+     * (never throws), so a partial/half-written file simply defers to normal detection.
+     */
+    private String readAppDeclaredApi() {
+        try {
+            File f = new File(imageFs.getTmpDir(), APP_DECLARED_API_FILE);
+            if (!f.isFile()) return null;
+            String content = FileUtils.readString(f);
+            if (content == null || content.isEmpty()) return null;          // empty/partial write
+            JSONObject json = new JSONObject(content);                        // partial JSON -> throws -> null
+            long ts = json.optLong("ts", 0L);
+            if (System.currentTimeMillis() - ts >= APP_DECLARED_API_TTL_MS) return null;   // stale -> fall back
+            String label = json.optString("label", "").trim();
+            return label.isEmpty() ? null : label;
+        } catch (Exception ignore) {
+            return null;                                                      // missing/garbage -> normal detection
+        }
+    }
+
     // Window the FPS counter self-healed onto for the GL/Zink present topology (see
     // driveHudFrameTick). Written and read only from the present/tick threads and kept as a plain
     // volatile int — never a shared collection — so the tick path never mutates the WM-owned
@@ -694,7 +734,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
         dxApiThread = new Thread(() -> {
             String lastApi = null;
             while (!Thread.currentThread().isInterrupted()) {
-                String api = detectActiveDxApi(fallback);
+                // App-declared override wins ONLY while fresh: a guest app can publish its true active
+                // API into the shared tmp (see readAppDeclaredApi). Otherwise fall back to the
+                // /proc/maps present-path detection, so normal games (which never write the file) are
+                // unaffected. When the declaration goes stale the label reverts naturally on the next
+                // poll, because the detected api then differs from lastApi and re-pushes.
+                String api = readAppDeclaredApi();
+                if (api == null) api = detectActiveDxApi(fallback);
                 if (api != null && !api.equals(lastApi)) {
                     lastApi = api;
                     // Classic FrameRating renderer line = "<host renderer> | <api>". Skip the prefix
