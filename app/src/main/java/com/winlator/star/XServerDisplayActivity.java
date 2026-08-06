@@ -2901,7 +2901,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
     //          "2" = Banner File Manager 1.2.0 — fast large folders + version metadata (2026-08-05).
     //          "3" = AIO Graphics Test 2.0.0 added alongside v1 (2026-08-05).
     //          "4" = AIO Graphics Test 2.0.0 fixed exe — default now opens the v2 shell (supersedes the "3" test bake).
-    private static final String PATTERN_CONTENT_VERSION = "4";
+    //          "5" = AIO Graphics Test 2.0.1 (+ OpenGL start-menu entry) (2026-08-06).
+    private static final String PATTERN_CONTENT_VERSION = "5";
 
     private void setupWineSystemFiles() {
         String appVersion = String.valueOf(AppUtils.getVersionCode(this));
