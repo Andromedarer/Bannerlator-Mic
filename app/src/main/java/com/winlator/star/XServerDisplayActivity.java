@@ -632,7 +632,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // into the container's SHARED tmp — guest-writable AND host-readable because both sides resolve to
     // the same dir:
     //   host  read path : <filesDir>/imagefs/usr/tmp/hud_active_api.json  (imageFs.getTmpDir())
-    //   guest write path: Z:\usr\tmp\hud_active_api.json  (Z: is symlinked to the imagefs root — see
+    //   guest write path: Z:\\usr\\tmp\\hud_active_api.json  (Z: is symlinked to the imagefs root — see
     //                     WineUtils.createDosdevicesSymlinks — so it is prefix-independent, i.e. it
     //                     does NOT depend on drive_c / %TEMP% / the wine prefix layout).
     //   schema          : {"label":"D3D9 · DXVK","path":"d3d9 → DXVK → Turnip","ts":<epoch_ms>}
