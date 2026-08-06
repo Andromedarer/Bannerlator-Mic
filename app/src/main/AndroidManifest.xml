@@ -267,6 +267,9 @@
 
         <service android:name="com.winlator.star.store.SteamForegroundService" android:foregroundServiceType="dataSync" android:exported="false"/>
         <service android:name="com.winlator.star.store.download.DownloadForegroundService" android:foregroundServiceType="dataSync" android:exported="false"/>
+        <!-- Held while a container/game session is running so the OS low-memory killer can't reap
+             the guest while the app is backgrounded (else it "Shutting down" on return). -->
+        <service android:name="com.winlator.star.core.GameSessionForegroundService" android:foregroundServiceType="dataSync" android:exported="false"/>
     </application>
 </manifest>
 

@@ -168,7 +168,7 @@ import cn.sherlock.com.sun.media.sound.SF2Soundbank;
 
 public class XServerDisplayActivity extends AppCompatActivity {
     public static String NOTIFICATION_CHANNEL_ID = "Winlator";
-    public static int NOTIFICATION_ID = -1;
+    public static int NOTIFICATION_ID = 9004;
     private XServerView xServerView;
     private InputControlsView inputControlsView;
     private TouchpadView touchpadView;
@@ -1694,19 +1694,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // Check if a profile is defined by the shortcut
         String controlsProfile = shortcut != null ? shortcut.getExtra("controlsProfile", "") : "";
 
-        createNotifcationChannel();
-
-        Intent notificationIntent = new Intent(this, XServerDisplayActivity.class);
-        PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, PendingIntent.FLAG_IMMUTABLE);
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
-                .setSmallIcon(R.drawable.ic_stat_ab_gear_0011)
-                .setContentTitle("Winlator")
-                .setContentText("Winlator is running, do not kill or swipe this notification")
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setContentIntent(pendingIntent)
-                .setAutoCancel(false);
-
-        NotificationManagerCompat.from(this).notify(NOTIFICATION_ID, builder.build());
+        // Keep the running session alive while backgrounded: a REAL foreground service holds the
+        // process at perceptible priority so Android's low-memory killer can't reap the guest and
+        // force a shutdown on return. A plain notify() (what this used to be) does NOT protect the
+        // process. See docs/session-foreground-service-plan.md.
+        ContextCompat.startForegroundService(this,
+                com.winlator.star.core.GameSessionForegroundService.createIntent(this, shortcutName));
 
         Runnable runnable = () -> {
             setupUI();
@@ -2491,7 +2484,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         installerWatchHandler.removeCallbacks(installerWatchRunnable);
         gameExitWatchHandler.removeCallbacks(gameExitWatchRunnable);
         stopDxApiDetection();
-        NotificationManagerCompat.from(this).cancel(NOTIFICATION_ID);
+        // Stop the session foreground service (also removes its ongoing notification).
+        stopService(new Intent(this, com.winlator.star.core.GameSessionForegroundService.class));
         preloaderDialog.showOnUiThread(R.string.shutdown);
         handler.postDelayed(new Runnable() {
             @Override
