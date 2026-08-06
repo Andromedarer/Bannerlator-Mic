@@ -16,7 +16,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.runtime.derivedStateOf
@@ -445,9 +444,11 @@ private fun topTabLabel(title: String): String = when (title) {
 
 /**
  * Portrait-only: the container-editor tabs as a horizontal icon bar across the top (landscape keeps
- * the collapsible left rail instead). Same icons and labels as the rail — just repositioned. The
- * help / reset-to-defaults links sit in a slim right-aligned row above the tabs. The bar scrolls
- * horizontally if the tabs don't fit. Used by all 3 container screens (New / Edit / Defaults).
+ * the collapsible left rail instead). Same icons/labels as the rail — just repositioned. The help /
+ * reset-to-defaults buttons are appended INLINE at the end of the same row (a faint divider hints
+ * they're actions, not tabs). Every cell gets equal weight, so the tabs + buttons evenly fill the
+ * full width. Used by all 3 container screens (New / Edit = tabs + help; Defaults = tabs + help +
+ * reset). No separate button row above the tabs, so the top stays tight under the header.
  */
 @Composable
 private fun ContainerTopTabs(
@@ -457,64 +458,41 @@ private fun ContainerTopTabs(
     onSelect: (Int) -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
-        if (links.isNotEmpty()) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                horizontalArrangement = Arrangement.End,
-            ) {
-                links.forEach { link ->
-                    IconButton(onClick = link.onClick, modifier = Modifier.size(36.dp)) {
-                        Icon(
-                            link.icon,
-                            contentDescription = link.label,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
-                }
-            }
-        }
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 4.dp, vertical = 2.dp),
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             tabs.forEachIndexed { index, tab ->
                 val active = index == selected
-                val tint = if (active) MaterialTheme.colorScheme.primary
-                           else MaterialTheme.colorScheme.onSurfaceVariant
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
+                TopCell(
+                    icon = tabIcon(tab),
+                    label = topTabLabel(tab),
+                    tint = if (active) MaterialTheme.colorScheme.primary
+                           else MaterialTheme.colorScheme.onSurfaceVariant,
+                    highlight = active,
+                    indicatorOn = active,
+                    onClick = { onSelect(index) },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            if (links.isNotEmpty()) {
+                // Faint separator: everything past here is an action button, not a tab.
+                Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(
-                            if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
-                            else Color.Transparent
-                        )
-                        .clickable { onSelect(index) }
-                        .widthIn(min = 56.dp)
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                ) {
-                    Icon(tabIcon(tab), contentDescription = tab, tint = tint, modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.height(3.dp))
-                    Text(
-                        topTabLabel(tab),
-                        color = tint,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.3.sp,
-                        maxLines = 1,
-                    )
-                    Spacer(Modifier.height(3.dp))
-                    // Active-tab underline indicator (collapses to zero width when inactive).
-                    Box(
-                        modifier = Modifier
-                            .height(2.5.dp)
-                            .width(if (active) 20.dp else 0.dp)
-                            .clip(RoundedCornerShape(3.dp))
-                            .background(if (active) MaterialTheme.colorScheme.primary else Color.Transparent),
+                        .padding(horizontal = 2.dp)
+                        .width(1.dp)
+                        .height(30.dp)
+                        .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)),
+                )
+                links.forEach { link ->
+                    TopCell(
+                        icon = link.icon,
+                        label = topActionLabel(link.icon),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        highlight = false,
+                        indicatorOn = false,
+                        onClick = link.onClick,
+                        modifier = Modifier.weight(1f),
                     )
                 }
             }
@@ -522,6 +500,51 @@ private fun ContainerTopTabs(
         HorizontalDivider()
     }
 }
+
+/** One cell of the portrait top bar — a tab or an action button (icon over a small label). The
+ *  active underline collapses to zero width when off, so every cell keeps the same height. */
+@Composable
+private fun TopCell(
+    icon: ImageVector,
+    label: String,
+    tint: Color,
+    highlight: Boolean,
+    indicatorOn: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = modifier
+            .clip(RoundedCornerShape(9.dp))
+            .background(if (highlight) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else Color.Transparent)
+            .clickable { onClick() }
+            .padding(vertical = 6.dp, horizontal = 1.dp),
+    ) {
+        Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.height(3.dp))
+        Text(
+            label,
+            color = tint,
+            fontSize = 8.5.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.2.sp,
+            maxLines = 1,
+        )
+        Spacer(Modifier.height(2.dp))
+        Box(
+            modifier = Modifier
+                .height(2.dp)
+                .width(if (indicatorOn) 16.dp else 0.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .background(if (indicatorOn) MaterialTheme.colorScheme.primary else Color.Transparent),
+        )
+    }
+}
+
+/** Short label for the top-bar action buttons — only Help + Restore ever appear there. */
+private fun topActionLabel(icon: ImageVector): String =
+    if (icon == Icons.Filled.Restore) "RESET" else "HELP"
 
 @Composable
 internal fun VulkanSettingsDialog(
