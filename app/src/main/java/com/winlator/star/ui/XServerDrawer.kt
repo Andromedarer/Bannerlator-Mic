@@ -3608,37 +3608,47 @@ private fun TmCoreStrip(h: XServerDialogState.TmHeaderStats?) {
     if (cores.isEmpty()) return
     val accent = MaterialTheme.colorScheme.primary
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    // Wrap the cores into rows of 4 (matching the stat-tile grid above) so every core is
+    // visible without horizontal scrolling — 8 cores = 2 rows, scales to any count.
+    val cols = 4
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        cores.forEachIndexed { i, mhz ->
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier
-                    .widthIn(min = 44.dp)
-                    .clip(RoundedCornerShape(7.dp))
-                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(7.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
-                    .padding(horizontal = 6.dp, vertical = 4.dp),
+        cores.toList().chunked(cols).forEachIndexed { rowIdx, rowCores ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Text("C$i", color = muted, fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                Text(
-                    buildAnnotatedString {
-                        withStyle(SpanStyle(fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = accent)) {
-                            append(if (mhz > 0) "$mhz" else "—")
-                        }
-                        if (mhz > 0) {
-                            withStyle(SpanStyle(fontSize = 7.sp, fontWeight = FontWeight.Medium, color = muted)) {
-                                append(" MHz")
-                            }
-                        }
-                    },
-                    maxLines = 1,
-                )
+                rowCores.forEachIndexed { j, mhz ->
+                    val i = rowIdx * cols + j
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(7.dp))
+                            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(7.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                            .padding(horizontal = 4.dp, vertical = 4.dp),
+                    ) {
+                        Text("C$i", color = muted, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            buildAnnotatedString {
+                                withStyle(SpanStyle(fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = accent)) {
+                                    append(if (mhz > 0) "$mhz" else "—")
+                                }
+                                if (mhz > 0) {
+                                    withStyle(SpanStyle(fontSize = 7.sp, fontWeight = FontWeight.Medium, color = muted)) {
+                                        append(" MHz")
+                                    }
+                                }
+                            },
+                            maxLines = 1,
+                        )
+                    }
+                }
+                // Pad the final short row so chip widths stay uniform with the full rows.
+                repeat(cols - rowCores.size) { Spacer(Modifier.weight(1f)) }
             }
         }
     }
