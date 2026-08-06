@@ -3391,48 +3391,56 @@ private fun ProcessorAffinityDialog(
                     Icons.Default.Memory,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp),
+                    modifier = Modifier.size(18.dp),
                 )
                 Spacer(Modifier.width(8.dp))
-                Text("Processor Affinity")
+                Text("Processor Affinity", fontSize = 17.sp, fontWeight = FontWeight.Bold)
             }
         },
         text = {
             Column {
                 Text(
                     "Which processors are allowed to run \"${proc.name}\"?",
-                    fontSize = 13.sp,
+                    fontSize = 12.5.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Spacer(Modifier.height(10.dp))
-                // "<All Processors>" stays a full-width row; the per-CPU toggles are laid out in a
-                // 2-column grid so an 8-core device fits without scrolling (4 rows instead of 8). A
-                // heightIn + scroll fallback keeps very high core counts (up to the 32 cap) usable.
+                Spacer(Modifier.height(8.dp))
+                // "<All Processors>" is a full-width master toggle. Each CPU is a compact bordered
+                // tile (accent checkbox + "CPUn" label) matching the core picker in the container /
+                // game settings (widget/CPUListView -> cpu_list_item). Cores come from the SAME
+                // source the container picker uses (availableProcessors), so the set is identical
+                // regardless of an arm64ec vs x86-64 container. Laid out 4-per-row so 8 cores fit in
+                // two rows without scrolling; a heightIn + scroll fallback covers the 32-core cap.
+                AffinityCheckRow(
+                    label = "<All Processors>",
+                    checked = allChecked,
+                    bold = true,
+                    onToggle = { mask = if (allChecked) 0 else allMask },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                val cols = 4
                 Column(
                     modifier = Modifier
-                        .heightIn(max = 320.dp)
-                        .verticalScroll(rememberScrollState())
+                        .heightIn(max = 240.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    AffinityCheckRow(
-                        label = "<All Processors>",
-                        checked = allChecked,
-                        bold = true,
-                        onToggle = { mask = if (allChecked) 0 else allMask },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
-                    (0 until coreCount).chunked(2).forEach { pair ->
-                        Row(modifier = Modifier.fillMaxWidth()) {
-                            pair.forEach { i ->
+                    (0 until coreCount).chunked(cols).forEach { rowCores ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            rowCores.forEach { i ->
                                 val on = (mask shr i) and 1 == 1
-                                AffinityCheckRow(
-                                    label = "CPU $i",
+                                AffinityCoreTile(
+                                    label = "CPU$i",
                                     checked = on,
                                     onToggle = { mask = (mask xor (1 shl i)) and allMask },
                                     modifier = Modifier.weight(1f),
                                 )
                             }
-                            if (pair.size == 1) Spacer(Modifier.weight(1f))
+                            repeat(cols - rowCores.size) { Spacer(Modifier.weight(1f)) }
                         }
                     }
                 }
@@ -3475,6 +3483,41 @@ private fun AffinityCheckRow(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+/** One CPU as a compact bordered tile — accent checkbox stacked over a "CPUn" label — matching the
+ *  container/game-settings core picker (widget/CPUListView -> cpu_list_item). The border tints to
+ *  the accent when the core is selected. */
+@Composable
+private fun AffinityCoreTile(
+    label: String,
+    checked: Boolean,
+    modifier: Modifier = Modifier,
+    onToggle: () -> Unit,
+) {
+    val accent = MaterialTheme.colorScheme.primary
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+            .border(
+                1.dp,
+                if (checked) accent.copy(alpha = 0.7f) else MaterialTheme.colorScheme.outline,
+                RoundedCornerShape(8.dp),
+            )
+            .clickable { onToggle() }
+            .padding(vertical = 3.dp),
+    ) {
+        Checkbox(
+            checked = checked,
+            onCheckedChange = { onToggle() },
+            colors = CheckboxDefaults.colors(checkedColor = accent),
+            modifier = Modifier.size(30.dp),
+        )
+        Spacer(Modifier.height(2.dp))
+        Text(label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
 }
 
