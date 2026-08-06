@@ -47,6 +47,7 @@
     </string-array>
     <string-array name="ddrawrapper_entries">
         <item>CnC-DDraw</item>
+        <item>D7VK</item>
         <item>Dd7To9</item>
         <item>Dgvoodoo</item>
         <item>None</item>
