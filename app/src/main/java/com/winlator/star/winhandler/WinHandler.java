@@ -66,6 +66,14 @@ public class WinHandler {
     private boolean initReceived = false;
     private boolean running = false;
     private OnGetProcessInfoListener onGetProcessInfoListener;
+    // Task Manager "Processor Affinity": the last mask the user applied per (guest) pid. The guest's
+    // GetProcessAffinityMask readback is unreliable under wow64/FEX (it keeps reporting the full mask
+    // even after SetProcessAffinityMask has moved the live threads), so we remember what the user
+    // actually chose and surface THAT in the dialog. Pruned to live pids each process-list refresh, so
+    // a restarted process (new pid) correctly falls back to the guest value — matching Windows, where
+    // affinity resets on restart.
+    private final java.util.concurrent.ConcurrentHashMap<Integer, Integer> manualAffinity =
+        new java.util.concurrent.ConcurrentHashMap<>();
     private final Map<Integer, ExternalController> controllers = new HashMap<>(); // map deviceId -> controller
                                                                                   // implementation
     private InetAddress localhost;
@@ -490,6 +498,7 @@ public class WinHandler {
     }
 
     public void setProcessAffinity(final int pid, final int affinityMask) {
+        if (pid != 0) manualAffinity.put(pid, affinityMask);
         addAction(() -> {
             sendData.rewind();
             sendData.put(RequestCodes.SET_PROCESS_AFFINITY);
@@ -499,6 +508,29 @@ public class WinHandler {
             sendData.put((byte) 0);
             sendPacket(CLIENT_PORT);
         });
+    }
+
+    // The mask the user last applied to this pid via the Task Manager, or null if none. The TM uses
+    // this to pre-tick the Processor Affinity dialog with the user's real choice instead of the
+    // guest's stale GetProcessAffinityMask readback.
+    public Integer getManualAffinity(int pid) {
+        return manualAffinity.get(pid);
+    }
+
+    // Drop remembered affinities for pids that are no longer running (called on each process-list
+    // refresh) so a restarted process doesn't inherit a stale override.
+    public void retainManualAffinities(java.util.Set<Integer> livePids) {
+        if (livePids.isEmpty()) manualAffinity.clear();
+        else manualAffinity.keySet().retainAll(livePids);
+    }
+
+    // Re-send every remembered affinity. The guest's process-affinity record doesn't stick under
+    // wow64/FEX, so threads spawned after the original set escape back to all cores; re-applying while
+    // the Task Manager is open re-pins them (and, in the guest, every thread of the process).
+    public void reapplyManualAffinities() {
+        for (Map.Entry<Integer, Integer> e : manualAffinity.entrySet()) {
+            setProcessAffinity((int) e.getKey(), (int) e.getValue());
+        }
     }
 
     public void mouseEvent(int flags, int dx, int dy, int wheelDelta) {

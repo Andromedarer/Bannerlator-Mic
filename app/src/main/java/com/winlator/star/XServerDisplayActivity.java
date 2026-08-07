@@ -7214,6 +7214,7 @@ return true;
         if (winHandler != null) {
             winHandler.setOnGetProcessInfoListener(new OnGetProcessInfoListener() {
                 private final ArrayList<XServerDialogState.TmProcess> buffer = new ArrayList<>();
+                private final java.util.HashSet<Integer> livePids = new java.util.HashSet<>();
 
                 @Override
                 public void onGetProcessInfo(int index, int numProcesses, ProcessInfo info) {
@@ -7225,13 +7226,25 @@ return true;
 
                     final android.graphics.Bitmap finalIcon = icon;
                     runOnUiThread(() -> {
-                        if (index == 0) buffer.clear();
+                        if (index == 0) { buffer.clear(); livePids.clear(); }
+                        livePids.add(info.pid);
+                        // Show the mask the USER applied, not the guest's stale GetProcessAffinityMask
+                        // readback (which keeps reporting the full mask under wow64/FEX). Falls back to
+                        // the guest value when the user never set an affinity for this pid.
+                        Integer override = winHandler != null ? winHandler.getManualAffinity(info.pid) : null;
+                        int displayMask = override != null ? override : info.affinityMask;
                         buffer.add(new XServerDialogState.TmProcess(
                             index, info.pid, info.name,
-                            info.getFormattedMemoryUsage(), info.wow64Process, info.affinityMask, finalIcon));
+                            info.getFormattedMemoryUsage(), info.wow64Process, displayMask, finalIcon));
                         if (numProcesses == 0 || index == numProcesses - 1) {
                             ds.setTmProcesses(new ArrayList<>(buffer));
                             ds.setTmCount(numProcesses);
+                            if (winHandler != null) {
+                                // Forget affinities for exited pids, then re-pin the survivors so threads
+                                // spawned since the last set (which escape back to all cores) get bound.
+                                winHandler.retainManualAffinities(livePids);
+                                winHandler.reapplyManualAffinities();
+                            }
                         }
                     });
                 }
