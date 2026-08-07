@@ -118,6 +118,7 @@ fun ContainerDetailScreen(
     var glossaryQuery            by remember { mutableStateOf<String?>(null) }
     var showVegasDownloadSheet   by remember { mutableStateOf(false) }
     var showVkd3dDownloadSheet   by remember { mutableStateOf(false) }
+    var showD7vkDownloadSheet    by remember { mutableStateOf(false) }
     var showVulkanConfig          by remember { mutableStateOf(false) }
     // Bumped after a DXVK/VKD3D/Vegas download so the open DxvkConfigDialog re-reads its version lists.
     var dxvkRefreshKey           by remember { mutableStateOf(0) }
@@ -321,7 +322,8 @@ fun ContainerDetailScreen(
             // Close the config dialog first — the download sheet is a ModalBottomSheet (activity
             // window) and would otherwise render BEHIND this AlertDialog. It reopens on sheet dismiss.
             onDownloadDxvk = { showDxvkConfig = false; if (isVegasWrapper) showVegasDownloadSheet = true else showDxvkDownloadSheet = true },
-            onDownloadVkd3d = { showDxvkConfig = false; showVkd3dDownloadSheet = true }
+            onDownloadVkd3d = { showDxvkConfig = false; showVkd3dDownloadSheet = true },
+            onDownloadD7vk = { showDxvkConfig = false; showD7vkDownloadSheet = true }
         )
     }
     if (showWineD3DConfig) {
@@ -405,6 +407,13 @@ fun ContainerDetailScreen(
         ContentDownloadSheet(
             contentType = com.winlator.star.contents.ContentProfile.ContentType.CONTENT_TYPE_VKD3D,
             onDismiss = { showVkd3dDownloadSheet = false; showDxvkConfig = true },
+            onContentChanged = { dxvkRefreshKey++ }
+        )
+    }
+    if (showD7vkDownloadSheet) {
+        ContentDownloadSheet(
+            contentType = com.winlator.star.contents.ContentProfile.ContentType.CONTENT_TYPE_D7VK,
+            onDismiss = { showD7vkDownloadSheet = false; showDxvkConfig = true },
             onContentChanged = { dxvkRefreshKey++ }
         )
     }
@@ -2983,6 +2992,7 @@ internal fun DxvkConfigDialog(
     onDismiss: () -> Unit,
     onDownloadDxvk: () -> Unit = {},
     onDownloadVkd3d: () -> Unit = {},
+    onDownloadD7vk: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -2992,6 +3002,9 @@ internal fun DxvkConfigDialog(
 
     val allDxvkVersions = remember { mutableStateOf(listOf<String>()) }
     val vkd3dVersions   = remember { mutableStateOf(listOf<String>()) }
+    // Seeded with the bundled sentinel so the D7VK version dropdown always offers "Bundled (default)"
+    // even before the async catalog load lands (or when there are no downloaded d7vk profiles).
+    val d7vkVersions    = remember { mutableStateOf(listOf(DXVKConfigDialog.D7VK_BUNDLED)) }
     val configSourceEntries = remember { mutableStateOf(listOf<String>()) }
 
     LaunchedEffect(refreshKey) {
@@ -3003,10 +3016,12 @@ internal fun DxvkConfigDialog(
             else
                 DXVKConfigDialog.loadDxvkVersionList(context, cm, isArm64EC)
             val vkd3d = DXVKConfigDialog.loadVkd3dVersionList(context, cm)
+            val d7vk = DXVKConfigDialog.loadD7vkVersionList(context, cm)
             val cfgsrc = DXVKConfigDialog.loadVegasConfigSourceList(context)
             withContext(Dispatchers.Main) {
                 allDxvkVersions.value = versions
                 vkd3dVersions.value = vkd3d
+                d7vkVersions.value = d7vk
                 configSourceEntries.value = cfgsrc
             }
         }
@@ -3046,6 +3061,11 @@ internal fun DxvkConfigDialog(
     }
     var selectedFeatureLevel by remember { mutableStateOf(featureLevelEntries.firstOrNull { it == config.get("vkd3dLevel") } ?: featureLevelEntries.first()) }
     var selectedDdra         by remember { mutableStateOf(ddraEntries.firstOrNull { StringUtils.parseIdentifier(it) == config.get("ddrawrapper") } ?: ddraEntries.first()) }
+    // D7VK version (only meaningful when DDraw Wrapper == D7VK). Empty/unknown -> the bundled asset.
+    var selectedD7vk         by remember(d7vkVersions.value) {
+        val stored = config.get("d7vkVersion")
+        mutableStateOf(d7vkVersions.value.firstOrNull { it == stored } ?: DXVKConfigDialog.D7VK_BUNDLED)
+    }
     var selectedConfigSource by remember(configSourceEntries.value) {
         val stored = config.get("dxvkConfigFile")
         mutableStateOf(configSourceEntries.value.firstOrNull { it == stored } ?: configSourceEntries.value.firstOrNull() ?: "None")
@@ -3181,6 +3201,19 @@ internal fun DxvkConfigDialog(
                 LabeledDropdown("VKD3D Feature Level", featureLevelEntries, selectedFeatureLevel, { selectedFeatureLevel = it })
                 Spacer(Modifier.height(8.dp))
                 LabeledDropdown("DDraw Wrapper", ddraEntries, selectedDdra, { selectedDdra = it })
+                // D7VK is a catalog-backed component: when it's the chosen DDraw wrapper, offer a
+                // version dropdown ("Bundled (default)" + any downloaded profiles) and a cloud button
+                // to fetch more — mirroring the DXVK/VKD3D version UI above.
+                if (StringUtils.parseIdentifier(selectedDdra) == "d7vk") {
+                    Spacer(Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        LabeledDropdown(
+                            "D7VK Version", d7vkVersions.value, selectedD7vk, { selectedD7vk = it },
+                            modifier = Modifier.weight(1f)
+                        )
+                        ContentInstallGear(onDownloadFile = onDownloadD7vk)
+                    }
+                }
                 if (isVegas) {
                     Spacer(Modifier.height(8.dp))
                     LabeledDropdown("Config Source", configSourceEntries.value, selectedConfigSource, { selectedConfigSource = it })
@@ -3197,6 +3230,7 @@ internal fun DxvkConfigDialog(
                 cfg.put("vkd3dVersion", selectedVkd3d)
                 cfg.put("vkd3dLevel", selectedFeatureLevel)
                 cfg.put("ddrawrapper", StringUtils.parseIdentifier(selectedDdra))
+                cfg.put("d7vkVersion", selectedD7vk)
                 cfg.put("dxvkConfigFile", if (selectedConfigSource == "None") "" else selectedConfigSource)
                 onConfirm(cfg.toString())
             }) { Text(stringResource(android.R.string.ok)) }

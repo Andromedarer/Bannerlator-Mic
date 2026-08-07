@@ -5778,6 +5778,7 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
     var showDxvkDownloadSheet by remember { mutableStateOf(false) }
     var showVegasDownloadSheet by remember { mutableStateOf(false) }
     var showVkd3dDownloadSheet by remember { mutableStateOf(false) }
+    var showD7vkDownloadSheet by remember { mutableStateOf(false) }
 
     // Tab
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -6811,7 +6812,8 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
             onConfirm = { dxWrapperConfig = it; showDxvkConfig = false },
             onDismiss = { showDxvkConfig = false },
             onDownloadDxvk = { showDxvkConfig = false; if (isVegasCfg) showVegasDownloadSheet = true else showDxvkDownloadSheet = true },
-            onDownloadVkd3d = { showDxvkConfig = false; showVkd3dDownloadSheet = true }
+            onDownloadVkd3d = { showDxvkConfig = false; showVkd3dDownloadSheet = true },
+            onDownloadD7vk = { showDxvkConfig = false; showD7vkDownloadSheet = true }
         )
     }
     if (showWineD3DConfig) {
@@ -6852,6 +6854,13 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
         ContentDownloadSheet(
             contentType = com.winlator.star.contents.ContentProfile.ContentType.CONTENT_TYPE_VKD3D,
             onDismiss = { showVkd3dDownloadSheet = false },
+            onContentChanged = {}
+        )
+    }
+    if (showD7vkDownloadSheet) {
+        ContentDownloadSheet(
+            contentType = com.winlator.star.contents.ContentProfile.ContentType.CONTENT_TYPE_D7VK,
+            onDismiss = { showD7vkDownloadSheet = false },
             onContentChanged = {}
         )
     }

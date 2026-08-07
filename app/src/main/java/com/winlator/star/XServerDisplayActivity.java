@@ -2930,7 +2930,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             String dxvkWrapper = "dxvk-" + dxwrapperConfig.get("version");
             String vkd3dWrapper = "vkd3d-" + dxwrapperConfig.get("vkd3dVersion");
             String ddrawrapper = dxwrapperConfig.get("ddrawrapper");
-            dxwrapper = dxvkWrapper + ";" + vkd3dWrapper + ";" + ddrawrapper;
+            dxwrapper = dxvkWrapper + ";" + vkd3dWrapper + ";" + ddrawrapper + d7vkMarker(ddrawrapper);
         }
         else if (dxwrapper.contains("vegas")) {
             String vegasVersion = dxwrapperConfig.get("version");
@@ -2940,7 +2940,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             String vkd3dVersion = dxwrapperConfig.get("vkd3dVersion");
             String vkd3dPart = (vkd3dVersion != null && !vkd3dVersion.isEmpty() && !vkd3dVersion.equals("none") && !vkd3dVersion.equals("None"))
                 ? "vkd3d-" + vkd3dVersion : "";
-            dxwrapper = "vegas-" + vegasVersion + ";" + vkd3dPart + ";" + ddrawrapper;
+            dxwrapper = "vegas-" + vegasVersion + ";" + vkd3dPart + ";" + ddrawrapper + d7vkMarker(ddrawrapper);
         }
 
         if (!dxwrapper.equals(container.getExtra("dxwrapper"))) {
@@ -3116,7 +3116,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     String expectedDxvkWrapper = "dxvk-" + dxwrapperConfig.get("version");
                     String expectedVkd3dWrapper = "vkd3d-" + dxwrapperConfig.get("vkd3dVersion");
                     String expectedDdra = dxwrapperConfig.get("ddrawrapper");
-                    String expectedFull = expectedDxvkWrapper + ";" + expectedVkd3dWrapper + ";" + expectedDdra;
+                    String expectedFull = expectedDxvkWrapper + ";" + expectedVkd3dWrapper + ";" + expectedDdra + d7vkMarker(expectedDdra);
                     wineDebugWriter.println("expected full string: " + expectedFull);
                     wineDebugWriter.println("extraction will run: " + (!expectedFull.equals(cachedDxwrapper)));
                 }
@@ -5025,6 +5025,45 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     private static final String TAG = "DXWrapperExtraction";
 
+    // Fold the chosen d7vk version into the dxwrapper signature string (compared against the container's
+    // stored value) so switching d7vk versions — which leaves the ddrawrapper token unchanged as "d7vk" —
+    // still re-triggers extraction. Appended as a trailing ";d7vk=<ver>" field the split-based apply
+    // code (which only reads indices 0..2) safely ignores. Empty for any non-d7vk wrapper.
+    private String d7vkMarker(String ddrawrapper) {
+        if (!"d7vk".equals(ddrawrapper) || dxwrapperConfig == null) return "";
+        String ver = dxwrapperConfig.get("d7vkVersion");
+        return ";d7vk=" + (ver == null ? "" : ver);
+    }
+
+    // Materialize the selected d7vk into the prefix: a downloaded CONTENT_TYPE_D7VK profile (its .wcp
+    // drops syswow64/ddraw.dll) when the user picked one, otherwise the bundled offline d7vk.tzst asset.
+    // Callers have already restored the builtin ddraw + copied it aside as the ddraw_.dll proxy target.
+    private void applyD7vk(File windowsDir) {
+        String d7vkVersion = (dxwrapperConfig != null) ? dxwrapperConfig.get("d7vkVersion") : null;
+        ContentProfile d7vkProfile = findD7vkProfile(d7vkVersion);
+        if (d7vkProfile != null) {
+            Log.d(TAG, "Applying user-defined d7vk content profile: " + d7vkVersion);
+            contentsManager.applyContent(d7vkProfile);
+        } else {
+            Log.d(TAG, "Extracting bundled d7vk .tzst archive");
+            TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "ddrawrapper/d7vk.tzst", windowsDir, onExtractFileListener);
+        }
+    }
+
+    // Resolve a stored d7vkVersion ("verName-verCode") to an installed profile; null = use the bundled
+    // asset (empty/absent value, the "Bundled (default)" sentinel, or the profile isn't installed).
+    private ContentProfile findD7vkProfile(String version) {
+        if (version == null || version.isEmpty()
+                || version.equals(DXVKConfigDialog.D7VK_BUNDLED) || contentsManager == null) return null;
+        List<ContentProfile> profiles = contentsManager.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_D7VK);
+        if (profiles == null) return null;
+        for (ContentProfile p : profiles) {
+            if ((p.verName + "-" + p.verCode).equals(version) && ContentsManager.getInstallDir(this, p).exists())
+                return p;
+        }
+        return null;
+    }
+
     private boolean extractDXWrapperFiles(String dxwrapper) {
         final String[] dlls = {"d3d10.dll", "d3d10_1.dll", "d3d10core.dll", "d3d11.dll", "d3d12.dll", "d3d12core.dll", "d3d8.dll", "d3d9.dll", "dxgi.dll", "ddraw.dll", "d3dimm.dll"};
 
@@ -5098,7 +5137,7 @@ else {
         restoreOriginalDllFiles("ddraw.dll", "d3dimm.dll");
         File d7vkBuiltinDdraw = new File(d7vkSyswow64, "ddraw.dll");
         if (d7vkBuiltinDdraw.exists()) FileUtils.copy(d7vkBuiltinDdraw, new File(d7vkSyswow64, "ddraw_.dll"));
-        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "ddrawrapper/d7vk.tzst", windowsDir, onExtractFileListener);
+        applyD7vk(windowsDir);
     }
 
     Log.d(TAG, "Extracting ddrawrapper " + ddrawrapper);
@@ -5186,7 +5225,7 @@ return true;
             restoreOriginalDllFiles("ddraw.dll", "d3dimm.dll");
             File d7vkBuiltinDdraw = new File(d7vkSyswow64, "ddraw.dll");
             if (d7vkBuiltinDdraw.exists()) FileUtils.copy(d7vkBuiltinDdraw, new File(d7vkSyswow64, "ddraw_.dll"));
-            TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "ddrawrapper/d7vk.tzst", windowsDir, onExtractFileListener);
+            applyD7vk(windowsDir);
         }
 
         Log.d(TAG, "Extracting ddrawrapper " + ddrawrapper);

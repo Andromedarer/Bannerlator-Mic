@@ -24,6 +24,10 @@ public class DXVKConfigDialog {
     public static final int DXVK_TYPE_ASYNC = 1;
     public static final int DXVK_TYPE_GPLASYNC = 2;
     public static final String[] VKD3D_FEATURE_LEVEL = {"12_0", "12_1", "12_2", "11_1", "11_0", "10_1", "10_0", "9_3", "9_2", "9_1"};
+    // Sentinel version for the DDraw-Wrapper=D7VK version dropdown. Means "use the bundled, offline
+    // d7vk.tzst asset" (the default). Any other value is a downloaded CONTENT_TYPE_D7VK profile,
+    // identified by "verName-verCode" (mirrors the VKD3D version identifier).
+    public static final String D7VK_BUNDLED = "Bundled (default)";
 
     private static final Pattern SEMVER = Pattern.compile("(\\d+)\\.(\\d+)(?:\\.(\\d+))?");
 
@@ -68,6 +72,17 @@ public class DXVKConfigDialog {
         String[] original = context.getResources().getStringArray(R.array.vkd3d_version_entries);
         List<String> list = new ArrayList<>(Arrays.asList(original));
         for (ContentProfile profile : contentsManager.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_VKD3D)) {
+            list.add(new VKD3DVersionItem(profile.verName, profile.verCode).getIdentifier());
+        }
+        return list;
+    }
+
+    public static List<String> loadD7vkVersionList(Context context, ContentsManager contentsManager) {
+        // The bundled d7vk.tzst is always the first/default option (offline, zero-download).
+        // Downloaded catalog profiles follow, identified as "verName-verCode" like VKD3D.
+        List<String> list = new ArrayList<>();
+        list.add(D7VK_BUNDLED);
+        for (ContentProfile profile : contentsManager.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_D7VK)) {
             list.add(new VKD3DVersionItem(profile.verName, profile.verCode).getIdentifier());
         }
         return list;
