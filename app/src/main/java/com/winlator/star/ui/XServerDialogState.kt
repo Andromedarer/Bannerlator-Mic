@@ -727,6 +727,12 @@ object XServerDialogState {
     fun interface TmAffinityCallback { fun invoke(pid: Int, mask: Int) }
     @JvmField var onTmSetAffinity: TmAffinityCallback? = null
 
+    // Live lookup of the mask the user last applied to a pid (or -1 if none). Lets the affinity
+    // dialog show the user's real choice the instant it opens, without waiting on the async
+    // process-list rebuild to carry the override into TmProcess.affinityMask.
+    fun interface TmAffinityQuery { fun invoke(pid: Int): Int }
+    @JvmField var onTmQueryAffinity: TmAffinityQuery? = null
+
     fun interface FpsConfigCallback { fun invoke(config: String) }
 
     // -------------------------------------------------------------------------
@@ -826,7 +832,7 @@ object XServerDialogState {
         onScreenEffectsApply = null; onSeAddProfile = null; onSeRemoveProfile = null
         onWindowClick = null
         onTmRefresh = null; onTmDismissed = null; onTmNewTask = null; onTmNewTaskSubmit = null
-        onTmBringToFront = null; onTmKillProcess = null; onTmSetAffinity = null
+        onTmBringToFront = null; onTmKillProcess = null; onTmSetAffinity = null; onTmQueryAffinity = null
         onInitGraphicsTab = null
     }
 }

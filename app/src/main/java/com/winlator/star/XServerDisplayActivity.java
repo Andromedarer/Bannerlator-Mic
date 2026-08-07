@@ -7181,6 +7181,12 @@ return true;
             if (winHandler != null) winHandler.setProcessAffinity(pid, mask);
         };
 
+        ds.onTmQueryAffinity = pid -> {
+            if (winHandler == null) return -1;
+            Integer m = winHandler.getManualAffinity(pid);
+            return m != null ? m : -1;
+        };
+
         registerTmProcessInfoListener();
 
         ds.setTmContainerInfo(buildTmContainerInfo());
@@ -7240,9 +7246,15 @@ return true;
                             ds.setTmProcesses(new ArrayList<>(buffer));
                             ds.setTmCount(numProcesses);
                             if (winHandler != null) {
-                                // Forget affinities for exited pids, then re-pin the survivors so threads
-                                // spawned since the last set (which escape back to all cores) get bound.
-                                winHandler.retainManualAffinities(livePids);
+                                // Enumerations overlap and share buffer/livePids (a concurrent one's
+                                // index-0 reset wipes livePids mid-cycle), so only prune on a clean,
+                                // complete pass -- every pid seen exactly once. Pruning off a truncated
+                                // livePids would wrongly drop a still-valid override the instant it's set.
+                                if (numProcesses > 0 && livePids.size() == numProcesses) {
+                                    winHandler.retainManualAffinities(livePids);
+                                }
+                                // Re-pin survivors so threads spawned since the last set (which escape
+                                // back to all cores) get bound. Idempotent and race-free.
                                 winHandler.reapplyManualAffinities();
                             }
                         }

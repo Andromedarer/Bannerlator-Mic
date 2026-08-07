@@ -3524,9 +3524,12 @@ private fun ProcessorAffinityDialog(
 ) {
     val coreCount = remember { Runtime.getRuntime().availableProcessors().coerceIn(1, 32) }
     val allMask = remember(coreCount) { if (coreCount >= 32) -1 else (1 shl coreCount) - 1 }
-    // Open pre-ticked to the process's live cores; if the guest reported nothing, default to all.
+    // Open pre-ticked to the cores the user actually chose. Prefer the live override cache (what the
+    // user last applied) over the guest's GetProcessAffinityMask readback, which is unreliable under
+    // wow64/FEX. Fall back to the guest value, then to all.
     var mask by remember(proc.pid) {
-        val m = proc.affinityMask and allMask
+        val stored = XServerDialogState.onTmQueryAffinity?.invoke(proc.pid) ?: -1
+        val m = (if (stored > 0) stored else proc.affinityMask) and allMask
         mutableStateOf(if (m == 0) allMask else m)
     }
     val allChecked = (mask and allMask) == allMask
