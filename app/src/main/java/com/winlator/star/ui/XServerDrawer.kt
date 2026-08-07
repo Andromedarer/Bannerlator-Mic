@@ -2703,6 +2703,7 @@ private fun PlayersSection() {
 }
 
 // One device row: name + "currently Player N / unassigned" subtitle + a slot selector dropdown.
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PlayerSlotRowItem(row: XServerDialogState.PlayerSlotRow) {
     val accent = MaterialTheme.colorScheme.primary
