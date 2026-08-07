@@ -525,6 +525,7 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
 
        // ---> START OF DIAGNOSTIC MIC INJECTION <---
         try {
+           try {
             Log.d("MicBridgeDebug", "Original command: " + command);
             Log.d("MicBridgeDebug", "RootDir absolute path: " + rootDir.getAbsolutePath());
 
@@ -547,7 +548,7 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
             pyWriter.write("        data = s.recv(4096)\n");
             pyWriter.write("        if not data: break\n");
             pyWriter.write("        p.stdin.write(data)\n");
-            pyWriter.except Exception as e:\n");
+            pyWriter.write("except Exception as e:\n");
             pyWriter.write("    with open('/tmp/mic_bridge_error.log', 'w') as f:\n");
             pyWriter.write("        f.write(str(e))\n");
             pyWriter.close();
