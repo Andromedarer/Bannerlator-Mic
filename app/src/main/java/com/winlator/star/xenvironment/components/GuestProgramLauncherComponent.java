@@ -504,7 +504,7 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
             emulator = shortcut.getExtra("emulator", container.getEmulator());
 
        // Construct the command without Box64 to the Wine executable
-       String command = "";
+        String command = "";
         String overriddenCommand = envVars.get("GUEST_PROGRAM_LAUNCHER_COMMAND");
         if (!overriddenCommand.isEmpty()) {
             String[] parts = overriddenCommand.split(";");
@@ -523,74 +523,7 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
                 command = imageFs.getBinDir() + "/box64 " + guestExecutable;
         }
 
-       // ---> START OF DIAGNOSTIC MIC INJECTION <---
-        try {
-           try {
-            Log.d("MicBridgeDebug", "Original command: " + command);
-            Log.d("MicBridgeDebug", "RootDir absolute path: " + rootDir.getAbsolutePath());
-
-            // Translate Android host-side paths into container-internal paths
-            String containerCommand = command.replace(rootDir.getAbsolutePath(), "");
-            if (!containerCommand.startsWith("/")) {
-                containerCommand = "/" + containerCommand;
-            }
-            Log.d("MicBridgeDebug", "Translated containerCommand: " + containerCommand);
-
-            // 1. Write the Python streaming helper script into the container
-            File pyScript = new File(rootDir, "usr/bin/mic_streamer.py");
-            java.io.FileWriter pyWriter = new java.io.FileWriter(pyScript);
-            pyWriter.write("import socket, sys, subprocess\n");
-            pyWriter.write("try:\n");
-            pyWriter.write("    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n");
-            pyWriter.write("    s.connect(('127.0.0.1', 4711))\n");
-            pyWriter.write("    p = subprocess.Popen(['pacat', '--playback', '--device=VirtualMic', '--format=s16le', '--rate=44100', '--channels=1'], stdin=subprocess.PIPE)\n");
-            pyWriter.write("    while True:\n");
-            pyWriter.write("        data = s.recv(4096)\n");
-            pyWriter.write("        if not data: break\n");
-            pyWriter.write("        p.stdin.write(data)\n");
-            pyWriter.write("except Exception as e:\n");
-            pyWriter.write("    with open('/tmp/mic_bridge_error.log', 'w') as f:\n");
-            pyWriter.write("        f.write(str(e))\n");
-            pyWriter.close();
-            FileUtils.chmod(pyScript, 0755);
-
-            // 2. Write the wrapper script with full logging redirected to text files
-            File launcherScript = new File(rootDir, "usr/bin/wine_mic_launcher.sh");
-            java.io.FileWriter writer = new java.io.FileWriter(launcherScript);
-            
-            writer.write("#!/bin/sh\n");
-            // Capture all shell output of the wrapper to a debug file
-            writer.write("exec > /tmp/launcher_debug.log 2>&1\n");
-            writer.write("echo '=== LAUNCHER STARTED ==='\n");
-            writer.write("echo 'Container command to execute: " + containerCommand.replace("'", "'\\''") + "'\n");
-            
-            // Run audio setup and Python bridge in background with its own log
-            writer.write("(\n");
-            writer.write("  echo 'Audio bridge subshell started'\n");
-            writer.write("  sleep 4\n");
-            writer.write("  export PULSE_SERVER=unix:/tmp/pulseaudio-socket\n");
-            writer.write("  pactl load-module module-null-sink sink_name=VirtualMic\n");
-            writer.write("  pactl set-default-source VirtualMic.monitor\n");
-            writer.write("  python3 /usr/bin/mic_streamer.py\n");
-            writer.write(") > /tmp/audio_bridge.log 2>&1 &\n");
-            
-            writer.write("echo 'Attempting to run container command...'\n");
-            // Execute the container command
-            writer.write("exec " + containerCommand + "\n");
-            
-            writer.close();
-            
-            // Give the launcher script execution permissions
-            FileUtils.chmod(launcherScript, 0755);
-            
-            // Tell Winlator to run our script
-            command = "/usr/bin/wine_mic_launcher.sh";
-            Log.d("MicBridgeDebug", "Successfully targeted wrapper script: " + command);
-            
-        } catch (Exception e) {
-            Log.e("MicBridgeDebug", "Failed to write diagnostic launcher script", e);
-        }
-        // ---> END OF DIAGNOSTIC INJECTION <---
+        
 
         // **Maybe remove this: Set execute permissions for box64 if necessary (Glibc/Proot artifact)
         File box64File = new File(rootDir, "/usr/bin/box64");
