@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import com.winlator.star.ui.XServerDialogState
 import com.winlator.star.ui.XServerDialogState.ControllerToastData
@@ -86,16 +87,13 @@ private const val TOAST_SCALE = 0.75f
 // --- Palette (mockup 1:1) ---
 private val CardTop     = Color(0xF7131A24) // rgba(19,26,36,.97)
 private val CardBottom  = Color(0xF70E141C) // rgba(14,19,27,.97)
-private val Accent      = Color(0xFF5FC7DD)
-private val AccentGlow  = Color(0x595FC7DD) // rgba(95,199,221,.35)
-private val Stroke55    = Color(0x8C5FC7DD) // rgba(95,199,221,.55)
+// Accent-role colors (border, glow, top-rail, dot, icon tint, P1 badge, countdown) are derived from
+// MaterialTheme.colorScheme.primary at render time so the toast follows the app theme. Only the
+// theme-independent tokens live here as constants.
 private val StrokeSoft  = Color(0x12FFFFFF) // rgba(255,255,255,.07)
 private val Txt         = Color(0xFFE9F1F5)
 private val TxtDim      = Color(0xFF8EA0AD)
 private val RowBg       = Color(0xFF0E141C) // card-2
-private val IconBorder  = Color(0x405FC7DD) // rgba(95,199,221,.25)
-private val IconTintHi  = Color(0x2E5FC7DD) // rgba(95,199,221,.18)
-private val IconTintLo  = Color(0x0A5FC7DD) // rgba(95,199,221,.04)
 private val BadgeText   = Color(0xFF06121A)
 private val P2Amber     = Color(0xFFC8944E)
 private val P3Green     = Color(0xFF7EC46B)
@@ -172,6 +170,9 @@ private fun ControllerToastCard(data: ControllerToastData, onFinished: () -> Uni
 
 @Composable
 private fun ToastBody(data: ControllerToastData, progress: Float) {
+    val accent = MaterialTheme.colorScheme.primary       // follow the app theme accent
+    val accentGlow = accent.copy(alpha = 0.35f)
+    val stroke55 = accent.copy(alpha = 0.55f)
     Column(
         Modifier
             .width(TOAST_WIDTH_DP.dp)
@@ -180,19 +181,19 @@ private fun ToastBody(data: ControllerToastData, progress: Float) {
                 shadowElevation = 16.dp.toPx()
                 shape = RoundedCornerShape(16.dp)
                 clip = false
-                ambientShadowColor = AccentGlow
-                spotShadowColor = AccentGlow
+                ambientShadowColor = accentGlow
+                spotShadowColor = accentGlow
             }
             .clip(RoundedCornerShape(16.dp))
             .background(Brush.verticalGradient(listOf(CardTop, CardBottom)))
-            .border(1.dp, Stroke55, RoundedCornerShape(16.dp))
+            .border(1.dp, stroke55, RoundedCornerShape(16.dp))
     ) {
-        // 3px accent top-rail (cyan → transparent).
+        // 3px accent top-rail (accent → transparent).
         Box(
             Modifier
                 .fillMaxWidth()
                 .height(3.dp)
-                .background(Brush.horizontalGradient(listOf(Accent, Color.Transparent), endX = 850f))
+                .background(Brush.horizontalGradient(listOf(accent, Color.Transparent), endX = 850f))
         )
 
         // Header: accent dot + bold uppercase title + right-aligned dim sub-label.
@@ -204,7 +205,7 @@ private fun ToastBody(data: ControllerToastData, progress: Float) {
                 Modifier
                     .size(7.dp)
                     .clip(RoundedCornerShape(50))
-                    .background(Accent)
+                    .background(accent)
             )
             Spacer(Modifier.width(8.dp))
             Text(
@@ -247,14 +248,20 @@ private fun ToastBody(data: ControllerToastData, progress: Float) {
                     scaleX = progress
                     transformOrigin = TransformOrigin(0f, 0.5f)
                 }
-                .background(Accent.copy(alpha = 0.5f))
+                .background(accent.copy(alpha = 0.5f))
         )
     }
 }
 
 @Composable
 private fun DeviceRow(row: ControllerToastRow) {
-    val newBorder = if (row.isNew) Stroke55 else StrokeSoft
+    val accent = MaterialTheme.colorScheme.primary       // follow the app theme accent
+    val accentGlow = accent.copy(alpha = 0.35f)
+    val stroke55 = accent.copy(alpha = 0.55f)
+    val iconBorder = accent.copy(alpha = 0.25f)
+    val iconTintHi = accent.copy(alpha = 0.18f)
+    val iconTintLo = accent.copy(alpha = 0.04f)
+    val newBorder = if (row.isNew) stroke55 else StrokeSoft
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -266,7 +273,7 @@ private fun DeviceRow(row: ControllerToastRow) {
                 if (row.isNew) Modifier.drawWithContent {
                     drawContent()
                     drawRoundRect(
-                        color = AccentGlow,
+                        color = accentGlow,
                         cornerRadius = androidx.compose.ui.geometry.CornerRadius(11.dp.toPx()),
                         style = Stroke(width = 1.dp.toPx())
                     )
@@ -283,11 +290,11 @@ private fun DeviceRow(row: ControllerToastRow) {
                 .clip(RoundedCornerShape(10.dp))
                 .background(
                     Brush.radialGradient(
-                        colors = listOf(IconTintHi, IconTintLo),
+                        colors = listOf(iconTintHi, iconTintLo),
                         center = Offset(0.35f * 38f, 0.30f * 38f)
                     )
                 )
-                .border(1.dp, IconBorder, RoundedCornerShape(10.dp))
+                .border(1.dp, iconBorder, RoundedCornerShape(10.dp))
         ) {
             TypeIcon(row.icon, Modifier.size(22.dp))
         }
@@ -310,7 +317,7 @@ private fun DeviceRow(row: ControllerToastRow) {
                     Spacer(Modifier.width(6.dp))
                     Text(
                         text = "NEW",
-                        color = Accent,
+                        color = accent,
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 0.6.sp
@@ -328,17 +335,22 @@ private fun DeviceRow(row: ControllerToastRow) {
 
 @Composable
 private fun Badge(row: ControllerToastRow) {
+    val accent = MaterialTheme.colorScheme.primary       // follow the app theme accent
+    val onAccent = MaterialTheme.colorScheme.onPrimary
+    val stroke55 = accent.copy(alpha = 0.55f)
     when (row.badge) {
         ToastBadgeType.PLAYER -> {
+            // P1 follows the theme accent; P2-P4 keep distinct player colors so slots stay tellable.
             val bg = when (row.slot) {
                 1 -> P2Amber
                 2 -> P3Green
                 3 -> P4Purple
-                else -> Accent
+                else -> accent
             }
-            SolidBadge("P${row.slot + 1}", bg, BadgeText)
+            val fg = if (row.slot == 0) onAccent else BadgeText
+            SolidBadge("P${row.slot + 1}", bg, fg)
         }
-        ToastBadgeType.SHARE -> OutlineBadge("P${row.slot + 1} · share", Accent, Stroke55)
+        ToastBadgeType.SHARE -> OutlineBadge("P${row.slot + 1} · share", accent, stroke55)
         ToastBadgeType.IGNORED -> OutlineBadge("Ignored", TxtDim, StrokeSoft)
         ToastBadgeType.DETECTED -> OutlineBadge("Detected", TxtDim, StrokeSoft)
     }
@@ -346,14 +358,15 @@ private fun Badge(row: ControllerToastRow) {
 
 @Composable
 private fun SolidBadge(text: String, bg: Color, textColor: Color) {
+    val glow = bg.copy(alpha = 0.35f) // glow matches the badge color
     Box(
         Modifier
             .graphicsLayer {
                 shadowElevation = 6.dp.toPx()
                 shape = RoundedCornerShape(50)
                 clip = false
-                ambientShadowColor = AccentGlow
-                spotShadowColor = AccentGlow
+                ambientShadowColor = glow
+                spotShadowColor = glow
             }
             .clip(RoundedCornerShape(50))
             .background(bg)
@@ -384,6 +397,7 @@ private const val TOUCH_PATH =
 
 @Composable
 private fun TypeIcon(type: ToastIconType, modifier: Modifier) {
+    val accent = MaterialTheme.colorScheme.primary // follow the app theme accent
     Canvas(modifier) {
         val s = size.minDimension / 24f
         val w = 1.8f // stroke width in the 24-unit space
@@ -393,34 +407,34 @@ private fun TypeIcon(type: ToastIconType, modifier: Modifier) {
                 ToastIconType.CONTROLLER -> {
                     // Capsule body (rx = half height → rounded ends).
                     drawRoundRect(
-                        color = Accent,
+                        color = accent,
                         topLeft = Offset(2f, 7f),
                         size = androidx.compose.ui.geometry.Size(20f, 10f),
                         cornerRadius = androidx.compose.ui.geometry.CornerRadius(5f, 5f),
                         style = stroke
                     )
-                    drawLine(Accent, Offset(7f, 10f), Offset(7f, 14f), w, StrokeCap.Round)
-                    drawLine(Accent, Offset(5f, 12f), Offset(9f, 12f), w, StrokeCap.Round)
-                    drawCircle(Accent, 0.9f, Offset(16f, 11f), style = stroke)
-                    drawCircle(Accent, 0.9f, Offset(18.5f, 13f), style = stroke)
+                    drawLine(accent, Offset(7f, 10f), Offset(7f, 14f), w, StrokeCap.Round)
+                    drawLine(accent, Offset(5f, 12f), Offset(9f, 12f), w, StrokeCap.Round)
+                    drawCircle(accent, 0.9f, Offset(16f, 11f), style = stroke)
+                    drawCircle(accent, 0.9f, Offset(18.5f, 13f), style = stroke)
                 }
                 ToastIconType.TOUCH -> {
                     val path = PathParser().parsePathString(TOUCH_PATH).toPath()
-                    drawPath(path, Accent, style = stroke)
+                    drawPath(path, accent, style = stroke)
                 }
                 ToastIconType.MOUSE -> {
                     drawRoundRect(
-                        color = Accent,
+                        color = accent,
                         topLeft = Offset(6f, 3f),
                         size = androidx.compose.ui.geometry.Size(12f, 18f),
                         cornerRadius = androidx.compose.ui.geometry.CornerRadius(6f, 6f),
                         style = stroke
                     )
-                    drawLine(Accent, Offset(12f, 7f), Offset(12f, 11f), w, StrokeCap.Round)
+                    drawLine(accent, Offset(12f, 7f), Offset(12f, 11f), w, StrokeCap.Round)
                 }
                 ToastIconType.KEYBOARD -> {
                     drawRoundRect(
-                        color = Accent,
+                        color = accent,
                         topLeft = Offset(2.5f, 6f),
                         size = androidx.compose.ui.geometry.Size(19f, 12f),
                         cornerRadius = androidx.compose.ui.geometry.CornerRadius(2f, 2f),
@@ -428,10 +442,10 @@ private fun TypeIcon(type: ToastIconType, modifier: Modifier) {
                     )
                     // Top key-row: five dots.
                     for (x in intArrayOf(6, 9, 12, 15, 18)) {
-                        drawCircle(Accent, 0.35f, Offset(x.toFloat(), 9.5f))
+                        drawCircle(accent, 0.35f, Offset(x.toFloat(), 9.5f))
                     }
                     // Spacebar.
-                    drawLine(Accent, Offset(8f, 14f), Offset(16f, 14f), w, StrokeCap.Round)
+                    drawLine(accent, Offset(8f, 14f), Offset(16f, 14f), w, StrokeCap.Round)
                 }
             }
         }
