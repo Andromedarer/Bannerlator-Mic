@@ -34,6 +34,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Held only while a depot download is running (SteamDepotDownloader) so the aggressive OEM
          task-killer can't kill the process mid-download and cause a LogonSessionReplaced churn. -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
