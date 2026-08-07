@@ -218,6 +218,11 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     var vibrationMode by mutableStateOf(Container.VIBRATION_MODE_DEFAULT)
     var vibrationIntensity by mutableStateOf(Container.VIBRATION_INTENSITY_DEFAULT)
 
+    // Manual controller->player-slot pins for this container (Player Slots section). Opaque JSON string
+    // (descriptor -> slot), the exact schema the in-game Players tab + launch pre-assignment use — the
+    // editor UI mutates it only through WinHandler.parse/buildSlotOverridesJson. "{}" = all auto.
+    var controllerSlotOverridesJson by mutableStateOf("{}")
+
     // Gyro (motion aim), per-container. Target: 0=Right stick 1=Left stick 2=Mouse; activator is the
     // button that gates the tilt (4 = always on), with the activation mode deciding whether that
     // button is held or tapped to latch (0=Hold 1=Toggle). Enabled/target/activator/mode/sensitivity/
@@ -524,6 +529,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         }
         vibrationMode      = seed?.getVibrationMode() ?: Container.VIBRATION_MODE_DEFAULT
         vibrationIntensity = seed?.getVibrationIntensity() ?: Container.VIBRATION_INTENSITY_DEFAULT
+        controllerSlotOverridesJson = seed?.getControllerSlotOverrides() ?: "{}"
 
         gyroEnabled     = seed?.isGyroEnabled() ?: Container.GYRO_ENABLED_DEFAULT
         gyroTarget      = seed?.getGyroTarget() ?: Container.GYRO_TARGET_DEFAULT
@@ -900,6 +906,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             c.setExclusiveXInput(exclusiveXInput)
             c.setVibrationMode(vibrationMode)
             c.setVibrationIntensity(vibrationIntensity)
+            c.setControllerSlotOverrides(controllerSlotOverridesJson)
             c.setGyroEnabled(gyroEnabled)
             c.setGyroTarget(gyroTarget)
             c.setGyroActivator(gyroActivator)
@@ -954,6 +961,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
                     created.setLsfgAutoEnable(lsfgAutoEnable)
                     created.setVibrationMode(vibrationMode)
                     created.setVibrationIntensity(vibrationIntensity)
+                    created.setControllerSlotOverrides(controllerSlotOverridesJson)
                     // Same set as the edit path above — a new container must not silently drop these.
                     created.setGyroEnabled(gyroEnabled)
                     created.setGyroTarget(gyroTarget)
@@ -1089,6 +1097,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             template.setLsfgAutoEnable(lsfgAutoEnable)
             template.setVibrationMode(vibrationMode)
             template.setVibrationIntensity(vibrationIntensity)
+            template.setControllerSlotOverrides(controllerSlotOverridesJson)
             template.setGyroEnabled(gyroEnabled)
             template.setGyroTarget(gyroTarget)
             template.setGyroActivator(gyroActivator)

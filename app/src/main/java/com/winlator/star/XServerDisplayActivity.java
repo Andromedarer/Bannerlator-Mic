@@ -5842,32 +5842,14 @@ return true;
         }
     }
 
+    // Delegate to the shared schema helpers on WinHandler so the in-game Players tab, launch
+    // pre-assign, and the out-of-game container/shortcut editors all read/write ONE JSON format.
     private java.util.Map<String, Integer> parseSlotOverrides(String json) {
-        java.util.Map<String, Integer> map = new java.util.HashMap<>();
-        if (json == null || json.isEmpty()) return map;
-        try {
-            org.json.JSONObject obj = new org.json.JSONObject(json);
-            java.util.Iterator<String> keys = obj.keys();
-            while (keys.hasNext()) {
-                String key = keys.next();
-                map.put(key, obj.getInt(key));
-            }
-        } catch (org.json.JSONException e) {
-            android.util.Log.w("XServerDisplayActivity", "Bad controllerSlotOverrides JSON: " + json, e);
-        }
-        return map;
+        return com.winlator.star.winhandler.WinHandler.parseSlotOverridesJson(json);
     }
 
     private String buildSlotOverridesJson() {
-        org.json.JSONObject obj = new org.json.JSONObject();
-        try {
-            for (java.util.Map.Entry<String, Integer> e : winHandler.getManualSlotOverrides().entrySet()) {
-                obj.put(e.getKey(), e.getValue());
-            }
-        } catch (org.json.JSONException e) {
-            android.util.Log.w("XServerDisplayActivity", "Failed to serialize controllerSlotOverrides", e);
-        }
-        return obj.toString();
+        return com.winlator.star.winhandler.WinHandler.buildSlotOverridesJson(winHandler.getManualSlotOverrides());
     }
 
     // bionic-fg interpolation model for this launch: per-game override else the container value.

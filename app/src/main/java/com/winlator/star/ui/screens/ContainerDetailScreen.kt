@@ -90,6 +90,7 @@ import com.winlator.star.widget.CPUListView
 import com.winlator.star.ui.components.CollapsibleRail
 import com.winlator.star.ui.components.ContainerGlossarySheet
 import com.winlator.star.ui.components.EnvVarsEditor
+import com.winlator.star.ui.components.PlayerSlotsEditor
 import com.winlator.star.ui.components.RailItem
 import com.winlator.star.ui.components.RailLink
 import com.winlator.star.ui.components.RailSection
@@ -1775,6 +1776,16 @@ private fun AdvancedTab(
                     valueRange = 0f..100f, steps = 99
                 )
             }
+        }
+
+        // Player Slots section — manual controller->player-slot pins that the launch pre-assignment
+        // applies. Same JSON schema and editor the in-game "Players" drawer tab uses, but here it's a
+        // saved default (applied on next launch), not a live reassignment.
+        SectionBox(title = "Player Slots") {
+            PlayerSlotsEditor(
+                savedOverridesJson = viewModel.controllerSlotOverridesJson,
+                onOverridesChange = { viewModel.controllerSlotOverridesJson = it },
+            )
         }
 
         // Gyro (motion aim) section — the default a session (and a new shortcut) launches with.

@@ -1838,6 +1838,48 @@ public class WinHandler {
         return new HashMap<>(manualSlotOverrides);
     }
 
+    // ---- Shared controller-slot-overrides JSON schema (SINGLE source of truth) ----
+    // The persisted format is a flat JSON object: descriptor -> desired slot int, where the key is
+    // device.getDescriptor() for a physical pad (== ExternalController.getId(), the SAME key the
+    // launch pre-assign and the in-game Players tab look up) or OSC_DESCRIPTOR for the on-screen pad,
+    // and the value is 0..MAX_CONTROLLERS-1 (a player-slot pin), SLOT_IGNORE (never take a slot), or
+    // absent (auto/FCFS). Every read/write site MUST go through these two helpers so the in-game tab,
+    // launch pre-assign, and the out-of-game container/shortcut editors all agree on one format.
+
+    /** Parse a slot-overrides JSON object string into a descriptor->slot map. Empty/null/bad JSON
+     *  yields an empty map (all-auto). */
+    public static Map<String, Integer> parseSlotOverridesJson(String json) {
+        Map<String, Integer> map = new HashMap<>();
+        if (json == null || json.isEmpty()) return map;
+        try {
+            org.json.JSONObject obj = new org.json.JSONObject(json);
+            java.util.Iterator<String> keys = obj.keys();
+            while (keys.hasNext()) {
+                String key = keys.next();
+                map.put(key, obj.getInt(key));
+            }
+        } catch (org.json.JSONException e) {
+            Log.w("WinHandler", "Bad controllerSlotOverrides JSON: " + json, e);
+        }
+        return map;
+    }
+
+    /** Serialize a descriptor->slot map back to the canonical JSON object string. */
+    public static String buildSlotOverridesJson(Map<String, Integer> overrides) {
+        org.json.JSONObject obj = new org.json.JSONObject();
+        if (overrides != null) {
+            try {
+                for (Map.Entry<String, Integer> e : overrides.entrySet()) {
+                    if (e.getKey() != null && e.getValue() != null)
+                        obj.put(e.getKey(), (int) e.getValue());
+                }
+            } catch (org.json.JSONException e) {
+                Log.w("WinHandler", "Failed to serialize controllerSlotOverrides", e);
+            }
+        }
+        return obj.toString();
+    }
+
     /** Snapshot of every device the Players sub-tab should list: the OSC virtual pad (always), every
      *  connected game controller, and any device currently holding a slot (so a mis-slotted device can
      *  be freed). Sibling sub-devices are de-duplicated by descriptor. Main-thread only. */

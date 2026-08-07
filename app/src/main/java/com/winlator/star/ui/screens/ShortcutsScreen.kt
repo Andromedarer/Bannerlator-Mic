@@ -249,6 +249,7 @@ import com.winlator.star.ui.theme.SurfaceVariant
 import com.winlator.star.ui.theme.SurfaceVariant as SurfaceVariantColor
 import com.winlator.star.widget.CPUListView
 import com.winlator.star.ui.components.EnvVarsEditor
+import com.winlator.star.ui.components.PlayerSlotsEditor
 import com.winlator.star.winhandler.WinHandler
 import android.net.Uri
 import android.os.Build
@@ -5665,6 +5666,12 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
     var disabledXInput by remember { mutableStateOf(shortcut.getExtra("disableXinput", "0") == "1") }
     var simTouchScreen by remember { mutableStateOf(shortcut.getExtra("simTouchScreen", "0") == "1") }
 
+    // Per-game controller->player-slot pins. EMPTY string = no shortcut override (inherit the container's
+    // Player Slots); any non-empty value means this shortcut OWNS the pins. Same JSON schema (and editor)
+    // as the container editor and the in-game Players tab — mutated only via WinHandler.parse/build. The
+    // launch resolver reads this extra first, else the container's (resolvedControllerSlotOverridesJson).
+    var controllerSlotOverridesJson by remember { mutableStateOf(shortcut.getExtra("controllerSlotOverrides", "")) }
+
     // Num controllers
     val numControllersEntries = remember { res.getStringArray(R.array.num_controllers_entries).toList() }
     var selectedNumControllers by remember {
@@ -5948,6 +5955,8 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
             putExtra("exclusiveXInput", if (exclusiveXInput) "1" else "0")
             putExtra("disableXinput", if (disabledXInput) "1" else null)
             putExtra("simTouchScreen", if (simTouchScreen) "1" else "0")
+            // Empty = clear the extra so the game re-inherits the container's Player Slots.
+            putExtra("controllerSlotOverrides", controllerSlotOverridesJson.ifEmpty { null })
             putExtra("numControllers", numCtrl.toString())
             putExtra("box64Version", selectedBox64Version)
             putExtra("box64Preset", b64PresetId)
@@ -6560,6 +6569,31 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                             options = numControllersEntries,
                             selected = selectedNumControllers,
                             onSelect = { selectedNumControllers = it }
+                        )
+
+                        // Player Slots (per-game override). Empty override = inherit the container's
+                        // Player Slots; touching any slot makes this shortcut own the pins. The "Use
+                        // container default" button clears the override so it re-inherits. Editing an
+                        // empty override starts from an all-auto ("{}") view.
+                        Spacer(Modifier.height(12.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Player Slots", modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium)
+                            if (controllerSlotOverridesJson.isNotEmpty()) {
+                                TextButton(onClick = { controllerSlotOverridesJson = "" }) {
+                                    Text("Use container default")
+                                }
+                            }
+                        }
+                        if (controllerSlotOverridesJson.isEmpty()) {
+                            Text(
+                                "Inheriting the container's Player Slots. Pin a controller below to set a per-game override.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        PlayerSlotsEditor(
+                            savedOverridesJson = controllerSlotOverridesJson.ifEmpty { "{}" },
+                            onOverridesChange = { controllerSlotOverridesJson = it },
                         )
 
                         // Gyro (motion aim) per-game override. Deadzone/smoothing are deliberately
