@@ -503,7 +503,7 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         if (shortcut != null)
             emulator = shortcut.getExtra("emulator", container.getEmulator());
 
-        // Construct the command without Box64 to the Wine executable
+       // Construct the command without Box64 to the Wine executable
         String command = "";
         String overriddenCommand = envVars.get("GUEST_PROGRAM_LAUNCHER_COMMAND");
         if (!overriddenCommand.isEmpty()) {
@@ -522,6 +522,15 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
             } else
                 command = imageFs.getBinDir() + "/box64 " + guestExecutable;
         }
+
+        // ---> START OF MIC INJECTION <---
+        String micBridgeScript = "pactl load-module module-null-sink sink_name=VirtualMic ; " + 
+                                 "pactl set-default-source VirtualMic.monitor ; " + 
+                                 "nohup sh -c 'nc 127.0.0.1 4711 | pacat --playback --device=VirtualMic --format=s16le --rate=44100 --channels=1' >/dev/null 2>&1 & ";
+                                 
+        // Prepend our PulseAudio mic setup so it executes right before Wine
+        command = micBridgeScript + command;
+        // ---> END OF MIC INJECTION <---
 
         // **Maybe remove this: Set execute permissions for box64 if necessary (Glibc/Proot artifact)
         File box64File = new File(rootDir, "/usr/bin/box64");
