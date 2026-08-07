@@ -638,10 +638,32 @@ internal fun VulkanSettingsDialog(
                     )
                 }
 
-                // NOTE: the "Renderer Driver" (System/Turnip) dropdown was removed — it was vestigial:
-                // its value (driverId) was stored + round-tripped but NEVER read at runtime (the actual
-                // driver is the top-level "Graphics Driver" setting). The `driverId` config field is
-                // still preserved below so existing containers round-trip byte-identically.
+                // Renderer (compositor) driver: which Vulkan driver the present layer itself runs on —
+                // "System" (Android's own driver, the safe default) or an installed Turnip. This is the
+                // compositor, NOT where your game renders (that's the top-level Graphics Driver). Applied
+                // at launch by XServerDisplayActivity (VulkanRenderer.setDriverInfo before nativeInit).
+                // Vulkan-renderer only; a no-op on SurfaceFlinger/OpenGL. Options = System + installed
+                // adrenotools drivers; default stays System because a Turnip compositor can black-screen
+                // on builds whose WSI doesn't support the surface.
+                val vkCtx = androidx.compose.ui.platform.LocalContext.current
+                val rendererDriverOptions = remember {
+                    val installed = try {
+                        com.winlator.star.contents.AdrenotoolsManager(vkCtx).enumarateInstalledDrivers()
+                    } catch (e: Exception) { arrayListOf<String>() }
+                    (listOf("system") + installed).distinct()
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LabeledDropdown(
+                        label = stringResource(R.string.renderer_driver_id),
+                        options = rendererDriverOptions,
+                        selectedOption = if (rendererDriverOptions.contains(driverId)) driverId else "system",
+                        onSelect = { driverId = it },
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = { helpRes = R.string.help_renderer_driver }) {
+                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                    }
+                }
 
                 // Filter mode (Nearest/Linear) is no longer edited here: the in-game
                 // drawer's "Scaling mode" picker is the single source of truth for

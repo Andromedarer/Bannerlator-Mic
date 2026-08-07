@@ -213,6 +213,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private ControlsProfile inGameEditorPreviousProfile;
     private Shortcut shortcut;
     private String graphicsDriver = Container.DEFAULT_GRAPHICS_DRIVER;
+    // Which Vulkan driver the host compositor/present layer runs on ("system" = Android's own driver,
+    // or an installed adrenotools Turnip). Separate from graphicsDriver (which the guest game renders
+    // through). Default "system" — a Turnip compositor can black-screen on builds whose WSI doesn't
+    // support the surface, so it's opt-in. Applied via VulkanRenderer.setDriverInfo before nativeInit.
+    private String rendererDriverId = "system";
     private HashMap<String, String> graphicsDriverConfig;
     private String audioDriver = Container.DEFAULT_AUDIO_DRIVER;
     private String emulator = Container.DEFAULT_EMULATOR;
@@ -1498,6 +1503,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
 
         graphicsDriver = container.getGraphicsDriver();
+        rendererDriverId = container.getRendererDriverId();
         String graphicsDriverConfig = container.getGraphicsDriverConfig();
         audioDriver = container.getAudioDriver();
         emulator = container.getEmulator();
@@ -1515,6 +1521,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         if (shortcut != null) {
             graphicsDriver = shortcut.getExtra("graphicsDriver", container.getGraphicsDriver());
+            rendererDriverId = shortcut.getExtra("rendererDriverId", container.getRendererDriverId());
             graphicsDriverConfig = shortcut.getExtra("graphicsDriverConfig", container.getGraphicsDriverConfig());
             audioDriver = shortcut.getExtra("audioDriver", container.getAudioDriver());
             emulator = shortcut.getExtra("emulator", container.getEmulator());
@@ -3446,6 +3453,26 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (useVulkan && renderer instanceof com.winlator.star.renderer.vulkan.VulkanRenderer) {
             com.winlator.star.renderer.vulkan.VulkanRenderer vkRenderer =
                 (com.winlator.star.renderer.vulkan.VulkanRenderer) renderer;
+            // Compositor (present-layer) Vulkan driver. "system"/empty => leave driverPath null so
+            // nativeInit falls back to the system libvulkan (the safe default). An installed Turnip =>
+            // point the compositor at it. Vulkan-renderer only (SurfaceFlinger/OpenGL composite through
+            // the system path and have no ICD to swap). MUST run before the async surface nativeInit.
+            if (rendererDriverId != null && !rendererDriverId.isEmpty()
+                    && !rendererDriverId.equalsIgnoreCase("system")) {
+                try {
+                    AdrenotoolsManager adm = new AdrenotoolsManager(this);
+                    if (adm.enumarateInstalledDrivers().contains(rendererDriverId)) {
+                        String rp = adm.getDriverPath(rendererDriverId);
+                        String rl = adm.getLibraryName(rendererDriverId);
+                        if (rl != null && !rl.isEmpty()) {
+                            vkRenderer.setDriverInfo(rp, rl, getApplicationInfo().nativeLibraryDir);
+                            Log.d("RendererDriver", "compositor driver = " + rendererDriverId + " (" + rl + ")");
+                        }
+                    }
+                } catch (Exception e) {
+                    Log.w("RendererDriver", "failed to apply renderer driver '" + rendererDriverId + "', staying on system", e);
+                }
+            }
             // Present mode (with the mailbox-while-FG override) AND the drawer's live selector seed both
             // flow through the single choke point applyEffectivePresentMode() — see that method.
             applyEffectivePresentMode();
