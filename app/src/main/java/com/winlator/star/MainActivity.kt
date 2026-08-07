@@ -3,7 +3,9 @@ package com.winlator.star
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.widget.Toast
 import android.graphics.Bitmap
+import androidx.core.app.ActivityCompat
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -91,6 +93,46 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 class MainActivity : AppCompatActivity() {
+
+    private val RECORD_AUDIO_PERMISSION_CODE = 1001
+    private var micCaptureThread: MicCaptureThread? = null
+    
+    private fun checkAndRequestMicPermission() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            // Permission is not granted, request it
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.RECORD_AUDIO),
+                RECORD_AUDIO_PERMISSION_CODE
+            )
+        } else {
+            // Permission already granted
+            initializeMicrophoneBridge()
+        }
+    }
+    
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == RECORD_AUDIO_PERMISSION_CODE) {
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                initializeMicrophoneBridge()
+            } else {
+                Toast.makeText(this, "Microphone permission is required for audio input.", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    
+    private fun initializeMicrophoneBridge() {
+        if (micCaptureThread == null) {
+            micCaptureThread = MicCaptureThread()
+            micCaptureThread?.start()
+        }
+    }
+    
+    override fun onDestroy() {
+        super.onDestroy()
+        micCaptureThread?.stopCapture()
+    }
 
     companion object {
         const val PERMISSION_WRITE_EXTERNAL_STORAGE_REQUEST_CODE: Byte = 1
@@ -249,6 +291,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+        checkAndRequestMicPermission()
     }
 
     private fun launchStore(screen: Screen) {
