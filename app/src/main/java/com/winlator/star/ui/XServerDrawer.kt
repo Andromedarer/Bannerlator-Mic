@@ -3239,7 +3239,16 @@ private fun RootPerformanceSection(state: XServerDrawerState) {
 
     if (granted) {
         Spacer(Modifier.height(6.dp))
-        AdvancedActionRow("Free memory now", R.drawable.icon_task_manager) { state.onFreeMemory?.run() }
+        // TIER 1 — light, honest label. Drops file caches; the system reclaims cache automatically.
+        AdvancedActionRow(
+            "Drop file caches", R.drawable.icon_task_manager,
+            subtitle = "Frees cached files. Little visible RAM; the system reclaims cache automatically.",
+        ) { state.onFreeMemory?.run() }
+        // TIER 2 — the real RAM free (root-only). `am kill-all` never touches the running game/system.
+        AdvancedActionRow(
+            "Deep clean (free app memory)", R.drawable.icon_task_manager,
+            subtitle = "Force-closes background apps to free real memory. Won't touch your game or system.",
+        ) { state.onDeepClean?.run() }
     }
 
     // Temperature watchdog (device-wide; shared control block, identical + synced with App Settings).
@@ -3267,7 +3276,12 @@ private fun RootToggleRow(
 }
 
 @Composable
-private fun AdvancedActionRow(label: String, iconRes: Int, onClick: () -> Unit) {
+private fun AdvancedActionRow(
+    label: String,
+    iconRes: Int,
+    subtitle: String? = null,
+    onClick: () -> Unit,
+) {
     val accent = MaterialTheme.colorScheme.primary
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -3285,7 +3299,16 @@ private fun AdvancedActionRow(label: String, iconRes: Int, onClick: () -> Unit) 
             modifier = Modifier.size(20.dp),
         )
         Spacer(Modifier.width(10.dp))
-        Text(label, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, color = MaterialTheme.colorScheme.onSurface)
+            if (subtitle != null) {
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
 }
 
