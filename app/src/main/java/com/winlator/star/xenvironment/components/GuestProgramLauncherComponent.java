@@ -524,9 +524,10 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         }
 
         // ---> START OF MIC INJECTION <---
-        String micBridgeScript = "pactl load-module module-null-sink sink_name=VirtualMic ; " + 
+        String micBridgeScript = "(sleep 4 && " +
+                                 "pactl load-module module-null-sink sink_name=VirtualMic ; " + 
                                  "pactl set-default-source VirtualMic.monitor ; " + 
-                                 "nohup sh -c 'nc 127.0.0.1 4711 | pacat --playback --device=VirtualMic --format=s16le --rate=44100 --channels=1' >/dev/null 2>&1 & ";
+                                 "nohup sh -c 'nc 127.0.0.1 4711 | pacat --playback --device=VirtualMic --format=s16le --rate=44100 --channels=1' >/dev/null 2>&1) & ";
                                  
         // Prepend our PulseAudio mic setup so it executes right before Wine
         command = micBridgeScript + command;
