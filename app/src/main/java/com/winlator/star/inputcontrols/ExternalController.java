@@ -10,6 +10,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
+import java.util.Locale;
 
 public class ExternalController {
     public static final byte IDX_BUTTON_A = 0;
@@ -227,10 +228,33 @@ public class ExternalController {
 
     public static boolean isGameController(InputDevice device) {
         if (device == null) return false;
+        // Fingerprint-reader / uinput daemons advertise gamepad-like sources on some phones and
+        // would otherwise steal slot 0 from the real pad. Reject them by name before the source
+        // check (uinput-fpc, goodix_fp, and the generic uinput- prefix cover the known offenders).
+        String name = device.getName();
+        if (name != null) {
+            String lowerName = name.toLowerCase();
+            if (lowerName.contains("uinput-fpc") || lowerName.contains("goodix_fp")
+                    || lowerName.contains("uinput-")) {
+                return false;
+            }
+        }
         int sources = device.getSources();
         // Exclude devices with SOURCE_MOUSE from being considered controllers
         return !device.isVirtual() && ((sources & InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD ||
                 ((sources & InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK && (sources & InputDevice.SOURCE_MOUSE) == 0));
+    }
+
+    /**
+     * Stable physical identity for a device, used to order controllers deterministically at
+     * startup. Prefers the descriptor; falls back to name:vendor:product when a device reports
+     * no descriptor (some cheap pads), so two such pads still sort consistently.
+     */
+    public static String getPhysicalDeviceIdentifier(InputDevice device) {
+        if (device == null) return "";
+        String descriptor = device.getDescriptor();
+        if (descriptor != null && !descriptor.isEmpty()) return descriptor;
+        return String.format(Locale.US, "%s:%d:%d", device.getName(), device.getVendorId(), device.getProductId());
     }
 
 

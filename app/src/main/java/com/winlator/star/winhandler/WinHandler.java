@@ -21,6 +21,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.hardware.input.InputManager;
 import android.os.Handler;
+import android.os.Looper;
 import android.os.SystemClock;
 import android.net.LocalServerSocket;
 import android.net.LocalSocket;
@@ -37,12 +38,15 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.Iterator;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -74,9 +78,30 @@ public class WinHandler {
     private static final int MAX_CONTROLLERS = 4;
     private static final int OSC_DEVICE_ID = -1;
     private FakeInputWriter[] writers = new FakeInputWriter[MAX_CONTROLLERS];
-    private Map<Integer, Integer> deviceToSlot = new HashMap<>();
+    // ConcurrentHashMap: the vibration thread iterates this to resolve a slot's owning
+    // device while the input/hotplug path (main thread) mutates it — avoid a CME.
+    private Map<Integer, Integer> deviceToSlot = new ConcurrentHashMap<>();
+    // Descriptor-keyed slot identity for PHYSICAL controllers. The Android deviceId is
+    // transient (it changes on every reconnect and each sub-device of one physical pad
+    // — gamepad + touchpad + motion — gets its own id), so slots are keyed on the stable
+    // device descriptor instead. descriptorToSlot maps a physical controller to its slot;
+    // deviceToDescriptor maps each live deviceId back to its descriptor so releaseSlot can
+    // tell whether a sibling sub-device still holds the slot. OSC has no descriptor and is
+    // never entered here — it keeps the deviceId(-1)→slot mapping in deviceToSlot only.
+    private Map<String, Integer> descriptorToSlot = new HashMap<>();
+    private Map<Integer, String> deviceToDescriptor = new HashMap<>();
     private Set<Integer> usedSlots = new HashSet<>();
     private String fakeInputBasePath;
+
+    // Physical hot-plug debounce. Android churns remove/add events during Bluetooth flaps
+    // and sub-device re-enumeration; a real unplug stays gone and is torn down after the
+    // delay, while a quick reconnect re-seats onto the SAME slot (via descriptorToSlot)
+    // before the writer is ever destroyed, so the guest never sees a disconnect. Runs on
+    // the main looper — the InputDeviceListener is registered with a null Handler, so its
+    // callbacks land on the main thread too.
+    private static final long PHYSICAL_DISCONNECT_DEBOUNCE_MS = 400;
+    private final Handler inputHandler = new Handler(Looper.getMainLooper());
+    private final Map<Integer, Runnable> pendingDeviceReleases = new HashMap<>();
     private LocalServerSocket vibrationServer;
     private volatile boolean vibrationRunning = false;
     private boolean[] vibrationEnabledSlots = new boolean[MAX_CONTROLLERS]; // per-slot vibration toggle
@@ -231,17 +256,32 @@ public class WinHandler {
         this.inputDeviceListener = new InputManager.InputDeviceListener() {
             @Override
             public void onInputDeviceAdded(int deviceId) {
+                // A pad appeared (or reconnected). Cancel any pending release for this id
+                // first so a fast reconnect re-seats its slot instead of tearing it down,
+                // then assign it a slot up front so the guest sees it without waiting for
+                // the first input event.
+                cancelPendingDeviceRelease(deviceId);
+                assignConnectedDeviceIfPossible(deviceId, "hotplug");
             }
 
             @Override
             public void onInputDeviceRemoved(int deviceId) {
-                InputControlsView inputControlsView = activity.getInputControlsView();
-                if (inputControlsView != null) inputControlsView.onControllerDisconnected(deviceId);
-                releaseSlot(deviceId);
+                // Debounced: a real unplug is released after PHYSICAL_DISCONNECT_DEBOUNCE_MS
+                // (the release runnable also notifies InputControlsView — see
+                // scheduleDeviceRelease); a flap that re-adds within the window is a no-op.
+                scheduleDeviceRelease(deviceId);
             }
 
             @Override
             public void onInputDeviceChanged(int deviceId) {
+                // Progressive capability (GameNative concept): some controllers advertise
+                // only a partial source set on add and expand to a full gamepad on the
+                // first change event. Re-evaluate here so those pads still get a slot.
+                // Thrash-guarded: cancelPendingDeviceRelease keeps a mid-debounce pad, and
+                // assignConnectedDeviceIfPossible early-returns when the device is already
+                // slotted or isn't a game controller, so repeated change events are cheap.
+                cancelPendingDeviceRelease(deviceId);
+                assignConnectedDeviceIfPossible(deviceId, "changed");
             }
         };
         inputManager.registerInputDeviceListener(inputDeviceListener, null);
@@ -544,20 +584,46 @@ public class WinHandler {
     }
 
     /**
+     * Resolves which deviceId should receive rumble for a slot. Prefers OSC (phone vibrator)
+     * when it owns the slot, then a physical sub-device that actually exposes a vibrator, then
+     * the first physical sub-device. deviceToSlot is a ConcurrentHashMap, so this iteration is
+     * safe on the vibration thread. Returns null when nothing owns the slot.
+     */
+    private Integer resolveSlotOwnerDeviceId(int slot) {
+        Integer firstPhysical = null;
+        Integer withVibrator = null;
+        for (Map.Entry<Integer, Integer> entry : deviceToSlot.entrySet()) {
+            if (entry.getValue() != slot)
+                continue;
+            int devId = entry.getKey();
+            if (devId == OSC_DEVICE_ID)
+                return OSC_DEVICE_ID;
+            if (firstPhysical == null)
+                firstPhysical = devId;
+            if (withVibrator == null) {
+                android.view.InputDevice d = android.view.InputDevice.getDevice(devId);
+                if (d != null) {
+                    Vibrator v = d.getVibrator();
+                    if (v != null && v.hasVibrator())
+                        withVibrator = devId;
+                }
+            }
+        }
+        return withVibrator != null ? withVibrator : firstPhysical;
+    }
+
+    /**
      * Controller-mode dispatch: resolves the same deviceId-owns-slot / OSC-or-no-vibrator phone
      * fallback that this method always used, then delivers via independent low/high motors
      * (VibratorManager, API 31+) when the target exposes ≥1 vibrator id, blending to one motor
      * otherwise. Below API 31 this always blends — identical to the pre-dual-motor behavior.
      */
     private void dispatchControllerVibration(int strong, int weak, int duration, int slot, boolean stopping) {
-        // Find which deviceId owns this slot
-        Integer deviceId = null;
-        for (Map.Entry<Integer, Integer> entry : deviceToSlot.entrySet()) {
-            if (entry.getValue() == slot) {
-                deviceId = entry.getKey();
-                break;
-            }
-        }
+        // Which deviceId owns this slot. With descriptor keying one slot can now hold
+        // several sub-device ids for a single physical pad, so resolve to the one that
+        // actually has a vibrator (falling back to OSC / first physical) — for a plain
+        // single-device pad this returns exactly the device it always did.
+        Integer deviceId = resolveSlotOwnerDeviceId(slot);
 
         android.view.InputDevice device = null;
         Vibrator fallbackVibrator = null;
@@ -1488,23 +1554,59 @@ public class WinHandler {
     }
 
     /**
-     * Assign a slot to a device using FCFS. Sticky slots - disconnect keeps
-     * reservation.
+     * Assigns a slot to a device. Slots are FCFS and sticky (a disconnect keeps the
+     * reservation via descriptorToSlot until the debounce fires). Physical controllers
+     * are keyed on their stable descriptor so a reconnect (new deviceId) and every
+     * sub-device of one pad share a single slot; OSC keeps its simple deviceId(-1)→slot
+     * path so the on-screen-controls transport is untouched.
      */
     private int assignSlot(int deviceId) {
+        // Fast path: this exact deviceId already owns a slot.
         Integer existing = deviceToSlot.get(deviceId);
         if (existing != null)
             return existing;
 
+        // OSC / virtual gamepad: no descriptor, simple FCFS — same behavior as before.
+        if (deviceId == OSC_DEVICE_ID)
+            return assignFreeSlot(deviceId, null);
+
+        // Physical: resolve the descriptor so sibling sub-devices group under one slot.
+        String descriptor = null;
+        android.view.InputDevice device = android.view.InputDevice.getDevice(deviceId);
+        if (device != null)
+            descriptor = device.getDescriptor();
+
+        // Another deviceId from the same physical controller (a reconnect, or a sibling
+        // sub-device) already holds a slot — reuse it instead of consuming a new one.
+        if (descriptor != null) {
+            Integer descriptorSlot = descriptorToSlot.get(descriptor);
+            if (descriptorSlot != null) {
+                deviceToSlot.put(deviceId, descriptorSlot);
+                deviceToDescriptor.put(deviceId, descriptor);
+                ensureWriterForSlot(descriptorSlot);
+                Log.d("WinHandler", "Mapped device " + deviceId + " to existing slot "
+                        + descriptorSlot + " (same physical controller: " + descriptor + ")");
+                return descriptorSlot;
+            }
+        }
+
+        return assignFreeSlot(deviceId, descriptor);
+    }
+
+    /** Claims the lowest free slot for deviceId, recording the descriptor keys (physical
+     *  only) and opening the slot's writer. Returns -1 when all slots are taken. */
+    private int assignFreeSlot(int deviceId, String descriptor) {
         for (int slot = 0; slot < MAX_CONTROLLERS; slot++) {
             if (!usedSlots.contains(slot)) {
                 usedSlots.add(slot);
                 deviceToSlot.put(deviceId, slot);
-                if (fakeInputBasePath != null && writers[slot] == null) {
-                    writers[slot] = new FakeInputWriter(fakeInputBasePath, slot);
-                    writers[slot].open();
-                    Log.d("WinHandler", "Assigned device " + deviceId + " to slot " + slot);
+                if (descriptor != null) {
+                    descriptorToSlot.put(descriptor, slot);
+                    deviceToDescriptor.put(deviceId, descriptor);
                 }
+                ensureWriterForSlot(slot);
+                Log.d("WinHandler", "Assigned device " + deviceId + " to slot " + slot
+                        + (descriptor != null ? " (descriptor: " + descriptor + ")" : ""));
                 return slot;
             }
         }
@@ -1512,23 +1614,190 @@ public class WinHandler {
         return -1;
     }
 
+    /** Lazily creates and opens the fake-input writer backing a slot. Opening the writer
+     *  activates the slot's mmap ring (P0), which is what the guest sees as a controller. */
+    private void ensureWriterForSlot(int slot) {
+        if (slot < 0 || slot >= MAX_CONTROLLERS || fakeInputBasePath == null)
+            return;
+        if (writers[slot] == null) {
+            writers[slot] = new FakeInputWriter(fakeInputBasePath, slot);
+            writers[slot].open();
+        }
+    }
+
     private void releaseSlot(int deviceId) {
         Integer slot = deviceToSlot.remove(deviceId);
-        if (slot != null) {
+        if (slot == null)
+            return;
+
+        // Sibling-sub-device reuse: one physical controller enumerates several deviceIds
+        // (gamepad + touchpad + motion), all sharing one slot via its descriptor. Only tear
+        // the slot down once the LAST of those sub-devices is gone, otherwise unplugging the
+        // touchpad half would kill a still-connected pad.
+        String descriptor = deviceToDescriptor.remove(deviceId);
+        boolean slotStillInUse = false;
+        if (descriptor != null) {
+            for (Map.Entry<Integer, String> entry : deviceToDescriptor.entrySet()) {
+                if (descriptor.equals(entry.getValue()) && deviceToSlot.containsKey(entry.getKey())) {
+                    slotStillInUse = true;
+                    break;
+                }
+            }
+            if (!slotStillInUse)
+                descriptorToSlot.remove(descriptor);
+        }
+
+        if (!slotStillInUse) {
             if (fallbackSlot == slot) fallbackSlot = -1;
             if (writers[slot] != null) {
-                writers[slot].softRelease();
+                if (deviceId == OSC_DEVICE_ID) {
+                    // OSC / virtual pad: keep the ring alive across on-screen-controls
+                    // hide/show. softRelease resets the pad to neutral without bumping the
+                    // ring generation, so toggling the overlay never flaps the guest's
+                    // virtual controller — this is the P0 on-screen path, left intact.
+                    writers[slot].softRelease();
+                } else {
+                    // Physical disconnect: destroy() so the ring generation bumps and the
+                    // guest sees a REAL removal (the core hot-plug fix). A fresh writer is
+                    // created on reconnect, which re-activates the ring at a new generation.
+                    writers[slot].destroy();
+                    writers[slot] = null;
+                }
             }
             usedSlots.remove(slot);
-            if (gyroTargetController != null && gyroTargetController.getDeviceId() == deviceId) {
-                gyroTargetController = null;
-                // Worst case for toggle mode: latched on and then the pad is unplugged, leaving no
-                // button anywhere to tap it back off. Drop the latch along with the device.
-                resetGyroRuntimeState();
-            }
-            controllers.remove(deviceId);
             Log.d("WinHandler", "Device " + deviceId + " disconnected (or OSC disabled). Slot released: " + slot);
+        } else {
+            Log.d("WinHandler", "Device " + deviceId + " removed but slot " + slot
+                    + " still used by a sibling sub-device.");
         }
+
+        if (gyroTargetController != null && gyroTargetController.getDeviceId() == deviceId) {
+            gyroTargetController = null;
+            // Worst case for toggle mode: latched on and then the pad is unplugged, leaving no
+            // button anywhere to tap it back off. Drop the latch along with the device.
+            resetGyroRuntimeState();
+        }
+        controllers.remove(deviceId);
+    }
+
+    // ---- Physical controller pre-assignment + hot-plug (ported from WinNative) ----
+
+    /**
+     * Assigns every already-connected gamepad to a slot BEFORE Wine boots, so controllers
+     * present at launch are live from the guest's very first device enumeration instead of
+     * only appearing after the first input event. Called from XServerDisplayActivity's
+     * setupXEnvironment, after the fake-input path is set and before the environment
+     * components (Wine) start. No-op until setFakeInputPath has run.
+     */
+    public int preAssignConnectedControllers() {
+        if (fakeInputBasePath == null || fakeInputBasePath.isEmpty()) {
+            Log.w("WinHandler", "Skipping pre-assignment: fake input path is not set yet.");
+            return 0;
+        }
+        int assignedCount = 0;
+        for (int deviceId : getConnectedGamepadDeviceIds()) {
+            if (usedSlots.size() >= MAX_CONTROLLERS)
+                break;
+            if (assignConnectedDeviceIfPossible(deviceId, "startup-scan"))
+                assignedCount++;
+        }
+        Log.d("WinHandler", "Pre-assigned " + assignedCount + " controller(s) before Wine startup.");
+        return assignedCount;
+    }
+
+    /** Connected deviceIds sorted by a stable physical identity, so slot order is
+     *  deterministic across launches (player 1 stays player 1) rather than following
+     *  Android's arbitrary deviceId ordering. */
+    private int[] getConnectedGamepadDeviceIds() {
+        int[] deviceIds = android.view.InputDevice.getDeviceIds();
+        Integer[] sortedIds = new Integer[deviceIds.length];
+        for (int i = 0; i < deviceIds.length; i++)
+            sortedIds[i] = deviceIds[i];
+
+        Arrays.sort(sortedIds, Comparator.comparing((Integer id) -> {
+            android.view.InputDevice device = android.view.InputDevice.getDevice(id);
+            if (device == null) return "";
+            String physicalId = ExternalController.getPhysicalDeviceIdentifier(device);
+            if (physicalId != null && !physicalId.isEmpty()) return physicalId;
+            String descriptor = device.getDescriptor();
+            return descriptor != null ? descriptor : "";
+        }).thenComparingInt(Integer::intValue));
+
+        int[] result = new int[sortedIds.length];
+        for (int i = 0; i < sortedIds.length; i++)
+            result[i] = sortedIds[i];
+        return result;
+    }
+
+    /** Assigns one deviceId to a slot if it's a game controller that isn't already slotted.
+     *  Shared by the startup scan and the add/change hot-plug hooks. Returns true only when
+     *  a NEW physical assignment happened. */
+    private boolean assignConnectedDeviceIfPossible(int deviceId, String source) {
+        if (deviceToSlot.containsKey(deviceId))
+            return false;
+
+        if (usedSlots.size() >= MAX_CONTROLLERS) {
+            // Still allow a reconnecting / sibling sub-device that will REUSE an existing
+            // physical controller's slot rather than consume a new one; without this a
+            // transient remove/add while all four slots are full would be dropped.
+            android.view.InputDevice probe = android.view.InputDevice.getDevice(deviceId);
+            String descriptor = probe != null ? probe.getDescriptor() : null;
+            if (descriptor == null || !descriptorToSlot.containsKey(descriptor)) {
+                Log.d("WinHandler", "Ignoring device " + deviceId + " from " + source + ": slot limit reached.");
+                return false;
+            }
+        }
+
+        android.view.InputDevice device = android.view.InputDevice.getDevice(deviceId);
+        if (!ExternalController.isGameController(device))
+            return false;
+
+        ExternalController controller = getController(deviceId);
+        if (controller == null)
+            return false;
+
+        int slot = assignSlot(deviceId);
+        if (slot >= 0) {
+            Log.d("WinHandler", "Auto-assigned device " + deviceId + " to slot " + slot + " via " + source + ".");
+            return true;
+        }
+        return false;
+    }
+
+    /** Debounces a physical removal (see PHYSICAL_DISCONNECT_DEBOUNCE_MS). OSC is released
+     *  immediately (no flap to guard against). The release runnable is also where the
+     *  InputControlsView notification fires, so a flap that re-adds within the window leaves
+     *  the on-screen controls state untouched too. */
+    private void scheduleDeviceRelease(final int deviceId) {
+        if (deviceId == OSC_DEVICE_ID) {
+            releaseSlot(deviceId);
+            return;
+        }
+        cancelPendingDeviceRelease(deviceId);
+        Runnable release = () -> {
+            pendingDeviceReleases.remove(deviceId);
+            // Retained from our tree: tell the on-screen controls a physical pad left so it
+            // resets that controller's mapping/overlay state (WinNative has no equivalent).
+            InputControlsView inputControlsView = activity.getInputControlsView();
+            if (inputControlsView != null) inputControlsView.onControllerDisconnected(deviceId);
+            releaseSlot(deviceId);
+        };
+        pendingDeviceReleases.put(deviceId, release);
+        inputHandler.postDelayed(release, PHYSICAL_DISCONNECT_DEBOUNCE_MS);
+        Log.d("WinHandler", "Device " + deviceId + " removed; scheduling slot release in "
+                + PHYSICAL_DISCONNECT_DEBOUNCE_MS + "ms (debounce). Reconnect within the window keeps the slot.");
+    }
+
+    private void cancelPendingDeviceRelease(int deviceId) {
+        Runnable pending = pendingDeviceReleases.remove(deviceId);
+        if (pending != null)
+            inputHandler.removeCallbacks(pending);
+    }
+
+    private void cancelAllPendingDeviceReleases() {
+        for (Runnable pending : pendingDeviceReleases.values())
+            inputHandler.removeCallbacks(pending);
+        pendingDeviceReleases.clear();
     }
 
     public void setXInputDisabled(boolean disabled) {
@@ -1550,6 +1819,7 @@ public class WinHandler {
     }
 
     public void closeFakeInputWriter() {
+        cancelAllPendingDeviceReleases();
         if (inputManager != null && inputDeviceListener != null) {
             inputManager.unregisterInputDeviceListener(inputDeviceListener);
         }
@@ -1560,6 +1830,8 @@ public class WinHandler {
             }
         }
         deviceToSlot.clear();
+        descriptorToSlot.clear();
+        deviceToDescriptor.clear();
         usedSlots.clear();
         controllers.clear();
         fallbackSlot = -1;
@@ -1577,6 +1849,22 @@ public class WinHandler {
     private ExternalController getController(int deviceId) {
         if (controllers.containsKey(deviceId)) {
             return controllers.get(deviceId);
+        }
+        // Sibling sub-device reuse: if another live deviceId of the same physical controller
+        // (same descriptor) already has an ExternalController, reuse that instance so both
+        // sub-devices feed one shared gamepad state instead of two competing halves.
+        android.view.InputDevice device = android.view.InputDevice.getDevice(deviceId);
+        if (device != null) {
+            String descriptor = device.getDescriptor();
+            if (descriptor != null) {
+                for (Map.Entry<Integer, ExternalController> entry : controllers.entrySet()) {
+                    android.view.InputDevice existing = android.view.InputDevice.getDevice(entry.getKey());
+                    if (existing != null && descriptor.equals(existing.getDescriptor())) {
+                        controllers.put(deviceId, entry.getValue());
+                        return entry.getValue();
+                    }
+                }
+            }
         }
         ExternalController controller = ExternalController.getController(deviceId);
         if (controller != null) {

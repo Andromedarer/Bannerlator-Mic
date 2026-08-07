@@ -3330,6 +3330,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
              // Cleanup moved to onCreate
         }
 
+        // Pre-assign any controllers that are already connected, BEFORE Wine boots. This opens
+        // their slot rings up front so the guest sees them from its first device enumeration
+        // instead of only after the first input event. The fake-input path was set in onCreate
+        // (setFakeInputPath), and the launcher component builds FAKE_EVDEV_MEMFD_PATHS during
+        // startEnvironmentComponents below, so this must sit here — after the path is known and
+        // before the guest starts reading the rings.
+        winHandler.preAssignConnectedControllers();
+
         // Start all environment components (XServer, Audio, Wine, etc.)
         preloaderDialog.step(4, "Launching Windows…");
         environment.startEnvironmentComponents();
