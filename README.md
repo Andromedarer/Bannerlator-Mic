@@ -64,7 +64,7 @@
 |---|---|
 | **App label** | `Bannerlator Bionic` (standard) · `Bannerlator Bionic PuBG` (pubg) · `Bannerlator Bionic Ludashi` (ludashi) |
 | **Packages** | `com.winlator.banner` (standard) · `com.tencent.ig` (pubg) · `com.ludashi.benchmark` (ludashi) |
-| **Version** | Bannerlator **V 2.9.5** — built from Star **marcescence** (`versionName 2.9.5`, `versionCode 67`) |
+| **Version** | Bannerlator **V 2.9.6** — built from Star **marcescence** (`versionName 2.9.6`, `versionCode 68`) |
 | **Android SDK** | `compileSdk 34` · `targetSdk 28` · `minSdk 26` (Android 8.0+) |
 | **Lineage** | Winlator → cmod → Bionic Nightly → Star Bionic → **marcescence** → **Bannerlator** |
 
@@ -95,6 +95,7 @@ Every report gets its own **public discussion thread**. You can reply as the ori
 - [📌 Project Notice](#-project-notice)
 - [ℹ️ Information](#ℹ️-information)
 - [🐛 Report a Mali GPU Issue](#-report-a-mali-gpu-game-issue)
+- [🆕 What's New in 2.9.6](#-whats-new-in-296)
 - [🆕 What's New in 2.9.5](#-whats-new-in-295)
 - [🆕 What's New in 2.9.4](#-whats-new-in-294)
 - [🆕 What's New in 2.9.3](#-whats-new-in-293)
@@ -112,6 +113,28 @@ Every report gets its own **public discussion thread**. You can reply as the ori
 - [📄 License](#-license)
 
 ---
+
+## 🆕 What's New in 2.9.6
+
+2.9.6 is a **feature-and-fixes release over 2.9.5**, headlined by a rebuilt **in-game Task Manager** and a new **D7VK** wrapper that runs old DirectX 7 / DirectDraw games on Vulkan. Everything from 2.9.5 is included. Like the releases before it it's **entirely app-side** — **no ImageFS reinstall** — just install over 2.9.5; your containers, themes, accent and per-game settings carry over untouched.
+
+**🧰 In-game Task Manager — now a real control panel.** The process list grew into a proper control panel. A Windows-style **"Set affinity"** on any running process's ⋮ menu lets you pin it to specific CPU cores **live, mid-game** — no relaunch — applied through the guest's real affinity path, with core toggles that match the container/game core-picker. Above it sits a **live telemetry header**: CPU & GPU usage **and temperatures**, GPU clock, **FPS (+ minimum)**, RAM, swap, battery (level / watts / temperature / charging) and a **per-core clock strip** — all from the same cross-vendor sensors as the performance HUD. Plus a collapsible **container info panel** summarizing the running Wine/Proton, DX wrapper, renderer, driver, resolution and device. *Which telemetry readings are available varies from device to device — some sensors (GPU load/clock, temperatures, battery watts) depend on what the manufacturer exposes, so a few values may read **"—"** on certain hardware.*
+
+**🎮 D7VK — DirectX 7 / DirectDraw games on Vulkan.** Old **DirectDraw / Direct3D 3–7** titles historically took a slow OpenGL path. **D7VK** ([WinterSnowfall](https://github.com/WinterSnowfall/d7vk)'s Vulkan implementation, a DXVK cousin) runs them straight through **Vulkan** instead — a new **D7VK** option in the **DDraw Wrapper** picker, **per-container and per-game**. It ships **bundled** and offline-ready as the **default**, and is **catalog-backed**: pick D7VK and a **"D7VK Version"** dropdown + download button appears, so you can pull **bleeding-edge nightly d7vk builds** from the catalog and switch between them. Entirely app-side — the wrapper drops into the container at launch, **no ImageFS reinstall**.
+
+**🧭 Container editor — tabs back on top in portrait.** In portrait the editor tabs (General / Environment / Drives / Win Components / Advanced) now sit in a single **icon bar across the top**, spread evenly across the full width, with **?** help (and **Reset** on the defaults screen) at the end of the row — reclaiming the wasted band. **Landscape is unchanged** (the collapsible left rail), and it applies to all three container screens — **New Container**, **Edit Container** and **New Container Defaults**.
+
+**🛡️ Backgrounded games stay alive.** Switching to another app (or taking a call) mid-game used to let Android quietly kill the container. 2.9.6 runs the game session as a **real foreground service** with a persistent notification, so a backgrounded game or container **keeps running** instead of being evicted.
+
+**🎛️ Deeper graphics tuning (Turnip).** **GMEM control (Auto / On / Off)** for Adreno (710 / 720 / 722) — force tiled rendering on or off, per-container **and** per-game — plus **advanced `TU_DEBUG` tokens** (concurrent-binning force/off, deck-emu, and more) for tricky titles. Each option carries a **"?"** explanation and a glossary entry.
+
+**📟 Performance HUD — wider device support + honest API labels.** The HUD now reads GPU load / clock and charging state on **MediaTek (GED)** and other non-Adreno devices, and apps that report their **active graphics API** (e.g. the bundled AIO Graphics Test's per-backend tests) now show the **correct** API instead of a best guess.
+
+**❓ "?" help everywhere + glossary.** Per-option **"?" help buttons** now cover **every technical setting** across the container editor, the per-game shortcut editor and the Turnip / Wrapper driver config, each backed by a plain-language **glossary**.
+
+**📦 Bundled in every container** (picked up automatically, no reinstall): **AIO Graphics Test 2.0.1** (single-window multi-API benchmark with an automatic OpenGL fallback for Mali / broken-DXVK), **Banner File Manager 1.2.0** (faster on large folders), and **Pale Moon**, a lightweight browser launchable from the **Start Menu**.
+
+**🌐 Fixes.** Containers now get a **usable IPv4 DNS resolver**, fixing games and launchers that couldn't resolve hostnames. **New containers show up immediately** in the Games "add a game" container picker — no relaunch needed. **Pale Moon** no longer clutters the container desktop or Games tab (Start Menu only). Plus assorted stability and UI polish.
 
 ## 🆕 What's New in 2.9.5
 
@@ -438,6 +461,7 @@ Everything Bannerlator offers, at a glance. No PC and no root required — it ru
 - **DXVK** — DirectX 8 / 9 / 10 / 11 → Vulkan (with GPLAsync and Sarek variants).
 - **VKD3D-Proton** — DirectX 12 → Vulkan.
 - **WineD3D / DirectDraw** OpenGL fallback paths for older titles.
+- **D7VK** — DirectX 7 / DirectDraw (Direct3D 3–7) → Vulkan for old 2D/3D titles that otherwise take the slow OpenGL path ([WinterSnowfall](https://github.com/WinterSnowfall/d7vk)'s DXVK-lineage Vulkan implementation). Selectable in the **DDraw Wrapper** picker **per container and per game**; ships **bundled** as the default and is **catalog-backed** — a **"D7VK Version"** dropdown lets you download and switch between nightly d7vk builds.
 - **Proton bionic** translation layers (via GameNative) — including **Proton 11.0-1** in **arm64ec** and **x86-64** builds, packaged per Android SDK (**SDK 28** for Android 9-era, **SDK 35** for Android 15) and downloadable from the Compatibility Layers menu.
 - **VEGAS** — Adreno-optimized DXVK for reduced stutter and real-time upscaling on mobile GPUs.
   - > 📖 **New to VEGAS?** Read the **[VEGAS DXVK FAQ](https://htmlpreview.github.io/?https://github.com/The412Banner/Bannerlator/blob/main/docs/vegas_faq.html)** — install, config, FSR, tiers, frame generation & shader-stutter troubleshooting.
@@ -599,6 +623,7 @@ Source, releases & issues: **[github.com/The412Banner/banner-file-manager](https
 - **Customizable themes** — **16 presets** (AMOLED default, Classic Dark, Ocean, Forest, Sunset, Rose, Steel, plus Midnight Cobalt, Phosphor, Carbon & Ember, Amethyst, Crimson, Synthwave, Royal Gold, Frost and Monochrome) plus an **HSV custom-accent picker**.
 - **Big Picture mode** — a **Compose-built couch launcher** for TV / handheld use: full D-pad navigation, direct rails to your games, settings and features, and **per-game spec chips** showing what each title is actually set to.
 - In-game overlay drawer for settings, input, and quick toggles, with a Task Manager that lists processes as cards and can launch new tasks on any renderer. The **Controls tab is split into Touch / Mouse / Vibration / Gyro sub-tabs**, with a uniform 3-across grid of toggle chips.
+- **In-game Task Manager — a full control panel.** Beyond the process cards it now offers Windows-style **per-process Processor Affinity** ("Set affinity" on a process's ⋮ menu — pin it to specific CPU cores **live, mid-game**, applied through the guest's real affinity path with no relaunch), a **live telemetry header** (CPU & GPU usage and temperatures, GPU clock, FPS + minimum, RAM, swap, battery level / watts / temperature / charging, and a per-core clock strip), and a collapsible **container info panel** (Wine/Proton, DX wrapper, renderer, driver, resolution, device).
 - **Built-in File Manager with Favorites** — bookmark folders and jump to them from a dedicated list, each labelled by storage source (Internal / SD card / a container's Drive C: or Z:) and full path. Image files show **real thumbnails**, and the File Manager doubles as the app's **file picker for every import** (WCP / ICP / wallpaper / drivers / assets) — reliable on OEM skins where Android's system picker fails, with the system picker still available as a secondary option. It also handles **multi-select bulk operations**, **archive extraction** (zip / 7z / tar / tar.gz / xz / bz2 / zst, Zip-Slip-guarded with progress and cancel), and **search / sort / hidden-file toggle / free-space** display.
 - **Performance HUD** — FPS, frame time, CPU/GPU temperature, and RAM, in vertical or horizontal layout, with its on-screen **position saved per game**. Four switchable overlay styles — **Classic**, **GameHub**, a **GameNative-style** HUD with live graphs, and the new **Fusion HUD** (MangoHud-style: size modes Full / Tiles / Pill / Minimal / Mega, VRAM, GPU model, 1% / 0.1% lows and a frametime graph) — with **long-press to lock any HUD in place**.
 - **FEX runtime indicator** — a live badge in the Graphics tab shows what's actually translating the running game: **arm64ec** vs **x86-64**, the translator (**FEXCore / wowbox64 / Box64**), and — for FEXCore — whether the native **unixlib (`.so`)** or the classic **DLL** path is active. Read straight from the running process, so it reflects reality, not just the setting.
@@ -780,6 +805,7 @@ This build stands on a long chain of prior work — its direct lineage, plus the
 | **FrankBarretta** | [lsfg-vk-android](https://github.com/FrankBarretta/lsfg-vk-android) — the Android/bionic port of lsfg-vk (AHardwareBuffer path + `vkCmdPipelineBarrier2` shim) that runs as Bannerlator's lsfg-vk engine on the Turnip stack. The in-game live multiplier/flow-scale reload uses the `conf.toml` mtime-watch mechanism from **GameNative's** [lsfg-vk-android fork](https://github.com/GameNative). No proprietary shaders are bundled — users supply their own `Lossless.dll` ([Lossless Scaling](https://store.steampowered.com/app/993090/Lossless_Scaling/) by THS) via the in-app picker. |
 | **DadSchoorse** | [vkBasalt](https://github.com/DadSchoorse/vkBasalt) (zlib) — the Vulkan post-processing layer that embeds the ReShade FX compiler. Bannerlator's **ReShade** feature is a continuation of this work: the bundled layer is built from DadSchoorse's source, patched for live on-device toggle and slider control. The bundled / catalog `.fx` effects are MIT / CC0 shaders by the **ReShade ([crosire](https://github.com/crosire/reshade-shaders))**, **prod80 ([prod80-reshade-repository](https://github.com/prod80/prod80-reshade-repository))**, **luluco250 ([FXShaders](https://github.com/luluco250/FXShaders))** and **fubax** authors, each under their own MIT / CC0 license. |
 | **leegao** (Lee Gao) | Vulkan texture-compression work used for mobile-GPU compatibility and performance — the [BCn decompression layer](https://github.com/leegao/bcn_layer) (**shader-v3**, powering 2.5's **"Wrapper + bcn_layer"** Mali driver) and the **DX12 `compat_layer`** that, alongside it, powers 2.7's new opt-in **"Wrapper + compat + bcn"** Mali DX12 driver — including the just-landed **layer-composition fix** — plus real-time [ASTC/ETC compute-shader encoders](https://github.com/leegao) and the [bionic-vulkan-wrapper](https://github.com/leegao/bionic-vulkan-wrapper) (**ETC2-Milestone-2**) bundled as the base wrapper for the Mali BCn path. |
+| **WinterSnowfall** | [d7vk](https://github.com/WinterSnowfall/d7vk) — the DXVK-lineage Vulkan implementation of DirectX 7 / DirectDraw (Direct3D 3–7) that powers Bannerlator's new **D7VK** DDraw-wrapper option (new in 2.9.6). Bundled as the default and offered as downloadable nightly catalog builds. |
 | **WinlatorMali** (GunaCharanTeja / Charan) | [WinlatorMali](https://github.com/GunaCharanTeja/WinlatorMali) — the **Wrapper Version Manager** (new in 2.7) is modeled on WinlatorMali's graphics-driver manager, introduced in [Winlator Mali Bionic 1.1](https://github.com/GunaCharanTeja/WinlatorMali/releases/tag/bionic-mali-1.1); a number of the downloadable catalog wrappers come from WinlatorMali too (each credited in-app). The feature was requested in [#132](https://github.com/The412Banner/Bannerlator/issues/132) by [@6ui99uhkllj](https://github.com/6ui99uhkllj). |
 | **BrunoSX** | The bundled Windows file manager is **[Banner File Manager](https://github.com/The412Banner/banner-file-manager)** (new in 2.7.1), Bannerlator's fork of BrunoSX's [Winlator File Manager](https://github.com/brunodev85/wfm) (**MIT**) — rebuilt with **native Win32 file operations** (sidestepping the Proton 10.0-4 shell32 copy-paste crash), a **dual-pane split view**, and **Open-as-administrator / Open-with**. |
 | **[@Tony57319](https://github.com/Tony57319)** | Reported / requested the **lsfg Performance mode** frame-gen toggle new in 2.7.1 ([#152](https://github.com/The412Banner/Bannerlator/issues/152)). |
@@ -802,6 +828,7 @@ The Wine/translation stack this app bundles or downloads:
 | **DXVK-GPLAsync patch** | [Ph42oN](https://gitlab.com/Ph42oN) |
 | **DXVK-Sarek** | [pythonlover02](https://github.com/pythonlover02) |
 | **VEGAS** (Adreno-tuned DXVK / GPLAsync fork — `v1.3-vegas`) | [isygold](https://github.com/isygold/vegas-releases) · [FAQ](https://htmlpreview.github.io/?https://github.com/The412Banner/Bannerlator/blob/main/docs/vegas_faq.html) · [❤️ Sponsor](https://github.com/sponsors/isygold) |
+| **D7VK** (DirectX 7 / DirectDraw → Vulkan) | [WinterSnowfall](https://github.com/WinterSnowfall/d7vk) |
 | **VKD3D-Proton** | [Hans-Kristian Arntzen](https://github.com/HansKristian-Work) |
 | **Turnip / Mesa** | [Freedreno team @ Mesa](https://gitlab.freedesktop.org/mesa/mesa) |
 | **Proton layers (bionic)** | [GameNative](https://github.com/utkarshdalal/GameNative) |
