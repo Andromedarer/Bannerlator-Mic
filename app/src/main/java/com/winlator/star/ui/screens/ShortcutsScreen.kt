@@ -6578,6 +6578,9 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                         Spacer(Modifier.height(12.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("Player Slots", modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium)
+                            IconButton(onClick = { helpRes = R.string.help_player_slots }) {
+                                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                            }
                             if (controllerSlotOverridesJson.isNotEmpty()) {
                                 TextButton(onClick = { controllerSlotOverridesJson = "" }) {
                                     Text("Use container default")

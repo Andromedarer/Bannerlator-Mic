@@ -3970,6 +3970,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
             int vibMode = resolvedVibrationMode();
             int vibIntensity = resolvedVibrationIntensity();
             winHandler.setVibrationTuning(vibMode, vibIntensity);
+
+            // On-screen-controls priority (KEEP/YIELD/SHARE), same seed-after-container discipline as the
+            // vibration tuning above: resolve per-game override else the container value and push it in.
+            winHandler.setOnScreenControllerMode(resolvedOnScreenControllerMode());
             ds.setVibrationMode(vibMode);
             ds.setVibrationIntensity(vibIntensity);
             ds.onVibrationModeChanged = (mode) -> {
@@ -5807,6 +5811,16 @@ return true;
         if (shortcut == null) return fallback;
         try {
             return Integer.parseInt(shortcut.getExtra("vibrationMode", String.valueOf(fallback)));
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    private int resolvedOnScreenControllerMode() {
+        int fallback = container != null ? container.getOnScreenControllerMode() : Container.ON_SCREEN_MODE_DEFAULT;
+        if (shortcut == null) return fallback;
+        try {
+            return Integer.parseInt(shortcut.getExtra("onScreenControllerMode", String.valueOf(fallback)));
         } catch (NumberFormatException e) {
             return fallback;
         }

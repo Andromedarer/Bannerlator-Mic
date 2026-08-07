@@ -1152,4 +1152,15 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="wrapper_catalog_download_failed">Couldn\'t download %1$s</string>
     <string name="wrapper_catalog_close">Done</string>
     <string name="no_wine_version_installed">No Wine version installed — download a Proton from the in-app catalog first (Containers → download icon).</string>
+    <string name="help_player_slots"><![CDATA[
+        <b>Player Slots</b><br /><br />
+        Decides which XInput <b>player</b> each controller becomes in the game. <b>Player 1</b> is slot 0, Player 2 is slot 1, and so on.<br /><br />
+        <b>Auto</b> — the controller takes the next free player in the order pads connect (the normal behaviour).<br />
+        <b>Player 1–4</b> — pins that controller to that exact player, every launch.<br />
+        <b>Ignore</b> — that controller never takes a player slot.<br /><br />
+        <b>Shared / combined control</b> — assign TWO (or more) devices to the SAME player and they BOTH drive that player at once (for example the on-screen controls plus a physical pad). Their inputs are combined, not fought over.<br /><br />
+        <b>On-screen controls</b> — the touch pad can be pinned to any player too. A physical pad connected BEFORE launch takes priority in the connect order. The On-screen priority setting decides what happens when a pad connects mid-game: <b>Keep</b> leaves the touch pad where it is, <b>Yield</b> hands Player 1 to the pad and moves the touch pad up, <b>Share</b> makes the pad share the touch pad\'s player.<br /><br />
+        <b>Reset Input</b> (in-game side menu) rebuilds the controller connection without restarting the game.<br /><br />
+        Changes made here (out of game) apply on the game\'s <b>next launch</b>; the in-game side menu changes players live. The app-drawer Input Controls copy of this sets the default for <b>newly-created</b> containers.
+    ]]></string>
 </resources>

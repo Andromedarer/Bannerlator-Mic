@@ -106,6 +106,39 @@ public class WinHandler {
     public static final String OSC_DESCRIPTOR = "__osc__"; // stand-in descriptor for the on-screen pad
     private final Map<String, Integer> manualSlotOverrides = new HashMap<>();
 
+    // ---- Shared / combined player slots (opt-in, manual-only) ----
+    // A slot is SHARED when >=2 DISTINCT contributors drive it: two physical descriptors pinned to the
+    // same player slot, or the on-screen pad co-occupying a physical pad's slot. This is only ever
+    // produced by an EXPLICIT choice — same-slot pins in the Players UI / saved overrides, or the
+    // per-container On-screen SHARE mode below. Plain auto-assignment never co-seats two devices on one
+    // slot (assignFreeSlot/assignSpecificSlot skip used slots), so a single-device slot always takes the
+    // untouched direct-write path and behaves EXACTLY as before. slotShared[] is a cache recomputed only
+    // when slot occupancy changes (recomputeSharedSlots), so the per-frame write path is a plain array
+    // read with no allocation whenever nothing is shared.
+    private final boolean[] slotShared = new boolean[MAX_CONTROLLERS];
+    // Per-shared-slot contributor snapshots, keyed by contributor descriptor (OSC_DESCRIPTOR for the
+    // on-screen pad). Each write copies the contributor's latest state in, then the slot writes the
+    // MERGE of all contributors — so one contributor's neutral frame (e.g. OSC's per-frame full,
+    // mostly-neutral state) can never stomp another contributor's held input. Main-thread only.
+    @SuppressWarnings("unchecked")
+    private final Map<String, GamepadState>[] slotContributions = new HashMap[MAX_CONTROLLERS];
+    // Pre-allocated merged-state scratch per slot, reused so a shared slot never allocates per frame.
+    private final GamepadState[] slotMerged = new GamepadState[MAX_CONTROLLERS];
+
+    // Per-container on-screen-controls-vs-physical-pad priority (see Container.getOnScreenControllerMode).
+    // KEEP = the historical behavior (OSC keeps whatever slot it holds; a pad hot-plugged mid-game lands
+    // on the next free slot). YIELD = a pad connecting while OSC holds Player 1 promotes to Player 1 and
+    // OSC steps up to the next free slot. SHARE = that pad co-occupies OSC's slot (merged, per above).
+    // Pushed once at launch (setupUI), the same seed-after-container discipline as the vibration tuning.
+    public static final int ON_SCREEN_MODE_KEEP = 0;
+    public static final int ON_SCREEN_MODE_YIELD = 1;
+    public static final int ON_SCREEN_MODE_SHARE = 2;
+    private volatile int onScreenControllerMode = ON_SCREEN_MODE_KEEP;
+    // Session-only OSC slot preference set by a YIELD promotion (NOT persisted). assignSlot honors it for
+    // OSC when OSC has no explicit pin, so a bumped OSC re-seats onto the slot it was moved to instead of
+    // falling straight back to the lowest free slot (which is the one we just handed the physical pad).
+    private int oscYieldSlot = -1;
+
     // Physical hot-plug debounce. Android churns remove/add events during Bluetooth flaps
     // and sub-device re-enumeration; a real unplug stays gone and is torn down after the
     // delay, while a quick reconnect re-seats onto the SAME slot (via descriptorToSlot)
@@ -274,6 +307,10 @@ public class WinHandler {
                 // then assign it a slot up front so the guest sees it without waiting for
                 // the first input event.
                 cancelPendingDeviceRelease(deviceId);
+                // On-screen priority (per-container): YIELD/SHARE may re-seat OSC or co-seat the pad
+                // first. When SHARE has already seated the pad, skip the normal auto-assign.
+                if (handleOnScreenModeForNewPad(deviceId))
+                    return;
                 assignConnectedDeviceIfPossible(deviceId, "hotplug");
             }
 
@@ -828,6 +865,18 @@ public class WinHandler {
         vibrationIntensity = Math.min(100, Math.max(0, intensity));
     }
 
+    /** Per-container on-screen-controls priority mode (KEEP/YIELD/SHARE). Pushed at launch (setupUI,
+     *  after the Container is resolved), the same seed-after-container discipline as setVibrationTuning.
+     *  Invalid values fall back to KEEP so an existing container's behavior never changes by accident. */
+    public void setOnScreenControllerMode(int mode) {
+        onScreenControllerMode = (mode < ON_SCREEN_MODE_KEEP || mode > ON_SCREEN_MODE_SHARE)
+                ? ON_SCREEN_MODE_KEEP : mode;
+    }
+
+    public int getOnScreenControllerMode() {
+        return onScreenControllerMode;
+    }
+
     public int getVibrationMode() {
         return vibrationMode;
     }
@@ -953,9 +1002,7 @@ public class WinHandler {
         // Handle virtual gamepad (on-screen controls)
         if (useVirtualGamepad) {
             int slot = assignSlot(OSC_DEVICE_ID);
-            if (slot >= 0 && writers[slot] != null) {
-                writers[slot].writeGamepadState(getOutputGamepadState(gamepadState));
-            }
+            writeSlotState(slot, OSC_DEVICE_ID, getOutputGamepadState(gamepadState));
         } else {
             releaseSlot(OSC_DEVICE_ID);
         }
@@ -982,17 +1029,166 @@ public class WinHandler {
                 // sendGamepadState()
                 // was solely responsible for sending remapped states.
                 int slot = assignSlot(controller.getDeviceId());
-                if (slot >= 0 && writers[slot] != null) {
-                    writers[slot].writeGamepadState(getOutputGamepadState(controller.remappedState));
-                }
+                writeSlotState(slot, controller.getDeviceId(), getOutputGamepadState(controller.remappedState));
                 return; // Suppress raw state sending if remapped state was sent
             }
         }
 
         int slot = assignSlot(controller.getDeviceId());
-        if (slot >= 0 && writers[slot] != null) {
-            writers[slot].writeGamepadState(getOutputGamepadState(controller.state));
+        writeSlotState(slot, controller.getDeviceId(), getOutputGamepadState(controller.state));
+    }
+
+    /**
+     * Writes one contributor's state to a slot, applying the SHARED-slot merge when needed.
+     *
+     * Common case (slot has a single owner — every OSC-only or pad-only session, and every
+     * auto-assigned multi-pad session): slotShared[slot] is false, so this is a plain
+     * writers[slot].writeGamepadState(state) — byte-identical to the pre-sharing code path.
+     *
+     * Shared case (>=2 contributors on the slot — manual same-slot pins or On-screen SHARE mode):
+     * snapshot this contributor's latest state under its descriptor key, then write the MERGE of
+     * every contributor's latest snapshot. The merge ORs all buttons/dpad and takes the
+     * largest-magnitude stick axis / largest trigger, so a neutral frame from one contributor
+     * (notably OSC, which sends a full mostly-neutral state every frame) can NEVER overwrite
+     * another contributor's held input.
+     */
+    private void writeSlotState(int slot, int deviceId, GamepadState state) {
+        if (slot < 0 || slot >= MAX_CONTROLLERS || writers[slot] == null || state == null)
+            return;
+
+        if (!slotShared[slot]) {
+            writers[slot].writeGamepadState(state);
+            return;
         }
+
+        String key = (deviceId == OSC_DEVICE_ID) ? OSC_DESCRIPTOR : deviceToDescriptor.get(deviceId);
+        if (key == null)
+            key = "dev:" + deviceId;
+
+        Map<String, GamepadState> contrib = slotContributions[slot];
+        if (contrib == null) {
+            contrib = new HashMap<>();
+            slotContributions[slot] = contrib;
+        }
+        GamepadState snap = contrib.get(key);
+        if (snap == null) {
+            snap = new GamepadState();
+            contrib.put(key, snap);
+        }
+        snap.copy(state);
+
+        GamepadState merged = slotMerged[slot];
+        if (merged == null) {
+            merged = new GamepadState();
+            slotMerged[slot] = merged;
+        }
+        mergeContributions(contrib, merged);
+        writers[slot].writeGamepadState(merged);
+    }
+
+    /** Combines every contributor's latest state into {@code out}: buttons and the four D-pad
+     *  directions are OR'd (any device pressing wins); each stick axis takes the value with the
+     *  largest magnitude (the actively-deflected one beats a centred one); each trigger takes the
+     *  max. Neutral contributions therefore drop out of the result entirely. */
+    private void mergeContributions(Map<String, GamepadState> contrib, GamepadState out) {
+        out.reset();
+        for (GamepadState s : contrib.values()) {
+            if (s == null) continue;
+            out.buttons |= s.buttons;
+            for (int i = 0; i < out.dpad.length; i++)
+                out.dpad[i] |= s.dpad[i];
+            if (Math.abs(s.thumbLX) > Math.abs(out.thumbLX)) out.thumbLX = s.thumbLX;
+            if (Math.abs(s.thumbLY) > Math.abs(out.thumbLY)) out.thumbLY = s.thumbLY;
+            if (Math.abs(s.thumbRX) > Math.abs(out.thumbRX)) out.thumbRX = s.thumbRX;
+            if (Math.abs(s.thumbRY) > Math.abs(out.thumbRY)) out.thumbRY = s.thumbRY;
+            if (s.triggerL > out.triggerL) out.triggerL = s.triggerL;
+            if (s.triggerR > out.triggerR) out.triggerR = s.triggerR;
+        }
+    }
+
+    /** Recomputes slotShared[] from live occupancy: a slot is shared when >=2 distinct contributors
+     *  hold it (the OSC virtual pad counted via deviceToSlot, physical pads via descriptorToSlot, which
+     *  is descriptor-keyed so sibling sub-devices of ONE pad count once). Called only when slot
+     *  occupancy changes — never on the per-frame input path. Clears the contribution/merge scratch for
+     *  any slot that is no longer shared so a stale snapshot can't linger. */
+    private void recomputeSharedSlots() {
+        int[] counts = new int[MAX_CONTROLLERS];
+        Integer oscSlot = deviceToSlot.get(OSC_DEVICE_ID);
+        if (oscSlot != null && oscSlot >= 0 && oscSlot < MAX_CONTROLLERS)
+            counts[oscSlot]++;
+        for (Integer s : descriptorToSlot.values())
+            if (s != null && s >= 0 && s < MAX_CONTROLLERS)
+                counts[s]++;
+        for (int i = 0; i < MAX_CONTROLLERS; i++) {
+            boolean shared = counts[i] >= 2;
+            slotShared[i] = shared;
+            if (!shared && slotContributions[i] != null)
+                slotContributions[i].clear();
+        }
+    }
+
+    /** Wipes all shared-slot bookkeeping (flags + contributor/merge scratch). Used by the reset/close
+     *  paths that also clear the slot maps. */
+    private void clearSharedSlotState() {
+        for (int i = 0; i < MAX_CONTROLLERS; i++) {
+            slotShared[i] = false;
+            if (slotContributions[i] != null) slotContributions[i].clear();
+        }
+    }
+
+    /**
+     * On-screen priority for a pad that just connected (onInputDeviceAdded), per the per-container
+     * On-screen mode. KEEP is a no-op (returns false → the pad auto-assigns normally). YIELD, when OSC
+     * currently holds Player 1, bumps OSC up to the next free slot so the incoming pad takes Player 1
+     * via the normal FCFS assign (returns false so that assign still runs). SHARE co-occupies OSC's slot
+     * with the pad (returns true — the pad is already seated via the merge, skip the normal assign).
+     * Only steers the AUTO case: an explicit pin/ignore on the pad or on OSC is always respected.
+     */
+    private boolean handleOnScreenModeForNewPad(int deviceId) {
+        int mode = onScreenControllerMode;
+        if (mode == ON_SCREEN_MODE_KEEP)
+            return false;
+        if (deviceToSlot.containsKey(deviceId))
+            return false;
+        android.view.InputDevice device = android.view.InputDevice.getDevice(deviceId);
+        if (!ExternalController.isGameController(device))
+            return false;
+        String descriptor = device != null ? device.getDescriptor() : null;
+        if (descriptor == null)
+            return false;
+        // Respect an explicit pin/ignore on the incoming pad — these modes only steer un-pinned pads.
+        if (manualSlotOverrides.get(descriptor) != null)
+            return false;
+        // OSC must currently hold Player 1 (slot 0) for either mode to have anything to do.
+        Integer oscSlot = deviceToSlot.get(OSC_DEVICE_ID);
+        if (oscSlot == null || oscSlot != 0)
+            return false;
+        // Respect an explicit OSC pin — never move a user-pinned on-screen pad.
+        if (manualSlotOverrides.get(OSC_DESCRIPTOR) != null)
+            return false;
+
+        if (mode == ON_SCREEN_MODE_SHARE) {
+            // Co-occupy OSC's Player-1 slot: the per-slot merge lets the pad and OSC both drive it.
+            if (getController(deviceId) == null)
+                return false;
+            int slot = joinSharedSlot(deviceId, descriptor, oscSlot);
+            Log.d("WinHandler", "On-screen SHARE: pad " + deviceId + " joined OSC slot " + slot);
+            return slot >= 0;
+        }
+
+        // YIELD: move OSC to the lowest free HIGHER slot so the pad can take Player 1 via FCFS.
+        int free = -1;
+        for (int s = 1; s < MAX_CONTROLLERS; s++) {
+            if (!usedSlots.contains(s)) { free = s; break; }
+        }
+        if (free < 0)
+            return false; // no room to move OSC — leave things as they are (safe)
+        releaseSlot(OSC_DEVICE_ID);         // softRelease: frees slot 0, OSC ring stays alive
+        oscYieldSlot = free;                // session-only OSC preference honored by assignSlot(OSC)
+        int newOscSlot = assignSlot(OSC_DEVICE_ID);
+        Log.d("WinHandler", "On-screen YIELD: OSC moved to slot " + newOscSlot
+                + "; incoming pad " + deviceId + " will take Player 1");
+        return false; // let assignConnectedDeviceIfPossible seat the pad on the now-free slot 0
     }
 
     /**
@@ -1588,9 +1784,18 @@ public class WinHandler {
             if (oscOverride != null) {
                 if (oscOverride == SLOT_IGNORE)
                     return -1;
-                if (oscOverride >= 0 && oscOverride < MAX_CONTROLLERS && !usedSlots.contains(oscOverride))
-                    return assignSpecificSlot(deviceId, null, oscOverride);
+                if (oscOverride >= 0 && oscOverride < MAX_CONTROLLERS) {
+                    if (!usedSlots.contains(oscOverride))
+                        return assignSpecificSlot(deviceId, null, oscOverride);
+                    // Slot is taken but the user pinned MULTIPLE devices to it — co-occupy (shared merge).
+                    if (isSlotManuallyShared(oscOverride))
+                        return joinSharedSlot(deviceId, null, oscOverride);
+                }
             }
+            // Session-only YIELD preference: a pad promotion moved OSC up to this slot. Honor it before
+            // FCFS so OSC doesn't fall straight back onto the slot 0 we just handed the physical pad.
+            if (oscYieldSlot >= 0 && oscYieldSlot < MAX_CONTROLLERS && !usedSlots.contains(oscYieldSlot))
+                return assignSpecificSlot(deviceId, null, oscYieldSlot);
             return assignFreeSlot(deviceId, null);
         }
 
@@ -1619,6 +1824,15 @@ public class WinHandler {
                 return descriptorSlot;
             }
 
+            // Manual same-slot SHARING: the user pinned this descriptor to a slot that ANOTHER
+            // descriptor (or OSC) is also pinned to. Co-occupy it instead of evicting/spilling — the
+            // per-slot merge lets both devices drive the one XInput player. Manual-only: nothing
+            // auto-assigns two descriptors to one slot, so this is reachable only via explicit pins.
+            if (override != null && override >= 0 && override < MAX_CONTROLLERS
+                    && usedSlots.contains(override) && isSlotManuallyShared(override)) {
+                return joinSharedSlot(deviceId, descriptor, override);
+            }
+
             // Pinned to a specific slot: claim it when free (else fall through to FCFS).
             if (override != null && override >= 0 && override < MAX_CONTROLLERS
                     && !usedSlots.contains(override)) {
@@ -1642,7 +1856,37 @@ public class WinHandler {
             deviceToDescriptor.put(deviceId, descriptor);
         }
         ensureWriterForSlot(slot);
+        recomputeSharedSlots();
         Log.d("WinHandler", "Pinned device " + deviceId + " to slot " + slot
+                + (descriptor != null ? " (descriptor: " + descriptor + ")" : " (OSC)"));
+        return slot;
+    }
+
+    /** True when the user has manually pinned >=2 DISTINCT descriptors (OSC counted) to {@code slot}.
+     *  This is the manual-only trigger for shared/combined control — auto-assignment never produces it. */
+    private boolean isSlotManuallyShared(int slot) {
+        int count = 0;
+        for (Integer v : manualSlotOverrides.values())
+            if (v != null && v == slot) count++;
+        return count >= 2;
+    }
+
+    /** Co-occupies an already-used slot for {@code deviceId} (manual same-slot sharing, or On-screen
+     *  SHARE mode) instead of evicting the current holder. Records the same descriptor keys as the
+     *  other assign helpers, marks the slot shared, and leaves the existing writer in place (both
+     *  contributors feed it through the per-slot merge). Returns the slot. */
+    private int joinSharedSlot(int deviceId, String descriptor, int slot) {
+        if (slot < 0 || slot >= MAX_CONTROLLERS)
+            return -1;
+        usedSlots.add(slot); // already present; idempotent
+        deviceToSlot.put(deviceId, slot);
+        if (descriptor != null) {
+            descriptorToSlot.put(descriptor, slot);
+            deviceToDescriptor.put(deviceId, descriptor);
+        }
+        ensureWriterForSlot(slot);
+        recomputeSharedSlots();
+        Log.d("WinHandler", "Device " + deviceId + " SHARING slot " + slot
                 + (descriptor != null ? " (descriptor: " + descriptor + ")" : " (OSC)"));
         return slot;
     }
@@ -1659,6 +1903,7 @@ public class WinHandler {
                     deviceToDescriptor.put(deviceId, descriptor);
                 }
                 ensureWriterForSlot(slot);
+                recomputeSharedSlots();
                 Log.d("WinHandler", "Assigned device " + deviceId + " to slot " + slot
                         + (descriptor != null ? " (descriptor: " + descriptor + ")" : ""));
                 return slot;
@@ -1689,16 +1934,36 @@ public class WinHandler {
         // the slot down once the LAST of those sub-devices is gone, otherwise unplugging the
         // touchpad half would kill a still-connected pad.
         String descriptor = deviceToDescriptor.remove(deviceId);
-        boolean slotStillInUse = false;
+        // Same-physical-controller sibling still on this slot? (gamepad + touchpad + motion each
+        // enumerate a deviceId but share one descriptor / one slot.)
+        boolean siblingHoldsSlot = false;
         if (descriptor != null) {
             for (Map.Entry<Integer, String> entry : deviceToDescriptor.entrySet()) {
                 if (descriptor.equals(entry.getValue()) && deviceToSlot.containsKey(entry.getKey())) {
-                    slotStillInUse = true;
+                    siblingHoldsSlot = true;
                     break;
                 }
             }
-            if (!slotStillInUse)
+            if (!siblingHoldsSlot)
                 descriptorToSlot.remove(descriptor);
+        }
+
+        // Shared-slot co-owner (a DIFFERENT descriptor, or OSC) still on this slot? If so we must NOT
+        // tear the ring down — only the LAST contributor to leave a shared slot destroys it (mirrors the
+        // sibling-sub-device rule above, extended to distinct co-owners of a shared slot).
+        boolean coOwnerHoldsSlot = false;
+        for (Integer s : deviceToSlot.values()) {
+            if (s != null && s.intValue() == slot) { coOwnerHoldsSlot = true; break; }
+        }
+
+        boolean slotStillInUse = siblingHoldsSlot || coOwnerHoldsSlot;
+
+        // Drop the departing contributor's snapshot from the shared merge (unless a same-descriptor
+        // sibling still feeds that same key) so its last-held inputs don't linger in the combined state.
+        if (!siblingHoldsSlot) {
+            String contribKey = (deviceId == OSC_DEVICE_ID) ? OSC_DESCRIPTOR : descriptor;
+            if (contribKey != null && slotContributions[slot] != null)
+                slotContributions[slot].remove(contribKey);
         }
 
         if (!slotStillInUse) {
@@ -1719,10 +1984,22 @@ public class WinHandler {
                 }
             }
             usedSlots.remove(slot);
+            if (slotContributions[slot] != null) slotContributions[slot].clear();
             Log.d("WinHandler", "Device " + deviceId + " disconnected (or OSC disabled). Slot released: " + slot);
         } else {
             Log.d("WinHandler", "Device " + deviceId + " removed but slot " + slot
-                    + " still used by a sibling sub-device.");
+                    + " still used by a sibling sub-device or shared-slot co-owner.");
+        }
+
+        // Occupancy changed either way — refresh the shared cache. When a co-owner remains, immediately
+        // re-write the merged state (now without the departed contributor) so its held inputs release
+        // even before the remaining contributor's next frame.
+        recomputeSharedSlots();
+        if (slotStillInUse && slotShared[slot] && writers[slot] != null && slotContributions[slot] != null) {
+            GamepadState merged = slotMerged[slot];
+            if (merged == null) { merged = new GamepadState(); slotMerged[slot] = merged; }
+            mergeContributions(slotContributions[slot], merged);
+            writers[slot].writeGamepadState(merged);
         }
 
         if (gyroTargetController != null && gyroTargetController.getDeviceId() == deviceId) {
@@ -1947,6 +2224,8 @@ public class WinHandler {
 
         // ---- OSC virtual pad ----
         if (OSC_DESCRIPTOR.equals(descriptor)) {
+            // An explicit OSC assignment overrides any session-only YIELD promotion preference.
+            oscYieldSlot = -1;
             Integer cur = deviceToSlot.get(OSC_DEVICE_ID);
             if (normalized >= 0 && cur != null && cur == normalized)
                 return normalized; // already there — no flap
@@ -2016,13 +2295,21 @@ public class WinHandler {
         for (int occ : occupants) {
             if (occ == OSC_DEVICE_ID) {
                 // Only evict OSC when the incoming device isn't OSC itself.
-                if (!OSC_DESCRIPTOR.equals(exceptDescriptor))
-                    releaseSlot(OSC_DEVICE_ID);
+                if (OSC_DESCRIPTOR.equals(exceptDescriptor)) continue;
+                // Shared: OSC is ALSO manually pinned to this slot — it's an intended co-owner, keep it.
+                Integer oscOv = manualSlotOverrides.get(OSC_DESCRIPTOR);
+                if (oscOv != null && oscOv == targetSlot) continue;
+                releaseSlot(OSC_DEVICE_ID);
                 continue;
             }
             String occDescriptor = deviceToDescriptor.get(occ);
-            if (occDescriptor == null || !occDescriptor.equals(exceptDescriptor))
-                releaseSlot(occ);
+            if (occDescriptor != null && occDescriptor.equals(exceptDescriptor)) continue;
+            // Shared: this occupant is ALSO manually pinned to the same slot — intended co-owner, keep it.
+            if (occDescriptor != null) {
+                Integer occOv = manualSlotOverrides.get(occDescriptor);
+                if (occOv != null && occOv == targetSlot) continue;
+            }
+            releaseSlot(occ);
         }
     }
 
@@ -2060,6 +2347,8 @@ public class WinHandler {
         usedSlots.clear();
         controllers.clear();
         fallbackSlot = -1;
+        oscYieldSlot = -1;
+        clearSharedSlotState();
 
         // 2) Make sure the hot-plug listener is still live.
         if (inputManager != null && inputDeviceListener != null) {
@@ -2224,6 +2513,8 @@ public class WinHandler {
         controllers.clear();
         manualSlotOverrides.clear();
         fallbackSlot = -1;
+        oscYieldSlot = -1;
+        clearSharedSlotState();
 
         vibrationRunning = false;
         if (vibrationServer != null) {

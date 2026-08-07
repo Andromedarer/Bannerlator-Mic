@@ -1782,6 +1782,26 @@ private fun AdvancedTab(
         // applies. Same JSON schema and editor the in-game "Players" drawer tab uses, but here it's a
         // saved default (applied on next launch), not a live reassignment.
         SectionBox(title = "Player Slots") {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Pin controllers to players; assign two to one player to share control.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(onClick = { helpRes = R.string.help_player_slots }) {
+                    Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                }
+            }
+            // On-screen priority: what happens to the on-screen pad when a physical pad connects mid-game.
+            val onScreenModeLabels = listOf("Keep on-screen player", "Yield Player 1 to pad", "Share the player")
+            LabeledDropdown(
+                label = "On-screen priority",
+                options = onScreenModeLabels,
+                selectedOption = onScreenModeLabels.getOrElse(viewModel.onScreenControllerMode) { onScreenModeLabels[0] },
+                onSelect = { viewModel.onScreenControllerMode = onScreenModeLabels.indexOf(it).coerceAtLeast(0) },
+            )
+            Spacer(Modifier.height(8.dp))
             PlayerSlotsEditor(
                 savedOverridesJson = viewModel.controllerSlotOverridesJson,
                 onOverridesChange = { viewModel.controllerSlotOverridesJson = it },
