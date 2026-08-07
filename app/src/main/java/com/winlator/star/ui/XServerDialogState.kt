@@ -326,6 +326,112 @@ object XServerDialogState {
     @JvmField var onResetInput: Runnable? = null
 
     // -------------------------------------------------------------------------
+    // Controller-status TOAST (P5b) — a small app-themed card that fades into the TOP-RIGHT of the
+    // in-game screen (below the Fusion HUD), lists each detected input device (type icon + name +
+    // player badge), holds a few seconds, then fades out. Fired on: launch, controller hot-plug
+    // (add/remove), manual slot reassignment, and Reset Input. Purely informational / non-interactive
+    // (see ControllerToastOverlay). The activity reads getPlayerSlotAssignments (main-thread only) and
+    // calls showControllerToastFor with the SAME PlayerSlotRow list the Players sub-tab uses, so the
+    // toast and the editor never disagree.
+    // -------------------------------------------------------------------------
+    enum class ToastIconType { CONTROLLER, TOUCH, MOUSE, KEYBOARD }
+    enum class ToastBadgeType { PLAYER, SHARE, IGNORED, DETECTED }
+
+    data class ControllerToastRow(
+        val name: String,
+        val kind: String,
+        val icon: ToastIconType,
+        val badge: ToastBadgeType,
+        val slot: Int,        // 0-based player slot for PLAYER/SHARE badges; -1 otherwise
+        val isNew: Boolean,   // true for the device that just hot-plugged (drives the "NEW" tag)
+    )
+
+    data class ControllerToastData(
+        val title: String,
+        val subLabel: String,
+        val rows: List<ControllerToastRow>,
+        // Incremented on every event; the overlay keys its fade-in/hold/fade-out animation on this so a
+        // new event fired while the toast is showing restarts the cycle with fresh content.
+        val token: Long,
+    )
+
+    private val _controllerToast = MutableStateFlow<ControllerToastData?>(null)
+    val controllerToast: StateFlow<ControllerToastData?> = _controllerToast
+    private var _toastToken = 0L
+
+    /** Called by the overlay once the fade-out finishes (auto-dismiss). */
+    fun clearControllerToast() { _controllerToast.value = null }
+
+    /**
+     * Build + show the controller-status toast from the current player-slot rows. Main-thread only
+     * (the caller must have just read WinHandler.getPlayerSlotAssignments on the main thread).
+     *
+     * @param reason one of "launch", "connected", "disconnected", "reassign", "reset" — drives the
+     *   header title + sub-label.
+     * @param slots  the SAME PlayerSlotRow list the Players sub-tab renders (OSC first, then devices).
+     * @param changedDescriptor descriptor of a just-hot-plugged device (marks its row NEW); may be null.
+     */
+    fun showControllerToastFor(reason: String, slots: List<PlayerSlotRow>, changedDescriptor: String?) {
+        // OSC only appears as a row when it is actually seated as a player (has a slot); physical
+        // controllers + any slot-holder always appear (getPlayerSlotAssignments already filtered those).
+        val visible = slots.filter { !it.isOnScreen || it.currentSlot >= 0 }
+
+        // Shared-slot detection: two visible rows holding the same real slot.
+        val slotCounts = HashMap<Int, Int>()
+        visible.forEach { if (it.currentSlot >= 0) slotCounts[it.currentSlot] = (slotCounts[it.currentSlot] ?: 0) + 1 }
+
+        val rows = visible.map { r ->
+            val lname = r.displayName.lowercase()
+            val icon = when {
+                r.isOnScreen -> ToastIconType.TOUCH
+                r.isGameController -> ToastIconType.CONTROLLER
+                lname.contains("mouse") -> ToastIconType.MOUSE
+                lname.contains("keyboard") || lname.contains("keypad") -> ToastIconType.KEYBOARD
+                else -> ToastIconType.CONTROLLER
+            }
+            val badge = when {
+                r.override == SLOT_IGNORE -> ToastBadgeType.IGNORED
+                r.currentSlot >= 0 && (slotCounts[r.currentSlot] ?: 0) > 1 -> ToastBadgeType.SHARE
+                r.currentSlot >= 0 -> ToastBadgeType.PLAYER
+                else -> ToastBadgeType.DETECTED
+            }
+            val kind = when {
+                r.isOnScreen -> "Virtual gamepad"
+                badge == ToastBadgeType.IGNORED -> "Controller · filtered"
+                icon == ToastIconType.MOUSE -> "Pointer"
+                icon == ToastIconType.KEYBOARD -> "Keys"
+                else -> "Controller"
+            }
+            ControllerToastRow(
+                name = r.displayName, kind = kind, icon = icon, badge = badge, slot = r.currentSlot,
+                isNew = changedDescriptor != null && r.descriptor == changedDescriptor,
+            )
+        }
+        if (rows.isEmpty()) return
+
+        val hasShare = rows.any { it.badge == ToastBadgeType.SHARE }
+        val hasMouseKb = rows.any { it.icon == ToastIconType.MOUSE || it.icon == ToastIconType.KEYBOARD }
+        val sharedSlot = rows.firstOrNull { it.badge == ToastBadgeType.SHARE }?.slot ?: 0
+
+        val (title, sub) = when (reason) {
+            "connected"    -> "CONTROLLER CONNECTED" to "just now"
+            "disconnected" -> "CONTROLLER DISCONNECTED" to "just now"
+            "reset"        -> "INPUT RESET" to "just now"
+            "reassign"     ->
+                if (hasShare) "PLAYER ${sharedSlot + 1} · SHARED" to "updated"
+                else "INPUT UPDATED" to "updated"
+            else /* launch */ -> when {
+                hasMouseKb     -> "INPUT DETECTED"
+                rows.size == 1 -> "CONTROLLER DETECTED"
+                else           -> "CONTROLLERS DETECTED"
+            } to "on launch"
+        }
+
+        _toastToken += 1
+        _controllerToast.value = ControllerToastData(title, sub, rows, _toastToken)
+    }
+
+    // -------------------------------------------------------------------------
     // Gyro (motion aim) — Controls tab. WinHandler owns the values and persists them to
     // SharedPreferences, same round-trip as the vibration master switch: the activity seeds these
     // flows in setupUI and each drawer change fires the matching callback straight back into
@@ -659,6 +765,7 @@ object XServerDialogState {
         _reshadeLoadout.value  = emptyList()
         _reshadeLivePreview.value = false
         _paused.value          = false
+        _controllerToast.value = null
         _vibrationSlots.value  = emptyList()
         _vibrationMode.value   = 1
         _vibrationIntensity.value = 100

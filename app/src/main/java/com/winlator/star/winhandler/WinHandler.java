@@ -296,6 +296,25 @@ public class WinHandler {
     private final InputManager inputManager;
     private final InputManager.InputDeviceListener inputDeviceListener;
 
+    // ---- Controller-status toast hook (P5b) ----
+    // A plain, UI-framework-agnostic callback so the Activity/Compose layer can surface an in-game
+    // "controllers detected/changed" toast WITHOUT this class ever touching Compose. Fired only for
+    // real game-controller hot-plug events (add/remove/progressive-change); manual reassignment + Reset
+    // Input are already driven from the Activity's own drawer callbacks, so those fire the toast there.
+    // Always invoked on the main looper (the InputDeviceListener + the debounced release Runnable both
+    // run there), so the Activity may read getPlayerSlotAssignments() straight from the callback.
+    public interface ControllerAssignmentListener {
+        /** @param reason "connected" | "disconnected" | "changed"; @param descriptor affected device
+         *  descriptor (may be null, e.g. an already-detached device). */
+        void onControllerAssignmentsChanged(String reason, String descriptor);
+    }
+    private ControllerAssignmentListener assignmentListener;
+    public void setControllerAssignmentListener(ControllerAssignmentListener l) { this.assignmentListener = l; }
+    private void notifyAssignmentsChanged(String reason, String descriptor) {
+        ControllerAssignmentListener l = assignmentListener;
+        if (l != null) l.onControllerAssignmentsChanged(reason, descriptor);
+    }
+
     public WinHandler(XServerDisplayActivity activity) {
         this.activity = activity;
         this.inputManager = (InputManager) activity.getSystemService(Context.INPUT_SERVICE);
@@ -309,9 +328,13 @@ public class WinHandler {
                 cancelPendingDeviceRelease(deviceId);
                 // On-screen priority (per-container): YIELD/SHARE may re-seat OSC or co-seat the pad
                 // first. When SHARE has already seated the pad, skip the normal auto-assign.
-                if (handleOnScreenModeForNewPad(deviceId))
-                    return;
-                assignConnectedDeviceIfPossible(deviceId, "hotplug");
+                if (!handleOnScreenModeForNewPad(deviceId))
+                    assignConnectedDeviceIfPossible(deviceId, "hotplug");
+                // Surface a "connected" event for the in-game status toast — game controllers only, so a
+                // random device add never pops a toast.
+                android.view.InputDevice added = android.view.InputDevice.getDevice(deviceId);
+                if (ExternalController.isGameController(added))
+                    notifyAssignmentsChanged("connected", added != null ? added.getDescriptor() : null);
             }
 
             @Override
@@ -331,7 +354,13 @@ public class WinHandler {
                 // assignConnectedDeviceIfPossible early-returns when the device is already
                 // slotted or isn't a game controller, so repeated change events are cheap.
                 cancelPendingDeviceRelease(deviceId);
-                assignConnectedDeviceIfPossible(deviceId, "changed");
+                boolean assigned = assignConnectedDeviceIfPossible(deviceId, "changed");
+                // A pad that only became a full game controller on this change event just took a slot —
+                // treat it like a fresh connect for the status toast.
+                if (assigned) {
+                    android.view.InputDevice dev = android.view.InputDevice.getDevice(deviceId);
+                    notifyAssignmentsChanged("connected", dev != null ? dev.getDescriptor() : null);
+                }
             }
         };
         inputManager.registerInputDeviceListener(inputDeviceListener, null);
@@ -2453,11 +2482,17 @@ public class WinHandler {
         cancelPendingDeviceRelease(deviceId);
         Runnable release = () -> {
             pendingDeviceReleases.remove(deviceId);
+            // Capture the descriptor BEFORE releaseSlot clears the mapping (the device itself is already
+            // gone from the system, so InputDevice.getDevice() would return null here).
+            String releasedDescriptor = deviceToDescriptor.get(deviceId);
             // Retained from our tree: tell the on-screen controls a physical pad left so it
             // resets that controller's mapping/overlay state (WinNative has no equivalent).
             InputControlsView inputControlsView = activity.getInputControlsView();
             if (inputControlsView != null) inputControlsView.onControllerDisconnected(deviceId);
             releaseSlot(deviceId);
+            // Only toast a real tracked controller's departure (a device we'd actually slotted).
+            if (releasedDescriptor != null)
+                notifyAssignmentsChanged("disconnected", releasedDescriptor);
         };
         pendingDeviceReleases.put(deviceId, release);
         inputHandler.postDelayed(release, PHYSICAL_DISCONNECT_DEBOUNCE_MS);

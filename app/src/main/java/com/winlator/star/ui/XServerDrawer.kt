@@ -2680,7 +2680,13 @@ private fun PlayersSection() {
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     } else {
-        rows.forEach { row -> PlayerSlotRowItem(row); Spacer(Modifier.height(8.dp)) }
+        rows.forEachIndexed { i, row ->
+            if (i > 0) HorizontalDivider(
+                color = MaterialTheme.colorScheme.outline,
+                modifier = Modifier.padding(vertical = 8.dp)
+            )
+            PlayerSlotRowItem(row)
+        }
     }
 
     // Manual recovery: rebuild the fake-input transport in place (no relaunch). Belt-and-suspenders

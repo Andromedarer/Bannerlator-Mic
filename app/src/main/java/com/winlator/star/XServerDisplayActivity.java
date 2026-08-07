@@ -171,6 +171,19 @@ public class XServerDisplayActivity extends AppCompatActivity {
     public static int NOTIFICATION_ID = 9004;
     private XServerView xServerView;
     private InputControlsView inputControlsView;
+
+    // ---- Controller-status toast (P5b) — debounced hot-plug plumbing ----
+    // Coalesce a burst of add/remove/change callbacks (fast replug, or a pad that fans out into
+    // several sibling sub-devices) into ONE toast within this window.
+    private static final long CONTROLLER_TOAST_DEBOUNCE_MS = 300;
+    private final android.os.Handler controllerToastHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private String pendingToastReason = null;
+    private String pendingToastDescriptor = null;
+    private final Runnable fireControllerToast = () -> {
+        showControllerStatusToast(pendingToastReason != null ? pendingToastReason : "connected", pendingToastDescriptor);
+        pendingToastReason = null;
+        pendingToastDescriptor = null;
+    };
     private TouchpadView touchpadView;
     private XEnvironment environment;
     private DrawerLayout drawerLayout;
@@ -1635,9 +1648,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     xServerView.getRenderer().setCursorVisible(true);
                     cancelLaunchTimers();
                     // First real game frame: hold the launch screen a few more seconds (the game
-                    // renders behind it) so the boot steps are actually seen, then close.
-                    new android.os.Handler(getMainLooper()).postDelayed(
-                        preloaderDialog::closeOnUiThread, LAUNCH_OVERLAY_GRACE_MS);
+                    // renders behind it) so the boot steps are actually seen, then close and pop the
+                    // controller-status toast (game now visible, preloader gone; runs on the main thread
+                    // so getPlayerSlotAssignments is safe).
+                    new android.os.Handler(getMainLooper()).postDelayed(() -> {
+                        preloaderDialog.closeOnUiThread();
+                        showControllerStatusToast("launch", null);
+                    }, LAUNCH_OVERLAY_GRACE_MS);
                 }
                     
                 // SHM/copyArea present path — count the frame (self-heals onto the real presenting
@@ -2779,6 +2796,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
         unregisterGyroSensor();
         stopDxApiDetection();
         cancelLaunchTimers();
+        // Controller-status toast: drop the listener + any pending debounced toast so a late callback
+        // can't run against a tearing-down activity.
+        if (winHandler != null) winHandler.setControllerAssignmentListener(null);
+        controllerToastHandler.removeCallbacks(fireControllerToast);
         // Drop the failure-card callbacks so this activity isn't retained via the static holder.
         com.winlator.star.core.PreloaderState.setOnClose(null);
         com.winlator.star.core.PreloaderState.setOnOpenLog(null);
@@ -4003,28 +4024,31 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // are torn down + re-seated so the guest sees the move; OSC softReleases and only its slot
             // index changes) and the FULL override map is persisted per-container (shortcut-override
             // -else-container, same owner as the vibration/gyro writes above), so it survives relaunch.
-            final Runnable refreshPlayerSlots = () -> {
-                java.util.List<com.winlator.star.winhandler.WinHandler.PlayerSlotInfo> infos =
-                        winHandler.getPlayerSlotAssignments();
-                java.util.List<XServerDialogState.PlayerSlotRow> uiRows = new java.util.ArrayList<>();
-                for (com.winlator.star.winhandler.WinHandler.PlayerSlotInfo info : infos) {
-                    uiRows.add(new XServerDialogState.PlayerSlotRow(
-                            info.displayName, info.descriptor, info.currentSlot,
-                            info.override, info.isOnScreen, info.isGameController));
-                }
-                ds.setPlayerSlots(uiRows);
-            };
+            final Runnable refreshPlayerSlots = () -> ds.setPlayerSlots(buildPlayerSlotRows());
             refreshPlayerSlots.run();
             ds.onPlayerSlotsRefresh = refreshPlayerSlots;
             ds.onPlayerSlotChanged = (descriptor, desiredSlot) -> {
                 winHandler.setDeviceSlotAssignment(descriptor, desiredSlot);
                 persistControllerSlotOverridesJson(buildSlotOverridesJson());
                 refreshPlayerSlots.run();
+                // Manual reassignment → status toast (may be a "PLAYER n · SHARED" state).
+                showControllerStatusToast("reassign", null);
             };
             ds.onResetInput = () -> {
                 winHandler.resetInputPipeline();
                 refreshPlayerSlots.run();
+                showControllerStatusToast("reset", null);
             };
+
+            // Hot-plug (add/remove/progressive-change) → status toast. WinHandler fires a plain callback
+            // on the main looper; we DEBOUNCE a burst (a fast unplug/replug, or a pad that fans out into
+            // several sibling sub-devices) into a single toast, keeping only the latest reason/descriptor.
+            winHandler.setControllerAssignmentListener((reason, descriptor) -> {
+                pendingToastReason = reason;
+                pendingToastDescriptor = descriptor;
+                controllerToastHandler.removeCallbacks(fireControllerToast);
+                controllerToastHandler.postDelayed(fireControllerToast, CONTROLLER_TOAST_DEBOUNCE_MS);
+            });
 
             // Gyro (motion aim) state — WinHandler holds the live values (already resolved at launch
             // from the shortcut/container chain), so this seeds the drawer straight off it. Each
@@ -5064,6 +5088,28 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     public InputControlsView getInputControlsView() {
         return inputControlsView;
+    }
+
+    /** Snapshot the current input-device/slot state as UI rows. Main-thread only (reads
+     *  WinHandler.getPlayerSlotAssignments). Shared by the Players sub-tab refresh and the toast. */
+    private java.util.List<XServerDialogState.PlayerSlotRow> buildPlayerSlotRows() {
+        java.util.List<com.winlator.star.winhandler.WinHandler.PlayerSlotInfo> infos =
+                winHandler.getPlayerSlotAssignments();
+        java.util.List<XServerDialogState.PlayerSlotRow> uiRows = new java.util.ArrayList<>();
+        for (com.winlator.star.winhandler.WinHandler.PlayerSlotInfo info : infos) {
+            uiRows.add(new XServerDialogState.PlayerSlotRow(
+                    info.displayName, info.descriptor, info.currentSlot,
+                    info.override, info.isOnScreen, info.isGameController));
+        }
+        return uiRows;
+    }
+
+    /** Build + show the in-game controller-status toast for an event. Main-thread only. reason ∈
+     *  {"launch","connected","disconnected","reassign","reset"}; changedDescriptor marks a hot-plugged
+     *  row NEW (may be null). */
+    private void showControllerStatusToast(String reason, String changedDescriptor) {
+        if (winHandler == null) return;
+        XServerDialogState.INSTANCE.showControllerToastFor(reason, buildPlayerSlotRows(), changedDescriptor);
     }
 
     protected boolean isInGameControlsEditorOpen() {
