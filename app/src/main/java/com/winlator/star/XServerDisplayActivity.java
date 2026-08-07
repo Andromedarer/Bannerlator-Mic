@@ -5087,10 +5087,23 @@ else {
         Log.d(TAG, "Applying dgvoodoo ddrawrapper");
         TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "ddrawrapper/dgvoodoo.tzst", windowsDir, onExtractFileListener);
     }
+    else if (ddrawrapper.equals("d7vk")) {
+        Log.d(TAG, "Applying d7vk ddrawrapper");
+        // d7vk's ddraw.dll proxies unimplemented (2D/GDI) DirectDraw calls to a
+        // renamed builtin ddraw_.dll (see "GetProxiedDDrawModule: Loaded ddraw_.dll").
+        // Restore the genuine wine builtin, copy it aside as the proxy target, then
+        // drop d7vk's native ddraw.dll over the top (d3dimm stays builtin).
+        File d7vkSyswow64 = new File(windowsDir, "syswow64");
+        new File(d7vkSyswow64, "ddraw_.dll").delete();
+        restoreOriginalDllFiles("ddraw.dll", "d3dimm.dll");
+        File d7vkBuiltinDdraw = new File(d7vkSyswow64, "ddraw.dll");
+        if (d7vkBuiltinDdraw.exists()) FileUtils.copy(d7vkBuiltinDdraw, new File(d7vkSyswow64, "ddraw_.dll"));
+        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "ddrawrapper/d7vk.tzst", windowsDir, onExtractFileListener);
+    }
 
     Log.d(TAG, "Extracting ddrawrapper " + ddrawrapper);
     // Only extract if it wasn't already handled specifically above
-    if (!ddrawrapper.equals("dgvoodoo")) {
+    if (!ddrawrapper.equals("dgvoodoo") && !ddrawrapper.equals("d7vk")) {
         TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "ddrawrapper/" + ddrawrapper + ".tzst", windowsDir, onExtractFileListener);
     }
 }
@@ -5165,9 +5178,19 @@ return true;
             Log.d(TAG, "Applying dgvoodoo ddrawrapper");
             TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "ddrawrapper/dgvoodoo.tzst", windowsDir, onExtractFileListener);
         }
+        else if (ddrawrapper.equals("d7vk")) {
+            Log.d(TAG, "Applying d7vk ddrawrapper");
+            // See site above: d7vk proxies to a renamed builtin ddraw_.dll.
+            File d7vkSyswow64 = new File(windowsDir, "syswow64");
+            new File(d7vkSyswow64, "ddraw_.dll").delete();
+            restoreOriginalDllFiles("ddraw.dll", "d3dimm.dll");
+            File d7vkBuiltinDdraw = new File(d7vkSyswow64, "ddraw.dll");
+            if (d7vkBuiltinDdraw.exists()) FileUtils.copy(d7vkBuiltinDdraw, new File(d7vkSyswow64, "ddraw_.dll"));
+            TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "ddrawrapper/d7vk.tzst", windowsDir, onExtractFileListener);
+        }
 
         Log.d(TAG, "Extracting ddrawrapper " + ddrawrapper);
-        if (!ddrawrapper.equals("dgvoodoo")) {
+        if (!ddrawrapper.equals("dgvoodoo") && !ddrawrapper.equals("d7vk")) {
             TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "ddrawrapper/" + ddrawrapper + ".tzst", windowsDir, onExtractFileListener);
         }
     }
