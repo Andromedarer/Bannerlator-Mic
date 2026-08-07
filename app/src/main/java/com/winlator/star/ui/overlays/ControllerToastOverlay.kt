@@ -95,6 +95,9 @@ private val Txt         = Color(0xFFE9F1F5)
 private val TxtDim      = Color(0xFF8EA0AD)
 private val RowBg       = Color(0xFF0E141C) // card-2
 private val BadgeText   = Color(0xFF06121A)
+// Player-identity badge colors — FIXED and distinct regardless of the app theme, so P1-P4 stay
+// instantly tellable. (The card chrome still follows MaterialTheme.colorScheme.primary.)
+private val P1Cyan      = Color(0xFF5FC7DD)
 private val P2Amber     = Color(0xFFC8944E)
 private val P3Green     = Color(0xFF7EC46B)
 private val P4Purple    = Color(0xFFC77EC4)
@@ -335,22 +338,16 @@ private fun DeviceRow(row: ControllerToastRow) {
 
 @Composable
 private fun Badge(row: ControllerToastRow) {
-    val accent = MaterialTheme.colorScheme.primary       // follow the app theme accent
-    val onAccent = MaterialTheme.colorScheme.onPrimary
-    val stroke55 = accent.copy(alpha = 0.55f)
+    // Player badge colors are FIXED (theme-independent) so P1-P4 stay distinguishable under any theme.
+    val playerColor = when (row.slot) {
+        1 -> P2Amber
+        2 -> P3Green
+        3 -> P4Purple
+        else -> P1Cyan
+    }
     when (row.badge) {
-        ToastBadgeType.PLAYER -> {
-            // P1 follows the theme accent; P2-P4 keep distinct player colors so slots stay tellable.
-            val bg = when (row.slot) {
-                1 -> P2Amber
-                2 -> P3Green
-                3 -> P4Purple
-                else -> accent
-            }
-            val fg = if (row.slot == 0) onAccent else BadgeText
-            SolidBadge("P${row.slot + 1}", bg, fg)
-        }
-        ToastBadgeType.SHARE -> OutlineBadge("P${row.slot + 1} · share", accent, stroke55)
+        ToastBadgeType.PLAYER -> SolidBadge("P${row.slot + 1}", playerColor, BadgeText)
+        ToastBadgeType.SHARE -> OutlineBadge("P${row.slot + 1} · share", playerColor, playerColor.copy(alpha = 0.55f))
         ToastBadgeType.IGNORED -> OutlineBadge("Ignored", TxtDim, StrokeSoft)
         ToastBadgeType.DETECTED -> OutlineBadge("Detected", TxtDim, StrokeSoft)
     }
