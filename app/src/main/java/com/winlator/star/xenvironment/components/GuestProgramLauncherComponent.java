@@ -523,7 +523,30 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
                 command = imageFs.getBinDir() + "/box64 " + guestExecutable;
         }
 
-        
+        // ---> START OF MIC INJECTION <---
+        try {
+            // Write a bash script to the container's virtual filesystem
+            File launcherScript = new File(rootDir, "usr/bin/wine_mic_launcher.sh");
+            java.io.FileWriter writer = new java.io.FileWriter(launcherScript);
+            
+            writer.write("#!/bin/sh\n");
+            // Execute the original Winlator command
+            writer.write("exec " + command + "\n");
+            // Run PulseAudio bridge silently in the background
+            writer.write("(sleep 3 && pactl load-module module-null-sink sink_name=VirtualMic ; pactl set-default-source VirtualMic.monitor ; nohup sh -c 'nc 127.0.0.1 4711 | pacat --playback --device=VirtualMic --format=s16le --rate=44100 --channels=1' >/dev/null 2>&1) &\n");
+         
+            writer.close();
+            
+            // Give the script execution permissions
+            FileUtils.chmod(launcherScript, 0755);
+            
+            // Tell Winlator to run our script instead of the raw command
+            command = "/usr/bin/wine_mic_launcher.sh";
+            
+        } catch (Exception e) {
+            Log.e("MicBridge", "Failed to write launcher script", e);
+        }
+        // ---> END OF MIC INJECTION <---
 
         // **Maybe remove this: Set execute permissions for box64 if necessary (Glibc/Proot artifact)
         File box64File = new File(rootDir, "/usr/bin/box64");
