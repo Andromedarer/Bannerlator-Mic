@@ -3419,28 +3419,31 @@ private fun ProcessorAffinityDialog(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-                val cols = 4
-                Column(
+                // All cores in one shaded panel with hairline dividers (matches the header strip).
+                // Bounded + scrollable only as a fallback for very high core counts; 8 cores = 2 rows.
+                Box(
                     modifier = Modifier
-                        .heightIn(max = 240.dp)
+                        .heightIn(max = 260.dp)
                         .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    (0 until coreCount).chunked(cols).forEach { rowCores ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    CorePanel(count = coreCount) { i ->
+                        val on = (mask shr i) and 1 == 1
+                        val cbAccent = MaterialTheme.colorScheme.primary
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { mask = (mask xor (1 shl i)) and allMask }
+                                .padding(vertical = 6.dp, horizontal = 2.dp),
                         ) {
-                            rowCores.forEach { i ->
-                                val on = (mask shr i) and 1 == 1
-                                AffinityCoreTile(
-                                    label = "CPU$i",
-                                    checked = on,
-                                    onToggle = { mask = (mask xor (1 shl i)) and allMask },
-                                    modifier = Modifier.weight(1f),
-                                )
-                            }
-                            repeat(cols - rowCores.size) { Spacer(Modifier.weight(1f)) }
+                            Checkbox(
+                                checked = on,
+                                onCheckedChange = { mask = (mask xor (1 shl i)) and allMask },
+                                colors = CheckboxDefaults.colors(checkedColor = cbAccent),
+                                modifier = Modifier.size(28.dp),
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text("CPU$i", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                         }
                     }
                 }
@@ -3483,41 +3486,6 @@ private fun AffinityCheckRow(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-    }
-}
-
-/** One CPU as a compact bordered tile — accent checkbox stacked over a "CPUn" label — matching the
- *  container/game-settings core picker (widget/CPUListView -> cpu_list_item). The border tints to
- *  the accent when the core is selected. */
-@Composable
-private fun AffinityCoreTile(
-    label: String,
-    checked: Boolean,
-    modifier: Modifier = Modifier,
-    onToggle: () -> Unit,
-) {
-    val accent = MaterialTheme.colorScheme.primary
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
-            .border(
-                1.dp,
-                if (checked) accent.copy(alpha = 0.7f) else MaterialTheme.colorScheme.outline,
-                RoundedCornerShape(8.dp),
-            )
-            .clickable { onToggle() }
-            .padding(vertical = 3.dp),
-    ) {
-        Checkbox(
-            checked = checked,
-            onCheckedChange = { onToggle() },
-            colors = CheckboxDefaults.colors(checkedColor = accent),
-            modifier = Modifier.size(30.dp),
-        )
-        Spacer(Modifier.height(2.dp))
-        Text(label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
 }
 
@@ -3651,47 +3619,71 @@ private fun TmCoreStrip(h: XServerDialogState.TmHeaderStats?) {
     if (cores.isEmpty()) return
     val accent = MaterialTheme.colorScheme.primary
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
-    // Wrap the cores into rows of 4 (matching the stat-tile grid above) so every core is
-    // visible without horizontal scrolling — 8 cores = 2 rows, scales to any count.
-    val cols = 4
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        cores.toList().chunked(cols).forEachIndexed { rowIdx, rowCores ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+    Box(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        CorePanel(count = cores.size) { i ->
+            val mhz = cores[i]
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp, horizontal = 4.dp),
             ) {
-                rowCores.forEachIndexed { j, mhz ->
-                    val i = rowIdx * cols + j
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(7.dp))
-                            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(7.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
-                            .padding(horizontal = 4.dp, vertical = 4.dp),
-                    ) {
-                        Text("C$i", color = muted, fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                        Text(
-                            buildAnnotatedString {
-                                withStyle(SpanStyle(fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = accent)) {
-                                    append(if (mhz > 0) "$mhz" else "—")
-                                }
-                                if (mhz > 0) {
-                                    withStyle(SpanStyle(fontSize = 7.sp, fontWeight = FontWeight.Medium, color = muted)) {
-                                        append(" MHz")
-                                    }
-                                }
-                            },
-                            maxLines = 1,
-                        )
+                Text("C$i", color = muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    buildAnnotatedString {
+                        withStyle(SpanStyle(fontSize = 12.sp, fontWeight = FontWeight.Bold, color = accent)) {
+                            append(if (mhz > 0) "$mhz" else "—")
+                        }
+                        if (mhz > 0) {
+                            withStyle(SpanStyle(fontSize = 8.sp, fontWeight = FontWeight.Medium, color = muted)) {
+                                append(" MHz")
+                            }
+                        }
+                    },
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+/** The cores as ONE shaded panel — the translucent accent wash used by the Vulkan/DXVK game-card
+ *  component pills — with hairline dividers BETWEEN cells only (no per-cell borders, no outer-edge
+ *  lines). 4-per-row; scales to any count. [cell] renders one core's content by 0-based index.
+ *  Vertical hairlines use a Box rather than VerticalDivider (not on the classpath). */
+@Composable
+private fun CorePanel(
+    count: Int,
+    cols: Int = 4,
+    cell: @Composable (Int) -> Unit,
+) {
+    if (count <= 0) return
+    val accent = MaterialTheme.colorScheme.primary
+    val div = MaterialTheme.colorScheme.outline.copy(alpha = 0.55f)
+    val rows = (count + cols - 1) / cols
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(accent.copy(alpha = 0.12f))
+            .border(1.dp, accent.copy(alpha = 0.38f), RoundedCornerShape(12.dp)),
+    ) {
+        for (r in 0 until rows) {
+            if (r > 0) HorizontalDivider(thickness = 1.dp, color = div)
+            Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+                for (c in 0 until cols) {
+                    val idx = r * cols + c
+                    if (c > 0) {
+                        if (idx < count) {
+                            Box(Modifier.width(1.dp).fillMaxHeight().background(div))
+                        } else {
+                            Spacer(Modifier.width(1.dp))
+                        }
+                    }
+                    if (idx < count) {
+                        Box(Modifier.weight(1f)) { cell(idx) }
+                    } else {
+                        Spacer(Modifier.weight(1f))
                     }
                 }
-                // Pad the final short row so chip widths stay uniform with the full rows.
-                repeat(cols - rowCores.size) { Spacer(Modifier.weight(1f)) }
             }
         }
     }
