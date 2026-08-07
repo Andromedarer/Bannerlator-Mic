@@ -525,17 +525,23 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
 
        // ---> START OF MIC INJECTION <---
         try {
-            // Write a robust bash script to the container's virtual filesystem
+            // Translate Android host-side paths into container-internal paths
+            String containerCommand = command.replace(rootDir.getAbsolutePath(), "");
+            if (!containerCommand.startsWith("/")) {
+                containerCommand = "/" + containerCommand;
+            }
+
+            // Write the wrapper script to the container's virtual filesystem
             File launcherScript = new File(rootDir, "usr/bin/wine_mic_launcher.sh");
             java.io.FileWriter writer = new java.io.FileWriter(launcherScript);
             
             writer.write("#!/bin/sh\n");
             
-            // 1. Run the audio bridge in a completely detached background subshell with a 3s delay
+            // 1. Run the audio bridge in a detached background subshell with a 3s delay
             writer.write("(sleep 3 && pactl load-module module-null-sink sink_name=VirtualMic ; pactl set-default-source VirtualMic.monitor ; nc 127.0.0.1 4711 | pacat --playback --device=VirtualMic --format=s16le --rate=44100 --channels=1) >/dev/null 2>&1 &\n");
             
-            // 2. Use 'eval' to execute the original Winlator command safely, preserving spaces and quotes
-            writer.write("eval \"" + command.replace("\"", "\\\"") + "\"\n");
+            // 2. Execute the clean container-internal command using 'exec'
+            writer.write("exec " + containerCommand + "\n");
             
             writer.close();
             
