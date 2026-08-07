@@ -504,7 +504,7 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
             emulator = shortcut.getExtra("emulator", container.getEmulator());
 
        // Construct the command without Box64 to the Wine executable
-        String command = "";
+       String command = "";
         String overriddenCommand = envVars.get("GUEST_PROGRAM_LAUNCHER_COMMAND");
         if (!overriddenCommand.isEmpty()) {
             String[] parts = overriddenCommand.split(";");
@@ -524,13 +524,27 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         }
 
         // ---> START OF MIC INJECTION <---
-        String micBridgeScript = "(sleep 4 && " +
-                                 "pactl load-module module-null-sink sink_name=VirtualMic ; " + 
-                                 "pactl set-default-source VirtualMic.monitor ; " + 
-                                 "nohup sh -c 'nc 127.0.0.1 4711 | pacat --playback --device=VirtualMic --format=s16le --rate=44100 --channels=1' >/dev/null 2>&1) & ";
-                                 
-        // Prepend our PulseAudio mic setup so it executes right before Wine
-        command = micBridgeScript + command;
+        try {
+            // Write a bash script to the container's virtual filesystem
+            File launcherScript = new File(rootDir, "usr/bin/wine_mic_launcher.sh");
+            java.io.FileWriter writer = new java.io.FileWriter(launcherScript);
+            
+            writer.write("#!/bin/sh\n");
+            // Run PulseAudio bridge silently in the background
+            writer.write("(sleep 3 && pactl load-module module-null-sink sink_name=VirtualMic ; pactl set-default-source VirtualMic.monitor ; nohup sh -c 'nc 127.0.0.1 4711 | pacat --playback --device=VirtualMic --format=s16le --rate=44100 --channels=1' >/dev/null 2>&1) &\n");
+            // Execute the original Winlator command
+            writer.write("exec " + command + "\n");
+            writer.close();
+            
+            // Give the script execution permissions
+            FileUtils.chmod(launcherScript, 0755);
+            
+            // Tell Winlator to run our script instead of the raw command
+            command = "/usr/bin/wine_mic_launcher.sh";
+            
+        } catch (Exception e) {
+            Log.e("MicBridge", "Failed to write launcher script", e);
+        }
         // ---> END OF MIC INJECTION <---
 
         // **Maybe remove this: Set execute permissions for box64 if necessary (Glibc/Proot artifact)
