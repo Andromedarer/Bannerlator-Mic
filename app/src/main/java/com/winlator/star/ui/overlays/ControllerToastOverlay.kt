@@ -75,12 +75,13 @@ private const val TOAST_FADE_IN_MS = 280
 private const val TOAST_HOLD_MS = 3200
 private const val TOAST_FADE_OUT_MS = 450
 
-// Placement: top-right, offset DOWN so it clears the Fusion HUD. The Fusion HUD anchors TOP with a
-// 10px top margin (see XServerDisplayActivity.buildFusionHud); 64dp leaves room for it whether it
-// sits top-left (default) or the user has dragged it top-right.
-private const val TOAST_TOP_OFFSET_DP = 64
-private const val TOAST_END_MARGIN_DP = 16
+// Placement: top-right, tucked close to the corner. Small top offset keeps it high; the card shrinks
+// toward its top-right origin (TOAST_SCALE) so it hugs the corner without crowding gameplay center.
+private const val TOAST_TOP_OFFSET_DP = 24
+private const val TOAST_END_MARGIN_DP = 12
 private const val TOAST_WIDTH_DP = 288
+// Uniform render scale for the whole card (1.0 = full mockup size). 0.75 = 25% smaller.
+private const val TOAST_SCALE = 0.75f
 
 // --- Palette (mockup 1:1) ---
 private val CardTop     = Color(0xF7131A24) // rgba(19,26,36,.97)
@@ -159,7 +160,7 @@ private fun ControllerToastCard(data: ControllerToastData, onFinished: () -> Uni
                 this.alpha = alpha.value
                 // Subtle slide + scale to echo the mockup's tIn/tOut keyframes.
                 translationY = (1f - alpha.value) * -10.dp.toPx()
-                val sc = 0.93f + 0.07f * alpha.value
+                val sc = (0.93f + 0.07f * alpha.value) * TOAST_SCALE
                 scaleX = sc; scaleY = sc
                 transformOrigin = TransformOrigin(1f, 0f) // top-right, like the CSS transform-origin
             }
