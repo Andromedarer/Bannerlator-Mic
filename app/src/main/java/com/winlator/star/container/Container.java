@@ -567,6 +567,20 @@ public class Container {
         putExtra("vibrationIntensity", String.valueOf(intensity));
     }
 
+    // Manual controller slot overrides (in-game "Players" sub-tab), per-container. Stored as a raw
+    // JSON object string mapping a stable device descriptor -> desired slot: 0..3 pins the device to
+    // that XInput player slot, WinHandler.SLOT_IGNORE (-2) means "never take a slot", and a missing
+    // key = auto (FCFS). The on-screen pad uses the WinHandler.OSC_DESCRIPTOR sentinel as its key.
+    // Kept as an opaque string here (same discipline as getFPSCounterConfig): XServerDisplayActivity
+    // parses it into a Map for WinHandler.setManualSlotOverrides and writes edits back through here.
+    public String getControllerSlotOverrides() {
+        return getExtra("controllerSlotOverrides", "{}");
+    }
+
+    public void setControllerSlotOverrides(String json) {
+        putExtra("controllerSlotOverrides", json == null || json.isEmpty() ? "{}" : json);
+    }
+
     // Gyro (motion aim), per-container. Mirrors the WinHandler.GYRO_* constants so the editor VM and
     // the shortcut screen can talk about targets/activators without importing winhandler (same reason
     // the VIBRATION_MODE_* values are duplicated above). Enabled/target/sensitivity/activator/invert

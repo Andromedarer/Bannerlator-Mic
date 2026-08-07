@@ -2426,8 +2426,9 @@ private fun ControlsContent(state: XServerDrawerState) {
             Triple("Mouse", subTab == 1) { state.setControlsSubTab(1) },
             Triple("Vibration", subTab == 2) { state.setControlsSubTab(2) },
             Triple("Gyro", subTab == 3) { state.setControlsSubTab(3) },
+            Triple("Players", subTab == 4) { state.setControlsSubTab(4) },
         ),
-        perRow = 4
+        perRow = 3
     )
     Spacer(Modifier.height(8.dp))
 
@@ -2643,6 +2644,123 @@ private fun ControlsContent(state: XServerDrawerState) {
         // ── Gyro ── its own branch, deliberately OUTSIDE the vibration block above: the gyro section
         // is unrelated to rumble and must render whether or not vibration is switched on.
         3 -> GyroSection()
+
+        // ── Players ── manual per-device slot assignment (override when auto-assignment guesses wrong).
+        4 -> PlayersSection()
+    }
+}
+
+// ───── Controls > Players — manual per-device XInput slot assignment ─────
+// One row per detected input device (plus the on-screen pad), each with a Player 1-4 / Ignore / Auto
+// selector. Applied live (WinHandler.setDeviceSlotAssignment) and persisted per-container. Fixes the
+// case where auto-assignment hands Player 1 to the wrong device (e.g. an aux media-button board that
+// sorts first). The list is re-read from WinHandler each time the sub-tab opens, since devices
+// hot-plug. Reuses SectionHeader + the drawer's ExposedDropdownMenu pattern for visual consistency.
+@Composable
+private fun PlayersSection() {
+    val accent = MaterialTheme.colorScheme.primary
+    val rows by XServerDialogState.playerSlots.collectAsState()
+
+    // Devices hot-plug, so pull a fresh snapshot whenever this sub-tab is shown.
+    LaunchedEffect(Unit) { XServerDialogState.onPlayerSlotsRefresh?.run() }
+
+    Text("Player Slots", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+    Spacer(Modifier.height(4.dp))
+    Text(
+        "Assign each device to a player, or ignore it. Applied immediately and saved for this container.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    Spacer(Modifier.height(8.dp))
+
+    if (rows.isEmpty()) {
+        Text(
+            "No input devices detected.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    } else {
+        rows.forEach { row -> PlayerSlotRowItem(row); Spacer(Modifier.height(8.dp)) }
+    }
+
+    // Manual recovery: rebuild the fake-input transport in place (no relaunch). Belt-and-suspenders
+    // for any input-loss — re-handshakes physical pads AND the on-screen controls. Refreshes the list
+    // afterwards so the rebuilt slot assignments show.
+    Spacer(Modifier.height(4.dp))
+    OutlinedButton(
+        onClick = {
+            XServerDialogState.onResetInput?.run()
+            XServerDialogState.onPlayerSlotsRefresh?.run()
+        },
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+    ) { Text("Reset Input") }
+    Text(
+        "Re-handshake controllers & on-screen if input stops responding.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+}
+
+// One device row: name + "currently Player N / unassigned" subtitle + a slot selector dropdown.
+@Composable
+private fun PlayerSlotRowItem(row: XServerDialogState.PlayerSlotRow) {
+    val accent = MaterialTheme.colorScheme.primary
+
+    // Selector option order: Auto, Player 1-4, Ignore. Value encodes the override the callback wants:
+    // SLOT_AUTO / 0..3 / SLOT_IGNORE — the exact contract of onPlayerSlotChanged.
+    val options = remember {
+        buildList {
+            add("Auto" to XServerDialogState.SLOT_AUTO)
+            for (i in 0 until 4) add("Player ${i + 1}" to i)
+            add("Ignore" to XServerDialogState.SLOT_IGNORE)
+        }
+    }
+    val selectedLabel = options.firstOrNull { it.second == row.override }?.first ?: "Auto"
+
+    val subtitle = when {
+        row.currentSlot >= 0 -> "Currently Player ${row.currentSlot + 1}"
+        row.override == XServerDialogState.SLOT_IGNORE -> "Ignored"
+        else -> "Unassigned"
+    }
+
+    var expanded by remember(row.descriptor, row.override) { mutableStateOf(false) }
+
+    Column(Modifier.fillMaxWidth()) {
+        Text(
+            row.displayName,
+            color = MaterialTheme.colorScheme.onSurface,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            subtitle + if (row.isOnScreen) " · on-screen controls" else "",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(4.dp))
+        ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+            OutlinedTextField(
+                value = selectedLabel,
+                onValueChange = {}, readOnly = true,
+                label = { Text("Slot", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                modifier = Modifier.fillMaxWidth().menuAnchor(),
+                singleLine = true,
+            )
+            ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                options.forEach { (label, value) ->
+                    DropdownMenuItem(text = { Text(label) }, onClick = {
+                        expanded = false
+                        if (value != row.override) {
+                            XServerDialogState.onPlayerSlotChanged?.invoke(row.descriptor, value)
+                        }
+                    })
+                }
+            }
+        }
     }
 }
 

@@ -292,6 +292,40 @@ object XServerDialogState {
     @JvmField var onVibrationIntensityChanged: VibrationIntensityCallback? = null
 
     // -------------------------------------------------------------------------
+    // Player Slots (manual per-device slot assignment) — Controls > Players sub-tab. One row per
+    // detected input device (plus the on-screen pad). `override` is the user's choice: SLOT_AUTO
+    // (-1) leaves auto-assignment alone, SLOT_IGNORE (-2) drops the device, 0..3 pins it to that
+    // XInput player slot. `currentSlot` is the slot the device actually holds right now (-1 =
+    // unassigned) and is shown as a subtitle. The list is re-read from WinHandler via
+    // onPlayerSlotsRefresh (devices hot-plug), and each edit fires onPlayerSlotChanged, which the
+    // activity applies live (WinHandler.setDeviceSlotAssignment) + persists per-container.
+    // -------------------------------------------------------------------------
+    const val SLOT_AUTO = -1
+    const val SLOT_IGNORE = -2 // mirrors WinHandler.SLOT_IGNORE
+
+    data class PlayerSlotRow(
+        val displayName: String,
+        val descriptor: String,
+        val currentSlot: Int,
+        val override: Int,
+        val isOnScreen: Boolean,
+        val isGameController: Boolean,
+    )
+
+    private val _playerSlots = MutableStateFlow<List<PlayerSlotRow>>(emptyList())
+    val playerSlots: StateFlow<List<PlayerSlotRow>> = _playerSlots
+    fun setPlayerSlots(rows: List<PlayerSlotRow>) { _playerSlots.value = rows }
+
+    fun interface PlayerSlotCallback { fun invoke(descriptor: String, desiredSlot: Int) }
+    /** Fired when the user changes a device's slot selection. desiredSlot = 0..3 pin, SLOT_IGNORE, or
+     *  SLOT_AUTO. The activity applies it live and re-seeds the list afterwards. */
+    @JvmField var onPlayerSlotChanged: PlayerSlotCallback? = null
+    /** Re-reads the device list from WinHandler (call when the sub-tab opens / after a change). */
+    @JvmField var onPlayerSlotsRefresh: Runnable? = null
+    /** Manual "Reset Input" recovery — rebuilds the fake-input transport in place (no relaunch). */
+    @JvmField var onResetInput: Runnable? = null
+
+    // -------------------------------------------------------------------------
     // Gyro (motion aim) — Controls tab. WinHandler owns the values and persists them to
     // SharedPreferences, same round-trip as the vibration master switch: the activity seeds these
     // flows in setupUI and each drawer change fires the matching callback straight back into
@@ -628,6 +662,7 @@ object XServerDialogState {
         _vibrationSlots.value  = emptyList()
         _vibrationMode.value   = 1
         _vibrationIntensity.value = 100
+        _playerSlots.value     = emptyList()
         _gyroSupported.value   = false
         _gyroOrientationSupported.value = false
         _gyroEnabled.value     = true
@@ -674,6 +709,7 @@ object XServerDialogState {
         onRequestResume = null
         onVibrationSlotChanged = null
         onVibrationModeChanged = null; onVibrationIntensityChanged = null
+        onPlayerSlotChanged = null; onPlayerSlotsRefresh = null; onResetInput = null
         onGyroEnabledChanged = null; onGyroTargetChanged = null
         onGyroSensitivityChanged = null; onGyroDeadzoneChanged = null; onGyroSmoothingChanged = null
         onGyroInvertXChanged = null; onGyroInvertYChanged = null; onGyroActivatorChanged = null

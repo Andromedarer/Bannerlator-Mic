@@ -93,6 +93,19 @@ public class WinHandler {
     private Set<Integer> usedSlots = new HashSet<>();
     private String fakeInputBasePath;
 
+    // Manual per-device slot overrides from the in-game "Players" sub-tab (persisted per-container by
+    // XServerDisplayActivity in Container.controllerSlotOverrides). Keyed on the stable device
+    // descriptor — same key as descriptorToSlot — with the OSC virtual pad using the OSC_DESCRIPTOR
+    // sentinel below (it has no real descriptor). A value of 0..MAX_CONTROLLERS-1 PINS the device to
+    // that XInput player slot; SLOT_IGNORE means "never take a slot"; a missing entry = auto (FCFS,
+    // the historical behavior). Consulted by assignSlot on EVERY assignment path (startup pre-assign,
+    // hot-plug, and the per-input-event send), so an override can't be undone by a later input event.
+    // Main-thread only (drawer callbacks + InputDeviceListener + input events all land on the main
+    // looper), so a plain HashMap is safe here — mirrors descriptorToSlot/deviceToDescriptor.
+    public static final int SLOT_IGNORE = -2;
+    public static final String OSC_DESCRIPTOR = "__osc__"; // stand-in descriptor for the on-screen pad
+    private final Map<String, Integer> manualSlotOverrides = new HashMap<>();
+
     // Physical hot-plug debounce. Android churns remove/add events during Bluetooth flaps
     // and sub-device re-enumeration; a real unplug stays gone and is torn down after the
     // delay, while a quick reconnect re-seats onto the SAME slot (via descriptorToSlot)
@@ -1566,9 +1579,20 @@ public class WinHandler {
         if (existing != null)
             return existing;
 
-        // OSC / virtual gamepad: no descriptor, simple FCFS — same behavior as before.
-        if (deviceId == OSC_DEVICE_ID)
+        // OSC / virtual gamepad: no real descriptor, so it keys manual overrides on OSC_DESCRIPTOR.
+        // Ignore = no slot; pin = claim the chosen slot (including slot 0 / Player 1) when free,
+        // else fall back to FCFS so the on-screen pad still works. Default (no override) is the
+        // historical simple FCFS behavior.
+        if (deviceId == OSC_DEVICE_ID) {
+            Integer oscOverride = manualSlotOverrides.get(OSC_DESCRIPTOR);
+            if (oscOverride != null) {
+                if (oscOverride == SLOT_IGNORE)
+                    return -1;
+                if (oscOverride >= 0 && oscOverride < MAX_CONTROLLERS && !usedSlots.contains(oscOverride))
+                    return assignSpecificSlot(deviceId, null, oscOverride);
+            }
             return assignFreeSlot(deviceId, null);
+        }
 
         // Physical: resolve the descriptor so sibling sub-devices group under one slot.
         String descriptor = null;
@@ -1576,9 +1600,15 @@ public class WinHandler {
         if (device != null)
             descriptor = device.getDescriptor();
 
-        // Another deviceId from the same physical controller (a reconnect, or a sibling
-        // sub-device) already holds a slot — reuse it instead of consuming a new one.
         if (descriptor != null) {
+            // Manual override wins over auto-assignment. Ignore = never take a slot (guards the
+            // input-event path so an ignored pad can't re-grab a slot on its next event).
+            Integer override = manualSlotOverrides.get(descriptor);
+            if (override != null && override == SLOT_IGNORE)
+                return -1;
+
+            // Another deviceId from the same physical controller (a reconnect, or a sibling
+            // sub-device) already holds a slot — reuse it instead of consuming a new one.
             Integer descriptorSlot = descriptorToSlot.get(descriptor);
             if (descriptorSlot != null) {
                 deviceToSlot.put(deviceId, descriptorSlot);
@@ -1588,9 +1618,33 @@ public class WinHandler {
                         + descriptorSlot + " (same physical controller: " + descriptor + ")");
                 return descriptorSlot;
             }
+
+            // Pinned to a specific slot: claim it when free (else fall through to FCFS).
+            if (override != null && override >= 0 && override < MAX_CONTROLLERS
+                    && !usedSlots.contains(override)) {
+                return assignSpecificSlot(deviceId, descriptor, override);
+            }
         }
 
         return assignFreeSlot(deviceId, descriptor);
+    }
+
+    /** Claims a SPECIFIC slot for deviceId (manual pin path), recording the descriptor keys
+     *  (physical only) and opening the slot's writer. Returns the slot, or -1 if it's out of range
+     *  or already taken — callers fall back to assignFreeSlot in that case. */
+    private int assignSpecificSlot(int deviceId, String descriptor, int slot) {
+        if (slot < 0 || slot >= MAX_CONTROLLERS || usedSlots.contains(slot))
+            return -1;
+        usedSlots.add(slot);
+        deviceToSlot.put(deviceId, slot);
+        if (descriptor != null) {
+            descriptorToSlot.put(descriptor, slot);
+            deviceToDescriptor.put(deviceId, descriptor);
+        }
+        ensureWriterForSlot(slot);
+        Log.d("WinHandler", "Pinned device " + deviceId + " to slot " + slot
+                + (descriptor != null ? " (descriptor: " + descriptor + ")" : " (OSC)"));
+        return slot;
     }
 
     /** Claims the lowest free slot for deviceId, recording the descriptor keys (physical
@@ -1695,7 +1749,20 @@ public class WinHandler {
             return 0;
         }
         int assignedCount = 0;
-        for (int deviceId : getConnectedGamepadDeviceIds()) {
+        int[] ids = getConnectedGamepadDeviceIds();
+        // Pass 1 — honor manual pins FIRST, so a user-pinned controller claims its exact player slot
+        // before FCFS can hand that slot to anyone else. Without the two-pass split, a non-pinned pad
+        // that sorts earlier could take a slot another pad is pinned to (then the pin would spill to a
+        // free slot instead of the one the user chose).
+        for (int deviceId : ids) {
+            if (usedSlots.size() >= MAX_CONTROLLERS)
+                break;
+            if (assignPinnedDeviceIfPossible(deviceId))
+                assignedCount++;
+        }
+        // Pass 2 — auto-assign the remaining controllers into whatever slots are left (ignored
+        // descriptors are skipped inside assignConnectedDeviceIfPossible / assignSlot).
+        for (int deviceId : ids) {
             if (usedSlots.size() >= MAX_CONTROLLERS)
                 break;
             if (assignConnectedDeviceIfPossible(deviceId, "startup-scan"))
@@ -1703,6 +1770,273 @@ public class WinHandler {
         }
         Log.d("WinHandler", "Pre-assigned " + assignedCount + " controller(s) before Wine startup.");
         return assignedCount;
+    }
+
+    /** Pass-1 helper for pre-assignment: assigns a device to its manually PINNED slot if it has one
+     *  and isn't slotted yet. Returns true only when a new pin assignment happened. Ignored devices
+     *  and un-pinned (auto) devices return false here — the latter are handled in pass 2. */
+    private boolean assignPinnedDeviceIfPossible(int deviceId) {
+        if (deviceToSlot.containsKey(deviceId))
+            return false;
+        android.view.InputDevice device = android.view.InputDevice.getDevice(deviceId);
+        if (!ExternalController.isGameController(device))
+            return false;
+        String descriptor = device != null ? device.getDescriptor() : null;
+        if (descriptor == null)
+            return false;
+        Integer override = manualSlotOverrides.get(descriptor);
+        if (override == null || override == SLOT_IGNORE || override < 0 || override >= MAX_CONTROLLERS)
+            return false;
+        // Make sure an ExternalController instance exists for this deviceId (input path relies on it).
+        if (getController(deviceId) == null)
+            return false;
+        int slot = assignSlot(deviceId); // honors the pin (descriptor is in manualSlotOverrides)
+        if (slot >= 0) {
+            Log.d("WinHandler", "Pre-assigned PINNED device " + deviceId + " to slot " + slot + ".");
+            return true;
+        }
+        return false;
+    }
+
+    // ---- Manual per-device slot overrides (in-game "Players" sub-tab) ----
+
+    /** One row for the in-game Players sub-tab. Immutable snapshot — the UI re-reads via
+     *  getPlayerSlotAssignments() rather than holding a live handle. */
+    public static class PlayerSlotInfo {
+        public final String displayName;
+        public final String descriptor;       // OSC_DESCRIPTOR for the on-screen pad
+        public final int currentSlot;         // 0..MAX_CONTROLLERS-1, or -1 if unassigned
+        public final boolean isGameController; // false for OSC and for non-controllers still holding a slot
+        public final boolean isOnScreen;       // true only for the OSC row
+        public final int override;             // 0..MAX-1 pin, SLOT_IGNORE, or -1 (auto)
+
+        public PlayerSlotInfo(String displayName, String descriptor, int currentSlot,
+                              boolean isGameController, boolean isOnScreen, int override) {
+            this.displayName = displayName;
+            this.descriptor = descriptor;
+            this.currentSlot = currentSlot;
+            this.isGameController = isGameController;
+            this.isOnScreen = isOnScreen;
+            this.override = override;
+        }
+    }
+
+    /** Replaces the manual override map wholesale. Called from XServerDisplayActivity.setupUI once the
+     *  container is resolved and BEFORE preAssignConnectedControllers, so launch-time assignment honors
+     *  the per-container pins/ignores. Values: 0..MAX-1 = pin, SLOT_IGNORE = ignore, absent = auto. */
+    public void setManualSlotOverrides(Map<String, Integer> overrides) {
+        manualSlotOverrides.clear();
+        if (overrides != null)
+            manualSlotOverrides.putAll(overrides);
+        Log.d("WinHandler", "Manual slot overrides set: " + manualSlotOverrides);
+    }
+
+    /** Copy of the current override map, for persistence. Includes overrides for devices that are
+     *  currently DISCONNECTED (loaded at launch, mutated per-key by setDeviceSlotAssignment) so
+     *  serializing this back to the container never drops a configured-but-unplugged device. */
+    public Map<String, Integer> getManualSlotOverrides() {
+        return new HashMap<>(manualSlotOverrides);
+    }
+
+    /** Snapshot of every device the Players sub-tab should list: the OSC virtual pad (always), every
+     *  connected game controller, and any device currently holding a slot (so a mis-slotted device can
+     *  be freed). Sibling sub-devices are de-duplicated by descriptor. Main-thread only. */
+    public java.util.List<PlayerSlotInfo> getPlayerSlotAssignments() {
+        java.util.List<PlayerSlotInfo> out = new java.util.ArrayList<>();
+
+        Integer oscSlot = deviceToSlot.get(OSC_DEVICE_ID);
+        Integer oscOverride = manualSlotOverrides.get(OSC_DESCRIPTOR);
+        out.add(new PlayerSlotInfo("On-screen controls", OSC_DESCRIPTOR,
+                oscSlot != null ? oscSlot : -1, false, true,
+                oscOverride != null ? oscOverride : -1));
+
+        java.util.LinkedHashMap<String, PlayerSlotInfo> byDescriptor = new java.util.LinkedHashMap<>();
+        for (int id : android.view.InputDevice.getDeviceIds()) {
+            android.view.InputDevice device = android.view.InputDevice.getDevice(id);
+            if (device == null)
+                continue;
+            String descriptor = device.getDescriptor();
+            if (descriptor == null || byDescriptor.containsKey(descriptor))
+                continue;
+            boolean isController = ExternalController.isGameController(device);
+            boolean holdsSlot = descriptorToSlot.containsKey(descriptor);
+            // Only list real controllers, plus anything currently occupying a slot (edge case: a
+            // device that grabbed a slot before an override/filter change and should be freeable).
+            if (!isController && !holdsSlot)
+                continue;
+            Integer slot = descriptorToSlot.get(descriptor);
+            Integer override = manualSlotOverrides.get(descriptor);
+            byDescriptor.put(descriptor, new PlayerSlotInfo(device.getName(), descriptor,
+                    slot != null ? slot : -1, isController, false,
+                    override != null ? override : -1));
+        }
+        out.addAll(byDescriptor.values());
+        return out;
+    }
+
+    /**
+     * Live per-device slot reassignment from the in-game Players sub-tab. desiredSlot is 0..MAX-1 to
+     * pin the device to that XInput player slot (Player 1 = slot 0), SLOT_IGNORE to drop it (free its
+     * slot, never re-grab), or -1 to clear the override back to auto (FCFS). The override is recorded
+     * first so every later assign path obeys it, then the change is applied immediately:
+     *   • Physical devices are torn down (releaseSlot → destroy() → ring generation bump → the guest
+     *     sees a real removal) and re-seated on the new slot — the P1 physical-reassignment semantic.
+     *   • OSC keeps softRelease semantics: only its slot INDEX changes; its ring stays alive across
+     *     the move so the on-screen overlay never flaps.
+     * Pinning onto a slot another device holds evicts that other device (it re-auto-assigns to the
+     * next free slot). Returns the resulting slot, or -1 for ignore / unassigned. Main-thread only.
+     */
+    public int setDeviceSlotAssignment(String descriptor, int desiredSlot) {
+        if (descriptor == null)
+            return -1;
+
+        // Normalize + record the override up front (guards the input-event assign path too).
+        int normalized;
+        if (desiredSlot == SLOT_IGNORE) {
+            manualSlotOverrides.put(descriptor, SLOT_IGNORE);
+            normalized = SLOT_IGNORE;
+        } else if (desiredSlot >= 0 && desiredSlot < MAX_CONTROLLERS) {
+            manualSlotOverrides.put(descriptor, desiredSlot);
+            normalized = desiredSlot;
+        } else {
+            manualSlotOverrides.remove(descriptor);
+            normalized = -1; // auto
+        }
+
+        // ---- OSC virtual pad ----
+        if (OSC_DESCRIPTOR.equals(descriptor)) {
+            Integer cur = deviceToSlot.get(OSC_DEVICE_ID);
+            if (normalized >= 0 && cur != null && cur == normalized)
+                return normalized; // already there — no flap
+            // Pinning OSC onto a slot a physical pad holds evicts that pad (it re-auto-assigns to the
+            // next free slot), so OSC can take ANY slot including Player 1 (slot 0).
+            if (normalized >= 0)
+                evictSlotOccupants(normalized, OSC_DESCRIPTOR);
+            // softRelease (inside releaseSlot for OSC) keeps the ring alive across the move; only the
+            // slot INDEX changes. The re-seat below (or the next sendGamepadState frame) re-opens it.
+            releaseSlot(OSC_DEVICE_ID);
+            if (normalized >= 0)
+                return assignSlot(OSC_DEVICE_ID);
+            return -1;
+        }
+
+        // ---- Physical controller ----
+        Integer curSlot = descriptorToSlot.get(descriptor);
+        if (normalized >= 0 && curSlot != null && curSlot == normalized)
+            return normalized; // already pinned there — avoid a needless destroy/recreate flap
+
+        // Evict whoever currently holds the target slot (a different device), so the pin wins.
+        if (normalized >= 0)
+            evictSlotOccupants(normalized, descriptor);
+
+        // Release this descriptor's current slot across all of its live/stale deviceIds so the last
+        // release destroys the writer (guest sees the removal) before we re-seat it.
+        java.util.List<Integer> liveIds = new java.util.ArrayList<>();
+        for (int id : android.view.InputDevice.getDeviceIds()) {
+            android.view.InputDevice d = android.view.InputDevice.getDevice(id);
+            if (d != null && descriptor.equals(d.getDescriptor()))
+                liveIds.add(id);
+        }
+        java.util.List<Integer> toRelease = new java.util.ArrayList<>(liveIds);
+        for (Map.Entry<Integer, String> e : deviceToDescriptor.entrySet()) {
+            if (descriptor.equals(e.getValue()) && !toRelease.contains(e.getKey()))
+                toRelease.add(e.getKey());
+        }
+        for (int id : toRelease)
+            releaseSlot(id);
+
+        if (normalized == SLOT_IGNORE)
+            return -1;
+
+        // Re-seat: the first live sub-device claims the slot (honoring the pin, or FCFS when auto);
+        // siblings reuse it via the descriptor. If the device is currently disconnected the override
+        // still persists and is applied on its next reconnect / next launch.
+        for (int id : liveIds) {
+            if (getController(id) == null)
+                continue;
+            int slot = assignSlot(id);
+            if (slot >= 0)
+                return slot;
+        }
+        return -1;
+    }
+
+    /** Frees targetSlot by releasing whatever device currently holds it, UNLESS that device is the one
+     *  identified by exceptDescriptor (a sibling of the device we're about to pin there). A physical
+     *  occupant is destroyed; the OSC occupant softReleases. The evicted device re-auto-assigns to the
+     *  next free slot on its next input frame (or stays unassigned if none free). */
+    private void evictSlotOccupants(int targetSlot, String exceptDescriptor) {
+        java.util.List<Integer> occupants = new java.util.ArrayList<>();
+        for (Map.Entry<Integer, Integer> e : deviceToSlot.entrySet()) {
+            if (e.getValue() != null && e.getValue() == targetSlot)
+                occupants.add(e.getKey());
+        }
+        for (int occ : occupants) {
+            if (occ == OSC_DEVICE_ID) {
+                // Only evict OSC when the incoming device isn't OSC itself.
+                if (!OSC_DESCRIPTOR.equals(exceptDescriptor))
+                    releaseSlot(OSC_DEVICE_ID);
+                continue;
+            }
+            String occDescriptor = deviceToDescriptor.get(occ);
+            if (occDescriptor == null || !occDescriptor.equals(exceptDescriptor))
+                releaseSlot(occ);
+        }
+    }
+
+    /**
+     * Manual recovery: rebuilds the fake-input transport IN PLACE without relaunching the game or
+     * restarting the container. Belt-and-suspenders for any input-loss (e.g. on-screen input death);
+     * the P0 ring should prevent it, but this hands the user an explicit "re-handshake" button.
+     * Idempotent — safe to call at any time. Steps:
+     *   1. Destroy every slot writer so each ring's generation bumps → the native reader re-reads a
+     *      fresh keyframe (cancel pending debounced releases first so nothing fires mid-rebuild).
+     *   2. Re-register the hot-plug listener (in case it was torn down).
+     *   3. Re-run slot assignment via the SAME override-honoring two-pass path pre-assignment uses,
+     *      so physical pads re-seat on their pinned/auto slots.
+     *   4. Re-open the OSC ring so on-screen touch resumes writing (no-op if OSC is set to Ignore).
+     * The manual-override map is deliberately preserved across the reset.
+     */
+    public void resetInputPipeline() {
+        if (fakeInputBasePath == null || fakeInputBasePath.isEmpty()) {
+            Log.w("WinHandler", "resetInputPipeline: fake input path not set; nothing to rebuild.");
+            return;
+        }
+        Log.d("WinHandler", "resetInputPipeline: rebuilding input transport in place.");
+
+        // 1) Tear down all rings + slot bookkeeping (overrides preserved so we re-seat the same pins).
+        cancelAllPendingDeviceReleases();
+        for (int i = 0; i < MAX_CONTROLLERS; i++) {
+            if (writers[i] != null) {
+                writers[i].destroy();
+                writers[i] = null;
+            }
+        }
+        deviceToSlot.clear();
+        descriptorToSlot.clear();
+        deviceToDescriptor.clear();
+        usedSlots.clear();
+        controllers.clear();
+        fallbackSlot = -1;
+
+        // 2) Make sure the hot-plug listener is still live.
+        if (inputManager != null && inputDeviceListener != null) {
+            try {
+                inputManager.unregisterInputDeviceListener(inputDeviceListener);
+            } catch (Exception ignored) {
+            }
+            inputManager.registerInputDeviceListener(inputDeviceListener, null);
+        }
+
+        // 3) Re-assign physical controllers (honors pins/ignores, same path as launch).
+        preAssignConnectedControllers();
+
+        // 4) Re-open the OSC ring so on-screen touch resumes. assignSlot(OSC) honors an OSC pin/ignore;
+        //    when on-screen controls aren't active the next sendGamepadState frame releases it again
+        //    (softRelease), so this is safe either way.
+        int oscSlot = assignSlot(OSC_DEVICE_ID);
+        Log.d("WinHandler", "resetInputPipeline: complete. OSC slot=" + oscSlot
+                + ", used slots=" + usedSlots);
     }
 
     /** Connected deviceIds sorted by a stable physical identity, so slot order is
@@ -1751,6 +2085,18 @@ public class WinHandler {
         android.view.InputDevice device = android.view.InputDevice.getDevice(deviceId);
         if (!ExternalController.isGameController(device))
             return false;
+
+        // Manual "Ignore" override: user marked this physical controller as not-a-player in the
+        // in-game Players sub-tab — never auto-assign it a slot.
+        String descriptor = device != null ? device.getDescriptor() : null;
+        if (descriptor != null) {
+            Integer override = manualSlotOverrides.get(descriptor);
+            if (override != null && override == SLOT_IGNORE) {
+                Log.d("WinHandler", "Skipping device " + deviceId + " from " + source
+                        + ": ignored by manual slot override.");
+                return false;
+            }
+        }
 
         ExternalController controller = getController(deviceId);
         if (controller == null)
@@ -1834,6 +2180,7 @@ public class WinHandler {
         deviceToDescriptor.clear();
         usedSlots.clear();
         controllers.clear();
+        manualSlotOverrides.clear();
         fallbackSlot = -1;
 
         vibrationRunning = false;

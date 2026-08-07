@@ -3330,6 +3330,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
              // Cleanup moved to onCreate
         }
 
+        // Manual per-device slot overrides (in-game Players sub-tab), per-container — pushed BEFORE
+        // pre-assignment so launch-time slotting honors the user's pins/ignores first (a pinned pad
+        // claims its exact player slot; an ignored device never takes one). Resolve shortcut-override
+        // -else-container, the same owner discipline as the vibration/gyro tuning.
+        winHandler.setManualSlotOverrides(parseSlotOverrides(resolvedControllerSlotOverridesJson()));
+
         // Pre-assign any controllers that are already connected, BEFORE Wine boots. This opens
         // their slot rings up front so the guest sees them from its first device enumeration
         // instead of only after the first input event. The fake-input path was set in onCreate
@@ -3985,6 +3991,35 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     container.setVibrationIntensity(pct);
                     container.saveData();
                 }
+            };
+
+            // Player Slots (manual per-device slot assignment) — Controls > Players sub-tab. Seeds the
+            // drawer list from WinHandler's live device/slot state, then wires the refresh + change
+            // callbacks. A change is applied LIVE (WinHandler.setDeviceSlotAssignment: physical devices
+            // are torn down + re-seated so the guest sees the move; OSC softReleases and only its slot
+            // index changes) and the FULL override map is persisted per-container (shortcut-override
+            // -else-container, same owner as the vibration/gyro writes above), so it survives relaunch.
+            final Runnable refreshPlayerSlots = () -> {
+                java.util.List<com.winlator.star.winhandler.WinHandler.PlayerSlotInfo> infos =
+                        winHandler.getPlayerSlotAssignments();
+                java.util.List<XServerDialogState.PlayerSlotRow> uiRows = new java.util.ArrayList<>();
+                for (com.winlator.star.winhandler.WinHandler.PlayerSlotInfo info : infos) {
+                    uiRows.add(new XServerDialogState.PlayerSlotRow(
+                            info.displayName, info.descriptor, info.currentSlot,
+                            info.override, info.isOnScreen, info.isGameController));
+                }
+                ds.setPlayerSlots(uiRows);
+            };
+            refreshPlayerSlots.run();
+            ds.onPlayerSlotsRefresh = refreshPlayerSlots;
+            ds.onPlayerSlotChanged = (descriptor, desiredSlot) -> {
+                winHandler.setDeviceSlotAssignment(descriptor, desiredSlot);
+                persistControllerSlotOverridesJson(buildSlotOverridesJson());
+                refreshPlayerSlots.run();
+            };
+            ds.onResetInput = () -> {
+                winHandler.resetInputPipeline();
+                refreshPlayerSlots.run();
             };
 
             // Gyro (motion aim) state — WinHandler holds the live values (already resolved at launch
@@ -5785,6 +5820,54 @@ return true;
         } catch (NumberFormatException e) {
             return fallback;
         }
+    }
+
+    // Manual controller-slot overrides (Players sub-tab): the same per-game-override-else-container
+    // discipline as the vibration resolvers above. The value is an opaque JSON object string
+    // (descriptor -> desired slot); WinHandler parses/serializes it via parseSlotOverrides/
+    // buildSlotOverridesJson.
+    private String resolvedControllerSlotOverridesJson() {
+        String fallback = container != null ? container.getControllerSlotOverrides() : "{}";
+        if (shortcut == null) return fallback;
+        return shortcut.getExtra("controllerSlotOverrides", fallback);
+    }
+
+    private void persistControllerSlotOverridesJson(String json) {
+        if (shortcut != null && shortcut.hasExtra("controllerSlotOverrides")) {
+            shortcut.putExtra("controllerSlotOverrides", json);
+            shortcut.saveData();
+        } else if (container != null) {
+            container.setControllerSlotOverrides(json);
+            container.saveData();
+        }
+    }
+
+    private java.util.Map<String, Integer> parseSlotOverrides(String json) {
+        java.util.Map<String, Integer> map = new java.util.HashMap<>();
+        if (json == null || json.isEmpty()) return map;
+        try {
+            org.json.JSONObject obj = new org.json.JSONObject(json);
+            java.util.Iterator<String> keys = obj.keys();
+            while (keys.hasNext()) {
+                String key = keys.next();
+                map.put(key, obj.getInt(key));
+            }
+        } catch (org.json.JSONException e) {
+            android.util.Log.w("XServerDisplayActivity", "Bad controllerSlotOverrides JSON: " + json, e);
+        }
+        return map;
+    }
+
+    private String buildSlotOverridesJson() {
+        org.json.JSONObject obj = new org.json.JSONObject();
+        try {
+            for (java.util.Map.Entry<String, Integer> e : winHandler.getManualSlotOverrides().entrySet()) {
+                obj.put(e.getKey(), e.getValue());
+            }
+        } catch (org.json.JSONException e) {
+            android.util.Log.w("XServerDisplayActivity", "Failed to serialize controllerSlotOverrides", e);
+        }
+        return obj.toString();
     }
 
     // bionic-fg interpolation model for this launch: per-game override else the container value.
