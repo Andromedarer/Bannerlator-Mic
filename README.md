@@ -132,7 +132,7 @@ Every report gets its own **public discussion thread**. You can reply as the ori
 
 **❓ "?" help everywhere + glossary.** Per-option **"?" help buttons** now cover **every technical setting** across the container editor, the per-game shortcut editor and the Turnip / Wrapper driver config, each backed by a plain-language **glossary**.
 
-**📦 Bundled in every container** (picked up automatically, no reinstall): **AIO Graphics Test 2.0.1** (single-window multi-API benchmark with an automatic OpenGL fallback for Mali / broken-DXVK), **Banner File Manager 1.2.0** (faster on large folders), and **Pale Moon**, a lightweight browser launchable from the **Start Menu**.
+**📦 Bundled in every container** (picked up automatically, no reinstall): **[AIO Graphics Test 2.0.1](https://github.com/The412Banner/AIO-Graphics-Test/releases/tag/2.0.1)** ([repo](https://github.com/The412Banner/AIO-Graphics-Test)) — single-window multi-API benchmark with an automatic OpenGL fallback for Mali / broken-DXVK; **[Banner File Manager 1.2.0](https://github.com/The412Banner/banner-file-manager/releases/tag/v1.2.0)** ([repo](https://github.com/The412Banner/banner-file-manager)) — faster on large folders; and **Pale Moon**, a lightweight browser launchable from the **Start Menu**.
 
 **🌐 Fixes.** Containers now get a **usable IPv4 DNS resolver**, fixing games and launchers that couldn't resolve hostnames. **New containers show up immediately** in the Games "add a game" container picker — no relaunch needed. **Pale Moon** no longer clutters the container desktop or Games tab (Start Menu only). Plus assorted stability and UI polish.
 
@@ -596,7 +596,7 @@ The Steam / Epic / GOG / Amazon sign-ins are a **third-party login system, exact
 <details>
 <summary><b>🧰 Bundled Start-menu utilities</b></summary>
 
-- New containers ship with handy Windows tools in the Start menu — **[Banner File Manager](https://github.com/The412Banner/banner-file-manager)** (our own file manager — see below), **AIO Graphics Test**, and **Game Controller Test**.
+- New containers ship with handy Windows tools in the Start menu — **[Banner File Manager](https://github.com/The412Banner/banner-file-manager)** (our own file manager — see below), **[AIO Graphics Test](https://github.com/The412Banner/AIO-Graphics-Test)**, and **Game Controller Test**.
 - **`.lnk` working-directory ("Start in") support** so shortcuts for apps that only run from their own folder launch correctly.
 
 </details>
