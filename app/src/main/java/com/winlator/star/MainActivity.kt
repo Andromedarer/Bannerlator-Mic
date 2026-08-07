@@ -111,16 +111,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
     
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == RECORD_AUDIO_PERMISSION_CODE) {
-            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                initializeMicrophoneBridge()
-            } else {
-                Toast.makeText(this, "Microphone permission is required for audio input.", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
+   
     
     private fun initializeMicrophoneBridge() {
         if (micCaptureThread == null) {
@@ -304,13 +295,20 @@ class MainActivity : AppCompatActivity() {
         }
         startActivity(Intent(this, cls))
     }
-
+    
     override fun onRequestPermissionsResult(
         requestCode: Int,
         permissions: Array<String>,
         grantResults: IntArray,
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == RECORD_AUDIO_PERMISSION_CODE) {
+        if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            initializeMicrophoneBridge()
+        } else {
+            Toast.makeText(this, "Microphone permission is required for audio input.", Toast.LENGTH_SHORT).show()
+        }
+    }
         // Install runs independently now; nothing to do after storage permission result.
     }
 
