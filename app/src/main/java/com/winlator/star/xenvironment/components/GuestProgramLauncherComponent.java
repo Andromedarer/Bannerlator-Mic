@@ -523,23 +523,26 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
                 command = imageFs.getBinDir() + "/box64 " + guestExecutable;
         }
 
-        // ---> START OF MIC INJECTION <---
+       // ---> START OF MIC INJECTION <---
         try {
-            // Write a bash script to the container's virtual filesystem
+            // Write a robust bash script to the container's virtual filesystem
             File launcherScript = new File(rootDir, "usr/bin/wine_mic_launcher.sh");
             java.io.FileWriter writer = new java.io.FileWriter(launcherScript);
             
             writer.write("#!/bin/sh\n");
-            // Run PulseAudio bridge silently in the background
-            writer.write("(sleep 3 && pactl load-module module-null-sink sink_name=VirtualMic ; pactl set-default-source VirtualMic.monitor ; nohup sh -c 'nc 127.0.0.1 4711 | pacat --playback --device=VirtualMic --format=s16le --rate=44100 --channels=1' >/dev/null 2>&1) &\n");
-            // Execute the original Winlator command
-            writer.write("exec " + command + "\n");
+            
+            // 1. Run the audio bridge in a completely detached background subshell with a 3s delay
+            writer.write("(sleep 3 && pactl load-module module-null-sink sink_name=VirtualMic ; pactl set-default-source VirtualMic.monitor ; nc 127.0.0.1 4711 | pacat --playback --device=VirtualMic --format=s16le --rate=44100 --channels=1) >/dev/null 2>&1 &\n");
+            
+            // 2. Use 'eval' to execute the original Winlator command safely, preserving spaces and quotes
+            writer.write("eval \"" + command.replace("\"", "\\\"") + "\"\n");
+            
             writer.close();
             
             // Give the script execution permissions
             FileUtils.chmod(launcherScript, 0755);
             
-            // Tell Winlator to run our script instead of the raw command
+            // Tell Winlator to run our script
             command = "/usr/bin/wine_mic_launcher.sh";
             
         } catch (Exception e) {
