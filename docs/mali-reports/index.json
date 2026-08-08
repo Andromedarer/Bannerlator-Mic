@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-08-08T17-33-36-13900e",
+    "created": "2026-08-08T17:33:36.184Z",
+    "reporter": "",
+    "device": "Poco X8 Pro",
+    "gpu": "Mali-G720 MC8",
+    "game": "Re2R",
+    "symptom": "Tela preta (sem imagem)",
+    "logs": 1
+  },
+  {
     "id": "2026-08-08T17-00-15-be74e5",
     "created": "2026-08-08T17:00:15.020Z",
     "reporter": "Krabkush",
