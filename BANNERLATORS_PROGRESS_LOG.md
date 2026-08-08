@@ -635,3 +635,6 @@ Branch fix/stale-wine-launch still NOT merged — user decision pending.
 
 ## 2026-08-08 (cont.) — stale-wine fix MERGED to main `e57882e2`
 `--no-ff` merge of `fix/stale-wine-launch` into main in the `bannerlators-dnsfix` worktree; file list pre-verified = exactly 4 files (3 Java + progress log), no drift/LICENSE touched; pushed `e3a1ce6a..e57882e2`. Merge commit `e57882e2` (parents `e3a1ce6a`, `50c6c5b3`). Feature branch left in place (not deleted). Device-verified before merge (see previous entry).
+
+## 2026-08-08 (cont.) — post-merge main artifacts build
+Run **31272915069** (label `stale-wine-merged`, ref main, headSha `f1360fcf`==tip) = ✅ GREEN, 3 flavors (standard/ludashi/pubg). Pubg APK staged `/sdcard/Download/Bannerlator-stale-wine-merged-pubg.apk` (sha256 `ba0b7885a1357f5adcaacfced6a3261e12b32b456f0ba616ab0f05e781214810`, vc69/2.9.7, same cert → installs over cleanly).
