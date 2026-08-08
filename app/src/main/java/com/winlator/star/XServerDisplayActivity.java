@@ -2059,6 +2059,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 environment.onPause();
                 xServerView.onPause();
             }
+            // Backgrounding auto-pauses the guest; if the game is on the TV, show the pause pill there
+            // so the external display reads as paused (not a frozen frame) while the user is away.
+            if (externalDisplayController != null) externalDisplayController.setPaused(true);
         }
 
         savePlaytimeData();
@@ -2592,6 +2595,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
         XServerDrawerState.INSTANCE.setIsPaused(paused);
         XServerDialogState.INSTANCE.setPaused(paused);
+        // Mirror the paused state onto the TV (the pause pill shows on the external display too).
+        if (externalDisplayController != null) externalDisplayController.setPaused(paused);
     }
 
     private void savePlaytimeData() {
@@ -3720,10 +3725,55 @@ public class XServerDisplayActivity extends AppCompatActivity {
         xServer.setRenderer(renderer);
         rootView.addView(xServerView);
 
-        // Version-A spike: watch for an external (TV) display and reparent the game onto it, using the
-        // handheld as the controller. Auto-swap, no UI — proves the mechanic before the real toggle.
-        externalDisplayController = new com.winlator.star.display.ExternalDisplayController(this, xServerView, rootView);
+        // Version A: watch for an external (TV) display and reparent the game onto it, using the
+        // handheld as the controller. The listener updates the in-game TV tab + raises Compose toasts.
+        com.winlator.star.display.ExternalDisplayController.Listener tvListener =
+                new com.winlator.star.display.ExternalDisplayController.Listener() {
+                    @Override public void onTvConnectedChanged(boolean connected, String displayName) {
+                        XServerDrawerState.INSTANCE.setTvConnected(connected);
+                        XServerDrawerState.INSTANCE.setTvDisplayName(displayName != null ? displayName : "");
+                        // Populate the TV tab's display-mode picker + HDR readout from the display.
+                        if (connected && externalDisplayController != null) {
+                            java.util.List<XServerDrawerState.TvDisplayMode> ms = new java.util.ArrayList<>();
+                            for (android.view.Display.Mode m : externalDisplayController.getSupportedModes()) {
+                                String label = m.getPhysicalWidth() + "×" + m.getPhysicalHeight()
+                                        + " @ " + Math.round(m.getRefreshRate()) + "Hz";
+                                ms.add(new XServerDrawerState.TvDisplayMode(m.getModeId(), label));
+                            }
+                            XServerDrawerState.INSTANCE.setTvModes(ms);
+                            XServerDrawerState.INSTANCE.setTvCurrentModeId(externalDisplayController.getActiveModeId());
+                            XServerDrawerState.INSTANCE.setTvHdr(externalDisplayController.getHdrSummary());
+                        } else {
+                            XServerDrawerState.INSTANCE.setTvModes(java.util.Collections.emptyList());
+                            XServerDrawerState.INSTANCE.setTvHdr("");
+                        }
+                        // When auto-switch is off we only notify and wait for the user to open the TV tab.
+                        if (connected && externalDisplayController != null && !externalDisplayController.isAutoSwap()) {
+                            XServerDialogState.INSTANCE.showInfoToast(
+                                    "EXTERNAL DISPLAY DETECTED", "TV",
+                                    "Open the TV tab in the menu to switch displays");
+                        }
+                    }
+                    @Override public void onGameOnExternalChanged(boolean onExternal) {
+                        XServerDrawerState.INSTANCE.setTvGameOnExternal(onExternal);
+                        if (onExternal) {
+                            XServerDialogState.INSTANCE.showInfoToast(
+                                    "GAME MOVED TO TV", "now", "Use the handheld as the controller");
+                        } else {
+                            XServerDialogState.INSTANCE.showInfoToast(
+                                    "GAME ON HANDHELD", "now", "Returned to the phone screen");
+                        }
+                    }
+                };
+        externalDisplayController = new com.winlator.star.display.ExternalDisplayController(this, xServerView, rootView, tvListener);
         externalDisplayController.start();
+
+        // Wire the in-game TV tab controls to the controller.
+        XServerDrawerState.INSTANCE.onTvPlayOnTvChange = (b) -> externalDisplayController.setEnabled(b);
+        XServerDrawerState.INSTANCE.onTvAutoSwapChange = (b) -> externalDisplayController.setAutoSwap(b);
+        XServerDrawerState.INSTANCE.onMoveToTv = () -> externalDisplayController.requestMoveToExternal();
+        XServerDrawerState.INSTANCE.onBringBackFromTv = () -> externalDisplayController.bringBackToHandheld();
+        XServerDrawerState.INSTANCE.onTvModeChange = (id) -> externalDisplayController.setPreferredModeId(id);
 
         globalCursorSpeed = preferences.getFloat("cursor_speed", 1.0f);
         touchpadView = new TouchpadView(this, xServer, timeoutHandler, hideControlsRunnable);

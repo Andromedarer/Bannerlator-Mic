@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
 enum class TabType {
-    GRAPHICS, HUD, RESHADE, CONTROLS, ADVANCED, TASK_MANAGER
+    GRAPHICS, HUD, RESHADE, CONTROLS, ADVANCED, TASK_MANAGER, TV
 }
 
 object XServerDrawerState {
@@ -163,6 +163,58 @@ object XServerDrawerState {
     // to the in-game "Toggle Fullscreen" row so the user sees which mode the cycle landed on.
     private val _fullscreenMode = MutableStateFlow(0)
     val fullscreenMode: StateFlow<Int> = _fullscreenMode
+
+    // ---- External display / TV (Version A) --------------------------------------------------------
+    // Whether a TV/external presentation display is currently connected. Gates the TV tab's visibility.
+    private val _tvConnected = MutableStateFlow(false)
+    val tvConnected: StateFlow<Boolean> = _tvConnected
+    fun setTvConnected(v: Boolean) { _tvConnected.value = v }
+
+    // Human-readable name of the connected external display (for the TV tab readout).
+    private val _tvDisplayName = MutableStateFlow("")
+    val tvDisplayName: StateFlow<String> = _tvDisplayName
+    fun setTvDisplayName(v: String) { _tvDisplayName.value = v }
+
+    // "Play on TV" master switch and "Auto-switch on connect" (both default on). When auto-switch is
+    // off, connecting a display only notifies and waits for the user to move the game from this tab.
+    private val _tvPlayOnTv = MutableStateFlow(true)
+    val tvPlayOnTv: StateFlow<Boolean> = _tvPlayOnTv
+    fun setTvPlayOnTv(v: Boolean) { _tvPlayOnTv.value = v }
+
+    private val _tvAutoSwap = MutableStateFlow(true)
+    val tvAutoSwap: StateFlow<Boolean> = _tvAutoSwap
+    fun setTvAutoSwap(v: Boolean) { _tvAutoSwap.value = v }
+
+    // Whether the game is currently shown on the external display (drives the Move / Bring-back button).
+    private val _tvGameOnExternal = MutableStateFlow(false)
+    val tvGameOnExternal: StateFlow<Boolean> = _tvGameOnExternal
+    fun setTvGameOnExternal(v: Boolean) { _tvGameOnExternal.value = v }
+
+    // Activity wires these to ExternalDisplayController. Consumer<Boolean> / Runnable for easy Java assign.
+    @JvmField var onTvPlayOnTvChange: java.util.function.Consumer<Boolean>? = null
+    @JvmField var onTvAutoSwapChange: java.util.function.Consumer<Boolean>? = null
+    @JvmField var onMoveToTv: Runnable? = null
+    @JvmField var onBringBackFromTv: Runnable? = null
+
+    // TV output display modes (resolution + refresh rate). Seeded by the activity from the connected
+    // display's getSupportedModes() so the user can switch off e.g. 4K@30 to 1080p@60. id 0 = default.
+    data class TvDisplayMode(val id: Int, val label: String)
+
+    private val _tvModes = MutableStateFlow<List<TvDisplayMode>>(emptyList())
+    val tvModes: StateFlow<List<TvDisplayMode>> = _tvModes
+    fun setTvModes(v: List<TvDisplayMode>) { _tvModes.value = v }
+
+    private val _tvCurrentModeId = MutableStateFlow(0)
+    val tvCurrentModeId: StateFlow<Int> = _tvCurrentModeId
+    fun setTvCurrentModeId(v: Int) { _tvCurrentModeId.value = v }
+
+    // Fired with the chosen Display.Mode id (0 = system default): activity → controller.setPreferredModeId.
+    @JvmField var onTvModeChange: java.util.function.Consumer<Int>? = null
+
+    // Read-only HDR capability of the connected display (e.g. "HDR10, Dolby Vision"); "" if none.
+    private val _tvHdr = MutableStateFlow("")
+    val tvHdr: StateFlow<String> = _tvHdr
+    fun setTvHdr(v: String) { _tvHdr.value = v }
 
     private val _fpsExpanded = MutableStateFlow(false)
     val fpsExpanded: StateFlow<Boolean> = _fpsExpanded

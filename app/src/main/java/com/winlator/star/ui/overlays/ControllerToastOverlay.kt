@@ -234,6 +234,16 @@ private fun ToastBody(data: ControllerToastData, progress: Float) {
                 .background(StrokeSoft)
         )
 
+        // Optional full-width message line (info toasts with no device rows, e.g. TV notifications).
+        data.message?.let { msg ->
+            Text(
+                text = msg,
+                color = Txt,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 9.dp, bottom = 3.dp)
+            )
+        }
+
         // Rows.
         Column(
             verticalArrangement = Arrangement.spacedBy(7.dp),

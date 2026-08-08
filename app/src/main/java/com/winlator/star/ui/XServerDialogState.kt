@@ -353,6 +353,9 @@ object XServerDialogState {
         // Incremented on every event; the overlay keys its fade-in/hold/fade-out animation on this so a
         // new event fired while the toast is showing restarts the cycle with fresh content.
         val token: Long,
+        // Optional full-width message line (used by info toasts that have no device rows, e.g. the
+        // external-display / TV notification). Null for the controller toast.
+        val message: String? = null,
     )
 
     private val _controllerToast = MutableStateFlow<ControllerToastData?>(null)
@@ -361,6 +364,16 @@ object XServerDialogState {
 
     /** Called by the overlay once the fade-out finishes (auto-dismiss). */
     fun clearControllerToast() { _controllerToast.value = null }
+
+    /**
+     * Show a simple informational toast that reuses the controller-toast card (title + right-aligned
+     * subLabel + one full-width message line, no device rows). Used for external-display / TV
+     * notifications so they match the existing input notifications. Main-thread only.
+     */
+    fun showInfoToast(title: String, subLabel: String, message: String?) {
+        _toastToken += 1
+        _controllerToast.value = ControllerToastData(title, subLabel, emptyList(), _toastToken, message)
+    }
 
     /**
      * Build + show the controller-status toast from the current player-slot rows. Main-thread only
