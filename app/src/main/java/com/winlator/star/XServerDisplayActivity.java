@@ -171,6 +171,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
     public static String NOTIFICATION_CHANNEL_ID = "Winlator";
     public static int NOTIFICATION_ID = 9004;
     private XServerView xServerView;
+    // Version-A spike: auto-swaps the game onto a connected external display (TV), handheld = controller.
+    private com.winlator.star.display.ExternalDisplayController externalDisplayController;
     private InputControlsView inputControlsView;
 
     // ---- Controller-status toast (P5b) — debounced hot-plug plumbing ----
@@ -2037,6 +2039,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // Track the live panel rate again (the readout shows it while Auto is on).
         registerVrrDisplayListener();
         updateCurrentRefreshRate();
+        // Re-check the external display in case a TV was (un)plugged while we were backgrounded.
+        if (externalDisplayController != null) externalDisplayController.onResume();
     }
 
     @Override
@@ -2935,6 +2939,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
         unregisterGyroSensor();
         stopDxApiDetection();
         cancelLaunchTimers();
+        // Version-A spike: unregister the display listener, dismiss the Presentation, and pull the
+        // game back to the phone so nothing leaks a window on the external display.
+        if (externalDisplayController != null) {
+            externalDisplayController.stop();
+            externalDisplayController = null;
+        }
         // Controller-status toast: drop the listener + any pending debounced toast so a late callback
         // can't run against a tearing-down activity.
         if (winHandler != null) winHandler.setControllerAssignmentListener(null);
@@ -3709,6 +3719,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         xServer.setRenderer(renderer);
         rootView.addView(xServerView);
+
+        // Version-A spike: watch for an external (TV) display and reparent the game onto it, using the
+        // handheld as the controller. Auto-swap, no UI — proves the mechanic before the real toggle.
+        externalDisplayController = new com.winlator.star.display.ExternalDisplayController(this, xServerView, rootView);
+        externalDisplayController.start();
 
         globalCursorSpeed = preferences.getFloat("cursor_speed", 1.0f);
         touchpadView = new TouchpadView(this, xServer, timeoutHandler, hideControlsRunnable);

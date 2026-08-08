@@ -5555,3 +5555,6 @@ HOTFIX over 2.8.1. Version bump on main (vc 50→51, vn 2.8.1→2.8.2, commit `d
 The repo (`The412Banner/FusionHUD`) had NO releases. Cut **`v1.0`** at `d171774` (`--latest`), attaching `fusionhud-1.0-release.aar` (95 KB library) + `fusionhud-1.0-demo-debug.apk` (3.3 MB preview) from CI run `30217601607`. Notes: what-it-is / adopt-via-JitPack(`com.github.The412Banner:FusionHUD:v1.0`)-or-fork / GPL-3.0 §7(b) attribution. Linked from the 2.8.2 description for other projects to adopt. ⚠️ `gh release create --target` needs a FULL sha (12-char abbrev → HTTP 422).
 
 **▶️ NEXT: 2.9** = merge PR #156 (Virtual Controller Pro) + the pinned `fix/hud-under-controls` + newer work.
+
+## 2026-08-08 — External display swap spike (Version A)
+Branch `feat/external-display-swap` off origin/main `ab6be8ed`. New `ExternalDisplayController` (clean-room Android Presentation API): auto-reparents XServerView onto a connected external/wireless display (TV), handheld = controller; moves back on unplug. Wired into XServerDisplayActivity (setupUI start / onResume recheck / onDestroy stop). Auto-swap, no UI — proves mechanic before production toggle + phone-side input. Recon: GameNative has full Version A (externaldisplay pkg); WinNative has none. DeX onboards for free on the same path later. UNVERIFIED — device test after CI. vc frozen 69.
