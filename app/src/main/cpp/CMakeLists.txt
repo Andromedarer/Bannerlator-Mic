@@ -47,6 +47,20 @@ target_link_libraries(winlator
         adrenotools
 )
 
+# DrawableBufferPool native heap (ERL bug report #2): tiny dependency-free lib
+# (libc + JNI only) backing the X-server Drawable buffer pool with calloc/free in
+# the native heap, bypassing ART's small non-compacting non-moving space which
+# fragments under cursor/drawable churn. Own .so so it stays off every other path.
+add_library(drawablepool SHARED
+        winlator/drawablepool.c
+)
+
+target_compile_options(drawablepool PRIVATE -Wall -Wextra)
+
+target_link_libraries(drawablepool
+        log
+)
+
 # Add Fake Input library for controller emulation (loaded via LD_PRELOAD)
 add_library(fakeinput SHARED
         winlator/fakeinput.cpp

@@ -157,7 +157,9 @@ public class DRI3Extension implements Extension {
             // GPUImage(fd) now locks the buffer, so getStride() is valid (matches the SHM path's
             // stride-based width). Mark the drawable directScanout so the Vulkan renderer can
             // present the AHB directly instead of compositing a blank CPU buffer (-> black).
-            Drawable drawable = client.xServer.drawableManager.createDrawable(pixmapId, gpuImage.getStride(), height, depth);
+            // ERL bug report #6: use the buffer's real height (from AHardwareBuffer_describe),
+            // mirroring how width already uses getStride() rather than the wire value.
+            Drawable drawable = client.xServer.drawableManager.createDrawable(pixmapId, gpuImage.getStride(), gpuImage.getHeight(), depth);
             drawable.setTexture(gpuImage);
             drawable.setDirectScanout(true);
             client.xServer.pixmapManager.createPixmap(drawable);
