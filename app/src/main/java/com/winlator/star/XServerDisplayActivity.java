@@ -481,6 +481,23 @@ public class XServerDisplayActivity extends AppCompatActivity {
                                 }
                             }
                             affinityThreadHighWater.put(pid, threads);
+                        } else if (ProcessHelper.PRINT_DEBUG) {
+                            // Steady state (no new threads): verify the requested mask is actually being
+                            // honored. If the process's real Cpus_allowed differs from what we asked, something
+                            // below us — a vendor cpuset cgroup / scheduler (e.g. HyperOS/MIUI) — is overriding
+                            // the pin, which SetProcessAffinityMask cannot beat (affinity is intersected with the
+                            // cpuset). Surfacing it turns "affinity didn't help" into a concrete, testable cause.
+                            Integer want = winHandler.getManualAffinity(pid);
+                            if (want != null) {
+                                int got = ProcessHelper.getProcessAffinityMask(pid);
+                                if (got != 0 && got != want) {
+                                    Log.w("AffinityDrift", "pid=" + pid + " NOT-HONORED requested=0x"
+                                            + Integer.toHexString(want) + " achieved=0x" + Integer.toHexString(got)
+                                            + ((got & ~want) != 0
+                                                ? " (ROM re-allowed excluded cores — likely cpuset/scheduler override)"
+                                                : " (cpuset allows only a subset of the requested cores)"));
+                                }
+                            }
                         }
                     }
                 }
