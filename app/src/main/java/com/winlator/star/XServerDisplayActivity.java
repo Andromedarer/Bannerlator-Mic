@@ -799,7 +799,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private void createNotifcationChannel() {
         String name = "Winlator";
         String description = "Winlator XServer Messages";
-        int importance = NotificationManager.IMPORTANCE_HIGH;
+        int importance = NotificationManager.IMPORTANCE_LOW;
         NotificationChannel channel = new NotificationChannel(NOTIFICATION_CHANNEL_ID, name, importance);
         channel.setDescription(description);
         NotificationManager notificationManager = getSystemService(NotificationManager.class);

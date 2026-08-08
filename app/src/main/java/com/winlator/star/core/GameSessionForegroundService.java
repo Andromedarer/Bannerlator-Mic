@@ -60,10 +60,15 @@ public class GameSessionForegroundService extends Service {
     private void createChannel() {
         NotificationManager nm = getSystemService(NotificationManager.class);
         if (nm == null) return;
-        if (nm.getNotificationChannel(XServerDisplayActivity.NOTIFICATION_CHANNEL_ID) == null) {
+        NotificationChannel existing = nm.getNotificationChannel(XServerDisplayActivity.NOTIFICATION_CHANNEL_ID);
+        if (existing != null && existing.getImportance() > NotificationManager.IMPORTANCE_LOW) {
+            nm.deleteNotificationChannel(XServerDisplayActivity.NOTIFICATION_CHANNEL_ID);
+            existing = null;
+        }
+        if (existing == null) {
             NotificationChannel channel = new NotificationChannel(
                     XServerDisplayActivity.NOTIFICATION_CHANNEL_ID, "Winlator",
-                    NotificationManager.IMPORTANCE_HIGH);
+                    NotificationManager.IMPORTANCE_LOW);
             channel.setDescription("Winlator XServer Messages");
             nm.createNotificationChannel(channel);
         }
@@ -81,7 +86,7 @@ public class GameSessionForegroundService extends Service {
                 .setSmallIcon(R.drawable.ic_stat_ab_gear_0011)
                 .setContentTitle("Winlator")
                 .setContentText(text)
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setContentIntent(pendingIntent)
                 .setOngoing(true)
                 .setAutoCancel(false)
