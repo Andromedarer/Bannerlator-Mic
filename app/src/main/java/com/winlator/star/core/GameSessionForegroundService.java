@@ -45,9 +45,10 @@ public class GameSessionForegroundService extends Service {
         String label = intent != null ? intent.getStringExtra(EXTRA_LABEL) : null;
         createChannel();
         Notification notification = buildNotification(label);
-        // startForeground(id, notification, type) requires API 34 for the typed overload; mirror the
-        // gating used by the store/unpack foreground services (targetSdk 28 => classic FGS semantics).
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+        // The typed startForeground overload (with the declared foregroundServiceType) exists since
+        // API 29 — same gating as the store/download and unpack foreground services
+        // (DownloadForegroundService, UnpackService). targetSdk 28 => classic FGS semantics.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(XServerDisplayActivity.NOTIFICATION_ID, notification,
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
         } else {
@@ -60,10 +61,15 @@ public class GameSessionForegroundService extends Service {
     private void createChannel() {
         NotificationManager nm = getSystemService(NotificationManager.class);
         if (nm == null) return;
-        if (nm.getNotificationChannel(XServerDisplayActivity.NOTIFICATION_CHANNEL_ID) == null) {
+        NotificationChannel existing = nm.getNotificationChannel(XServerDisplayActivity.NOTIFICATION_CHANNEL_ID);
+        if (existing != null && existing.getImportance() > NotificationManager.IMPORTANCE_LOW) {
+            nm.deleteNotificationChannel(XServerDisplayActivity.NOTIFICATION_CHANNEL_ID);
+            existing = null;
+        }
+        if (existing == null) {
             NotificationChannel channel = new NotificationChannel(
                     XServerDisplayActivity.NOTIFICATION_CHANNEL_ID, "Winlator",
-                    NotificationManager.IMPORTANCE_HIGH);
+                    NotificationManager.IMPORTANCE_LOW);
             channel.setDescription("Winlator XServer Messages");
             nm.createNotificationChannel(channel);
         }
@@ -81,7 +87,7 @@ public class GameSessionForegroundService extends Service {
                 .setSmallIcon(R.drawable.ic_stat_ab_gear_0011)
                 .setContentTitle("Winlator")
                 .setContentText(text)
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setContentIntent(pendingIntent)
                 .setOngoing(true)
                 .setAutoCancel(false)
