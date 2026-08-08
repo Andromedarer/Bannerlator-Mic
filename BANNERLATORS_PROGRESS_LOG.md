@@ -658,3 +658,23 @@ Run **31272915069** (label `stale-wine-merged`, ref main, headSha `f1360fcf`==ti
 3. `assignTaskAffinity` (`:6406`) is also one-shot at window-map only — same drift applies to the container CPU-list path.
 
 **Status:** diagnosed + logged, NO code written yet. PICK UP HERE with Claude: decide option 1 vs 2, then implement + device-verify (GoW: set cores, watch `Cpus_allowed` on `/proc/<gow-pid>/task/*/status` across gameplay, esp. threads spawned after the set).
+
+## 2026-08-08 (cont.) — TM affinity drift: IMPLEMENTED "drift-detected re-pin" (Option 1, refined) — branch fix/affinity-reapply-timer
+Picked up the hotice77 E-core-drift diagnosis and implemented the fix. Chosen approach = **drift-detected re-pin** (refinement of Option 1 after a stutter-risk review + a live comparison of GameNative / WinNative / StevenMXZ Ludashi).
+
+**Live comparison (all three, fetched from GitHub today):** NONE of GameNative (utkarshdalal/master), WinNative (WinNative-Emu/main), or Ludashi (StevenMXZ/ludashi-3.1, pushed today) re-pin affinity or set it host-side — all three are one-shot `SetProcessAffinityMask` and drift identically. Only novel idea worth borrowing = **StevenMXZ reads real affinity from `/proc/<pid>/status` `Cpus_allowed:`** (Wine's mask is unreliable post-set under wow64/FEX). WinNative's `PendingTaskAffinity` is just optimistic-UI bookkeeping, not a retry. So our shipped Part-1 + TM-open reapply already exceeds all three; this change goes further.
+
+**Why not a blind timer:** re-applying every ~2.5s re-walks all threads (winhandler Toolhelp snapshot) each tick even when nothing changed → periodic micro-stutter risk on heavy titles. Drift-detected avoids all steady-state re-pins.
+
+**Implementation (app-only, no guest rebuild):**
+- `ProcessHelper.getThreadCount(pid)` = entry count of `/proc/<pid>/task` (pid is the Linux pid — proven: we already read `/proc/<pid>/cmdline` with it at XSDA:623, and Ludashi reads `/proc/<pid>/status` with it). Returns -1 when the process is gone.
+- `ProcessHelper.getProcessAffinityMask(pid)` = reads `Cpus_allowed:` (borrowed from Ludashi; used for the drift-log, verification).
+- `XServerDisplayActivity` drift checker (Handler, 2000ms): for each pinned pid, re-pin the remembered mask ONLY when its thread count grew past the last-pinned high-water (new unpinned threads appeared). Steady-state thread pool = zero re-pins = no stutter; load→gameplay transition = caught within one interval. Dead pids dropped (clearManualAffinity + high-water remove). Debug log "AffinityDrift" on each re-pin for on-device correlation.
+- `WinHandler`: added `hasManualAffinity()`, `getManualAffinityPids()`, `clearManualAffinity(pid)`. `reapplyManualAffinities()` still drives the TM-OPEN loop.
+- Wired `startAffinityReapply()` into the 3 pid set-sites: TM Processor Affinity dialog (`onTmSetAffinity`), Prefer Big Cores toggle (ON), per-window `assignTaskAffinity` (pid path). Torn down in `exit()`.
+
+**Scope (confirmed w/ user):** targets the in-game **Task Manager Processor Affinity dialog (side menu, during gameplay)** — hotice77's exact case — plus Prefer Big Cores. Shares the `manualAffinity` map, so it also keeps the container CPU-list pin from drifting as a side benefit; NOT a change to the container/game-settings CPU-List setting itself.
+
+**Known limits (documented in code):** (a) class-name-only affinity (window mapped before it has a pid) isn't in the map until the pid path picks it up; (b) native DXVK/Turnip/FEX driver threads remain unreachable by any Windows affinity API — the complete fix would be host-side per-tid `sched_setaffinity` (Option 2, deliberately not done here); (c) an existing thread widened by an explicit SetThreadAffinityMask (no new thread) isn't caught by the thread-count trigger — rare.
+
+**Status:** code complete on branch `fix/affinity-reapply-timer` (off main `ab6be8ed`). NOT device-proven yet. Building pubg for hotice77/user device test — verify: set cores in TM during gameplay, watch fps + `logcat | grep AffinityDrift` + `Cpus_allowed` on `/proc/<pid>/task/*/status` across the menu→gameplay transition (esp. threads spawned after the set). Gate to merge = device-proven.

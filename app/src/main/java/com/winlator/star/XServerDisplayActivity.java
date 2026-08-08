@@ -431,6 +431,77 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
     };
 
+    // Drift-detected CPU-affinity re-pin. A user-selected affinity (Task Manager Processor Affinity
+    // dialog from the in-game side menu, Prefer Big Cores, or per-window task affinity) is a ONE-SHOT
+    // SetProcessAffinityMask: it pins only the threads that exist at call time. Game engines spawn the
+    // bulk of their job/worker threads once real gameplay starts (after menus/loading), and under
+    // wow64/FEX those new Windows threads don't reliably inherit the process mask — they escape back
+    // to all cores and Android's EAS scheduler parks them on the little (efficiency) cluster (hotice77
+    // report: WD2 ~52% usage, 12fps, load on the wrong cluster). Nothing in this stack enforces
+    // affinity persistently, and previously the ONLY re-pin lived inside the TM-OPEN refresh loop, so
+    // closing the Task Manager stopped all enforcement.
+    //
+    // Rather than re-pin on a blind timer (which re-walks every thread each tick even when nothing
+    // changed — a periodic cost that can surface as micro-stutter on heavy titles), we DRIFT-DETECT:
+    // watch each pinned pid's Linux thread count (/proc/<pid>/task) and re-apply the mask ONLY when it
+    // grows, i.e. exactly when new unpinned threads appeared. In steady-state gameplay (thread pool
+    // stable) nothing fires, so there is no rhythmic re-pin and no stutter; at the load→gameplay
+    // transition the new engine threads are caught within one interval and pinned once. wine maps
+    // SetProcessAffinityMask onto the process's current Linux threads, so a single re-apply re-pins
+    // them all. (Native DXVK/Turnip driver threads stay unreachable by any Windows affinity API — the
+    // complete fix for those would be host-side per-tid sched_setaffinity, deliberately not done here.)
+    private static final long AFFINITY_DRIFT_CHECK_INTERVAL_MS = 2000;
+    private final Handler affinityReapplyHandler = new Handler(Looper.getMainLooper());
+    // pid -> highest thread count seen at the last re-pin; a higher count means new threads escaped.
+    private final java.util.HashMap<Integer, Integer> affinityThreadHighWater = new java.util.HashMap<>();
+    private final Runnable affinityReapplyRunnable = new Runnable() {
+        @Override
+        public void run() {
+            try {
+                if (winHandler != null && winHandler.hasManualAffinity()) {
+                    for (int pid : winHandler.getManualAffinityPids()) {
+                        int threads = ProcessHelper.getThreadCount(pid);
+                        if (threads < 0) {
+                            // Process exited — stop tracking it (also prevents re-pinning a recycled pid).
+                            winHandler.clearManualAffinity(pid);
+                            affinityThreadHighWater.remove(pid);
+                            continue;
+                        }
+                        Integer prev = affinityThreadHighWater.get(pid);
+                        if (prev == null || threads > prev) {
+                            // First sighting, or new threads spawned since the last pin -> re-apply the
+                            // remembered mask so the fresh (all-core) threads get pulled onto the chosen cores.
+                            Integer mask = winHandler.getManualAffinity(pid);
+                            if (mask != null) {
+                                winHandler.setProcessAffinity(pid, mask);
+                                if (ProcessHelper.PRINT_DEBUG) {
+                                    Log.d("AffinityDrift", "pid=" + pid + " threads " + prev + "->" + threads
+                                            + " re-pin mask=0x" + Integer.toHexString(mask)
+                                            + " procMaskBefore=0x" + Integer.toHexString(ProcessHelper.getProcessAffinityMask(pid)));
+                                }
+                            }
+                            affinityThreadHighWater.put(pid, threads);
+                        }
+                    }
+                }
+            } catch (Throwable t) {
+                Log.w("XServerDisplayActivity", "Affinity drift-check tick failed", t);
+            }
+            affinityReapplyHandler.postDelayed(this, AFFINITY_DRIFT_CHECK_INTERVAL_MS);
+        }
+    };
+
+    /**
+     * Idempotently (re)start the periodic affinity drift check. Safe to call from every affinity
+     * set-site — it clears any pending tick first, so repeated calls never stack. The runnable
+     * self-gates on {@link WinHandler#hasManualAffinity()}, so starting it before any mask is set is
+     * harmless; it is torn down in {@link #exit()}.
+     */
+    private void startAffinityReapply() {
+        affinityReapplyHandler.removeCallbacks(affinityReapplyRunnable);
+        affinityReapplyHandler.postDelayed(affinityReapplyRunnable, AFFINITY_DRIFT_CHECK_INTERVAL_MS);
+    }
+
     // Live detection of which Direct3D API the running game actually uses, so the FPS-counter
     // overlay can show VKD3D for D3D12 titles instead of always printing the D3D9/10/11 wrapper
     // name (DXVK/VEGAS). Both wrappers are always present in the prefix, so the only reliable tell
@@ -2525,6 +2596,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         ProcessHelper.resumeAllWineProcesses();
         installerWatchHandler.removeCallbacks(installerWatchRunnable);
         gameExitWatchHandler.removeCallbacks(gameExitWatchRunnable);
+        affinityReapplyHandler.removeCallbacks(affinityReapplyRunnable);
         stopDxApiDetection();
         // Stop the session foreground service (also removes its ongoing notification).
         stopService(new Intent(this, com.winlator.star.core.GameSessionForegroundService.class));
@@ -5782,6 +5854,10 @@ return true;
                 }
                 // ...AND re-pin the ALREADY-RUNNING guest tree so the current game moves now.
                 reapplyBigCoresToRunningGuest(on);
+                // Keep the pin alive against later-spawned threads while Prefer Big Cores is ON; when
+                // OFF, reapplyBigCoresToRunningGuest has rewritten the remembered masks to the restored
+                // values, so the timer harmlessly re-asserts those (no-op) until pids die out.
+                if (on) startAffinityReapply();
                 break;
             default: // root six
                 com.winlator.star.perf.PerfRootApplier.INSTANCE.apply(key, on);
@@ -6411,8 +6487,11 @@ return true;
 
         if (processId > 0) {
             winHandler.setProcessAffinity(processId, processAffinity);
+            startAffinityReapply(); // keep it pinned as the game spawns more threads
         }
         else if (!className.isEmpty()) {
+            // Class-name path records no pid in the manual-affinity map, so the timer can't re-pin it
+            // yet; the window-map / TM / Prefer-Big-Cores pid path picks it up once a real pid exists.
             winHandler.setProcessAffinity(window.getClassName(), processAffinity);
         }
     }
@@ -7229,7 +7308,10 @@ return true;
         };
 
         ds.onTmSetAffinity = (pid, mask) -> {
-            if (winHandler != null) winHandler.setProcessAffinity(pid, mask);
+            if (winHandler != null) {
+                winHandler.setProcessAffinity(pid, mask);
+                startAffinityReapply(); // re-pin periodically so the choice survives past TM close
+            }
         };
 
         ds.onTmQueryAffinity = pid -> {

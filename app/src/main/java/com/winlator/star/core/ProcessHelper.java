@@ -51,6 +51,44 @@ public abstract class ProcessHelper {
     }
 
     /**
+     * Number of live threads in the given process, i.e. the entry count of {@code /proc/<pid>/task}
+     * (one sub-dir per tid). Returns {@code -1} when the process no longer exists (dir gone). The
+     * winhandler pid is the Linux pid — the same one we already read {@code /proc/<pid>/cmdline} with
+     * and that Ludashi reads {@code /proc/<pid>/status} with — so this resolves correctly.
+     *
+     * <p>Used as the affinity-drift trigger: a CPU affinity set via SetProcessAffinityMask only pins
+     * the threads that exist at call time, and under wow64/FEX newly spawned game threads don't
+     * inherit it. A jump in this count is the cheap, reliable signal that new (unpinned) threads
+     * appeared and the mask must be re-applied — letting us re-pin ONLY on real change instead of on a
+     * blind timer.
+     */
+    public static int getThreadCount(int pid) {
+        String[] tids = new File("/proc/" + pid + "/task").list();
+        return tids != null ? tids.length : -1;
+    }
+
+    /**
+     * The process's current Linux affinity, read from {@code Cpus_allowed:} in
+     * {@code /proc/<pid>/status} (main-thread/tgid view). This is the ground truth after a
+     * SetProcessAffinityMask, whose Wine-reported mask is unreliable under wow64/FEX (approach
+     * borrowed from Ludashi). Returns {@code 0} when unreadable. Note: this reflects the leader
+     * thread only, so it is NOT sufficient on its own to detect per-worker-thread drift — thread
+     * count is the trigger; this is available for verification/logging.
+     */
+    public static int getProcessAffinityMask(int pid) {
+        try (BufferedReader br = new BufferedReader(
+                new InputStreamReader(new FileInputStream("/proc/" + pid + "/status")))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                if (line.startsWith("Cpus_allowed:")) {
+                    return (int) Long.parseLong(line.substring("Cpus_allowed:".length()).trim(), 16);
+                }
+            }
+        } catch (Exception ignored) {}
+        return 0;
+    }
+
+    /**
      * Gracefully terminate every wine process, resuming SIGSTOP'd ones first so a suspended guest can
      * answer the SIGTERM, waiting up to {@code graceMs} for a clean exit, then force-killing any
      * survivor when {@code forceKill} is set. Mirrors the teardown WinNative performs on task
