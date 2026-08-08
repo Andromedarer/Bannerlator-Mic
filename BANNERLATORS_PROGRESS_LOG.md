@@ -610,3 +610,18 @@ confirm whether onLoggedOff fired (LoggedOff:<result>) vs onDisconnected. (2) FI
      depot requests, so re-login completes first.
 Note: access tokens from refresh-token logon ~24h, but CM session drops on idle far sooner; app
 backgrounding + foreground-service socket idle is a plausible trigger. NOT fixed tonight (needs repro).
+
+## 2026-08-08 — stale-wine second-launch crash ("exited before rendering / exit code 1") FIXED on fix/stale-wine-launch
+Commit `43389833` pushed to branch `fix/stale-wine-launch` (off main `8632de63`), 3 files, +82 lines.
+Artifacts-only CI run **31271990672** (label `stale-wine-fix`) = ✅ **GREEN**, headSha `433898338e5e1bc9268c0f26809a8255ba0edded`==tip, all 3 flavors (standard/ludashi/pubg) success.
+
+**Symptom:** launch a container/game, swipe it away from recents, launch the SAME game again → second launch dies "The game exited before rendering" / exit code 1. Reviewer also flagged: after swipe the app "was still running" (notification up, audio/drain) — wine never got torn down.
+
+**Root cause:** `XServerDisplayActivity.exit()` (`:2521`) was the ONLY wine teardown (`terminateAllWineProcesses()` `:2544`). Recents-swipe destroys the activity WITHOUT running exit() (onDestroy `:2809` only disposes UI/perf state). Old wineserver + wine tree survive as orphans; next launch recreates the fake-input ring files those stale procs still hold mmap'd → stale reader SIGBUS on first touch → exit code 1 on SECOND launch only.
+
+**Fix (mirrors WinNative SessionKeepAliveService.onTaskRemoved, refs `a2fc5080`/`e988447b`):**
+1. `ProcessHelper.terminateAllWineProcessesAndWait(graceMs, forceKill)` — SIGCONT → SIGTERM → bounded wait → SIGKILL survivors; idempotent.
+2. `GameSessionForegroundService.onTaskRemoved` — 1500ms later: defensive wine sweep → stopForeground(STOP_FOREGROUND_REMOVE) → stopSelf → `Process.killProcess(myPid())` (swipe = close everything). `onDestroy` = minimal, NO sweep (system may destroy FGS while a session legitimately runs).
+3. `XServerDisplayActivity.sweepStaleWineProcesses()` at fresh-launch start — defense in depth for kill paths that fire no callbacks (LMK/force-stop/background optimisation); safe because launch-only, paused-resume never re-enters the runnable.
+
+**Device-verify:** launch game → swipe from recents → relaunch → should boot clean; logcat `GameSessionFgService` "Task removed (user swipe)…" + `XServerDisplayActivity` "Sweeping stale wine processes…".
