@@ -91,7 +91,19 @@ public class Drawable extends XResource {
     public void setTexture(Texture texture) {
         if (texture instanceof NativeTexture) {
             ByteBuffer vd = ((NativeTexture)texture).getVirtualData();
-            if (vd != null) data = vd;
+            if (vd != null) {
+                // ERL bug report #8: on the FIRST transition from a pool-owned buffer to a
+                // NativeTexture's virtual data, release the old pool buffer instead of orphaning
+                // it. The guard fires only when data is genuinely still pool-owned (not ASR, and
+                // this.texture not already a NativeTexture) — otherwise we'd pool-release
+                // hardware-buffer memory (the issue #4 bug in reverse).
+                synchronized (renderLock) {
+                    if (data != null && !DRAWABLE_FOR_ASR && !(this.texture instanceof NativeTexture)) {
+                        DrawableBufferPool.release(data);
+                    }
+                    data = vd;
+                }
+            }
         }
         this.texture = texture;
     }
