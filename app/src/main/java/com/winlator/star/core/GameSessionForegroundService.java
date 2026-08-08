@@ -45,9 +45,10 @@ public class GameSessionForegroundService extends Service {
         String label = intent != null ? intent.getStringExtra(EXTRA_LABEL) : null;
         createChannel();
         Notification notification = buildNotification(label);
-        // startForeground(id, notification, type) requires API 34 for the typed overload; mirror the
-        // gating used by the store/unpack foreground services (targetSdk 28 => classic FGS semantics).
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+        // The typed startForeground overload (with the declared foregroundServiceType) exists since
+        // API 29 — same gating as the store/download and unpack foreground services
+        // (DownloadForegroundService, UnpackService). targetSdk 28 => classic FGS semantics.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(XServerDisplayActivity.NOTIFICATION_ID, notification,
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
         } else {
