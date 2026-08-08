@@ -130,6 +130,7 @@ import com.winlator.star.xenvironment.components.PulseAudioComponent;
 import com.winlator.star.xenvironment.components.SysVSharedMemoryComponent;
 import com.winlator.star.xenvironment.components.XServerComponent;
 import com.winlator.star.xserver.Pointer;
+import com.winlator.star.xserver.Atom;
 import com.winlator.star.xserver.Property;
 import com.winlator.star.xserver.ScreenInfo;
 import com.winlator.star.xserver.extensions.RandrExtension;
@@ -1775,7 +1776,15 @@ public class XServerDisplayActivity extends AppCompatActivity {
             @Override
             public void onModifyWindowProperty(Window window, Property property) {
                 changeFrameRatingVisibility(window, property);
-            }    
+                // The guest publishes its pid via _NET_WM_PID, which for many titles (e.g. DiRT 3)
+                // arrives AFTER the window maps — so at onMapWindow assignTaskAffinity could only pin by
+                // class name, which never registers a pid and left the drift checker dormant on the
+                // container/shortcut CPU-list path. Now that the pid is known, re-run it: the pid path
+                // registers it in the manual-affinity map and starts the re-pin checker.
+                if (property != null && property.name == Atom.getId("_NET_WM_PID")) {
+                    assignTaskAffinity(window);
+                }
+            }
 
             @Override
             public void onUnmapWindow(Window window) {
@@ -6504,11 +6513,18 @@ return true;
 
         if (processId > 0) {
             winHandler.setProcessAffinity(processId, processAffinity);
-            startAffinityReapply(); // keep it pinned as the game spawns more threads
+            // Only maintain the pin against drift when it's a genuine restriction (fewer cores than
+            // available) — no point re-pinning an "all cores" default every time a thread spawns.
+            if (Integer.bitCount(processAffinity & 0xff) < Runtime.getRuntime().availableProcessors()) {
+                startAffinityReapply(); // keep it pinned as the game spawns more threads
+            }
         }
         else if (!className.isEmpty()) {
-            // Class-name path records no pid in the manual-affinity map, so the timer can't re-pin it
-            // yet; the window-map / TM / Prefer-Big-Cores pid path picks it up once a real pid exists.
+            // pid not published yet: _NET_WM_PID arrives AFTER the window maps for many titles (DiRT 3
+            // device-proven), so at map time we can only pin by class name — which records no pid in the
+            // manual-affinity map, leaving the drift checker dormant for the container/shortcut CPU-list
+            // path. Pin by name now so cores apply immediately; onModifyWindowProperty(_NET_WM_PID) then
+            // re-runs this with the real pid → registers it + starts the checker.
             winHandler.setProcessAffinity(window.getClassName(), processAffinity);
         }
     }
