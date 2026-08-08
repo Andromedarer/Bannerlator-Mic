@@ -524,9 +524,30 @@ public class WinHandler {
         else manualAffinity.keySet().retainAll(livePids);
     }
 
+    // Whether any pid currently has a user-applied affinity mask remembered. Lets the periodic
+    // drift check skip its tick entirely when there's nothing to re-pin.
+    public boolean hasManualAffinity() {
+        return !manualAffinity.isEmpty();
+    }
+
+    // Snapshot of the pids that currently have a remembered affinity, safe to iterate while the
+    // drift checker calls setProcessAffinity()/clearManualAffinity() (which mutate the live map).
+    public java.util.Set<Integer> getManualAffinityPids() {
+        return new java.util.HashSet<>(manualAffinity.keySet());
+    }
+
+    // Forget one pid's remembered affinity — used by the drift checker when a pid has exited, so we
+    // stop re-pinning a dead (or recycled) pid without waiting for the Task Manager's prune pass.
+    public void clearManualAffinity(int pid) {
+        manualAffinity.remove(pid);
+    }
+
     // Re-send every remembered affinity. The guest's process-affinity record doesn't stick under
-    // wow64/FEX, so threads spawned after the original set escape back to all cores; re-applying while
-    // the Task Manager is open re-pins them (and, in the guest, every thread of the process).
+    // wow64/FEX, so threads spawned after the original set escape back to all cores; re-applying
+    // re-pins them (and, in the guest, every current thread of the process, since wine maps
+    // SetProcessAffinityMask onto the process's live Linux threads). Called by the Task-Manager
+    // process-refresh loop while it is open; when it is closed, XServerDisplayActivity's drift checker
+    // re-pins per-pid on thread growth instead (see AFFINITY_DRIFT_CHECK_INTERVAL_MS).
     public void reapplyManualAffinities() {
         for (Map.Entry<Integer, Integer> e : manualAffinity.entrySet()) {
             setProcessAffinity((int) e.getKey(), (int) e.getValue());

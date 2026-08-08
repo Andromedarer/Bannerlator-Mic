@@ -51,6 +51,94 @@ public abstract class ProcessHelper {
     }
 
     /**
+     * Number of live threads in the given process, i.e. the entry count of {@code /proc/<pid>/task}
+     * (one sub-dir per tid). Returns {@code -1} when the process no longer exists (dir gone). The
+     * winhandler pid is the Linux pid — the same one we already read {@code /proc/<pid>/cmdline} with
+     * and that Ludashi reads {@code /proc/<pid>/status} with — so this resolves correctly.
+     *
+     * <p>Used as the affinity-drift trigger: a CPU affinity set via SetProcessAffinityMask only pins
+     * the threads that exist at call time, and under wow64/FEX newly spawned game threads don't
+     * inherit it. A jump in this count is the cheap, reliable signal that new (unpinned) threads
+     * appeared and the mask must be re-applied — letting us re-pin ONLY on real change instead of on a
+     * blind timer.
+     */
+    public static int getThreadCount(int pid) {
+        String[] tids = new File("/proc/" + pid + "/task").list();
+        return tids != null ? tids.length : -1;
+    }
+
+    /**
+     * The process's current Linux affinity, read from {@code Cpus_allowed:} in
+     * {@code /proc/<pid>/status} (main-thread/tgid view). This is the ground truth after a
+     * SetProcessAffinityMask, whose Wine-reported mask is unreliable under wow64/FEX (approach
+     * borrowed from Ludashi). Returns {@code 0} when unreadable. Note: this reflects the leader
+     * thread only, so it is NOT sufficient on its own to detect per-worker-thread drift — thread
+     * count is the trigger; this is available for verification/logging.
+     */
+    public static int getProcessAffinityMask(int pid) {
+        try (BufferedReader br = new BufferedReader(
+                new InputStreamReader(new FileInputStream("/proc/" + pid + "/status")))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                if (line.startsWith("Cpus_allowed:")) {
+                    return (int) Long.parseLong(line.substring("Cpus_allowed:".length()).trim(), 16);
+                }
+            }
+        } catch (Exception ignored) {}
+        return 0;
+    }
+
+    /**
+     * Resolve the game's real LINUX pid by matching {@code exeBasename} inside {@code /proc/<pid>/cmdline}.
+     * The affinity/winhandler pids are Wine "Windows" pids that DON'T exist under {@code /proc} (device-
+     * proven: winhandler pid 236/324 vs the real Linux pid 5062), so the drift checker can't read thread
+     * info by them — this bridges to the real Linux pid. Wine sets argv[0] to the Windows exe path, so the
+     * game's cmdline contains the exe name. Returns the match with the MOST threads (the engine, not a
+     * helper/stub or a single-thread launcher), or {@code -1} if none. Only scans same-uid-readable
+     * cmdlines, so most system procs are skipped cheaply.
+     */
+    public static int findLinuxPidByExe(String exeBasename) {
+        if (exeBasename == null || exeBasename.isEmpty()) return -1;
+        String needle = exeBasename.toLowerCase();
+        File[] entries = new File("/proc").listFiles();
+        if (entries == null) return -1;
+        int best = -1, bestThreads = -1;
+        for (File e : entries) {
+            String name = e.getName();
+            if (name.isEmpty() || !Character.isDigit(name.charAt(0))) continue;
+            try (BufferedReader r = new BufferedReader(
+                    new InputStreamReader(new FileInputStream("/proc/" + name + "/cmdline")))) {
+                StringBuilder sb = new StringBuilder();
+                int c;
+                while ((c = r.read()) != -1 && sb.length() < 512) sb.append(c == 0 ? ' ' : (char) c);
+                if (!sb.toString().toLowerCase().contains(needle)) continue;
+                String[] tids = new File("/proc/" + name + "/task").list();
+                int threads = tids != null ? tids.length : 0;
+                if (threads > bestThreads) { bestThreads = threads; best = Integer.parseInt(name); }
+            } catch (Exception ignored) {}
+        }
+        return best;
+    }
+
+    /**
+     * Host-side affinity: pin ALL threads of a Linux process to {@code mask} via {@code taskset -a -p}
+     * (toybox wants BARE hex — device-proven). The guest runs under the app's own uid, so this is same-uid
+     * and needs no root. Crucially this reaches the native FEX/driver threads that the Windows-side
+     * SetProcessAffinityMask cannot touch under wow64/FEX. Returns true when taskset exits 0.
+     */
+    public static boolean setLinuxAffinity(int linuxPid, int mask) {
+        if (linuxPid <= 0 || mask == 0) return false;
+        try {
+            java.lang.Process p = Runtime.getRuntime().exec(new String[]{
+                    "/system/bin/taskset", "-a", "-p", Integer.toHexString(mask & 0xff), Integer.toString(linuxPid)});
+            return p.waitFor() == 0;
+        } catch (Exception e) {
+            Log.w("ProcessHelper", "setLinuxAffinity failed pid=" + linuxPid, e);
+            return false;
+        }
+    }
+
+    /**
      * Gracefully terminate every wine process, resuming SIGSTOP'd ones first so a suspended guest can
      * answer the SIGTERM, waiting up to {@code graceMs} for a clean exit, then force-killing any
      * survivor when {@code forceKill} is set. Mirrors the teardown WinNative performs on task

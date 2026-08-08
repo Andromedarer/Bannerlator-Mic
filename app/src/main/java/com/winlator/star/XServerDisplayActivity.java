@@ -130,6 +130,7 @@ import com.winlator.star.xenvironment.components.PulseAudioComponent;
 import com.winlator.star.xenvironment.components.SysVSharedMemoryComponent;
 import com.winlator.star.xenvironment.components.XServerComponent;
 import com.winlator.star.xserver.Pointer;
+import com.winlator.star.xserver.Atom;
 import com.winlator.star.xserver.Property;
 import com.winlator.star.xserver.ScreenInfo;
 import com.winlator.star.xserver.extensions.RandrExtension;
@@ -430,6 +431,99 @@ public class XServerDisplayActivity extends AppCompatActivity {
             gameExitWatchHandler.postDelayed(this, 2000);
         }
     };
+
+    // Drift-detected CPU-affinity re-pin. A user-selected affinity (Task Manager Processor Affinity
+    // dialog from the in-game side menu, Prefer Big Cores, or per-window task affinity) is a ONE-SHOT
+    // SetProcessAffinityMask: it pins only the threads that exist at call time. Game engines spawn the
+    // bulk of their job/worker threads once real gameplay starts (after menus/loading), and under
+    // wow64/FEX those new Windows threads don't reliably inherit the process mask — they escape back
+    // to all cores and Android's EAS scheduler parks them on the little (efficiency) cluster (hotice77
+    // report: WD2 ~52% usage, 12fps, load on the wrong cluster). Nothing in this stack enforces
+    // affinity persistently, and previously the ONLY re-pin lived inside the TM-OPEN refresh loop, so
+    // closing the Task Manager stopped all enforcement.
+    //
+    // Rather than re-pin on a blind timer (which re-walks every thread each tick even when nothing
+    // changed — a periodic cost that can surface as micro-stutter on heavy titles), we DRIFT-DETECT:
+    // watch each pinned pid's Linux thread count (/proc/<pid>/task) and re-apply the mask ONLY when it
+    // grows, i.e. exactly when new unpinned threads appeared. In steady-state gameplay (thread pool
+    // stable) nothing fires, so there is no rhythmic re-pin and no stutter; at the load→gameplay
+    // transition the new engine threads are caught within one interval and pinned once. wine maps
+    // SetProcessAffinityMask onto the process's current Linux threads, so a single re-apply re-pins
+    // them all. (Native DXVK/Turnip driver threads stay unreachable by any Windows affinity API — the
+    // complete fix for those would be host-side per-tid sched_setaffinity, deliberately not done here.)
+    private static final long AFFINITY_DRIFT_CHECK_INTERVAL_MS = 2000;
+    private final Handler affinityReapplyHandler = new Handler(Looper.getMainLooper());
+    // pid -> highest thread count seen at the last re-pin; a higher count means new threads escaped.
+    private final java.util.HashMap<Integer, Integer> affinityThreadHighWater = new java.util.HashMap<>();
+    // The winhandler affinity pid is a Wine "Windows" pid that doesn't exist under /proc (device-proven:
+    // win pid 324 vs real Linux pid 5062), so the checker can't read thread info by it. Instead we track
+    // the game's exe + chosen mask and resolve its real LINUX pid by exe name, then drift-detect + re-pin
+    // HOST-SIDE (taskset), which also reaches the native FEX/driver threads the Windows path can't.
+    private volatile String affinityTargetExe = null;
+    private volatile int affinityTargetMask = 0;
+    private int affinityLinuxPid = -1;
+    private final Runnable affinityReapplyRunnable = new Runnable() {
+        @Override
+        public void run() {
+            try {
+                final int mask = affinityTargetMask;
+                final String exe = affinityTargetExe;
+                if (mask != 0 && exe != null) {
+                    // Resolve/refresh the game's LINUX pid (winhandler pids are Windows pids, unusable with
+                    // /proc). Cheap in steady state — only re-scans /proc when the cached pid has died.
+                    int lpid = affinityLinuxPid;
+                    if (lpid <= 0 || ProcessHelper.getThreadCount(lpid) < 0) {
+                        lpid = ProcessHelper.findLinuxPidByExe(exe);
+                        if (lpid != affinityLinuxPid) affinityThreadHighWater.remove(affinityLinuxPid);
+                        affinityLinuxPid = lpid;
+                    }
+                    if (lpid > 0) {
+                        int threads = ProcessHelper.getThreadCount(lpid);
+                        Integer prev = affinityThreadHighWater.get(lpid);
+                        if (threads >= 0 && (prev == null || threads > prev)) {
+                            // First sighting, or new threads spawned since the last pin -> re-pin HOST-SIDE so
+                            // the fresh (all-core) threads get pulled onto the chosen cores. taskset -a hits
+                            // every current thread, including the native FEX/driver threads the Windows API misses.
+                            boolean ok = ProcessHelper.setLinuxAffinity(lpid, mask);
+                            affinityThreadHighWater.put(lpid, threads);
+                            if (ProcessHelper.PRINT_DEBUG) {
+                                Log.d("AffinityDrift", "lpid=" + lpid + " exe=" + exe + " threads " + prev + "->"
+                                        + threads + " host-repin mask=0x" + Integer.toHexString(mask) + " ok=" + ok
+                                        + " achieved=0x" + Integer.toHexString(ProcessHelper.getProcessAffinityMask(lpid)));
+                            }
+                        } else if (threads >= 0 && ProcessHelper.PRINT_DEBUG) {
+                            // Steady state (no new threads): verify the mask is actually being honored. If the
+                            // real Cpus_allowed differs from what we asked, something below us — a vendor cpuset
+                            // cgroup / scheduler (e.g. HyperOS/MIUI) — is overriding the pin. Surfacing it turns
+                            // "affinity didn't help" into a concrete, testable cause.
+                            int got = ProcessHelper.getProcessAffinityMask(lpid);
+                            if (got != 0 && got != mask) {
+                                Log.w("AffinityDrift", "lpid=" + lpid + " NOT-HONORED requested=0x"
+                                        + Integer.toHexString(mask) + " achieved=0x" + Integer.toHexString(got)
+                                        + ((got & ~mask) != 0
+                                            ? " (ROM re-allowed excluded cores — likely cpuset/scheduler override)"
+                                            : " (cpuset allows only a subset of the requested cores)"));
+                            }
+                        }
+                    }
+                }
+            } catch (Throwable t) {
+                Log.w("XServerDisplayActivity", "Affinity drift-check tick failed", t);
+            }
+            affinityReapplyHandler.postDelayed(this, AFFINITY_DRIFT_CHECK_INTERVAL_MS);
+        }
+    };
+
+    /**
+     * Idempotently (re)start the periodic affinity drift check. Safe to call from every affinity
+     * set-site — it clears any pending tick first, so repeated calls never stack. The runnable
+     * self-gates on {@link WinHandler#hasManualAffinity()}, so starting it before any mask is set is
+     * harmless; it is torn down in {@link #exit()}.
+     */
+    private void startAffinityReapply() {
+        affinityReapplyHandler.removeCallbacks(affinityReapplyRunnable);
+        affinityReapplyHandler.postDelayed(affinityReapplyRunnable, AFFINITY_DRIFT_CHECK_INTERVAL_MS);
+    }
 
     // Live detection of which Direct3D API the running game actually uses, so the FPS-counter
     // overlay can show VKD3D for D3D12 titles instead of always printing the D3D9/10/11 wrapper
@@ -1687,7 +1781,15 @@ public class XServerDisplayActivity extends AppCompatActivity {
             @Override
             public void onModifyWindowProperty(Window window, Property property) {
                 changeFrameRatingVisibility(window, property);
-            }    
+                // The guest publishes its pid via _NET_WM_PID, which for many titles (e.g. DiRT 3)
+                // arrives AFTER the window maps — so at onMapWindow assignTaskAffinity could only pin by
+                // class name, which never registers a pid and left the drift checker dormant on the
+                // container/shortcut CPU-list path. Now that the pid is known, re-run it so the mask is
+                // (re-)applied by pid (the exe/mask the drift checker uses is captured either way).
+                if (property != null && property.name == Atom.getId("_NET_WM_PID")) {
+                    assignTaskAffinity(window);
+                }
+            }
 
             @Override
             public void onUnmapWindow(Window window) {
@@ -2525,6 +2627,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         ProcessHelper.resumeAllWineProcesses();
         installerWatchHandler.removeCallbacks(installerWatchRunnable);
         gameExitWatchHandler.removeCallbacks(gameExitWatchRunnable);
+        affinityReapplyHandler.removeCallbacks(affinityReapplyRunnable);
         stopDxApiDetection();
         // Stop the session foreground service (also removes its ongoing notification).
         stopService(new Intent(this, com.winlator.star.core.GameSessionForegroundService.class));
@@ -5782,6 +5885,20 @@ return true;
                 }
                 // ...AND re-pin the ALREADY-RUNNING guest tree so the current game moves now.
                 reapplyBigCoresToRunningGuest(on);
+                // Keep the game pinned against later-spawned threads while Prefer Big Cores is ON: point the
+                // drift checker at the game exe + big mask so it resolves the real Linux pid and re-pins
+                // host-side on thread growth. OFF -> clear the target so the checker stops maintaining it.
+                if (on) {
+                    String exe = gameExeBasename();
+                    if (exe != null && Integer.bitCount(taskAffinityMask & 0xff) < Runtime.getRuntime().availableProcessors()) {
+                        if (!exe.equals(affinityTargetExe)) affinityLinuxPid = -1;
+                        affinityTargetExe = exe;
+                        affinityTargetMask = taskAffinityMask & 0xff;
+                        startAffinityReapply();
+                    }
+                } else {
+                    affinityTargetMask = 0;
+                }
                 break;
             default: // root six
                 com.winlator.star.perf.PerfRootApplier.INSTANCE.apply(key, on);
@@ -6403,17 +6520,47 @@ return true;
         if (desktop.isFile()) desktop.delete();
     }
 
+    /**
+     * The running game's exe basename (e.g. {@code dirt3_game.exe}) that the drift checker resolves to a
+     * real Linux pid. Prefers the value already captured from the mapped window's class name; falls back to
+     * the shortcut's Exec line. Lower-cased for matching. Null when neither is available.
+     */
+    private String gameExeBasename() {
+        if (affinityTargetExe != null) return affinityTargetExe;
+        try {
+            if (shortcut != null) {
+                String e = shortcut.getExecutable();
+                if (e != null && !e.isEmpty()) return e.trim().toLowerCase();
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
     private void assignTaskAffinity(Window window) {
         if (taskAffinityMask == 0 || taskAffinityMaskWoW64 == 0) return;
         int processId = window.getProcessId();
         String className = window.getClassName();
         int processAffinity = window.isWoW64() ? taskAffinityMaskWoW64 : taskAffinityMask;
 
-        if (processId > 0) {
-            winHandler.setProcessAffinity(processId, processAffinity);
-        }
-        else if (!className.isEmpty()) {
-            winHandler.setProcessAffinity(window.getClassName(), processAffinity);
+        // Apply immediately via winhandler so the cores take effect right now (by pid when known, else by
+        // class name — _NET_WM_PID often arrives after the window maps).
+        if (processId > 0) winHandler.setProcessAffinity(processId, processAffinity);
+        else if (!className.isEmpty()) winHandler.setProcessAffinity(className, processAffinity);
+
+        // Arm the drift checker — but only for a genuine restriction (fewer cores than available); no point
+        // maintaining an "all cores" default. The checker resolves the game's real LINUX pid by exe name and
+        // re-pins HOST-SIDE, so it no longer depends on the winhandler Windows-pid (which isn't a /proc pid).
+        if (!className.isEmpty()) {
+            boolean restrict = Integer.bitCount(processAffinity & 0xff) < Runtime.getRuntime().availableProcessors();
+            if (restrict) {
+                String exe = className.toLowerCase();
+                int slash = Math.max(exe.lastIndexOf('/'), exe.lastIndexOf('\\'));
+                if (slash >= 0) exe = exe.substring(slash + 1);
+                if (!exe.equals(affinityTargetExe)) affinityLinuxPid = -1; // new target -> re-resolve
+                affinityTargetExe = exe;
+                affinityTargetMask = processAffinity & 0xff;
+                startAffinityReapply();
+            }
         }
     }
 
@@ -7229,7 +7376,21 @@ return true;
         };
 
         ds.onTmSetAffinity = (pid, mask) -> {
-            if (winHandler != null) winHandler.setProcessAffinity(pid, mask);
+            if (winHandler != null) {
+                winHandler.setProcessAffinity(pid, mask);
+                // Point the drift checker at the game exe + this mask so it survives past the TM close: it
+                // resolves the real Linux pid and re-pins host-side on thread growth. A restriction arms it;
+                // "all cores" clears the target. (Targets the game exe — the common case of pinning the game.)
+                String exe = gameExeBasename();
+                if (exe != null && Integer.bitCount(mask & 0xff) < Runtime.getRuntime().availableProcessors()) {
+                    if (!exe.equals(affinityTargetExe)) affinityLinuxPid = -1;
+                    affinityTargetExe = exe;
+                    affinityTargetMask = mask & 0xff;
+                    startAffinityReapply();
+                } else if (Integer.bitCount(mask & 0xff) >= Runtime.getRuntime().availableProcessors()) {
+                    affinityTargetMask = 0;
+                }
+            }
         };
 
         ds.onTmQueryAffinity = pid -> {
