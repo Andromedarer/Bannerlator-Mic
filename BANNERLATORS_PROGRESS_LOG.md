@@ -638,3 +638,23 @@ Branch fix/stale-wine-launch still NOT merged — user decision pending.
 
 ## 2026-08-08 (cont.) — post-merge main artifacts build
 Run **31272915069** (label `stale-wine-merged`, ref main, headSha `f1360fcf`==tip) = ✅ GREEN, 3 flavors (standard/ludashi/pubg). Pubg APK staged `/sdcard/Download/Bannerlator-stale-wine-merged-pubg.apk` (sha256 `ba0b7885a1357f5adcaacfced6a3261e12b32b456f0ba616ab0f05e781214810`, vc69/2.9.7, same cert → installs over cleanly).
+
+## 2026-08-08 (cont.) — IN-GAME TASK MANAGER CPU AFFINITY: user report "works at startup but reverts to E-cores during gameplay" — ANALYZED (no code change yet)
+**Report (hotice77):** picking cores in the in-game Task Manager Processor Affinity dialog works fine during menus/loading screens, but once actual gameplay starts the load migrates back to the efficiency (little) cores — WD2: ~52% usage, 12 fps.
+
+**Verdict:** NOT a regression. Verified against code — this is the documented **one-shot design** of the affinity feature (merged `e50219d7` + readback race fix `e32cb580`). Full prior history + abandoned Part 2 in `~/.claude/projects/-home-claude-user/memory/project_bannerlator_taskmgr_affinity_readback.md`.
+
+**Technical root cause (code-verified):**
+- Every affinity set is a **one-shot, per-process call** (`winHandler.setProcessAffinity(pid, mask)` → `SET_PROCESS_AFFINITY` packet → guest `winhandler.exe` → `SetProcessAffinityMask` → wine `sched_setaffinity`). Set points: `assignTaskAffinity` at window-map only (`XServerDisplayActivity.java:1684`/`:6406`), Prefer Big Cores toggle one-shot (`:6456`), TM dialog OK (`:7232`).
+- The **only** periodic re-apply is `reapplyManualAffinities` (`XServerDisplayActivity.java:7309`), which fires inside the **Task-Manager-OPEN** process-list refresh loop (10+/sec). **Close the TM and nothing ever re-pins.**
+- Threads spawned by the game AFTER the last set escape to all cores (documented wow64/FEX stickiness gap); Android's EAS scheduler then migrates them onto little cores → low utilization + bad fps. Exactly matches the startup-vs-gameplay split.
+- Shipped `winhandler.exe` (original 61376B) has NO per-thread pin — `applyAffinityToThreads` (commit `52783e8b`) is source-only, never shipped (Part 2 abandoned: ~18 leftover threads are native DXVK/Turnip POSIX threads unreachable via Toolhelp; pinning them off big cores would HURT fps).
+
+**Layman's version (for handoff):** The CPU is an office with 8 desks — 4 fast (big cores), 4 slow-but-battery-friendly (little cores). Picking cores = telling the office manager "the game works only at desks 4–7." The manager only reads that rule **once**, when you open the Task Manager. Close it → he stops enforcing. The game keeps hiring new workers (background threads) once real gameplay starts; nobody tells the new workers the rule, they drift to any desk, and Android's scheduler sees them on the slow desks and keeps them there. Menus look fine (few workers, all already told); gameplay tanks (many new workers, no one re-checks). The obvious "tell every worker directly" fix is impossible because the graphics-driver worker threads can't even be addressed — hence the abandoned Part 2.
+
+**Real fix options (app-layer, no guest rebuild — NOT coded, awaiting user decision):**
+1. **Periodic re-apply timer** (cheap, recommended): while any manual/task affinity mask exists for a live pid, re-call `setProcessAffinity(pid, mask)` every ~2–3s regardless of TM state. Re-pins Windows threads spawned later (the bulk of game job threads) via the EXISTING binary. Reuses `reapplyBigCoresToRunningGuest` pattern (`:6428`).
+2. **Host-side `sched_setaffinity` on `/proc/<pid>/task/*`** (full fix incl. native threads): same-uid, no root, but JNI work + risks pinning GPU/present threads (see Part 2 dead-end note).
+3. `assignTaskAffinity` (`:6406`) is also one-shot at window-map only — same drift applies to the container CPU-list path.
+
+**Status:** diagnosed + logged, NO code written yet. PICK UP HERE with Claude: decide option 1 vs 2, then implement + device-verify (GoW: set cores, watch `Cpus_allowed` on `/proc/<gow-pid>/task/*/status` across gameplay, esp. threads spawned after the set).
