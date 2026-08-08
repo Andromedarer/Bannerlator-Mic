@@ -248,6 +248,12 @@ object XServerDialogState {
     private val _playingOnExternal = MutableStateFlow(false)
     val playingOnExternal: StateFlow<Boolean> = _playingOnExternal
     fun setPlayingOnExternal(v: Boolean) { _playingOnExternal.value = v }
+
+    // True while the in-game side menu (drawer) is open — used to hide the external-display badge so
+    // it doesn't overlap the menu.
+    private val _menuOpen = MutableStateFlow(false)
+    val menuOpen: StateFlow<Boolean> = _menuOpen
+    fun setMenuOpen(v: Boolean) { _menuOpen.value = v }
     @JvmField var onRequestResume: Runnable? = null
 
     // -------------------------------------------------------------------------

@@ -32,6 +32,7 @@ fun XServerDialogHost() {
     val paused           by state.paused.collectAsState()
     val controllerToast  by state.controllerToast.collectAsState()
     val playingOnExternal by state.playingOnExternal.collectAsState()
+    val menuOpen by state.menuOpen.collectAsState()
     when (activeDialog) {
         XServerDialogState.ActiveDialog.VIBRATION      -> VibrationDialog(state)
         XServerDialogState.ActiveDialog.DEBUG          -> DebugDialogContent(state)
@@ -43,7 +44,8 @@ fun XServerDialogHost() {
     }
 
     // On-handheld "game is on the TV" indicator (the phone would otherwise be a black screen).
-    if (playingOnExternal) ExternalModeOverlay(state)
+    // Hidden while the side menu is open so it doesn't overlap the drawer.
+    if (playingOnExternal && !menuOpen) ExternalModeOverlay(state)
 
     if (magnifierVisible) MagnifierOverlay(state)
 

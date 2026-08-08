@@ -5564,3 +5564,6 @@ On `feat/external-display-swap`. (1) Pause indicator on the TV when backgrounded
 
 ## 2026-08-08 — Audio reset + on-device external-mode indicator (Version A increment 3)
 Device feedback fixes on feat/external-display-swap: (1) resetGuestAudio() restarts PulseAudio to recover sound lost after background→foreground on the TV — auto on resume (gameOnExternal) + manual 'Reset audio' button in the TV tab. (2) ExternalModeOverlay: on-handheld '📺 Playing on external display' badge (Compose Dialog, non-interactive) so the phone isn't a black screen when the game is on the TV. Note: AYANEO built-in casting owns the display, so the resolution/refresh picker is a no-op there (works on direct-HDMI/DeX). UNVERIFIED (CI). vc frozen 69.
+
+## 2026-08-08 — Badge-overlap fix + correct audio reset (suspend/resume sink)
+Screenshot feedback: (1) hide the 'playing on external display' badge while the side menu is open (menuOpen state from DrawerLayout listener; badge = playingOnExternal && !menuOpen). (2) Audio reset reworked from daemon-restart (broke wine's connection, didn't work) to suspend/resume the AAudio sink over module-cli-protocol-unix — reopens the output route while keeping the daemon + guest audio connection. Device-confirmed HDMI is standard audio + full pulse module set bundled. UNVERIFIED (CI).

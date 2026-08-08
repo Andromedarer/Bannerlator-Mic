@@ -1065,9 +1065,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         drawerLayout.addDrawerListener(new DrawerLayout.SimpleDrawerListener() {
             @Override public void onDrawerOpened(@NonNull View drawerView) {
-
+                // Hide the on-handheld "playing on external display" badge while the menu is open so
+                // it doesn't overlap the drawer content.
+                XServerDialogState.INSTANCE.setMenuOpen(true);
             }
             @Override public void onDrawerClosed(@NonNull View drawerView) {
+                XServerDialogState.INSTANCE.setMenuOpen(false);
                 // If the user left Relative Mouse enabled, recapture.
                 if (isRelativeMouseMovement && !pointerCaptureRequested) {
                     drawerLayout.postDelayed(() -> ensurePointerCapture("drawer-closed"), 2000);
@@ -2601,7 +2604,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
         new Thread(() -> {
             try {
                 PulseAudioComponent audio = env.getComponent(PulseAudioComponent.class);
-                if (audio != null) audio.start(); // start() stops the old daemon then relaunches it
+                // Suspend/resume the sink (reopens the AAudio route) instead of restarting the daemon,
+                // so the guest's audio connection survives. Falls back to a restart only if unreachable.
+                if (audio != null) audio.resetAudioSink();
             } catch (Exception e) {
                 android.util.Log.w("XServerDisplay", "guest audio reset failed", e);
             }
