@@ -625,3 +625,10 @@ Artifacts-only CI run **31271990672** (label `stale-wine-fix`) = ✅ **GREEN**, 
 3. `XServerDisplayActivity.sweepStaleWineProcesses()` at fresh-launch start — defense in depth for kill paths that fire no callbacks (LMK/force-stop/background optimisation); safe because launch-only, paused-resume never re-enters the runnable.
 
 **Device-verify:** launch game → swipe from recents → relaunch → should boot clean; logcat `GameSessionFgService` "Task removed (user swipe)…" + `XServerDisplayActivity` "Sweeping stale wine processes…".
+
+## 2026-08-08 (cont.) — stale-wine fix ✅ DEVICE-VERIFIED (crash buffer + game logs)
+Fixed build installed over vc69 (pubg). Verified via device crash buffer + preserved game logs:
+- **BEFORE (old build), 14:16:22** — crash buffer: `Fatal signal 7 (SIGBUS), code 2 (BUS_ADRERR)` in **wineserver** pid 32199, backtrace `libfakeinput.so (read+60)` → `wineserver read_request` → `thread_poll_event`. This is EXACTLY the predicted stale fake-input ring mmap SIGBUS. The crashed session's wine_debug.log (kept in `bannerlator/DiRT 3/previous/2026-08-08_14-16-22/`) ends with `wine client error:0: recvmsg: Connection reset by peer`.
+- **AFTER (fixed build, installed ~14:37)** — 4 recreation launches (14:39:28 / 14:39:43 / 14:40:17 / 14:40:44) ALL clean; current session renders (DXVK `1280x720@144`, FIFO swapchain); **no wineserver/app SIGBUS after 14:16:22** anywhere in the crash buffer.
+Caveat: fix's own logcat tags rotated out of the main buffer pre-capture; effectiveness confirmed by outcome (exact pre-fix crash gone across 4 recreations).
+Branch fix/stale-wine-launch still NOT merged — user decision pending.
