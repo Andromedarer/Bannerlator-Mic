@@ -9,7 +9,11 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
+import android.os.Process;
+import android.util.Log;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
@@ -31,6 +35,7 @@ import com.winlator.star.XServerDisplayActivity;
  * <p>See {@code docs/session-foreground-service-plan.md}.
  */
 public class GameSessionForegroundService extends Service {
+    private static final String TAG = "GameSessionFgService";
     private static final String EXTRA_LABEL = "session_label";
 
     /** Intent that starts the session-keepalive service. {@code label} = the game/shortcut name (nullable). */
@@ -92,6 +97,37 @@ public class GameSessionForegroundService extends Service {
                 .setOngoing(true)
                 .setAutoCancel(false)
                 .build();
+    }
+
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        super.onTaskRemoved(rootIntent);
+        Log.i(TAG, "Task removed (user swipe). Tearing down session and exiting process.");
+        // Recents-swipe destroys the activity WITHOUT running XServerDisplayActivity.exit(), so the
+        // wine session would otherwise survive as an orphan (its stale wineserver/process tree then
+        // fouls the next launch). Defensively tear it down here — the activity's own teardown, if it
+        // happens to be racing, is idempotent — then drop the notification, stop the service and
+        // exit the process, so swipe behaves like the pre-existing "close everything" flow. Mirrors
+        // WinNative's SessionKeepAliveService.onTaskRemoved().
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            try {
+                ProcessHelper.terminateAllWineProcessesAndWait(1500, true);
+            } catch (Throwable t) {
+                Log.w(TAG, "Defensive wine cleanup on task removal failed", t);
+            }
+            stopForeground(STOP_FOREGROUND_REMOVE);
+            stopSelf();
+            Process.killProcess(Process.myPid());
+        }, 1500L);
+    }
+
+    @Override
+    public void onDestroy() {
+        // Nothing to release here: the foreground notification is auto-removed when the service
+        // stops, and wine teardown is owned by XServerDisplayActivity.exit() (in-app exit) and
+        // onTaskRemoved() (recents-swipe). An extra sweep here would be unsafe — the system may
+        // destroy the service while a session is legitimately running in the background.
+        super.onDestroy();
     }
 
     @Nullable
