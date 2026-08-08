@@ -2041,6 +2041,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
         updateCurrentRefreshRate();
         // Re-check the external display in case a TV was (un)plugged while we were backgrounded.
         if (externalDisplayController != null) externalDisplayController.onResume();
+        // Returning to a game on the TV can leave the AAudio output route dead (the stream is torn
+        // down while backgrounded); rebuild the audio sink shortly after resume so sound comes back.
+        if (externalDisplayController != null && externalDisplayController.isGameOnExternal()) {
+            handler.postDelayed(this::resetGuestAudio, 600);
+        }
     }
 
     @Override
@@ -2585,6 +2590,24 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // preview-ownership flag on any resume, and mirrors to BOTH Compose holders (the drawer Pause
     // button + the centered pause box). Everything that pauses/resumes (manual Pause, the ReShade
     // preview, the box tap, lifecycle) routes through here so the flag never disagrees with reality.
+    // Restart the guest audio server (PulseAudio + its AAudio sink). The AAudio output stream can be
+    // torn down when the app is backgrounded or the HDMI audio route changes, and the sink does not
+    // always re-establish it — leaving the game silent (notably after returning to a game on the TV).
+    // Rebuilding the sink re-grabs the current default output route. Runs off the main thread (it does
+    // file IO + spawns a process). Exposed to the TV tab's "Reset audio" button and the auto-reset.
+    public void resetGuestAudio() {
+        final XEnvironment env = environment;
+        if (env == null) return;
+        new Thread(() -> {
+            try {
+                PulseAudioComponent audio = env.getComponent(PulseAudioComponent.class);
+                if (audio != null) audio.start(); // start() stops the old daemon then relaunches it
+            } catch (Exception e) {
+                android.util.Log.w("XServerDisplay", "guest audio reset failed", e);
+            }
+        }, "audio-reset").start();
+    }
+
     private void setPausedState(boolean paused) {
         isPaused = paused;
         if (paused) {
@@ -3756,6 +3779,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     }
                     @Override public void onGameOnExternalChanged(boolean onExternal) {
                         XServerDrawerState.INSTANCE.setTvGameOnExternal(onExternal);
+                        // Show the on-handheld "playing on external display" indicator (the phone would
+                        // otherwise be a black screen once the game surface moves to the TV).
+                        XServerDialogState.INSTANCE.setPlayingOnExternal(onExternal);
                         if (onExternal) {
                             XServerDialogState.INSTANCE.showInfoToast(
                                     "GAME MOVED TO TV", "now", "Use the handheld as the controller");
@@ -3774,6 +3800,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         XServerDrawerState.INSTANCE.onMoveToTv = () -> externalDisplayController.requestMoveToExternal();
         XServerDrawerState.INSTANCE.onBringBackFromTv = () -> externalDisplayController.bringBackToHandheld();
         XServerDrawerState.INSTANCE.onTvModeChange = (id) -> externalDisplayController.setPreferredModeId(id);
+        XServerDrawerState.INSTANCE.onResetAudio = () -> resetGuestAudio();
 
         globalCursorSpeed = preferences.getFloat("cursor_speed", 1.0f);
         touchpadView = new TouchpadView(this, xServer, timeoutHandler, hideControlsRunnable);

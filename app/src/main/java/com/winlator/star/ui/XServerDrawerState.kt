@@ -195,6 +195,8 @@ object XServerDrawerState {
     @JvmField var onTvAutoSwapChange: java.util.function.Consumer<Boolean>? = null
     @JvmField var onMoveToTv: Runnable? = null
     @JvmField var onBringBackFromTv: Runnable? = null
+    // Rebuild the guest audio sink (fixes silence after backgrounding / HDMI route changes).
+    @JvmField var onResetAudio: Runnable? = null
 
     // TV output display modes (resolution + refresh rate). Seeded by the activity from the connected
     // display's getSupportedModes() so the user can switch off e.g. 4K@30 to 1080p@60. id 0 = default.

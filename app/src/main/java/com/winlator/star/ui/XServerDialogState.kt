@@ -242,6 +242,12 @@ object XServerDialogState {
     private val _paused = MutableStateFlow(false)
     val paused: StateFlow<Boolean> = _paused
     fun setPaused(v: Boolean) { _paused.value = v }
+
+    // True while the game is shown on an external display (TV). Drives the on-handheld "playing on
+    // external display" indicator so the phone isn't just a black screen once the game surface moves.
+    private val _playingOnExternal = MutableStateFlow(false)
+    val playingOnExternal: StateFlow<Boolean> = _playingOnExternal
+    fun setPlayingOnExternal(v: Boolean) { _playingOnExternal.value = v }
     @JvmField var onRequestResume: Runnable? = null
 
     // -------------------------------------------------------------------------

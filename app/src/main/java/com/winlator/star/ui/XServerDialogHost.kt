@@ -11,6 +11,7 @@ import com.winlator.star.ui.dialogs.NewTaskDialog
 import com.winlator.star.ui.dialogs.ScreenEffectsDialog
 import com.winlator.star.ui.dialogs.VibrationDialog
 import com.winlator.star.ui.overlays.ControllerToastOverlay
+import com.winlator.star.ui.overlays.ExternalModeOverlay
 import com.winlator.star.ui.overlays.MagnifierOverlay
 import com.winlator.star.ui.overlays.PauseBoxOverlay
 import com.winlator.star.ui.theme.WinlatorTheme
@@ -30,6 +31,7 @@ fun XServerDialogHost() {
     val magnifierVisible by state.magnifierVisible.collectAsState()
     val paused           by state.paused.collectAsState()
     val controllerToast  by state.controllerToast.collectAsState()
+    val playingOnExternal by state.playingOnExternal.collectAsState()
     when (activeDialog) {
         XServerDialogState.ActiveDialog.VIBRATION      -> VibrationDialog(state)
         XServerDialogState.ActiveDialog.DEBUG          -> DebugDialogContent(state)
@@ -39,6 +41,9 @@ fun XServerDialogHost() {
         XServerDialogState.ActiveDialog.NEW_TASK       -> NewTaskDialog(state)
         XServerDialogState.ActiveDialog.NONE           -> Unit
     }
+
+    // On-handheld "game is on the TV" indicator (the phone would otherwise be a black screen).
+    if (playingOnExternal) ExternalModeOverlay(state)
 
     if (magnifierVisible) MagnifierOverlay(state)
 

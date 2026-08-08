@@ -345,6 +345,19 @@ private fun TvContent(state: XServerDrawerState) {
             state.onMoveToTv?.run()
         }
     }
+
+    Spacer(Modifier.height(8.dp))
+
+    // Rebuild the audio route — sound can drop after backgrounding or an HDMI route change.
+    AccentButton("Reset audio", Modifier.fillMaxWidth()) {
+        state.onResetAudio?.run()
+    }
+    Text(
+        text = "Fixes lost sound after switching apps.",
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        fontSize = 11.sp,
+        modifier = Modifier.padding(top = 4.dp)
+    )
 }
 
 // ───── Modern Tab Button ─────
