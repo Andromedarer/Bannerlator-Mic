@@ -1742,6 +1742,17 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 // Track which app-side stage is running so a failure surfaces on the right card.
                 final String[] stage = { "Preparing Wine & graphics driver" };
                 try {
+                    // A previous session may have been killed without a clean exit (recents-swipe /
+                    // background optimisation / force-stop) — none of those run onDestroy, so exit()
+                    // (the only caller of terminateAllWineProcesses) never fired and the old
+                    // wineserver + wine tree can still be alive as orphans. A new session then
+                    // recreates the fake-input ring files those stale processes still hold mmap'd,
+                    // and the stale reader faults with SIGBUS the moment the new session touches
+                    // them → "The game exited before rendering / exit code 1" on the SECOND launch.
+                    // Sweep before starting anything; this is a fresh launch, so every wine process
+                    // found here is stale by construction. (A paused-session in-app resume never
+                    // re-enters this runnable, so a live session can't be swept.)
+                    sweepStaleWineProcesses();
                     preloaderDialog.step(2, "Preparing Wine & graphics driver…");
                     setupWineSystemFiles();
                     extractGraphicsDriverFiles();
@@ -2557,6 +2568,19 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 AppUtils.restartApplication(getApplicationContext());
             }
         }, 1000);
+    }
+
+    /**
+     * Terminate any wine processes orphaned by a previous session that was killed without a clean
+     * exit (recents-swipe, background optimisation, force-stop) — none of those run {@link #exit()},
+     * the only other caller of the wine teardown, so the stale wineserver + wine tree can survive as
+     * orphans. Only called on the fresh-launch path, where every wine process is stale by
+     * construction; a paused-session in-app resume never re-enters the launch runnable, so a live
+     * session can never be swept.
+     */
+    private void sweepStaleWineProcesses() {
+        Log.d("XServerDisplayActivity", "Sweeping stale wine processes from previous session");
+        ProcessHelper.terminateAllWineProcessesAndWait(1500, true);
     }
 
     /**

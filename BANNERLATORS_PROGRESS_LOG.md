@@ -610,3 +610,25 @@ confirm whether onLoggedOff fired (LoggedOff:<result>) vs onDisconnected. (2) FI
      depot requests, so re-login completes first.
 Note: access tokens from refresh-token logon ~24h, but CM session drops on idle far sooner; app
 backgrounding + foreground-service socket idle is a plausible trigger. NOT fixed tonight (needs repro).
+
+## 2026-08-08 — stale-wine second-launch crash ("exited before rendering / exit code 1") FIXED on fix/stale-wine-launch
+Commit `43389833` pushed to branch `fix/stale-wine-launch` (off main `8632de63`), 3 files, +82 lines.
+Artifacts-only CI run **31271990672** (label `stale-wine-fix`) = ✅ **GREEN**, headSha `433898338e5e1bc9268c0f26809a8255ba0edded`==tip, all 3 flavors (standard/ludashi/pubg) success.
+
+**Symptom:** launch a container/game, swipe it away from recents, launch the SAME game again → second launch dies "The game exited before rendering" / exit code 1. Reviewer also flagged: after swipe the app "was still running" (notification up, audio/drain) — wine never got torn down.
+
+**Root cause:** `XServerDisplayActivity.exit()` (`:2521`) was the ONLY wine teardown (`terminateAllWineProcesses()` `:2544`). Recents-swipe destroys the activity WITHOUT running exit() (onDestroy `:2809` only disposes UI/perf state). Old wineserver + wine tree survive as orphans; next launch recreates the fake-input ring files those stale procs still hold mmap'd → stale reader SIGBUS on first touch → exit code 1 on SECOND launch only.
+
+**Fix (mirrors WinNative SessionKeepAliveService.onTaskRemoved, refs `a2fc5080`/`e988447b`):**
+1. `ProcessHelper.terminateAllWineProcessesAndWait(graceMs, forceKill)` — SIGCONT → SIGTERM → bounded wait → SIGKILL survivors; idempotent.
+2. `GameSessionForegroundService.onTaskRemoved` — 1500ms later: defensive wine sweep → stopForeground(STOP_FOREGROUND_REMOVE) → stopSelf → `Process.killProcess(myPid())` (swipe = close everything). `onDestroy` = minimal, NO sweep (system may destroy FGS while a session legitimately runs).
+3. `XServerDisplayActivity.sweepStaleWineProcesses()` at fresh-launch start — defense in depth for kill paths that fire no callbacks (LMK/force-stop/background optimisation); safe because launch-only, paused-resume never re-enters the runnable.
+
+**Device-verify:** launch game → swipe from recents → relaunch → should boot clean; logcat `GameSessionFgService` "Task removed (user swipe)…" + `XServerDisplayActivity` "Sweeping stale wine processes…".
+
+## 2026-08-08 (cont.) — stale-wine fix ✅ DEVICE-VERIFIED (crash buffer + game logs)
+Fixed build installed over vc69 (pubg). Verified via device crash buffer + preserved game logs:
+- **BEFORE (old build), 14:16:22** — crash buffer: `Fatal signal 7 (SIGBUS), code 2 (BUS_ADRERR)` in **wineserver** pid 32199, backtrace `libfakeinput.so (read+60)` → `wineserver read_request` → `thread_poll_event`. This is EXACTLY the predicted stale fake-input ring mmap SIGBUS. The crashed session's wine_debug.log (kept in `bannerlator/DiRT 3/previous/2026-08-08_14-16-22/`) ends with `wine client error:0: recvmsg: Connection reset by peer`.
+- **AFTER (fixed build, installed ~14:37)** — 4 recreation launches (14:39:28 / 14:39:43 / 14:40:17 / 14:40:44) ALL clean; current session renders (DXVK `1280x720@144`, FIFO swapchain); **no wineserver/app SIGBUS after 14:16:22** anywhere in the crash buffer.
+Caveat: fix's own logcat tags rotated out of the main buffer pre-capture; effectiveness confirmed by outcome (exact pre-fix crash gone across 4 recreations).
+Branch fix/stale-wine-launch still NOT merged — user decision pending.

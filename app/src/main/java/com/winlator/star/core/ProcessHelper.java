@@ -50,6 +50,28 @@ public abstract class ProcessHelper {
         }
     }
 
+    /**
+     * Gracefully terminate every wine process, resuming SIGSTOP'd ones first so a suspended guest can
+     * answer the SIGTERM, waiting up to {@code graceMs} for a clean exit, then force-killing any
+     * survivor when {@code forceKill} is set. Mirrors the teardown WinNative performs on task
+     * removal. Idempotent: no-ops when no wine processes are running.
+     */
+    public static void terminateAllWineProcessesAndWait(int graceMs, boolean forceKill) {
+        resumeAllWineProcesses();
+        terminateAllWineProcesses();
+        long start = System.currentTimeMillis();
+        while (!listRunningWineProcesses().isEmpty()) {
+            if (System.currentTimeMillis() - start >= graceMs) {
+                break;
+            }
+        }
+        if (forceKill) {
+            for (String process : listRunningWineProcesses()) {
+                killProcess(Integer.parseInt(process));
+            }
+        }
+    }
+
     public static void pauseAllWineProcesses() {
         for (String process : listRunningWineProcesses()) {
             suspendProcess(Integer.parseInt(process));
