@@ -632,3 +632,6 @@ Fixed build installed over vc69 (pubg). Verified via device crash buffer + prese
 - **AFTER (fixed build, installed ~14:37)** — 4 recreation launches (14:39:28 / 14:39:43 / 14:40:17 / 14:40:44) ALL clean; current session renders (DXVK `1280x720@144`, FIFO swapchain); **no wineserver/app SIGBUS after 14:16:22** anywhere in the crash buffer.
 Caveat: fix's own logcat tags rotated out of the main buffer pre-capture; effectiveness confirmed by outcome (exact pre-fix crash gone across 4 recreations).
 Branch fix/stale-wine-launch still NOT merged — user decision pending.
+
+## 2026-08-08 (cont.) — stale-wine fix MERGED to main `e57882e2`
+`--no-ff` merge of `fix/stale-wine-launch` into main in the `bannerlators-dnsfix` worktree; file list pre-verified = exactly 4 files (3 Java + progress log), no drift/LICENSE touched; pushed `e3a1ce6a..e57882e2`. Merge commit `e57882e2` (parents `e3a1ce6a`, `50c6c5b3`). Feature branch left in place (not deleted). Device-verified before merge (see previous entry).
