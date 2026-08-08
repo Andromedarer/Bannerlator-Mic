@@ -460,8 +460,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
         public void run() {
             try {
                 if (winHandler != null && winHandler.hasManualAffinity()) {
+                    Log.d("AffinityDiag", "checker tick pids=" + winHandler.getManualAffinityPids());
                     for (int pid : winHandler.getManualAffinityPids()) {
                         int threads = ProcessHelper.getThreadCount(pid);
+                        Log.d("AffinityDiag", "  pid=" + pid + " /proc-threads=" + threads + " highwater=" + affinityThreadHighWater.get(pid));
                         if (threads < 0) {
                             // Process exited — stop tracking it (also prevents re-pinning a recycled pid).
                             winHandler.clearManualAffinity(pid);
@@ -516,6 +518,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
      * harmless; it is torn down in {@link #exit()}.
      */
     private void startAffinityReapply() {
+        Log.d("AffinityDiag", "startAffinityReapply() called — checker armed");
         affinityReapplyHandler.removeCallbacks(affinityReapplyRunnable);
         affinityReapplyHandler.postDelayed(affinityReapplyRunnable, AFFINITY_DRIFT_CHECK_INTERVAL_MS);
     }
@@ -1782,6 +1785,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 // container/shortcut CPU-list path. Now that the pid is known, re-run it: the pid path
                 // registers it in the manual-affinity map and starts the re-pin checker.
                 if (property != null && property.name == Atom.getId("_NET_WM_PID")) {
+                    Log.d("AffinityDiag", "onModifyWindowProperty _NET_WM_PID fired -> getProcessId=" + window.getProcessId());
                     assignTaskAffinity(window);
                 }
             }
@@ -6506,20 +6510,32 @@ return true;
     }
 
     private void assignTaskAffinity(Window window) {
-        if (taskAffinityMask == 0 || taskAffinityMaskWoW64 == 0) return;
+        if (taskAffinityMask == 0 || taskAffinityMaskWoW64 == 0) {
+            Log.d("AffinityDiag", "assignTaskAffinity SKIP masks=0 (mask=" + taskAffinityMask + " wow64=" + taskAffinityMaskWoW64 + ")");
+            return;
+        }
         int processId = window.getProcessId();
         String className = window.getClassName();
         int processAffinity = window.isWoW64() ? taskAffinityMaskWoW64 : taskAffinityMask;
+        Log.d("AffinityDiag", "assignTaskAffinity pid=" + processId + " class=" + className
+                + " wow64=" + window.isWoW64() + " mask=0x" + Integer.toHexString(processAffinity & 0xffff));
 
         if (processId > 0) {
             winHandler.setProcessAffinity(processId, processAffinity);
+            int avail = Runtime.getRuntime().availableProcessors();
+            boolean restrict = Integer.bitCount(processAffinity & 0xff) < avail;
+            int probe = ProcessHelper.getThreadCount(processId);
+            Log.d("AffinityDiag", "PID-PATH pid=" + processId + " bits=" + Integer.bitCount(processAffinity & 0xff)
+                    + " avail=" + avail + " startChecker=" + restrict + " /proc-threads=" + probe
+                    + (probe < 0 ? " (!! pid not found under /proc — namespace mismatch)" : ""));
             // Only maintain the pin against drift when it's a genuine restriction (fewer cores than
             // available) — no point re-pinning an "all cores" default every time a thread spawns.
-            if (Integer.bitCount(processAffinity & 0xff) < Runtime.getRuntime().availableProcessors()) {
+            if (restrict) {
                 startAffinityReapply(); // keep it pinned as the game spawns more threads
             }
         }
         else if (!className.isEmpty()) {
+            Log.d("AffinityDiag", "CLASSNAME-PATH (no pid yet) class=" + className);
             // pid not published yet: _NET_WM_PID arrives AFTER the window maps for many titles (DiRT 3
             // device-proven), so at map time we can only pin by class name — which records no pid in the
             // manual-affinity map, leaving the drift checker dormant for the container/shortcut CPU-list
