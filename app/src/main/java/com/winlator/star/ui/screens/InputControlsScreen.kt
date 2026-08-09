@@ -94,6 +94,8 @@ fun InputControlsScreen() {
     var currentProfile by remember { mutableStateOf<ControlsProfile?>(null) }
     var selectedProfileIdx by remember { mutableStateOf(0) }
     var controllers by remember { mutableStateOf(listOf<ExternalController>()) }
+    // #333: which controller row's "copy bindings from…" menu is open (by descriptor id), or null.
+    var copyMenuForId by remember { mutableStateOf<String?>(null) }
 
     var showProfileDropdown by remember { mutableStateOf(false) }
     var showDownloadDialog by remember { mutableStateOf(false) }
@@ -494,6 +496,33 @@ fun InputControlsScreen() {
 
         // ── External Controllers ────────────────────────────────────
         Text("External Controllers", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        // #333: the Default / Any Controller binding template — newly connected controllers inherit
+        // these mappings automatically, so a fresh controller is never blank. Always shown.
+        Box(
+            modifier = Modifier.fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surfaceContainer, RoundedCornerShape(8.dp))
+                .clickable {
+                    if (currentProfile != null) {
+                        val intent = Intent(context, ExternalControllerBindingsActivity::class.java)
+                        intent.putExtra("profile_id", currentProfile!!.id)
+                        intent.putExtra("controller_id", com.winlator.star.inputcontrols.ControlsProfile.DEFAULT_CONTROLLER_ID)
+                        context.startActivity(intent)
+                        (context as? Activity)?.overridePendingTransition(
+                            com.winlator.star.R.anim.slide_in_up, com.winlator.star.R.anim.slide_out_down
+                        )
+                    } else AppUtils.showToast(context, R.string.no_profile_selected)
+                }.padding(12.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Gamepad, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp))
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Default / Any Controller", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
+                    Text("New controllers inherit these bindings", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
         if (controllers.isEmpty()) {
             Text("No items to display", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp,
                 modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp))
@@ -524,6 +553,29 @@ fun InputControlsScreen() {
                         Column(Modifier.weight(1f)) {
                             Text(controller.getName(), color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
                             Text("$bindingsCount Bindings", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                        }
+                        // #333: copy bindings from the Default template or another controller onto this one.
+                        Box {
+                            IconButton(onClick = { copyMenuForId = controller.getId() }) {
+                                Icon(Icons.Default.ContentCopy, "Copy bindings", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            DropdownMenu(expanded = copyMenuForId == controller.getId(), onDismissRequest = { copyMenuForId = null }) {
+                                DropdownMenuItem(text = { Text("From Default / Any Controller") }, onClick = {
+                                    val tgt = currentProfile?.addController(controller.getId())
+                                    val src = currentProfile?.getOrCreateDefaultController()
+                                    if (tgt != null) { tgt.copyBindingsFrom(src); currentProfile?.save(); refreshControllers() }
+                                    copyMenuForId = null
+                                })
+                                for (other in controllers) {
+                                    if (other.getId() == controller.getId() || other.getControllerBindingCount() == 0) continue
+                                    DropdownMenuItem(text = { Text("From ${other.getName()}") }, onClick = {
+                                        val tgt = currentProfile?.addController(controller.getId())
+                                        val src = currentProfile?.getController(other.getId())
+                                        if (tgt != null && src != null) { tgt.copyBindingsFrom(src); currentProfile?.save(); refreshControllers() }
+                                        copyMenuForId = null
+                                    })
+                                }
+                            }
                         }
                         if (bindingsCount > 0) {
                             IconButton(onClick = {
