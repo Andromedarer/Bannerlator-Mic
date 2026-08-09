@@ -109,7 +109,13 @@ public class CastSession {
                 } catch (Exception e) { Log.w(TAG, "connect-to-app failed", e); }
             }
         }
-        if (json.contains("\"MEDIA_STATUS\"") && loadSent && cb != null) cb.onLoaded();
+        if (json.contains("MEDIA_STATUS")) {
+            Log.i(TAG, "MEDIA_STATUS: " + json.substring(0, Math.min(json.length(), 500)));
+            if (loadSent && cb != null) cb.onLoaded();
+        }
+        if (json.contains("LOAD_FAILED") || json.contains("LOAD_CANCELLED") || json.contains("INVALID_REQUEST")) {
+            Log.w(TAG, "load problem: " + json.substring(0, Math.min(json.length(), 500)));
+        }
     }
 
     private void sendLoad() throws Exception {

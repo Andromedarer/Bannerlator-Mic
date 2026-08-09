@@ -141,6 +141,10 @@ public class GameCaster {
             fmt.setInteger(MediaFormat.KEY_BIT_RATE, bitrate);
             fmt.setInteger(MediaFormat.KEY_FRAME_RATE, 30);
             fmt.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 10);  // GOP fallback; forced sync frames drive segments
+            // Baseline profile = most universally HW-decodable (Chromecast) + no B-frames.
+            fmt.setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline);
+            fmt.setInteger(MediaFormat.KEY_LEVEL, MediaCodecInfo.CodecProfileLevel.AVCLevel31);
+            if (android.os.Build.VERSION.SDK_INT >= 30) fmt.setInteger(MediaFormat.KEY_LATENCY, 1);
             encoder = MediaCodec.createEncoderByType(MIME);
             encoder.configure(fmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
             inputSurface = encoder.createInputSurface();
