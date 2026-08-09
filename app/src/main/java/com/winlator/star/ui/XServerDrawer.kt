@@ -217,7 +217,7 @@ fun XServerDrawer() {
                         // available (so the "Cast to a TV" button is always reachable).
                         if (tvConnected || castSupported) {
                             Spacer(Modifier.height(6.dp))
-                            TabIconButton(R.drawable.icon_monitor, selectedTab == TabType.TV) {
+                            TvTabButton(selectedTab == TabType.TV) {
                                 handleTabClick(TabType.TV, state)
                             }
                         }
@@ -598,6 +598,48 @@ private fun FpsTabButton(isSelected: Boolean, onClick: () -> Unit) {
         }
         Text(
             text = "FPS",
+            color = textColor,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
+// TV tab: a text "TV" pill (mirrors the FPS tab) instead of an icon.
+@Composable
+private fun TvTabButton(isSelected: Boolean, onClick: () -> Unit) {
+    val accent = MaterialTheme.colorScheme.primary
+    val accentDim = LocalAccentDim.current
+    val bgBrush = if (isSelected)
+        Brush.verticalGradient(listOf(accent, accentDim))
+    else
+        Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent))
+
+    val borderColor = if (isSelected) accent.copy(alpha = 0.6f) else Color(0xFF333333)
+    val textColor = if (isSelected) Color.White else accent
+
+    Box(
+        modifier = Modifier
+            .size(44.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(bgBrush, RoundedCornerShape(12.dp))
+            .border(1.5.dp, borderColor, RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (isSelected) {
+            Canvas(Modifier.size(44.dp)) {
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(accent.copy(alpha = 0.25f), Color.Transparent),
+                        radius = size.minDimension / 2f
+                    ),
+                    radius = size.minDimension / 2f
+                )
+            }
+        }
+        Text(
+            text = "TV",
             color = textColor,
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Bold,

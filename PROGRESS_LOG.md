@@ -5612,3 +5612,6 @@ Files: cast/CastDiscovery.java (new), ui/dialogs/CastDialog.kt (new), XServerDia
 
 ## 2026-08-09 — Cast dialog "?" help (options + pros/cons)
 Per user: the wireless-casting box must carry a "?" help button so users understand the available options + pros/cons. Added to CastDialog.kt: round "?" button in the title row toggles an in-dialog help view (scrollable) with 4 blocks, each ✓pros/✗cons: (1) Cast no-app (this screen) — no TV setup / laggy + Google-Cast-only; (2) Cast with receiver app (later) — crisp+phone-free / one-time install + no Roku; (3) Wired cable — lowest lag / needs cable; (4) Roku — no app / uses Android system screen + depends on Miracast. Back button returns to the list. DURABLE REQUIREMENT: keep this "?" help current as the casting tiers evolve.
+
+## 2026-08-09 — Cast picker DEVICE-VERIFIED + TV tab icon → "TV" text
+User screenshots (5) confirm Part 1 works end-to-end: in-app dialog discovered ALL 4 Google Cast devices by name (Living Room TV/Bedroom onn 4K pro, Living Room Monitor Chromecast Ultra, Picture frame Chromecast); tap→Connected→"streaming next update"→Disconnect flow works; "?" help renders all 4 option blocks with pros/cons. Per user: TV tab button in the side menu now shows a "TV" text pill (new TvTabButton, mirrors FpsTabButton) instead of icon_monitor. Building on feat/external-display-swap, vc 69.
