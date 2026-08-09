@@ -301,16 +301,17 @@ private fun TvContent(state: XServerDrawerState) {
     // ───────────── Wireless cast (screen mirroring — no app on the TV) ─────────────
     SectionHeader("Cast to a TV (wireless)")
     Text(
-        text = "⚠ EXPERIMENTAL — wireless streaming is new: expect a few seconds of lag, and it may not " +
-            "connect on the first try.",
+        text = "⚠ EXPERIMENTAL · VIDEO ONLY — wireless streaming is new: the picture runs a few seconds " +
+            "behind, there's no TV sound yet (game audio stays on this device), and it may take a moment " +
+            "to start or need a second try.",
         color = MaterialTheme.colorScheme.error,
         fontSize = 11.sp,
         fontWeight = FontWeight.SemiBold,
         modifier = Modifier.padding(bottom = 6.dp)
     )
     Text(
-        text = "Stream the game to a Google TV / Chromecast on your Wi-Fi — pick one in the app, nothing " +
-            "to install on the TV. Tap the “?” inside for how it works and the trade-offs.",
+        text = "Stream the game's picture to a Google TV / Chromecast on your Wi-Fi — pick one in the app, " +
+            "nothing to install on the TV. Tap the “?” inside for how it works and the trade-offs.",
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         fontSize = 11.sp,
         modifier = Modifier.padding(bottom = 8.dp)

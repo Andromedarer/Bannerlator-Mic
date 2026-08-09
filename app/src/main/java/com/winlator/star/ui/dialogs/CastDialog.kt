@@ -181,11 +181,12 @@ fun CastDialog(state: XServerDialogState) {
 private fun CastHelp() {
     Column(modifier = Modifier.heightIn(max = 340.dp).verticalScroll(rememberScrollState())) {
         HelpBlock(
-            title = "Cast — no app on the TV (this screen)",
+            title = "Cast — no app on the TV (this screen) · EXPERIMENTAL",
             body = "Pick a Google TV or Chromecast from the list — nothing to install on the TV.",
             pros = listOf("Nothing to set up on the TV", "Uses devices you already have"),
             cons = listOf(
                 "A few seconds of lag (video is buffered) — good for slower games, not fast ones",
+                "Video only for now — the game's sound stays on this device",
                 "Google TV / Chromecast only — Roku isn't listed here"
             )
         )
