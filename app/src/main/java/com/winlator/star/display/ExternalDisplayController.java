@@ -105,6 +105,22 @@ public class ExternalDisplayController {
     /** Re-evaluate on resume in case a display was (un)plugged while we were away, and clear pause. */
     public void onResume() { setPaused(false); update(); }
 
+    /** Temporarily stop reacting to display changes (used while the wireless caster owns the game view,
+     *  so the two don't fight over reparenting). The game is left exactly where it is. */
+    public void pauseForCast() {
+        if (displayManager != null) {
+            try { displayManager.unregisterDisplayListener(displayListener); } catch (Exception ignored) {}
+        }
+    }
+
+    /** Resume reacting to display changes after the caster released the game view. */
+    public void resumeAfterCast() {
+        if (displayManager != null) {
+            displayManager.registerDisplayListener(displayListener, mainHandler);
+        }
+        update();
+    }
+
     // ---- settings (from the TV tab) --------------------------------------------------------------
 
     /** "Play on TV" master switch. */

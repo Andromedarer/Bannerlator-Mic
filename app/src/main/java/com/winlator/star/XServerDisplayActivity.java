@@ -177,6 +177,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private boolean wasBackgrounded = false;
     // In-app wireless-cast device discovery (Google Cast via mDNS) for the Cast dialog.
     private com.winlator.star.cast.CastDiscovery castDiscovery;
+    // Version B Part 2: captures + H.264-encodes the game for casting (Step 1 records to a file).
+    private com.winlator.star.cast.GameCaster gameCaster;
     private InputControlsView inputControlsView;
 
     // ---- Controller-status toast (P5b) — debounced hot-plug plumbing ----
@@ -3046,6 +3048,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
             castDiscovery.stop();
             castDiscovery = null;
         }
+        if (gameCaster != null) {
+            try { gameCaster.stop(); } catch (Exception ignored) {}
+            gameCaster = null;
+        }
         // Controller-status toast: drop the listener + any pending debounced toast so a late callback
         // can't run against a tearing-down activity.
         if (winHandler != null) winHandler.setControllerAssignmentListener(null);
@@ -3928,29 +3934,37 @@ public class XServerDisplayActivity extends AppCompatActivity {
             XServerDialogState.INSTANCE.setCastScanning(true);
             castDiscovery.refresh();
         };
+        // Part 2 (Step 1): the game→VirtualDisplay→H.264 capture engine. Reports state to the dialog.
+        gameCaster = new com.winlator.star.cast.GameCaster(this, xServerView, rootView, (castState, detail) -> {
+            switch (castState) {
+                case "STREAMING":
+                    XServerDialogState.INSTANCE.setCastStatus(XServerDialogState.CastStatus.CONNECTED);
+                    XServerDialogState.INSTANCE.setCastStatusDetail("Capturing the game (test recording). " +
+                            "TV playback is the next update — tap Disconnect to stop & save.");
+                    break;
+                case "FAILED":
+                    XServerDialogState.INSTANCE.setCastStatus(XServerDialogState.CastStatus.FAILED);
+                    XServerDialogState.INSTANCE.setCastStatusDetail(detail);
+                    if (externalDisplayController != null) externalDisplayController.resumeAfterCast();
+                    break;
+                default:
+                    XServerDialogState.INSTANCE.setCastStatus(XServerDialogState.CastStatus.IDLE);
+                    XServerDialogState.INSTANCE.setCastStatusDetail(detail);
+            }
+        });
         XServerDialogState.INSTANCE.onCastConnect = (device) -> {
             XServerDialogState.INSTANCE.setCastTargetName(device.name);
             XServerDialogState.INSTANCE.setCastStatus(XServerDialogState.CastStatus.CONNECTING);
-            XServerDialogState.INSTANCE.setCastStatusDetail("");
-            new Thread(() -> {
-                boolean reachable = false;
-                try {
-                    java.net.Socket sock = new java.net.Socket();
-                    sock.connect(new java.net.InetSocketAddress(device.host, device.port), 3000);
-                    sock.close();
-                    reachable = true;
-                } catch (Exception ignored) {}
-                final boolean ok = reachable;
-                runOnUiThread(() -> {
-                    XServerDialogState.INSTANCE.setCastStatus(ok
-                            ? XServerDialogState.CastStatus.CONNECTED : XServerDialogState.CastStatus.FAILED);
-                    XServerDialogState.INSTANCE.setCastStatusDetail(ok
-                            ? "Reachable. Live game streaming arrives in the next update."
-                            : "Couldn't reach this device on Wi-Fi.");
-                });
-            }, "cast-connect").start();
+            XServerDialogState.INSTANCE.setCastStatusDetail("Starting capture…");
+            // Stop the wired-display watcher first so it doesn't fight over the game view.
+            if (externalDisplayController != null) externalDisplayController.pauseForCast();
+            boolean ok = gameCaster.start(1280, 720, 8_000_000,
+                    "/storage/emulated/0/Download/bannerlator-cast-test.mp4");
+            if (!ok && externalDisplayController != null) externalDisplayController.resumeAfterCast();
         };
         XServerDialogState.INSTANCE.onCastDisconnect = () -> {
+            if (gameCaster != null) gameCaster.stop();
+            if (externalDisplayController != null) externalDisplayController.resumeAfterCast();
             XServerDialogState.INSTANCE.setCastStatus(XServerDialogState.CastStatus.IDLE);
             XServerDialogState.INSTANCE.setCastTargetName("");
             XServerDialogState.INSTANCE.setCastStatusDetail("");
