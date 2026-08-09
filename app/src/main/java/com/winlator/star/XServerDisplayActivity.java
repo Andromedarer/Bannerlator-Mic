@@ -173,6 +173,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private XServerView xServerView;
     // Version-A spike: auto-swaps the game onto a connected external display (TV), handheld = controller.
     private com.winlator.star.display.ExternalDisplayController externalDisplayController;
+    // Set on a real background (onPause outside PiP) so onResume rebuilds the guest audio sink.
+    private boolean wasBackgrounded = false;
     private InputControlsView inputControlsView;
 
     // ---- Controller-status toast (P5b) — debounced hot-plug plumbing ----
@@ -2059,9 +2061,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
         updateCurrentRefreshRate();
         // Re-check the external display in case a TV was (un)plugged while we were backgrounded.
         if (externalDisplayController != null) externalDisplayController.onResume();
-        // Returning to a game on the TV can leave the AAudio output route dead (the stream is torn
-        // down while backgrounded); rebuild the audio sink shortly after resume so sound comes back.
-        if (externalDisplayController != null && externalDisplayController.isGameOnExternal()) {
+        // Returning from the background can leave the guest's AAudio output route dead (the stream is
+        // torn down while backgrounded) — on the TV OR the handheld. Rebuild the audio sink shortly
+        // after resume so sound comes back. Only after a real background (not a PiP/dialog pause).
+        if (wasBackgrounded) {
+            wasBackgrounded = false;
             handler.postDelayed(this::resetGuestAudio, 600);
         }
         applyHandheldDim(); // re-assert the handheld dim state after resume (brightness can reset)
@@ -2086,6 +2090,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // Backgrounding auto-pauses the guest; if the game is on the TV, show the pause pill there
             // so the external display reads as paused (not a frozen frame) while the user is away.
             if (externalDisplayController != null) externalDisplayController.setPaused(true);
+            // Mark a real background so onResume rebuilds the audio sink (the AAudio route dies while
+            // backgrounded, on TV or handheld). Distinct from PiP/dialog pauses, which don't set this.
+            wasBackgrounded = true;
         }
 
         savePlaytimeData();

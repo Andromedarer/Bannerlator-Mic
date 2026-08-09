@@ -160,3 +160,14 @@ target_link_libraries(direct_scanout
         atomic
 )
 
+
+# pasink — tiny PulseAudio client (dlopen-based) to suspend/resume the guest audio sink and recover
+# the output route after backgrounding / HDMI route changes. No pulse link deps (pure dlopen/dlsym).
+add_library(pasink SHARED
+        pasink/pasink.c
+)
+
+target_link_libraries(pasink
+        log
+        dl
+)
