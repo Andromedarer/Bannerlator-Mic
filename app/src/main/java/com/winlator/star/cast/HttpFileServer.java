@@ -110,6 +110,18 @@ public class HttpFileServer {
     }
 
     private void serveHls(OutputStream os, String path) throws Exception {
+        if (path.endsWith("master.m3u8")) {
+            // Multivariant playlist declaring the codecs up front so the receiver preps its decoders
+            // (avc1.42E01F = H.264 Baseline L3.1, mp4a.40.2 = AAC-LC).
+            String m = "#EXTM3U\n#EXT-X-VERSION:3\n"
+                    + "#EXT-X-STREAM-INF:BANDWIDTH=6000000,RESOLUTION=1280x720,CODECS=\"avc1.42E01F,mp4a.40.2\"\n"
+                    + "live.m3u8\n";
+            byte[] body = m.getBytes("UTF-8");
+            Log.i(TAG, "GET " + path + " -> 200 master(" + body.length + "B)");
+            writeHead(os, "200 OK", "application/vnd.apple.mpegurl", body.length, false, 0, 0, 0);
+            os.write(body); os.flush();
+            return;
+        }
         if (path.endsWith(".m3u8")) {
             byte[] body = hls.playlist().getBytes("UTF-8");
             Log.i(TAG, "GET " + path + " -> 200 playlist(" + body.length + "B)");

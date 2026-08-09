@@ -178,13 +178,23 @@ public class TsSegmenter {
     private byte[] buildPes(int streamId, byte[] au, long pts, boolean audio) {
         ByteArrayOutputStream pes = new ByteArrayOutputStream();
         pes.write(0x00); pes.write(0x00); pes.write(0x01); pes.write(streamId);
-        // Audio PES must carry a length; video may use 0 (unbounded). len = payload(3B PES hdr + 5B PTS + au).
-        int pesLen = audio ? (3 + 5 + au.length) : 0;
-        pes.write((pesLen >> 8) & 0xFF); pes.write(pesLen & 0xFF);
-        pes.write(0x80);                            // marker
-        pes.write(0x80);                            // PTS present
-        pes.write(0x05);                            // PES header data length
-        writePts(pes, 0x02, pts);
+        if (audio) {
+            int pesLen = 3 + 5 + au.length;         // opt-hdr(3) + PTS(5) + payload
+            pes.write((pesLen >> 8) & 0xFF); pes.write(pesLen & 0xFF);
+            pes.write(0x80);                        // marker
+            pes.write(0x80);                        // PTS only
+            pes.write(0x05);                        // PES header data length
+            writePts(pes, 0x02, pts);
+        } else {
+            // Video: write BOTH PTS and DTS (equal — no B-frames). Strict HW decoders need DTS to set up
+            // their decode pipeline; PTS-only stalls them. length 0 = unbounded (allowed for video).
+            pes.write(0x00); pes.write(0x00);
+            pes.write(0x80);                        // marker
+            pes.write(0xC0);                        // PTS + DTS present
+            pes.write(0x0A);                        // PES header data length (5 PTS + 5 DTS)
+            writePts(pes, 0x03, pts);               // PTS (prefix 0011)
+            writePts(pes, 0x01, pts);               // DTS (prefix 0001) = PTS
+        }
         pes.write(au, 0, au.length);
         return pes.toByteArray();
     }
