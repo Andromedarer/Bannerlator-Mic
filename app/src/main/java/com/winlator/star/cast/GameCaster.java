@@ -140,7 +140,7 @@ public class GameCaster {
             fmt.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
             fmt.setInteger(MediaFormat.KEY_BIT_RATE, bitrate);
             fmt.setInteger(MediaFormat.KEY_FRAME_RATE, 30);
-            fmt.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1);   // ~1s keyframes → ~2s HLS segments
+            fmt.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 10);  // GOP fallback; forced sync frames drive segments
             encoder = MediaCodec.createEncoderByType(MIME);
             encoder.configure(fmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
             inputSurface = encoder.createInputSurface();
@@ -167,8 +167,19 @@ public class GameCaster {
 
     private void drainStreamLoop() {
         MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
+        long lastKeyMs = System.currentTimeMillis();
         try {
             while (running) {
+                // Force a keyframe every ~2s so HLS segments stay ~2s (don't rely on the encoder GOP).
+                long now = System.currentTimeMillis();
+                if (now - lastKeyMs >= 2000) {
+                    try {
+                        android.os.Bundle b = new android.os.Bundle();
+                        b.putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0);
+                        encoder.setParameters(b);
+                    } catch (Exception ignored) {}
+                    lastKeyMs = now;
+                }
                 int idx = encoder.dequeueOutputBuffer(info, 10000);
                 if (idx >= 0) {
                     ByteBuffer buf = encoder.getOutputBuffer(idx);

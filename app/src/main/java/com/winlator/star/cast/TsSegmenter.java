@@ -18,7 +18,7 @@ import java.util.Map;
  */
 public class TsSegmenter {
     private static final int PID_PAT = 0x0000, PID_PMT = 0x1000, PID_VIDEO = 0x0100, PID_AUDIO = 0x0101;
-    private static final int TARGET_MS = 2000;      // segment length target
+    private static final int TARGET_MS = 1500;      // close a segment on the first keyframe past this
     private static final int WINDOW = 5;            // segments kept in the live window
 
     private byte[] codecConfig;                     // SPS+PPS in Annex-B
@@ -98,7 +98,10 @@ public class TsSegmenter {
     public synchronized String playlist() {
         StringBuilder sb = new StringBuilder();
         sb.append("#EXTM3U\n#EXT-X-VERSION:3\n");
-        sb.append("#EXT-X-TARGETDURATION:").append((int) Math.ceil(TARGET_MS / 1000.0) + 1).append('\n');
+        // TARGETDURATION must be >= the longest segment or the receiver rejects the playlist.
+        double maxDur = 3;
+        for (Double d : durations) maxDur = Math.max(maxDur, d);
+        sb.append("#EXT-X-TARGETDURATION:").append((int) Math.ceil(maxDur)).append('\n');
         sb.append("#EXT-X-MEDIA-SEQUENCE:").append(mediaSeq).append('\n');
         java.util.Iterator<String> it = order.iterator();
         java.util.Iterator<Double> dit = durations.iterator();
