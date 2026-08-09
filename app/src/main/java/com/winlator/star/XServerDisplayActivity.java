@@ -3958,8 +3958,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
             XServerDialogState.INSTANCE.setCastStatusDetail("Starting capture…");
             // Stop the wired-display watcher first so it doesn't fight over the game view.
             if (externalDisplayController != null) externalDisplayController.pauseForCast();
-            boolean ok = gameCaster.start(1280, 720, 8_000_000,
-                    "/storage/emulated/0/Download/bannerlator-cast-test.mp4");
+            java.io.File castOut = new java.io.File(getExternalFilesDir(null), "cast-test.mp4");
+            boolean ok = gameCaster.start(1280, 720, 8_000_000, castOut.getAbsolutePath());
             if (!ok && externalDisplayController != null) externalDisplayController.resumeAfterCast();
         };
         XServerDialogState.INSTANCE.onCastDisconnect = () -> {

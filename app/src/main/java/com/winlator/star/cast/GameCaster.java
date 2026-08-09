@@ -83,8 +83,10 @@ public class GameCaster {
 
             encoder = MediaCodec.createEncoderByType(MIME);
             encoder.configure(fmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+            Log.i(TAG, "step: encoder configured " + w + "x" + h);
             inputSurface = encoder.createInputSurface();
             encoder.start();
+            Log.i(TAG, "step: encoder started + input surface");
 
             muxer = new MediaMuxer(outPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
 
@@ -93,21 +95,30 @@ public class GameCaster {
                     "BannerlatorCast", w, h, dpi, inputSurface,
                     DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY
                             | DisplayManager.VIRTUAL_DISPLAY_FLAG_PRESENTATION);
-            if (virtualDisplay == null) { cleanup(); return false; }
+            if (virtualDisplay == null) {
+                Log.e(TAG, "createVirtualDisplay returned null");
+                cleanup();
+                notifyState("FAILED", "Couldn't create the capture display.");
+                return false;
+            }
+            Log.i(TAG, "step: virtual display created");
 
             presentation = new CastPresentation(activity, virtualDisplay.getDisplay());
             presentation.show();
+            Log.i(TAG, "step: presentation shown");
             moveGameTo(presentation.getRoot());
+            Log.i(TAG, "step: game reparented to cast display");
 
             running = true;
             drainThread = new Thread(this::drainLoop, "cast-encoder-drain");
             drainThread.start();
             notifyState("STREAMING", "Capturing the game.");
+            Log.i(TAG, "step: STREAMING notified");
             return true;
-        } catch (Exception e) {
+        } catch (Throwable e) {
             Log.e(TAG, "start failed", e);
             cleanup();
-            notifyState("FAILED", "Couldn't start the encoder: " + e.getMessage());
+            notifyState("FAILED", "Couldn't start capture: " + e.getMessage());
             return false;
         }
     }
