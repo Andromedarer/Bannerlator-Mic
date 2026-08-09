@@ -7,8 +7,38 @@ import kotlinx.coroutines.flow.StateFlow
 object XServerDialogState {
 
     enum class ActiveDialog {
-        NONE, VIBRATION, DEBUG, INPUT_CONTROLS, SCREEN_EFFECTS, ACTIVE_WINDOWS, NEW_TASK
+        NONE, VIBRATION, DEBUG, INPUT_CONTROLS, SCREEN_EFFECTS, ACTIVE_WINDOWS, NEW_TASK, CAST
     }
+
+    // -------------------------------------------------------------------------
+    // Wireless cast — in-app device picker (Google Cast devices via mDNS).
+    // -------------------------------------------------------------------------
+    enum class CastStatus { IDLE, CONNECTING, CONNECTED, FAILED }
+
+    private val _castDevices = MutableStateFlow<List<com.winlator.star.cast.CastDiscovery.Device>>(emptyList())
+    val castDevices: StateFlow<List<com.winlator.star.cast.CastDiscovery.Device>> = _castDevices
+    fun setCastDevices(v: List<com.winlator.star.cast.CastDiscovery.Device>) { _castDevices.value = v }
+
+    private val _castScanning = MutableStateFlow(false)
+    val castScanning: StateFlow<Boolean> = _castScanning
+    fun setCastScanning(v: Boolean) { _castScanning.value = v }
+
+    private val _castStatus = MutableStateFlow(CastStatus.IDLE)
+    val castStatus: StateFlow<CastStatus> = _castStatus
+    fun setCastStatus(v: CastStatus) { _castStatus.value = v }
+
+    // Name of the device currently connecting/connected, and a human-readable detail line.
+    private val _castTargetName = MutableStateFlow("")
+    val castTargetName: StateFlow<String> = _castTargetName
+    fun setCastTargetName(v: String) { _castTargetName.value = v }
+
+    private val _castStatusDetail = MutableStateFlow("")
+    val castStatusDetail: StateFlow<String> = _castStatusDetail
+    fun setCastStatusDetail(v: String) { _castStatusDetail.value = v }
+
+    @JvmField var onCastRefresh: Runnable? = null
+    @JvmField var onCastConnect: java.util.function.Consumer<com.winlator.star.cast.CastDiscovery.Device>? = null
+    @JvmField var onCastDisconnect: Runnable? = null
 
     // -------------------------------------------------------------------------
     // Active dialog

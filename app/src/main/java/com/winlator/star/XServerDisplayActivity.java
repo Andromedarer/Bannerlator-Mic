@@ -175,6 +175,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private com.winlator.star.display.ExternalDisplayController externalDisplayController;
     // Set on a real background (onPause outside PiP) so onResume rebuilds the guest audio sink.
     private boolean wasBackgrounded = false;
+    // In-app wireless-cast device discovery (Google Cast via mDNS) for the Cast dialog.
+    private com.winlator.star.cast.CastDiscovery castDiscovery;
     private InputControlsView inputControlsView;
 
     // ---- Controller-status toast (P5b) — debounced hot-plug plumbing ----
@@ -3040,6 +3042,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
             externalDisplayController.stop();
             externalDisplayController = null;
         }
+        if (castDiscovery != null) {
+            castDiscovery.stop();
+            castDiscovery = null;
+        }
         // Controller-status toast: drop the listener + any pending debounced toast so a late callback
         // can't run against a tearing-down activity.
         if (winHandler != null) winHandler.setControllerAssignmentListener(null);
@@ -3901,23 +3907,53 @@ public class XServerDisplayActivity extends AppCompatActivity {
             container.saveData();
         };
 
-        // Wireless cast (screen mirroring): apps can't silently start mirroring, so the "Cast" button
-        // opens the system cast / wireless-display picker where the user selects a TV. Available if that
-        // picker resolves on this device (Google Cast / Wireless Display present).
-        android.content.Intent castPickerIntent =
-                new android.content.Intent(android.provider.Settings.ACTION_CAST_SETTINGS);
-        boolean castAvail = castPickerIntent.resolveActivity(getPackageManager()) != null;
-        XServerDrawerState.INSTANCE.setCastSupported(castAvail);
+        // Wireless cast: in-app device picker. We discover Google Cast devices ourselves (mDNS) and show
+        // them in our own dialog (Refresh + per-device Connecting/Connected status + Disconnect), instead
+        // of bouncing to the Android cast screen. NOTE: this build ships the PICKER — the live game
+        // streaming pipeline is the next increment, so "connect" verifies the device is reachable.
+        XServerDrawerState.INSTANCE.setCastSupported(true);
+        castDiscovery = new com.winlator.star.cast.CastDiscovery(this, devices -> runOnUiThread(() -> {
+            XServerDialogState.INSTANCE.setCastDevices(devices);
+            XServerDialogState.INSTANCE.setCastScanning(false);
+        }));
         XServerDrawerState.INSTANCE.onOpenCastPicker = () -> {
-            try {
-                startActivity(new android.content.Intent(android.provider.Settings.ACTION_CAST_SETTINGS));
-            } catch (Exception e) {
-                try { startActivity(new android.content.Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS)); }
-                catch (Exception ignored) {
-                    XServerDialogState.INSTANCE.showInfoToast("CAST", "Not available on this device",
-                            "Open Quick Settings and tap the Cast / Screen-mirror tile instead.");
-                }
-            }
+            XServerDialogState.INSTANCE.setCastStatus(XServerDialogState.CastStatus.IDLE);
+            XServerDialogState.INSTANCE.setCastTargetName("");
+            XServerDialogState.INSTANCE.setCastStatusDetail("");
+            XServerDialogState.INSTANCE.setCastScanning(true);
+            castDiscovery.refresh();
+            XServerDialogState.INSTANCE.show(XServerDialogState.ActiveDialog.CAST);
+        };
+        XServerDialogState.INSTANCE.onCastRefresh = () -> {
+            XServerDialogState.INSTANCE.setCastScanning(true);
+            castDiscovery.refresh();
+        };
+        XServerDialogState.INSTANCE.onCastConnect = (device) -> {
+            XServerDialogState.INSTANCE.setCastTargetName(device.name);
+            XServerDialogState.INSTANCE.setCastStatus(XServerDialogState.CastStatus.CONNECTING);
+            XServerDialogState.INSTANCE.setCastStatusDetail("");
+            new Thread(() -> {
+                boolean reachable = false;
+                try {
+                    java.net.Socket sock = new java.net.Socket();
+                    sock.connect(new java.net.InetSocketAddress(device.host, device.port), 3000);
+                    sock.close();
+                    reachable = true;
+                } catch (Exception ignored) {}
+                final boolean ok = reachable;
+                runOnUiThread(() -> {
+                    XServerDialogState.INSTANCE.setCastStatus(ok
+                            ? XServerDialogState.CastStatus.CONNECTED : XServerDialogState.CastStatus.FAILED);
+                    XServerDialogState.INSTANCE.setCastStatusDetail(ok
+                            ? "Reachable. Live game streaming arrives in the next update."
+                            : "Couldn't reach this device on Wi-Fi.");
+                });
+            }, "cast-connect").start();
+        };
+        XServerDialogState.INSTANCE.onCastDisconnect = () -> {
+            XServerDialogState.INSTANCE.setCastStatus(XServerDialogState.CastStatus.IDLE);
+            XServerDialogState.INSTANCE.setCastTargetName("");
+            XServerDialogState.INSTANCE.setCastStatusDetail("");
         };
 
         globalCursorSpeed = preferences.getFloat("cursor_speed", 1.0f);

@@ -301,18 +301,18 @@ private fun TvContent(state: XServerDrawerState) {
     // ───────────── Wireless cast (screen mirroring — no app on the TV) ─────────────
     SectionHeader("Cast to a TV (wireless)")
     Text(
-        text = "Mirror the game to a Google TV, Chromecast, or Miracast TV on your Wi-Fi — nothing to " +
-            "install on the TV. Opens your device's cast picker so you can pick a screen.",
+        text = "Find Google TV / Chromecast devices on your Wi-Fi and pick one from a list — right here " +
+            "in the app, nothing to install on the TV.",
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         fontSize = 11.sp,
         modifier = Modifier.padding(bottom = 8.dp)
     )
-    AccentButton("Cast / Wireless display", Modifier.fillMaxWidth()) {
+    AccentButton("Cast to a TV", Modifier.fillMaxWidth()) {
         state.onOpenCastPicker?.run()
     }
     Text(
-        text = "Mirroring shows your whole screen and adds a little lag — best for slower games. For " +
-            "the lowest lag, a wired USB-C→HDMI cable is still best.",
+        text = "This build finds and lists your TVs; live game streaming is the next update. For the " +
+            "lowest lag, a wired USB-C→HDMI cable is still best.",
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         fontSize = 11.sp,
         modifier = Modifier.padding(top = 4.dp)

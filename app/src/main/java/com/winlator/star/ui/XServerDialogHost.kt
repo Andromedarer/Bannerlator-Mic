@@ -5,6 +5,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.ComposeView
 import com.winlator.star.ui.dialogs.ActiveWindowsDialog
+import com.winlator.star.ui.dialogs.CastDialog
 import com.winlator.star.ui.dialogs.DebugDialogContent
 import com.winlator.star.ui.dialogs.InputControlsDialog
 import com.winlator.star.ui.dialogs.NewTaskDialog
@@ -40,6 +41,7 @@ fun XServerDialogHost() {
         XServerDialogState.ActiveDialog.SCREEN_EFFECTS -> ScreenEffectsDialog(state)
         XServerDialogState.ActiveDialog.ACTIVE_WINDOWS -> ActiveWindowsDialog(state)
         XServerDialogState.ActiveDialog.NEW_TASK       -> NewTaskDialog(state)
+        XServerDialogState.ActiveDialog.CAST           -> CastDialog(state)
         XServerDialogState.ActiveDialog.NONE           -> Unit
     }
 
