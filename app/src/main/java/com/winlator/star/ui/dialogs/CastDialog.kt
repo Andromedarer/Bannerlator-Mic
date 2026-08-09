@@ -48,6 +48,9 @@ fun CastDialog(state: XServerDialogState) {
     val detail by state.castStatusDetail.collectAsState()
 
     var showHelp by remember { mutableStateOf(false) }
+    // Which device row is expanded (tapped). Selecting a device only shows its info + a Connect button;
+    // it does NOT auto-connect — the user connects explicitly.
+    var selected by remember { mutableStateOf<String?>(null) }
 
     Dialog(
         onDismissRequest = { state.dismiss() },
@@ -105,44 +108,56 @@ fun CastDialog(state: XServerDialogState) {
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         devices.forEach { d ->
-                            val isTarget = d.name == targetName
+                            // "Active" = this device is the one we're connecting to / connected to.
+                            val isActive = d.name == targetName && status != XServerDialogState.CastStatus.IDLE
+                            val expanded = d.name == selected || isActive
                             Card(
-                                modifier = Modifier.fillMaxWidth().clickable { state.onCastConnect?.accept(d) },
+                                modifier = Modifier.fillMaxWidth().clickable { selected = d.name },
                                 shape = RoundedCornerShape(10.dp),
                                 colors = CardDefaults.cardColors(
-                                    containerColor = if (isTarget) MaterialTheme.colorScheme.primaryContainer
+                                    containerColor = if (expanded) MaterialTheme.colorScheme.primaryContainer
                                                      else MaterialTheme.colorScheme.surfaceVariant)
                             ) {
                                 Column(Modifier.padding(12.dp)) {
                                     Text(d.name, fontWeight = FontWeight.SemiBold,
                                         color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
                                     Text(d.type, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
-                                    // Live status appears under the device you tapped.
-                                    if (isTarget && status != XServerDialogState.CastStatus.IDLE) {
+
+                                    if (expanded) {
+                                        if (d.host.isNotBlank())
+                                            Text(d.host, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
                                         Spacer(Modifier.height(6.dp))
-                                        val label = when (status) {
-                                            XServerDialogState.CastStatus.CONNECTING -> "Connecting…"
-                                            XServerDialogState.CastStatus.CONNECTED  -> "Connected"
-                                            XServerDialogState.CastStatus.FAILED     -> "Failed to connect"
-                                            else -> ""
-                                        }
-                                        val color = when (status) {
-                                            XServerDialogState.CastStatus.CONNECTED -> MaterialTheme.colorScheme.primary
-                                            XServerDialogState.CastStatus.FAILED    -> MaterialTheme.colorScheme.error
-                                            else -> MaterialTheme.colorScheme.onSurfaceVariant
-                                        }
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            if (status == XServerDialogState.CastStatus.CONNECTING)
-                                                CircularProgressIndicator(Modifier.size(14.dp).padding(end = 6.dp), strokeWidth = 2.dp)
-                                            Text(label, color = color, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                                        }
-                                        if (detail.isNotBlank())
-                                            Text(detail, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
-                                        if (status == XServerDialogState.CastStatus.CONNECTED ||
-                                            status == XServerDialogState.CastStatus.CONNECTING) {
+
+                                        if (isActive) {
+                                            // Connected / connecting: show live status + Disconnect.
+                                            val label = when (status) {
+                                                XServerDialogState.CastStatus.CONNECTING -> "Connecting…"
+                                                XServerDialogState.CastStatus.CONNECTED  -> "Connected"
+                                                XServerDialogState.CastStatus.FAILED     -> "Failed to connect"
+                                                else -> ""
+                                            }
+                                            val color = when (status) {
+                                                XServerDialogState.CastStatus.CONNECTED -> MaterialTheme.colorScheme.primary
+                                                XServerDialogState.CastStatus.FAILED    -> MaterialTheme.colorScheme.error
+                                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                            }
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                if (status == XServerDialogState.CastStatus.CONNECTING)
+                                                    CircularProgressIndicator(Modifier.size(14.dp).padding(end = 6.dp), strokeWidth = 2.dp)
+                                                Text(label, color = color, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                            }
+                                            if (detail.isNotBlank())
+                                                Text(detail, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
                                             TextButton(onClick = { state.onCastDisconnect?.run() },
                                                 contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
                                                 Text("Disconnect")
+                                            }
+                                        } else {
+                                            // Selected but not connected: explicit Connect button.
+                                            TextButton(onClick = { state.onCastConnect?.accept(d) },
+                                                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+                                                Text("Connect")
                                             }
                                         }
                                     }
