@@ -71,7 +71,8 @@ public class TsSegmenter {
     private void openSegment(long ptsUs) {
         seg = new ByteArrayOutputStream();
         segStartPtsUs = ptsUs;
-        ccPat = ccPmt = ccVideo = ccAudio = 0;
+        // Do NOT reset continuity counters per segment — players read segments back-to-back and a CC
+        // reset at each boundary reads as a corrupt/lost packet (which is why the Chromecast bailed).
         writeTs(PID_PAT, true, buildPat(), -1);
         writeTs(PID_PMT, true, buildPmt(), -1);
     }
