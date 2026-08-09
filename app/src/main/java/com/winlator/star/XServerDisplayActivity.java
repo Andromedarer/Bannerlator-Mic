@@ -4530,11 +4530,17 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 refreshPlayerSlots.run();
                 // Manual reassignment → status toast (may be a "PLAYER n · SHARED" state).
                 showControllerStatusToast("reassign", null);
+                // #333: a manual slot change alters who owns the on-screen slot (e.g. pinning a pad to
+                // Player 2 = 2-player → restore the overlay; pinning to Player 1 = takeover → hide), so
+                // re-evaluate auto-hide live. Also makes Ignore↔Auto a clean connect/disconnect sim.
+                updateAutoHideForControllers();
             };
             ds.onResetInput = () -> {
                 winHandler.resetInputPipeline();
                 refreshPlayerSlots.run();
                 showControllerStatusToast("reset", null);
+                // #333: pipeline reset re-seats slots → re-evaluate auto-hide against the fresh state.
+                updateAutoHideForControllers();
             };
 
             // Hot-plug (add/remove/progressive-change) → status toast. WinHandler fires a plain callback
