@@ -227,6 +227,11 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     // existing containers are unchanged; a new container is seeded from the app-drawer global at creation.
     var onScreenControllerMode by mutableStateOf(Container.ON_SCREEN_MODE_DEFAULT)
 
+    // Auto-hide on-screen controls when a controller takes the on-screen slot (#333). Container-level
+    // default FALSE (existing containers untouched); a new container is seeded from the app-drawer global
+    // (default ON) at creation, same discipline as onScreenControllerMode.
+    var autoHideControlsOnPad by mutableStateOf(Container.AUTO_HIDE_CONTROLS_ON_PAD_DEFAULT)
+
     // Gyro (motion aim), per-container. Target: 0=Right stick 1=Left stick 2=Mouse; activator is the
     // button that gates the tilt (4 = always on), with the activation mode deciding whether that
     // button is held or tapped to latch (0=Hold 1=Toggle). Enabled/target/activator/mode/sensitivity/
@@ -535,6 +540,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         vibrationIntensity = seed?.getVibrationIntensity() ?: Container.VIBRATION_INTENSITY_DEFAULT
         controllerSlotOverridesJson = seed?.getControllerSlotOverrides() ?: "{}"
         onScreenControllerMode = seed?.getOnScreenControllerMode() ?: Container.ON_SCREEN_MODE_DEFAULT
+        autoHideControlsOnPad = seed?.isAutoHideControlsOnPad() ?: Container.AUTO_HIDE_CONTROLS_ON_PAD_DEFAULT
 
         gyroEnabled     = seed?.isGyroEnabled() ?: Container.GYRO_ENABLED_DEFAULT
         gyroTarget      = seed?.getGyroTarget() ?: Container.GYRO_TARGET_DEFAULT
@@ -913,6 +919,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             c.setVibrationIntensity(vibrationIntensity)
             c.setControllerSlotOverrides(controllerSlotOverridesJson)
             c.setOnScreenControllerMode(onScreenControllerMode)
+            c.setAutoHideControlsOnPad(autoHideControlsOnPad)
             c.setGyroEnabled(gyroEnabled)
             c.setGyroTarget(gyroTarget)
             c.setGyroActivator(gyroActivator)
@@ -981,6 +988,14 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
                         if (onScreenControllerMode == Container.ON_SCREEN_MODE_DEFAULT)
                             com.winlator.star.ui.components.GlobalControllerPrefs.getOnScreenMode(context)
                         else onScreenControllerMode
+                    )
+                    // Seed auto-hide from the global default (ON) when the user didn't turn it on in the
+                    // create screen; an explicit ON in the create screen is kept. Existing containers never
+                    // hit this path, so they stay on the FALSE container-level fallback.
+                    created.setAutoHideControlsOnPad(
+                        if (!autoHideControlsOnPad)
+                            com.winlator.star.ui.components.GlobalControllerPrefs.getAutoHideControlsOnPad(context)
+                        else true
                     )
                     // Same set as the edit path above — a new container must not silently drop these.
                     created.setGyroEnabled(gyroEnabled)
@@ -1119,6 +1134,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             template.setVibrationIntensity(vibrationIntensity)
             template.setControllerSlotOverrides(controllerSlotOverridesJson)
             template.setOnScreenControllerMode(onScreenControllerMode)
+            template.setAutoHideControlsOnPad(autoHideControlsOnPad)
             template.setGyroEnabled(gyroEnabled)
             template.setGyroTarget(gyroTarget)
             template.setGyroActivator(gyroActivator)

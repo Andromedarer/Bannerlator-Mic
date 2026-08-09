@@ -608,6 +608,22 @@ public class Container {
         putExtra("onScreenControllerMode", String.valueOf(mode));
     }
 
+    // Auto-hide the on-screen touch controls when a physical controller takes over the on-screen pad's
+    // player slot (issue #333). Per-container, resolved shortcut-override-else-container and applied live
+    // at launch + on hot-plug. The container-level fallback is FALSE so existing containers are unchanged;
+    // a NEW container is seeded from the app-drawer global (GlobalControllerPrefs, default ON) at creation,
+    // exactly like onScreenControllerMode above. Stored as "1"/"0" in extraData (matches the shortcut
+    // "exclusiveXInput"/"inputType" extra convention that XServerDisplayActivity reads with equals("1")).
+    public static final boolean AUTO_HIDE_CONTROLS_ON_PAD_DEFAULT = false;
+
+    public boolean isAutoHideControlsOnPad() {
+        return getExtra("autoHideControlsOnPad", AUTO_HIDE_CONTROLS_ON_PAD_DEFAULT ? "1" : "0").equals("1");
+    }
+
+    public void setAutoHideControlsOnPad(boolean enabled) {
+        putExtra("autoHideControlsOnPad", enabled ? "1" : "0");
+    }
+
     // Gyro (motion aim), per-container. Mirrors the WinHandler.GYRO_* constants so the editor VM and
     // the shortcut screen can talk about targets/activators without importing winhandler (same reason
     // the VIBRATION_MODE_* values are duplicated above). Enabled/target/sensitivity/activator/invert

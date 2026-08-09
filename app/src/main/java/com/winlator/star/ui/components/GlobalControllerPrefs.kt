@@ -15,6 +15,11 @@ object GlobalControllerPrefs {
     private const val KEY_SLOT_OVERRIDES = "global_controller_slot_overrides"
     // On-screen priority mode default (Container.ON_SCREEN_MODE_*).
     private const val KEY_ON_SCREEN_MODE = "global_on_screen_controller_mode"
+    // Auto-hide on-screen controls when a controller takes the on-screen slot (issue #333). Global
+    // default is ON so newly-created containers get the seamless behavior; existing containers are
+    // untouched (they keep the FALSE container-level fallback unless the user opts in).
+    private const val KEY_AUTO_HIDE_ON_PAD = "global_auto_hide_controls_on_pad"
+    private const val DEFAULT_AUTO_HIDE_ON_PAD = true
 
     fun getSlotOverridesJson(context: Context): String {
         val prefs = PreferenceManager.getDefaultSharedPreferences(context)
@@ -39,6 +44,18 @@ object GlobalControllerPrefs {
         PreferenceManager.getDefaultSharedPreferences(context)
             .edit()
             .putInt(KEY_ON_SCREEN_MODE, mode)
+            .apply()
+    }
+
+    fun getAutoHideControlsOnPad(context: Context): Boolean {
+        return PreferenceManager.getDefaultSharedPreferences(context)
+            .getBoolean(KEY_AUTO_HIDE_ON_PAD, DEFAULT_AUTO_HIDE_ON_PAD)
+    }
+
+    fun setAutoHideControlsOnPad(context: Context, enabled: Boolean) {
+        PreferenceManager.getDefaultSharedPreferences(context)
+            .edit()
+            .putBoolean(KEY_AUTO_HIDE_ON_PAD, enabled)
             .apply()
     }
 }
