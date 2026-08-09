@@ -2698,6 +2698,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 castHttp = new com.winlator.star.cast.HttpFileServer(seg);
                 int port = castHttp.start();
                 String url = "http://" + ip + ":" + port + "/live.m3u8";
+                android.util.Log.i("CastSession", "live url: " + url);
                 runOnUiThread(() -> XServerDialogState.INSTANCE.setCastStatusDetail("Sending to the TV…"));
                 castSession = new com.winlator.star.cast.CastSession(device.host,
                         new com.winlator.star.cast.CastSession.Callback() {

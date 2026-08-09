@@ -112,15 +112,18 @@ public class HttpFileServer {
     private void serveHls(OutputStream os, String path) throws Exception {
         if (path.endsWith(".m3u8")) {
             byte[] body = hls.playlist().getBytes("UTF-8");
+            Log.i(TAG, "GET " + path + " -> 200 playlist(" + body.length + "B)");
             writeHead(os, "200 OK", "application/vnd.apple.mpegurl", body.length, false, 0, 0, 0);
             os.write(body);
         } else if (path.endsWith(".ts")) {
             String name = path.substring(path.lastIndexOf('/') + 1);
             byte[] body = hls.getSegment(name);
+            Log.i(TAG, "GET " + path + " -> " + (body == null ? "404" : "200 seg(" + body.length + "B)"));
             if (body == null) { writeHead(os, "404 Not Found", "text/plain", 0, false, 0, 0, 0); os.flush(); return; }
             writeHead(os, "200 OK", "video/mp2t", body.length, false, 0, 0, 0);
             os.write(body);
         } else {
+            Log.i(TAG, "GET " + path + " -> 404");
             writeHead(os, "404 Not Found", "text/plain", 0, false, 0, 0, 0);
         }
         os.flush();
