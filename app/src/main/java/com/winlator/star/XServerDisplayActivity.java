@@ -4922,8 +4922,19 @@ public class XServerDisplayActivity extends AppCompatActivity {
             ControlsProfile profile = inputControlsManager.getProfiles().get(selectedProfileIndex);
             showInputControls(profile);
         } else {
-            // No profile selected, ensure the controls are hidden
-            hideInputControls();
+            // #333 smart default layout: a fresh user who hasn't picked a profile gets the bundled
+            // "Virtual Gamepad" touch layout so there's a working touch controller out of the box —
+            // but ONLY when auto-hide is on (new/opted-in containers), so existing setups with no
+            // profile are unchanged. The overlay then auto-hides once a controller takes over.
+            ControlsProfile defaultVg = resolvedAutoHideControlsOnPad() ? findVirtualGamepadProfile() : null;
+            if (defaultVg != null) {
+                inputControlsView.setShowTouchscreenControls(true);
+                userWantsControlsShown = true;
+                showInputControls(defaultVg);
+            } else {
+                // No profile selected, ensure the controls are hidden
+                hideInputControls();
+            }
         }
 
         // Timeout logic should only apply if the controls are visible
@@ -6390,6 +6401,15 @@ return true;
         } catch (NumberFormatException e) {
             return fallback;
         }
+    }
+
+    // #333 smart default: the bundled "Virtual Gamepad" touch layout (controls-3.icp), used as the
+    // default overlay for a fresh user who hasn't picked a profile. Matched by name; null if absent.
+    private ControlsProfile findVirtualGamepadProfile() {
+        for (ControlsProfile p : inputControlsManager.getProfiles()) {
+            if (p != null && "Virtual Gamepad".equalsIgnoreCase(p.getName())) return p;
+        }
+        return null;
     }
 
     // #333: auto-hide on-screen controls when a controller takes the on-screen slot. Resolved
