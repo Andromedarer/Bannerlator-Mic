@@ -63,7 +63,12 @@ public class TsSegmenter {
             }
         }
 
-        byte[] payload = (keyframe && codecConfig != null) ? concat(codecConfig, au) : au;
+        // Prepend an Access Unit Delimiter (NAL type 9) — MPEG-TS/H.264 wants one per access unit and
+        // strict HW decoders (Chromecast) can refuse to start without it. Keyframe order: AUD, SPS/PPS, IDR.
+        byte[] aud = new byte[]{0, 0, 0, 1, 0x09, (byte) 0xF0};
+        byte[] payload = (keyframe && codecConfig != null)
+                ? concat(aud, concat(codecConfig, au))
+                : concat(aud, au);
         // PCR on EVERY video frame (~33 ms) — the receiver needs a frequent clock or it never starts.
         writePesTo(PID_VIDEO, 0xE0, payload, pts, true, false);
     }
