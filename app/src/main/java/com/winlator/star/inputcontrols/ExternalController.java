@@ -95,6 +95,23 @@ public class ExternalController {
         return controllerBindings.size();
     }
 
+    /** #333: replace this controller's bindings with a deep copy of another's. Used to seed a newly
+     *  added controller from the "Default / Any Controller" template and for the "copy bindings from…"
+     *  action, so a fresh controller is never blank. Clones each binding (keyCode + Binding) so the two
+     *  controllers never share mutable binding objects. */
+    public void copyBindingsFrom(ExternalController other) {
+        controllerBindings.clear();
+        if (other == null) return;
+        for (int i = 0; i < other.getControllerBindingCount(); i++) {
+            ExternalControllerBinding src = other.getControllerBindingAt(i);
+            if (src == null) continue;
+            ExternalControllerBinding copy = new ExternalControllerBinding();
+            copy.setKeyCode(src.getKeyCode());
+            copy.setBinding(src.getBinding());
+            controllerBindings.add(copy);
+        }
+    }
+
     public JSONObject toJSONObject() {
         try {
             if (controllerBindings.isEmpty()) return null;
