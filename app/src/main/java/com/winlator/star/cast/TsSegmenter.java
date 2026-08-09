@@ -64,7 +64,8 @@ public class TsSegmenter {
         }
 
         byte[] payload = (keyframe && codecConfig != null) ? concat(codecConfig, au) : au;
-        writePesTo(PID_VIDEO, 0xE0, payload, pts, keyframe, false);
+        // PCR on EVERY video frame (~33 ms) — the receiver needs a frequent clock or it never starts.
+        writePesTo(PID_VIDEO, 0xE0, payload, pts, true, false);
     }
 
     private void openSegment(long ptsUs) {

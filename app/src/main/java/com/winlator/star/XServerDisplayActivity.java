@@ -3986,9 +3986,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
             XServerDialogState.INSTANCE.setCastScanning(false);
         }));
         XServerDrawerState.INSTANCE.onOpenCastPicker = () -> {
-            XServerDialogState.INSTANCE.setCastStatus(XServerDialogState.CastStatus.IDLE);
-            XServerDialogState.INSTANCE.setCastTargetName("");
-            XServerDialogState.INSTANCE.setCastStatusDetail("");
+            // Keep the connected state if a cast is active — only clear when idle (not casting).
+            if (XServerDialogState.INSTANCE.getCastStatus().getValue() == XServerDialogState.CastStatus.IDLE) {
+                XServerDialogState.INSTANCE.setCastTargetName("");
+                XServerDialogState.INSTANCE.setCastStatusDetail("");
+            }
             XServerDialogState.INSTANCE.setCastScanning(true);
             castDiscovery.refresh();
             XServerDialogState.INSTANCE.show(XServerDialogState.ActiveDialog.CAST);
