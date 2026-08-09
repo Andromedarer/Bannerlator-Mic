@@ -54,20 +54,8 @@ public class GameSessionForegroundService extends Service {
         // API 29 — same gating as the store/download and unpack foreground services
         // (DownloadForegroundService, UnpackService). targetSdk 28 => classic FGS semantics.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // MEDIA_PLAYBACK (alongside DATA_SYNC) marks the session as actively playing audio so the
-            // platform keeps the guest's AAudio output stream alive while the app is backgrounded —
-            // otherwise it is torn down and the game returns silent. Paired with audio focus in the
-            // activity. Some strict Android 14 devices reject the MEDIA_PLAYBACK type at start; fall
-            // back to DATA_SYNC-only so the session keepalive is never lost.
-            try {
-                startForeground(XServerDisplayActivity.NOTIFICATION_ID, notification,
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-                                | ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
-            } catch (Throwable t) {
-                Log.w(TAG, "media-playback FGS type rejected; falling back to data-sync only", t);
-                startForeground(XServerDisplayActivity.NOTIFICATION_ID, notification,
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
-            }
+            startForeground(XServerDisplayActivity.NOTIFICATION_ID, notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
         } else {
             startForeground(XServerDisplayActivity.NOTIFICATION_ID, notification);
         }

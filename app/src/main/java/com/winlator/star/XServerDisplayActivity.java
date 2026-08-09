@@ -189,10 +189,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
     };
     private TouchpadView touchpadView;
     private XEnvironment environment;
-    // Audio focus: held while a game session is active so the platform keeps the guest's audio stream
-    // alive across backgrounding (paired with the media foreground-service type). [[audio]]
-    private android.media.AudioManager audioManager;
-    private android.media.AudioFocusRequest audioFocusRequest;
     private DrawerLayout drawerLayout;
     private ContainerManager containerManager;
     protected Container container;
@@ -2048,9 +2044,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
         updateCurrentRefreshRate();
         // Re-check the external display in case a TV was (un)plugged while we were backgrounded.
         if (externalDisplayController != null) externalDisplayController.onResume();
-        // (Re)acquire audio focus so the platform keeps the guest audio stream alive when we next
-        // background (another app may have taken focus while we were away).
-        requestGameAudioFocus();
         // Returning to a game on the TV can leave the AAudio output route dead (the stream is torn
         // down while backgrounded); rebuild the audio sink shortly after resume so sound comes back.
         if (externalDisplayController != null && externalDisplayController.isGameOnExternal()) {
@@ -2620,47 +2613,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }, "audio-reset").start();
     }
 
-    // Request audio focus for the session (idempotent). Holding GAIN focus with a game/media usage
-    // signals the platform that this app is actively producing audio, so the guest's AAudio output
-    // stream is kept alive while backgrounded instead of being torn down (→ silence on return). We do
-    // NOT abandon on pause — the whole point is to keep audio alive in the background; released in exit.
-    private void requestGameAudioFocus() {
-        if (audioManager == null) audioManager = (android.media.AudioManager) getSystemService(Context.AUDIO_SERVICE);
-        if (audioManager == null) return;
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                if (audioFocusRequest == null) {
-                    android.media.AudioAttributes attrs = new android.media.AudioAttributes.Builder()
-                            .setUsage(android.media.AudioAttributes.USAGE_GAME)
-                            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
-                            .build();
-                    audioFocusRequest = new android.media.AudioFocusRequest.Builder(
-                            android.media.AudioManager.AUDIOFOCUS_GAIN)
-                            .setAudioAttributes(attrs)
-                            .setWillPauseWhenDucked(false)
-                            .setOnAudioFocusChangeListener(focusChange -> {})
-                            .build();
-                }
-                audioManager.requestAudioFocus(audioFocusRequest);
-            } else {
-                audioManager.requestAudioFocus(focusChange -> {},
-                        android.media.AudioManager.STREAM_MUSIC,
-                        android.media.AudioManager.AUDIOFOCUS_GAIN);
-            }
-        } catch (Exception e) {
-            Log.w("XServerDisplay", "requestAudioFocus failed", e);
-        }
-    }
-
-    private void abandonGameAudioFocus() {
-        if (audioManager == null) return;
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && audioFocusRequest != null) {
-                audioManager.abandonAudioFocusRequest(audioFocusRequest);
-            }
-        } catch (Exception ignored) {}
-    }
-
     private void setPausedState(boolean paused) {
         isPaused = paused;
         if (paused) {
@@ -3026,7 +2978,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
             externalDisplayController.stop();
             externalDisplayController = null;
         }
-        abandonGameAudioFocus();
         // Controller-status toast: drop the listener + any pending debounced toast so a late callback
         // can't run against a tearing-down activity.
         if (winHandler != null) winHandler.setControllerAssignmentListener(null);
@@ -3847,9 +3798,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 };
         externalDisplayController = new com.winlator.star.display.ExternalDisplayController(this, xServerView, rootView, tvListener);
         externalDisplayController.start();
-
-        // Hold audio focus for the whole session so backgrounding doesn't tear down the guest audio.
-        requestGameAudioFocus();
 
         // Wire the in-game TV tab controls to the controller.
         XServerDrawerState.INSTANCE.onTvPlayOnTvChange = (b) -> externalDisplayController.setEnabled(b);
