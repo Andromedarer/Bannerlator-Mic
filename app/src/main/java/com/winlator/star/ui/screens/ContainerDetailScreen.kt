@@ -1824,6 +1824,18 @@ private fun AdvancedTab(
                 onSelect = { viewModel.onScreenControllerMode = onScreenModeLabels.indexOf(it).coerceAtLeast(0) },
             )
             Spacer(Modifier.height(8.dp))
+            // #333: auto-hide the on-screen touch controls when a physical controller takes over the
+            // on-screen pad's player slot; they reappear when it leaves. Slot-aware — a controller pinned
+            // to a DIFFERENT player (2-player setup) leaves the overlay up. Overrides Share while active.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(
+                    checked = viewModel.autoHideControlsOnPad,
+                    onCheckedChange = { viewModel.autoHideControlsOnPad = it }
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("Hide on-screen controls when a controller connects")
+            }
+            Spacer(Modifier.height(8.dp))
             PlayerSlotsEditor(
                 savedOverridesJson = viewModel.controllerSlotOverridesJson,
                 onOverridesChange = { viewModel.controllerSlotOverridesJson = it },

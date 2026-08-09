@@ -666,6 +666,10 @@ private fun GlobalPlayerSlotsSection() {
     var onScreenMode by remember {
         mutableStateOf(com.winlator.star.ui.components.GlobalControllerPrefs.getOnScreenMode(context))
     }
+    // #333 global default (seeds new containers): auto-hide on-screen controls when a controller connects.
+    var autoHideOnPad by remember {
+        mutableStateOf(com.winlator.star.ui.components.GlobalControllerPrefs.getAutoHideControlsOnPad(context))
+    }
 
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text("Player Slots", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp,
@@ -690,6 +694,18 @@ private fun GlobalPlayerSlotsSection() {
             onSelect = {
                 onScreenMode = onScreenModeLabels.indexOf(it).coerceAtLeast(0)
                 com.winlator.star.ui.components.GlobalControllerPrefs.setOnScreenMode(context, onScreenMode)
+            },
+        )
+        Spacer(Modifier.height(8.dp))
+        // #333 auto-hide default for new containers. On/Off dropdown (no Switch in this screen).
+        val autoHideLabels = listOf("On", "Off")
+        LabeledDropdown(
+            label = "Hide on-screen controls when a controller connects",
+            options = autoHideLabels,
+            selectedOption = if (autoHideOnPad) autoHideLabels[0] else autoHideLabels[1],
+            onSelect = {
+                autoHideOnPad = autoHideLabels.indexOf(it) == 0
+                com.winlator.star.ui.components.GlobalControllerPrefs.setAutoHideControlsOnPad(context, autoHideOnPad)
             },
         )
         Spacer(Modifier.height(8.dp))
