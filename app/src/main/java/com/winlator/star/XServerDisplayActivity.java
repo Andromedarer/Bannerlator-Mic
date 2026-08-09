@@ -3901,6 +3901,25 @@ public class XServerDisplayActivity extends AppCompatActivity {
             container.saveData();
         };
 
+        // Wireless cast (screen mirroring): apps can't silently start mirroring, so the "Cast" button
+        // opens the system cast / wireless-display picker where the user selects a TV. Available if that
+        // picker resolves on this device (Google Cast / Wireless Display present).
+        android.content.Intent castPickerIntent =
+                new android.content.Intent(android.provider.Settings.ACTION_CAST_SETTINGS);
+        boolean castAvail = castPickerIntent.resolveActivity(getPackageManager()) != null;
+        XServerDrawerState.INSTANCE.setCastSupported(castAvail);
+        XServerDrawerState.INSTANCE.onOpenCastPicker = () -> {
+            try {
+                startActivity(new android.content.Intent(android.provider.Settings.ACTION_CAST_SETTINGS));
+            } catch (Exception e) {
+                try { startActivity(new android.content.Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS)); }
+                catch (Exception ignored) {
+                    XServerDialogState.INSTANCE.showInfoToast("CAST", "Not available on this device",
+                            "Open Quick Settings and tap the Cast / Screen-mirror tile instead.");
+                }
+            }
+        };
+
         globalCursorSpeed = preferences.getFloat("cursor_speed", 1.0f);
         touchpadView = new TouchpadView(this, xServer, timeoutHandler, hideControlsRunnable);
         touchpadView.setSensitivity(globalCursorSpeed);

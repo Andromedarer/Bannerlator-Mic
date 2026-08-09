@@ -218,6 +218,14 @@ object XServerDrawerState {
     val tvHdr: StateFlow<String> = _tvHdr
     fun setTvHdr(v: String) { _tvHdr.value = v }
 
+    // Wireless casting (screen mirroring to a Google TV / Chromecast / Miracast) is available on this
+    // device (Google Cast / Wireless Display present). Gates the TV tab so a "Cast" button is reachable
+    // even with no wired display connected. onOpenCastPicker opens the system cast/mirror device chooser.
+    private val _castSupported = MutableStateFlow(false)
+    val castSupported: StateFlow<Boolean> = _castSupported
+    fun setCastSupported(v: Boolean) { _castSupported.value = v }
+    @JvmField var onOpenCastPicker: Runnable? = null
+
     // ---- TV Options v2 (NEW behaviours, TV-scoped via tv.* container extras) ----------------------
     // Overscan / safe-area inset for TVs that crop edges: 0..8 % padding on GamePresentation.root.
     private val _tvOverscan = MutableStateFlow(0)

@@ -152,6 +152,7 @@ fun XServerDrawer() {
     val selectedTab by state.selectedTab.collectAsState()
     val isPaused by state.isPaused.collectAsState()
     val tvConnected by state.tvConnected.collectAsState()
+    val castSupported by state.castSupported.collectAsState()
     val pauseIcon = if (isPaused) R.drawable.icon_play else R.drawable.icon_pause
     val accent = MaterialTheme.colorScheme.primary
     val surface = MaterialTheme.colorScheme.surface
@@ -212,8 +213,9 @@ fun XServerDrawer() {
                         TabIconButton(R.drawable.icon_debug, selectedTab == TabType.ADVANCED) {
                             handleTabClick(TabType.ADVANCED, state)
                         }
-                        // TV / external-display tab: only shown while a TV is connected.
-                        if (tvConnected) {
+                        // TV / Cast tab: shown while a TV is wired-connected OR wireless casting is
+                        // available (so the "Cast to a TV" button is always reachable).
+                        if (tvConnected || castSupported) {
                             Spacer(Modifier.height(6.dp))
                             TabIconButton(R.drawable.icon_monitor, selectedTab == TabType.TV) {
                                 handleTabClick(TabType.TV, state)
@@ -287,6 +289,7 @@ private fun handleTabClick(tab: TabType, state: XServerDrawerState) {
 // controls; picture/latency controls (aspect, overscan, latency mode, audio) land in a later pass.
 @Composable
 private fun TvContent(state: XServerDrawerState) {
+    val tvConnected by state.tvConnected.collectAsState()
     val displayName by state.tvDisplayName.collectAsState()
     val playOnTv by state.tvPlayOnTv.collectAsState()
     val autoSwap by state.tvAutoSwap.collectAsState()
@@ -295,58 +298,82 @@ private fun TvContent(state: XServerDrawerState) {
     val currentModeId by state.tvCurrentModeId.collectAsState()
     val hdr by state.tvHdr.collectAsState()
 
-    SectionHeader("TV / External Display")
-
+    // ───────────── Wireless cast (screen mirroring — no app on the TV) ─────────────
+    SectionHeader("Cast to a TV (wireless)")
     Text(
-        text = if (displayName.isNotBlank()) "Connected: $displayName" else "External display connected",
-        color = MaterialTheme.colorScheme.onSurface,
-        fontSize = 13.sp,
+        text = "Mirror the game to a Google TV, Chromecast, or Miracast TV on your Wi-Fi — nothing to " +
+            "install on the TV. Opens your device's cast picker so you can pick a screen.",
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        fontSize = 11.sp,
         modifier = Modifier.padding(bottom = 8.dp)
     )
-
-    // Output resolution + refresh rate of the TV (e.g. switch 4K@30 → 1080p@60 for smoother play).
-    if (modes.isNotEmpty()) {
-        val labels = modes.map { it.label }
-        val selectedIdx = modes.indexOfFirst { it.id == currentModeId }.let { if (it >= 0) it else 0 }
-        ReshadeDropdown("Display mode (resolution & refresh)", labels, selectedIdx) { i ->
-            val id = modes[i].id
-            state.setTvCurrentModeId(id)
-            state.onTvModeChange?.accept(id)
-        }
-        Spacer(Modifier.height(6.dp))
+    AccentButton("Cast / Wireless display", Modifier.fillMaxWidth()) {
+        state.onOpenCastPicker?.run()
     }
+    Text(
+        text = "Mirroring shows your whole screen and adds a little lag — best for slower games. For " +
+            "the lowest lag, a wired USB-C→HDMI cable is still best.",
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        fontSize = 11.sp,
+        modifier = Modifier.padding(top = 4.dp)
+    )
 
-    if (hdr.isNotBlank()) {
+    // ───────────── Wired / external display (only when one is actually connected) ─────────────
+    if (tvConnected) {
+        HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 12.dp))
+        SectionHeader("TV / External Display")
+
         Text(
-            text = "HDR supported by display: $hdr",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 11.sp,
+            text = if (displayName.isNotBlank()) "Connected: $displayName" else "External display connected",
+            color = MaterialTheme.colorScheme.onSurface,
+            fontSize = 13.sp,
             modifier = Modifier.padding(bottom = 8.dp)
         )
-    }
 
-    ToggleRow("Play on TV", playOnTv) {
-        state.setTvPlayOnTv(it)
-        state.onTvPlayOnTvChange?.accept(it)
-    }
-    ToggleRow("Auto-switch on connect", autoSwap, enabled = playOnTv) {
-        state.setTvAutoSwap(it)
-        state.onTvAutoSwapChange?.accept(it)
+        // Output resolution + refresh rate of the TV (e.g. switch 4K@30 → 1080p@60 for smoother play).
+        if (modes.isNotEmpty()) {
+            val labels = modes.map { it.label }
+            val selectedIdx = modes.indexOfFirst { it.id == currentModeId }.let { if (it >= 0) it else 0 }
+            ReshadeDropdown("Display mode (resolution & refresh)", labels, selectedIdx) { i ->
+                val id = modes[i].id
+                state.setTvCurrentModeId(id)
+                state.onTvModeChange?.accept(id)
+            }
+            Spacer(Modifier.height(6.dp))
+        }
+
+        if (hdr.isNotBlank()) {
+            Text(
+                text = "HDR supported by display: $hdr",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+        }
+
+        ToggleRow("Play on TV", playOnTv) {
+            state.setTvPlayOnTv(it)
+            state.onTvPlayOnTvChange?.accept(it)
+        }
+        ToggleRow("Auto-switch on connect", autoSwap, enabled = playOnTv) {
+            state.setTvAutoSwap(it)
+            state.onTvAutoSwapChange?.accept(it)
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        if (onExternal) {
+            AccentButton("Bring game back to handheld", Modifier.fillMaxWidth()) {
+                state.onBringBackFromTv?.run()
+            }
+        } else {
+            AccentButton("Move game to TV", Modifier.fillMaxWidth()) {
+                state.onMoveToTv?.run()
+            }
+        }
     }
 
     Spacer(Modifier.height(12.dp))
-
-    if (onExternal) {
-        AccentButton("Bring game back to handheld", Modifier.fillMaxWidth()) {
-            state.onBringBackFromTv?.run()
-        }
-    } else {
-        AccentButton("Move game to TV", Modifier.fillMaxWidth()) {
-            state.onMoveToTv?.run()
-        }
-    }
-
-    Spacer(Modifier.height(8.dp))
 
     // Rebuild the audio route — sound can drop after backgrounding or an HDMI route change.
     AccentButton("Reset audio", Modifier.fillMaxWidth()) {
