@@ -1,7 +1,9 @@
 package com.winlator.star.ui.dialogs
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,6 +13,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
@@ -22,8 +25,13 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -39,6 +47,8 @@ fun CastDialog(state: XServerDialogState) {
     val targetName by state.castTargetName.collectAsState()
     val detail by state.castStatusDetail.collectAsState()
 
+    var showHelp by remember { mutableStateOf(false) }
+
     Dialog(
         onDismissRequest = { state.dismiss() },
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -48,14 +58,35 @@ fun CastDialog(state: XServerDialogState) {
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
+                // Title row: name + "?" help toggle + Refresh (Refresh hidden on the help screen).
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Text("Cast to a TV (wireless)", style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.weight(1f))
-                    if (scanning) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                    TextButton(onClick = { state.onCastRefresh?.run() }) { Text("Refresh") }
+                    Text(if (showHelp) "Casting — options & tips" else "Cast to a TV (wireless)",
+                        style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                    if (!showHelp) {
+                        if (scanning) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        // Round "?" help button.
+                        Box(Modifier.size(28.dp).clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .clickable { showHelp = true }, contentAlignment = Alignment.Center) {
+                            Text("?", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        }
+                        Spacer(Modifier.size(4.dp))
+                        TextButton(onClick = { state.onCastRefresh?.run() }) { Text("Refresh") }
+                    }
                 }
+
+                if (showHelp) {
+                    CastHelp()
+                    Spacer(Modifier.height(8.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = { showHelp = false }) { Text("Back") }
+                    }
+                    return@Column
+                }
+
                 Text(
-                    text = "Google TV / Chromecast devices on your Wi-Fi. Nothing to install on the TV.",
+                    text = "Google TV / Chromecast devices on your Wi-Fi. Nothing to install on the TV. " +
+                        "Tap the “?” for how casting works and the trade-offs.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp,
                     modifier = Modifier.padding(bottom = 10.dp)
                 )
@@ -127,5 +158,51 @@ fun CastDialog(state: XServerDialogState) {
                 }
             }
         }
+    }
+}
+
+// The "?" help: explains the ways to get the game onto a TV and the pros/cons of each.
+@Composable
+private fun CastHelp() {
+    Column(modifier = Modifier.heightIn(max = 340.dp).verticalScroll(rememberScrollState())) {
+        HelpBlock(
+            title = "Cast — no app on the TV (this screen)",
+            body = "Pick a Google TV or Chromecast from the list — nothing to install on the TV.",
+            pros = listOf("Nothing to set up on the TV", "Uses devices you already have"),
+            cons = listOf(
+                "A few seconds of lag (video is buffered) — good for slower games, not fast ones",
+                "Google TV / Chromecast only — Roku isn't listed here"
+            )
+        )
+        HelpBlock(
+            title = "Cast — with a receiver app (coming later)",
+            body = "Install our small app on the Google TV once, then cast from this same list.",
+            pros = listOf("Crisp, low-lag — good for any game", "Phone stays free (blank phone, game on TV)"),
+            cons = listOf("Needs a one-time install on the Google TV", "Won't work on Roku (closed device)")
+        )
+        HelpBlock(
+            title = "Wired cable — lowest lag today",
+            body = "A USB-C→HDMI cable moves the game to the TV with almost no lag.",
+            pros = listOf("Best quality and responsiveness", "No Wi-Fi needed"),
+            cons = listOf("Needs a cable and an HDMI port")
+        )
+        HelpBlock(
+            title = "Roku TVs",
+            body = "Roku can't run our app and can't take our stream. Use Android's built-in Screen " +
+                "Mirroring (in Settings) with the Roku's Screen-mirroring turned on.",
+            pros = listOf("No app needed"),
+            cons = listOf("Uses Android's system screen, not this in-app list", "Depends on your phone's Miracast")
+        )
+    }
+}
+
+@Composable
+private fun HelpBlock(title: String, body: String, pros: List<String>, cons: List<String>) {
+    Column(modifier = Modifier.padding(bottom = 12.dp)) {
+        Text(title, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface)
+        Text(body, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp, bottom = 4.dp))
+        pros.forEach { Text("✓  $it", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary) }
+        cons.forEach { Text("✗  $it", fontSize = 11.sp, color = MaterialTheme.colorScheme.error) }
     }
 }
