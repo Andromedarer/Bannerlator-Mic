@@ -17,16 +17,22 @@ import java.util.Map;
  * segment is independently decodable. Only the last few segments are kept (live window).
  */
 public class TsSegmenter {
-    private static final int PID_PAT = 0x0000, PID_PMT = 0x1000, PID_VIDEO = 0x0100;
+    private static final int PID_PAT = 0x0000, PID_PMT = 0x1000, PID_VIDEO = 0x0100, PID_AUDIO = 0x0101;
     private static final int TARGET_MS = 2000;      // segment length target
     private static final int WINDOW = 5;            // segments kept in the live window
 
     private byte[] codecConfig;                     // SPS+PPS in Annex-B
     private ByteArrayOutputStream seg;              // current segment being built
     private long segStartPtsUs = -1;
-    private int ccPat = 0, ccPmt = 0, ccVideo = 0;
+    private long firstPtsUs = -1;                   // normalize all timestamps to start at 0
+    private int ccPat = 0, ccPmt = 0, ccVideo = 0, ccAudio = 0;
     private int mediaSeq = 0;                        // EXT-X-MEDIA-SEQUENCE of the oldest segment
     private int segIndex = 0;                        // monotonically increasing segment id
+
+    // Silent AAC audio track (Chromecast stalls on video-only). audioPtsUs walks the timeline.
+    private byte[] silentAac;
+    private long audioFrameDurUs;
+    private long audioPtsUs = 0;
 
     // name -> bytes, insertion-ordered so the oldest is first.
     private final LinkedHashMap<String, byte[]> segments = new LinkedHashMap<>();
@@ -36,19 +42,35 @@ public class TsSegmenter {
     /** Codec config (BUFFER_FLAG_CODEC_CONFIG output) — SPS/PPS in Annex-B. */
     public synchronized void setCodecConfig(byte[] cfg) { codecConfig = cfg; }
 
+    /** Provide the silent AAC frame (ADTS) + its duration to add an audio track. */
+    public synchronized void setSilentAac(byte[] frame, long frameDurUs) {
+        this.silentAac = frame; this.audioFrameDurUs = frameDurUs;
+    }
+
     /** Feed one access unit (Annex-B, from MediaCodec) with its PTS (µs) and whether it's a keyframe. */
     public synchronized void feed(byte[] au, long ptsUs, boolean keyframe) {
-        if (keyframe && seg != null && (ptsUs - segStartPtsUs) >= TARGET_MS * 1000L) closeSegment(ptsUs);
-        if (seg == null) { if (!keyframe) return; openSegment(ptsUs); }
+        if (firstPtsUs < 0) firstPtsUs = ptsUs;
+        long pts = ptsUs - firstPtsUs;              // normalize to start at 0
+
+        if (keyframe && seg != null && (pts - segStartPtsUs) >= TARGET_MS * 1000L) closeSegment(pts);
+        if (seg == null) { if (!keyframe) return; openSegment(pts); }
+
+        // Interleave silent audio up to this video PTS so the audio timeline keeps pace.
+        if (silentAac != null && audioFrameDurUs > 0) {
+            while (audioPtsUs <= pts) {
+                writePesTo(PID_AUDIO, 0xC0, silentAac, audioPtsUs, false, true);
+                audioPtsUs += audioFrameDurUs;
+            }
+        }
 
         byte[] payload = (keyframe && codecConfig != null) ? concat(codecConfig, au) : au;
-        writePes(payload, ptsUs, keyframe);
+        writePesTo(PID_VIDEO, 0xE0, payload, pts, keyframe, false);
     }
 
     private void openSegment(long ptsUs) {
         seg = new ByteArrayOutputStream();
         segStartPtsUs = ptsUs;
-        ccPat = ccPmt = ccVideo = 0;
+        ccPat = ccPmt = ccVideo = ccAudio = 0;
         writeTs(PID_PAT, true, buildPat(), -1);
         writeTs(PID_PMT, true, buildPmt(), -1);
     }
@@ -91,12 +113,11 @@ public class TsSegmenter {
 
     // ---- MPEG-TS building -----------------------------------------------------------------------
 
-    // PES-wrap an access unit and split it across 188-byte TS packets on the video PID. Each packet is
-    // built into a fixed 188-byte array with an EXACTLY-sized adaptation field, so the payload always
-    // advances (no runaway loop) and every packet is 188 bytes.
-    private void writePes(byte[] au, long ptsUs, boolean withPcr) {
+    // PES-wrap an access unit and split it across 188-byte TS packets on a PID. Each packet is a fixed
+    // 188-byte array with an EXACTLY-sized adaptation field, so payload always advances (no runaway loop).
+    private void writePesTo(int pid, int streamId, byte[] au, long ptsUs, boolean withPcr, boolean audio) {
         long pts = ptsUs * 9 / 100;                 // µs -> 90 kHz
-        byte[] data = buildPes(au, pts);
+        byte[] data = buildPes(streamId, au, pts, audio);
 
         int offset = 0; boolean first = true;
         while (offset < data.length) {
@@ -114,10 +135,11 @@ public class TsSegmenter {
             byte[] pkt = new byte[188];
             pkt[0] = 0x47;
             int afc = (adaptLen > 0) ? 0b11 : 0b01;
-            pkt[1] = (byte) ((first ? 0x40 : 0x00) | ((PID_VIDEO >> 8) & 0x1F));
-            pkt[2] = (byte) (PID_VIDEO & 0xFF);
-            pkt[3] = (byte) ((afc << 4) | (ccVideo & 0x0F));
-            ccVideo = (ccVideo + 1) & 0x0F;
+            pkt[1] = (byte) ((first ? 0x40 : 0x00) | ((pid >> 8) & 0x1F));
+            pkt[2] = (byte) (pid & 0xFF);
+            int cc = audio ? ccAudio : ccVideo;
+            pkt[3] = (byte) ((afc << 4) | (cc & 0x0F));
+            if (audio) ccAudio = (ccAudio + 1) & 0x0F; else ccVideo = (ccVideo + 1) & 0x0F;
 
             int pos = 4;
             if (adaptLen > 0) {
@@ -143,10 +165,12 @@ public class TsSegmenter {
         }
     }
 
-    private byte[] buildPes(byte[] au, long pts) {
+    private byte[] buildPes(int streamId, byte[] au, long pts, boolean audio) {
         ByteArrayOutputStream pes = new ByteArrayOutputStream();
-        pes.write(0x00); pes.write(0x00); pes.write(0x01); pes.write(0xE0); // start code + video stream id
-        pes.write(0x00); pes.write(0x00);           // PES length 0 = unbounded (allowed for video)
+        pes.write(0x00); pes.write(0x00); pes.write(0x01); pes.write(streamId);
+        // Audio PES must carry a length; video may use 0 (unbounded). len = payload(3B PES hdr + 5B PTS + au).
+        int pesLen = audio ? (3 + 5 + au.length) : 0;
+        pes.write((pesLen >> 8) & 0xFF); pes.write(pesLen & 0xFF);
         pes.write(0x80);                            // marker
         pes.write(0x80);                            // PTS present
         pes.write(0x05);                            // PES header data length
@@ -190,13 +214,16 @@ public class TsSegmenter {
     private byte[] buildPmt() {
         byte[] section = new byte[]{
                 0x02,                               // table_id PMT
-                (byte) 0xB0, 0x12,                  // length=18
+                (byte) 0xB0, 0x17,                  // section_length = 23 (with the audio ES entry)
                 0x00, 0x01,                         // program_number
                 (byte) 0xC1, 0x00, 0x00,
                 (byte) (0xE0 | ((PID_VIDEO >> 8) & 0x1F)), (byte) (PID_VIDEO & 0xFF), // PCR PID = video
                 (byte) 0xF0, 0x00,                  // program_info_length 0
                 0x1B,                               // stream_type H.264
                 (byte) (0xE0 | ((PID_VIDEO >> 8) & 0x1F)), (byte) (PID_VIDEO & 0xFF),
+                (byte) 0xF0, 0x00,                  // ES_info_length 0
+                0x0F,                               // stream_type AAC (ADTS)
+                (byte) (0xE0 | ((PID_AUDIO >> 8) & 0x1F)), (byte) (PID_AUDIO & 0xFF),
                 (byte) 0xF0, 0x00,                  // ES_info_length 0
                 0, 0, 0, 0                           // CRC placeholder
         };

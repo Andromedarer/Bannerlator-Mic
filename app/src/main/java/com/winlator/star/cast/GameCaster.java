@@ -130,6 +130,11 @@ public class GameCaster {
         if (running) return true;
         w &= ~1; h &= ~1;
         this.streamSink = sink;
+        // Give the stream a silent AAC track — Chromecast stalls on video-only HLS.
+        try {
+            SilentAac aac = new SilentAac();
+            if (aac.adtsFrame != null) sink.setSilentAac(aac.adtsFrame, SilentAac.FRAME_DUR_US);
+        } catch (Throwable ignored) {}
         try {
             MediaFormat fmt = MediaFormat.createVideoFormat(MIME, w, h);
             fmt.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
