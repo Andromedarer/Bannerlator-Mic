@@ -91,86 +91,68 @@ public class TsSegmenter {
 
     // ---- MPEG-TS building -----------------------------------------------------------------------
 
-    // PES-wrap an access unit and split it across 188-byte TS packets on the video PID.
+    // PES-wrap an access unit and split it across 188-byte TS packets on the video PID. Each packet is
+    // built into a fixed 188-byte array with an EXACTLY-sized adaptation field, so the payload always
+    // advances (no runaway loop) and every packet is 188 bytes.
     private void writePes(byte[] au, long ptsUs, boolean withPcr) {
         long pts = ptsUs * 9 / 100;                 // µs -> 90 kHz
-        ByteArrayOutputStream pes = new ByteArrayOutputStream();
-        // PES start code + stream id (0xE0 video)
-        pes.write(0x00); pes.write(0x00); pes.write(0x01); pes.write(0xE0);
-        // PES packet length 0 (unbounded, allowed for video)
-        pes.write(0x00); pes.write(0x00);
-        pes.write(0x80);                            // marker, no scrambling
-        pes.write(0x80);                            // PTS present
-        pes.write(0x05);                            // PES header data length (PTS = 5 bytes)
-        writePts(pes, 0x02, pts);
-        pes.write(au, 0, au.length);
-        byte[] data = pes.toByteArray();
+        byte[] data = buildPes(au, pts);
 
         int offset = 0; boolean first = true;
         while (offset < data.length) {
-            ByteArrayOutputStream pkt = new ByteArrayOutputStream(188);
-            int afLen = 0;
-            boolean pcr = first && withPcr;
-            // Adaptation field is needed on the first packet (PCR) or to stuff the last packet.
-            int headerLen = 4;
-            int maxPayload = 184;
-            byte[] af = null;
-            if (pcr) {
-                af = buildAdaptation(true, pts, 0);
-                maxPayload = 184 - af.length;
-            }
             int remaining = data.length - offset;
-            int payloadLen = Math.min(remaining, maxPayload);
-            int stuffing = 0;
-            if (payloadLen < maxPayload && !pcr) {
-                // last packet: pad with an adaptation field of stuffing bytes
-                stuffing = maxPayload - payloadLen;
-                af = buildAdaptation(false, 0, stuffing - 1 >= 0 ? stuffing : 0);
-                // recompute payload space
-                maxPayload = 184 - af.length;
-                payloadLen = Math.min(remaining, maxPayload);
+            boolean pcr = first && withPcr;
+            int payloadLen, adaptLen;
+            if (remaining >= 184 && !pcr) {
+                payloadLen = 184; adaptLen = 0;     // full payload, no adaptation field
+            } else {
+                int minAdapt = pcr ? 8 : 1;         // len+flags+6(PCR) ; or just the length byte for stuffing
+                payloadLen = Math.min(remaining, 184 - minAdapt);
+                adaptLen = 184 - payloadLen;         // adaptation field fills the rest of the 184
             }
 
-            int afc = (af != null) ? 0b11 : 0b01;   // adaptation+payload : payload only
-            pkt.write(0x47);
-            pkt.write(((first ? 0x40 : 0x00)) | ((PID_VIDEO >> 8) & 0x1F));
-            pkt.write(PID_VIDEO & 0xFF);
-            pkt.write((afc << 4) | (ccVideo & 0x0F));
+            byte[] pkt = new byte[188];
+            pkt[0] = 0x47;
+            int afc = (adaptLen > 0) ? 0b11 : 0b01;
+            pkt[1] = (byte) ((first ? 0x40 : 0x00) | ((PID_VIDEO >> 8) & 0x1F));
+            pkt[2] = (byte) (PID_VIDEO & 0xFF);
+            pkt[3] = (byte) ((afc << 4) | (ccVideo & 0x0F));
             ccVideo = (ccVideo + 1) & 0x0F;
-            if (af != null) pkt.write(af, 0, af.length);
-            pkt.write(data, offset, payloadLen);
+
+            int pos = 4;
+            if (adaptLen > 0) {
+                pkt[pos++] = (byte) (adaptLen - 1); // adaptation_field_length
+                if (adaptLen >= 2) {
+                    pkt[pos++] = (byte) (pcr ? 0x10 : 0x00);   // flags
+                    if (pcr) {
+                        long b = pts;               // reuse PTS as PCR base (90 kHz)
+                        pkt[pos++] = (byte) ((b >> 25) & 0xFF);
+                        pkt[pos++] = (byte) ((b >> 17) & 0xFF);
+                        pkt[pos++] = (byte) ((b >> 9) & 0xFF);
+                        pkt[pos++] = (byte) ((b >> 1) & 0xFF);
+                        pkt[pos++] = (byte) (((b & 0x1) << 7) | 0x7E);
+                        pkt[pos++] = 0x00;
+                    }
+                    while (pos < 4 + adaptLen) pkt[pos++] = (byte) 0xFF;  // stuffing
+                }
+            }
+            System.arraycopy(data, offset, pkt, pos, payloadLen);   // pos == 4 + adaptLen
             offset += payloadLen;
-            // pad to 188 if short (shouldn't happen once adaptation stuffing is right)
-            byte[] b = pkt.toByteArray();
-            seg.write(b, 0, b.length);
-            for (int i = b.length; i < 188; i++) seg.write(0xFF);
+            seg.write(pkt, 0, 188);
             first = false;
         }
     }
 
-    private byte[] buildAdaptation(boolean pcr, long pts, int stuffing) {
-        ByteArrayOutputStream a = new ByteArrayOutputStream();
-        // length + flags computed below; write placeholder then fix
-        ByteArrayOutputStream body = new ByteArrayOutputStream();
-        int flags = 0;
-        if (pcr) {
-            flags |= 0x10;                          // PCR flag
-            long pcrBase = pts;                     // reuse PTS as PCR base (90 kHz)
-            long pcrExt = 0;
-            body.write((int) ((pcrBase >> 25) & 0xFF));
-            body.write((int) ((pcrBase >> 17) & 0xFF));
-            body.write((int) ((pcrBase >> 9) & 0xFF));
-            body.write((int) ((pcrBase >> 1) & 0xFF));
-            body.write((int) (((pcrBase & 0x1) << 7) | 0x7E | ((pcrExt >> 8) & 0x1)));
-            body.write((int) (pcrExt & 0xFF));
-        }
-        byte[] bodyB = body.toByteArray();
-        int len = 1 + bodyB.length + stuffing;      // flags byte + body + stuffing
-        a.write(len);
-        a.write(flags);
-        a.write(bodyB, 0, bodyB.length);
-        for (int i = 0; i < stuffing; i++) a.write(0xFF);
-        return a.toByteArray();
+    private byte[] buildPes(byte[] au, long pts) {
+        ByteArrayOutputStream pes = new ByteArrayOutputStream();
+        pes.write(0x00); pes.write(0x00); pes.write(0x01); pes.write(0xE0); // start code + video stream id
+        pes.write(0x00); pes.write(0x00);           // PES length 0 = unbounded (allowed for video)
+        pes.write(0x80);                            // marker
+        pes.write(0x80);                            // PTS present
+        pes.write(0x05);                            // PES header data length
+        writePts(pes, 0x02, pts);
+        pes.write(au, 0, au.length);
+        return pes.toByteArray();
     }
 
     private void writeTs(int pid, boolean pusi, byte[] payload, long pcr) {
