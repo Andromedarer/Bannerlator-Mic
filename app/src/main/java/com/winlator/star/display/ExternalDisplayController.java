@@ -340,6 +340,11 @@ public class ExternalDisplayController {
             root = new FrameLayout(getContext());
             root.setLayoutParams(new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            // Black root so the overscan / safe-area inset (padding) shows BLACK bars, not the
+            // Presentation window's default light background.
+            root.setBackgroundColor(0xFF000000);
+            // Also paint the window itself black behind the game surface.
+            getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0xFF000000));
             // Don't take focus/touch from the phone — the phone stays the input device.
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                     | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL);
