@@ -34,6 +34,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Media-playback FGS type + audio focus keep the guest's audio stream alive while backgrounded. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <!-- Held only while a depot download is running (SteamDepotDownloader) so the aggressive OEM
          task-killer can't kill the process mid-download and cause a LogonSessionReplaced churn. -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
@@ -269,7 +271,7 @@
         <service android:name="com.winlator.star.store.download.DownloadForegroundService" android:foregroundServiceType="dataSync" android:exported="false"/>
         <!-- Held while a container/game session is running so the OS low-memory killer can't reap
              the guest while the app is backgrounded (else it "Shutting down" on return). -->
-        <service android:name="com.winlator.star.core.GameSessionForegroundService" android:foregroundServiceType="dataSync" android:exported="false"/>
+        <service android:name="com.winlator.star.core.GameSessionForegroundService" android:foregroundServiceType="dataSync|mediaPlayback" android:exported="false"/>
     </application>
 </manifest>
 

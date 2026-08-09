@@ -5567,3 +5567,6 @@ Device feedback fixes on feat/external-display-swap: (1) resetGuestAudio() resta
 
 ## 2026-08-08 — Badge-overlap fix + correct audio reset (suspend/resume sink)
 Screenshot feedback: (1) hide the 'playing on external display' badge while the side menu is open (menuOpen state from DrawerLayout listener; badge = playingOnExternal && !menuOpen). (2) Audio reset reworked from daemon-restart (broke wine's connection, didn't work) to suspend/resume the AAudio sink over module-cli-protocol-unix — reopens the output route while keeping the daemon + guest audio connection. Device-confirmed HDMI is standard audio + full pulse module set bundled. UNVERIFIED (CI).
+
+## 2026-08-09 — Audio keep-alive (media FGS + audio focus) + dead-code cleanup
+Option 1: keep the guest audio stream alive across backgrounding — GameSessionForegroundService type dataSync->dataSync|mediaPlayback (+ perm, +A14 fallback) and the activity holds AudioFocusRequest GAIN (USAGE_GAME) for the session. Removed the dead module-cli-protocol-unix code (device-confirmed the stock control modules are PulseAudio 17.0 builds that can't load in the 13.0 daemon). GameNative recon: their proven fix is suspend-sink-before-SIGSTOP via a bundled version-matched pactl (future path if option 1 falls short). UNVERIFIED (CI).

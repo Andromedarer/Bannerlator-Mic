@@ -47,34 +47,18 @@ public class PulseAudioComponent extends EnvironmentComponent {
     }
 
     /**
-     * Recover audio after a background/foreground or HDMI route change, WITHOUT restarting the daemon
-     * (which would break the guest's still-open audio connection). Suspending then resuming the sink
-     * closes and reopens its AAudio output stream, re-grabbing the current default route — the guest's
-     * streams stay attached to the sink the whole time. Sent over module-cli-protocol-unix. Falls back
-     * to a full daemon restart only if the control socket can't be reached. Call off the main thread.
+     * Best-effort manual audio recovery: restart the daemon. NOTE this does not reliably recover a
+     * running game's audio (the guest's audio connection is severed by the restart), and the clean
+     * fix (suspend/resume the sink over a control channel, GameNative-style) is not available on the
+     * bundled binaries — the daemon is PulseAudio 13.0 but every stock control module shipped here is
+     * a 17.0 build that cannot dlopen against it (only module-aaudio-sink + module-native-protocol-unix
+     * load). Kept as an escape hatch for the "Reset audio" button; the real fix keeps audio alive
+     * across backgrounding via the media foreground service + audio focus. Call off the main thread.
      */
     public void resetAudioSink() {
-        File cliSocket = new File(new File(environment.getContext().getFilesDir(), "/pulseaudio"), "cli");
-        android.net.LocalSocket sock = null;
-        try {
-            sock = new android.net.LocalSocket();
-            sock.connect(new android.net.LocalSocketAddress(
-                    cliSocket.getAbsolutePath(), android.net.LocalSocketAddress.Namespace.FILESYSTEM));
-            java.io.OutputStream os = sock.getOutputStream();
-            os.write("suspend-sink AAudioSink 1\n".getBytes());
-            os.flush();
-            try { Thread.sleep(250); } catch (InterruptedException ignored) {}
-            os.write("suspend-sink AAudioSink 0\n".getBytes());
-            os.flush();
-            try { Thread.sleep(100); } catch (InterruptedException ignored) {}
-        } catch (Exception e) {
-            android.util.Log.w("PulseAudio", "sink suspend/resume failed; restarting daemon", e);
-            start(); // last resort — full daemon restart
-        } finally {
-            if (sock != null) try { sock.close(); } catch (IOException ignored) {}
-        }
+        start();
     }
-    
+
     private void copyFromLibraryDir(File dst) {
         String[] libs = new String[] {
             "libltdl.so", "libpulseaudio.so", "libpulse.so", "libpulsecommon-13.0.so", "libpulsecore-13.0.so", "libsndfile.so"
@@ -105,19 +89,11 @@ public class PulseAudioComponent extends EnvironmentComponent {
             FileUtils.chmod(workingDir, 0771);
         }
 
-        // Remove a stale CLI control socket so module-cli-protocol-unix can re-bind on start.
-        File cliSocket = new File(workingDir, "cli");
-        cliSocket.delete();
-
         File configFile = new File(workingDir, "default.pa");
         FileUtils.writeString(configFile, String.join("\n",
             "load-module module-native-protocol-unix auth-anonymous=1 auth-cookie-enabled=0 socket=\""+socketConfig.path+"\"",
             "load-module module-aaudio-sink",
-            "set-default-sink AAudioSink",
-            // Text control socket so the app can suspend/resume the sink to recover the audio route
-            // after a background/foreground (resetGuestAudio). .nofail so a load failure never breaks audio.
-            ".nofail",
-            "load-module module-cli-protocol-unix socket=\""+cliSocket.getAbsolutePath()+"\""
+            "set-default-sink AAudioSink"
         ));
 
         String archName = AppUtils.getArchName();
