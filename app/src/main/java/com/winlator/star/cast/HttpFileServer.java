@@ -18,13 +18,17 @@ import java.util.Enumeration;
  */
 public class HttpFileServer {
     private static final String TAG = "HttpFileServer";
-    private final File file;
-    private final String contentType;
+    private File file;
+    private String contentType;
+    private TsSegmenter hls;                 // set for live HLS mode (serves .m3u8 + .ts from memory)
     private ServerSocket server;
     private volatile boolean running = false;
     private int port = -1;
 
     public HttpFileServer(File file, String contentType) { this.file = file; this.contentType = contentType; }
+
+    /** Live HLS mode: serve the segmenter's rolling playlist + in-memory .ts segments. */
+    public HttpFileServer(TsSegmenter segmenter) { this.hls = segmenter; }
 
     public int start() throws Exception {
         server = new ServerSocket(0);           // any free port
@@ -78,12 +82,11 @@ public class HttpFileServer {
     }
 
     private void serve(Socket client) {
-        try (Socket c = client; RandomAccessFile raf = new RandomAccessFile(file, "r")) {
+        try (Socket c = client) {
             java.io.BufferedReader r = new java.io.BufferedReader(
                     new java.io.InputStreamReader(c.getInputStream()));
-            String line = r.readLine();             // request line
-            long start = 0, end = file.length() - 1;
-            boolean partial = false;
+            String reqLine = r.readLine();          // e.g. "GET /live.m3u8 HTTP/1.1"
+            long rStart = 0, rEnd = -1; boolean partial = false;
             String h;
             while ((h = r.readLine()) != null && !h.isEmpty()) {
                 if (h.toLowerCase().startsWith("range:")) {
@@ -91,24 +94,44 @@ public class HttpFileServer {
                     String rng = h.substring(h.indexOf('=') + 1).trim();
                     String[] parts = rng.split("-");
                     try {
-                        start = parts[0].isEmpty() ? 0 : Long.parseLong(parts[0]);
-                        if (parts.length > 1 && !parts[1].isEmpty()) end = Long.parseLong(parts[1]);
+                        rStart = parts[0].isEmpty() ? 0 : Long.parseLong(parts[0]);
+                        if (parts.length > 1 && !parts[1].isEmpty()) rEnd = Long.parseLong(parts[1]);
                     } catch (NumberFormatException ignored) {}
                 }
             }
-            long total = file.length();
-            long length = end - start + 1;
+            String path = "/";
+            if (reqLine != null) { String[] t = reqLine.split(" "); if (t.length >= 2) path = t[1]; }
             OutputStream os = c.getOutputStream();
-            StringBuilder head = new StringBuilder();
-            head.append(partial ? "HTTP/1.1 206 Partial Content\r\n" : "HTTP/1.1 200 OK\r\n");
-            head.append("Content-Type: ").append(contentType).append("\r\n");
-            head.append("Accept-Ranges: bytes\r\n");
-            head.append("Content-Length: ").append(length).append("\r\n");
-            if (partial) head.append("Content-Range: bytes ").append(start).append('-').append(end)
-                    .append('/').append(total).append("\r\n");
-            head.append("Connection: close\r\n\r\n");
-            os.write(head.toString().getBytes("UTF-8"));
+            if (hls != null) serveHls(os, path);
+            else serveFile(os, partial, rStart, rEnd);
+        } catch (Exception e) {
+            // client hang-ups are normal; keep quiet
+        }
+    }
 
+    private void serveHls(OutputStream os, String path) throws Exception {
+        if (path.endsWith(".m3u8")) {
+            byte[] body = hls.playlist().getBytes("UTF-8");
+            writeHead(os, "200 OK", "application/vnd.apple.mpegurl", body.length, false, 0, 0, 0);
+            os.write(body);
+        } else if (path.endsWith(".ts")) {
+            String name = path.substring(path.lastIndexOf('/') + 1);
+            byte[] body = hls.getSegment(name);
+            if (body == null) { writeHead(os, "404 Not Found", "text/plain", 0, false, 0, 0, 0); os.flush(); return; }
+            writeHead(os, "200 OK", "video/mp2t", body.length, false, 0, 0, 0);
+            os.write(body);
+        } else {
+            writeHead(os, "404 Not Found", "text/plain", 0, false, 0, 0, 0);
+        }
+        os.flush();
+    }
+
+    private void serveFile(OutputStream os, boolean partial, long start, long endReq) throws Exception {
+        try (RandomAccessFile raf = new RandomAccessFile(file, "r")) {
+            long total = file.length();
+            long end = endReq < 0 ? total - 1 : endReq;
+            long length = end - start + 1;
+            writeHead(os, partial ? "206 Partial Content" : "200 OK", contentType, length, partial, start, end, total);
             raf.seek(start);
             byte[] buf = new byte[64 * 1024];
             long remaining = length;
@@ -119,9 +142,20 @@ public class HttpFileServer {
                 remaining -= n;
             }
             os.flush();
-        } catch (Exception e) {
-            // client hang-ups are normal; keep quiet
         }
+    }
+
+    private void writeHead(OutputStream os, String status, String ctype, long len,
+                           boolean partial, long s, long e, long total) throws Exception {
+        StringBuilder h = new StringBuilder();
+        h.append("HTTP/1.1 ").append(status).append("\r\n");
+        h.append("Content-Type: ").append(ctype).append("\r\n");
+        h.append("Access-Control-Allow-Origin: *\r\n");
+        h.append("Accept-Ranges: bytes\r\n");
+        h.append("Content-Length: ").append(len).append("\r\n");
+        if (partial) h.append("Content-Range: bytes ").append(s).append('-').append(e).append('/').append(total).append("\r\n");
+        h.append("Connection: close\r\n\r\n");
+        os.write(h.toString().getBytes("UTF-8"));
     }
 
     public void stop() {

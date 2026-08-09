@@ -51,6 +51,7 @@ public class GameCaster {
     private VirtualDisplay virtualDisplay;
     private CastPresentation presentation;
     private MediaMuxer muxer;
+    private TsSegmenter streamSink;       // set for live-stream (HLS) mode instead of the file muxer
     private Thread drainThread;
     private volatile boolean running = false;
     private int trackIndex = -1;
@@ -120,6 +121,68 @@ public class GameCaster {
             cleanup();
             notifyState("FAILED", "Couldn't start capture: " + e.getMessage());
             return false;
+        }
+    }
+
+    /** Start a LIVE capture (Step 2b): feed the encoder's H.264 straight into the HLS segmenter instead
+     *  of a file muxer. Same private-VirtualDisplay + reparent path as {@link #start}. */
+    public boolean startStream(int w, int h, int bitrate, TsSegmenter sink) {
+        if (running) return true;
+        w &= ~1; h &= ~1;
+        this.streamSink = sink;
+        try {
+            MediaFormat fmt = MediaFormat.createVideoFormat(MIME, w, h);
+            fmt.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
+            fmt.setInteger(MediaFormat.KEY_BIT_RATE, bitrate);
+            fmt.setInteger(MediaFormat.KEY_FRAME_RATE, 30);
+            fmt.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1);   // ~1s keyframes → ~2s HLS segments
+            encoder = MediaCodec.createEncoderByType(MIME);
+            encoder.configure(fmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+            inputSurface = encoder.createInputSurface();
+            encoder.start();
+            int dpi = activity.getResources().getDisplayMetrics().densityDpi;
+            virtualDisplay = displayManager.createVirtualDisplay("BannerlatorCast", w, h, dpi, inputSurface,
+                    DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY | DisplayManager.VIRTUAL_DISPLAY_FLAG_PRESENTATION);
+            if (virtualDisplay == null) { cleanup(); notifyState("FAILED", "Couldn't create the capture display."); return false; }
+            presentation = new CastPresentation(activity, virtualDisplay.getDisplay());
+            presentation.show();
+            moveGameTo(presentation.getRoot());
+            running = true;
+            drainThread = new Thread(this::drainStreamLoop, "cast-stream-drain");
+            drainThread.start();
+            notifyState("STREAMING", "Streaming the game.");
+            return true;
+        } catch (Throwable e) {
+            Log.e(TAG, "startStream failed", e);
+            cleanup();
+            notifyState("FAILED", "Couldn't start streaming: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private void drainStreamLoop() {
+        MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
+        try {
+            while (running) {
+                int idx = encoder.dequeueOutputBuffer(info, 10000);
+                if (idx >= 0) {
+                    ByteBuffer buf = encoder.getOutputBuffer(idx);
+                    if (buf != null && info.size > 0) {
+                        byte[] data = new byte[info.size];
+                        buf.position(info.offset);
+                        buf.get(data, 0, info.size);
+                        if ((info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
+                            streamSink.setCodecConfig(data);
+                        } else {
+                            boolean key = (info.flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0;
+                            streamSink.feed(data, info.presentationTimeUs, key);
+                        }
+                    }
+                    encoder.releaseOutputBuffer(idx, false);
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "stream drain ended", e);
         }
     }
 

@@ -301,8 +301,16 @@ private fun TvContent(state: XServerDrawerState) {
     // ───────────── Wireless cast (screen mirroring — no app on the TV) ─────────────
     SectionHeader("Cast to a TV (wireless)")
     Text(
-        text = "Find Google TV / Chromecast devices on your Wi-Fi and pick one from a list — right here " +
-            "in the app, nothing to install on the TV.",
+        text = "⚠ EXPERIMENTAL — wireless streaming is new: expect a few seconds of lag, and it may not " +
+            "connect on the first try.",
+        color = MaterialTheme.colorScheme.error,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.padding(bottom = 6.dp)
+    )
+    Text(
+        text = "Stream the game to a Google TV / Chromecast on your Wi-Fi — pick one in the app, nothing " +
+            "to install on the TV. Tap the “?” inside for how it works and the trade-offs.",
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         fontSize = 11.sp,
         modifier = Modifier.padding(bottom = 8.dp)
@@ -311,8 +319,7 @@ private fun TvContent(state: XServerDrawerState) {
         state.onOpenCastPicker?.run()
     }
     Text(
-        text = "This build finds and lists your TVs; live game streaming is the next update. For the " +
-            "lowest lag, a wired USB-C→HDMI cable is still best.",
+        text = "For the lowest lag, a wired USB-C→HDMI cable is still best.",
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         fontSize = 11.sp,
         modifier = Modifier.padding(top = 4.dp)
