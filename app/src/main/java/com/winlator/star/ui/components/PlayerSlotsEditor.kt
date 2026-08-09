@@ -11,6 +11,8 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MaterialTheme
+import com.winlator.star.ui.screens.MenuItemDivider
+import com.winlator.star.ui.screens.outlinedMenuCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -165,8 +167,16 @@ private fun PlayerSlotEditorRowItem(row: PlayerSlotEditorRow, onChange: (Int) ->
                 modifier = Modifier.fillMaxWidth().menuAnchor(),
                 singleLine = true,
             )
-            ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                options.forEach { (label, value) ->
+            ExposedDropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+                // #333 polish: match the shared outlined-menu-card look (outline + thin divider between
+                // options) used by LabeledDropdown, so these slot pickers read identically.
+                modifier = Modifier.outlinedMenuCard()
+            ) {
+                options.forEachIndexed { index, option ->
+                    if (index > 0) MenuItemDivider()
+                    val (label, value) = option
                     DropdownMenuItem(text = { Text(label) }, onClick = {
                         expanded = false
                         if (value != row.override) onChange(value)
