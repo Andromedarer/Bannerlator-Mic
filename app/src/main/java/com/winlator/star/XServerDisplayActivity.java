@@ -179,6 +179,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private com.winlator.star.cast.CastDiscovery castDiscovery;
     // Version B Part 2: captures + H.264-encodes the game for casting (Step 1 records to a file).
     private com.winlator.star.cast.GameCaster gameCaster;
+    // Part 2 Step 2a: Cast v2 session + local HTTP server that serve/cast the captured clip to the TV.
+    private com.winlator.star.cast.CastSession castSession;
+    private com.winlator.star.cast.HttpFileServer castHttp;
+    private Runnable pendingCastStart; // the delayed "finalize clip + cast" step, cancelable on disconnect
     private InputControlsView inputControlsView;
 
     // ---- Controller-status toast (P5b) — debounced hot-plug plumbing ----
@@ -2679,6 +2683,66 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
     }
 
+    /** Step 2a: the recorded clip is ready — finalize it, return the game to the phone, host it, and
+     *  tell the Chromecast to play it. Proves the capture→web-server→Cast→TV chain end to end. */
+    private void startCastPlayback(com.winlator.star.cast.CastDiscovery.Device device, java.io.File file) {
+        pendingCastStart = null;
+        if (gameCaster != null) gameCaster.stop();                 // finalize the mp4 + game back to phone
+        if (externalDisplayController != null) externalDisplayController.resumeAfterCast();
+        XServerDialogState.INSTANCE.setCastStatusDetail("Sending to the TV…");
+        new Thread(() -> {
+            try {
+                String ip = com.winlator.star.cast.HttpFileServer.localIpv4();
+                if (ip == null) {
+                    runOnUiThread(() -> {
+                        XServerDialogState.INSTANCE.setCastStatus(XServerDialogState.CastStatus.FAILED);
+                        XServerDialogState.INSTANCE.setCastStatusDetail("Couldn't find this phone's Wi-Fi address.");
+                    });
+                    return;
+                }
+                castHttp = new com.winlator.star.cast.HttpFileServer(file, "video/mp4");
+                int port = castHttp.start();
+                String url = "http://" + ip + ":" + port + "/cast.mp4";
+                castSession = new com.winlator.star.cast.CastSession(device.host,
+                        new com.winlator.star.cast.CastSession.Callback() {
+                    @Override public void onConnected() {
+                        runOnUiThread(() -> XServerDialogState.INSTANCE.setCastStatusDetail("Loading on the TV…"));
+                    }
+                    @Override public void onLoaded() {
+                        runOnUiThread(() -> {
+                            XServerDialogState.INSTANCE.setCastStatus(XServerDialogState.CastStatus.CONNECTED);
+                            XServerDialogState.INSTANCE.setCastStatusDetail("Playing the clip on your TV. Live streaming is next.");
+                        });
+                    }
+                    @Override public void onError(String message) {
+                        runOnUiThread(() -> {
+                            XServerDialogState.INSTANCE.setCastStatus(XServerDialogState.CastStatus.FAILED);
+                            XServerDialogState.INSTANCE.setCastStatusDetail(message);
+                        });
+                    }
+                });
+                castSession.connectAndLoad(url, "video/mp4", "BUFFERED");
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    XServerDialogState.INSTANCE.setCastStatus(XServerDialogState.CastStatus.FAILED);
+                    XServerDialogState.INSTANCE.setCastStatusDetail("Cast failed: " + e.getMessage());
+                });
+            }
+        }, "cast-start").start();
+    }
+
+    /** Tear down a cast: cancel a pending start, stop capture/session/server, return the game. */
+    private void stopCast() {
+        if (pendingCastStart != null) { handler.removeCallbacks(pendingCastStart); pendingCastStart = null; }
+        try { if (gameCaster != null) gameCaster.stop(); } catch (Exception ignored) {}
+        try { if (castSession != null) { castSession.close(); castSession = null; } } catch (Exception ignored) {}
+        try { if (castHttp != null) { castHttp.stop(); castHttp = null; } } catch (Exception ignored) {}
+        if (externalDisplayController != null) externalDisplayController.resumeAfterCast();
+        XServerDialogState.INSTANCE.setCastStatus(XServerDialogState.CastStatus.IDLE);
+        XServerDialogState.INSTANCE.setCastTargetName("");
+        XServerDialogState.INSTANCE.setCastStatusDetail("");
+    }
+
     private void setPausedState(boolean paused) {
         isPaused = paused;
         if (paused) {
@@ -3052,6 +3116,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
             try { gameCaster.stop(); } catch (Exception ignored) {}
             gameCaster = null;
         }
+        try { if (castSession != null) { castSession.close(); castSession = null; } } catch (Exception ignored) {}
+        try { if (castHttp != null) { castHttp.stop(); castHttp = null; } } catch (Exception ignored) {}
         // Controller-status toast: drop the listener + any pending debounced toast so a late callback
         // can't run against a tearing-down activity.
         if (winHandler != null) winHandler.setControllerAssignmentListener(null);
@@ -3955,20 +4021,20 @@ public class XServerDisplayActivity extends AppCompatActivity {
         XServerDialogState.INSTANCE.onCastConnect = (device) -> {
             XServerDialogState.INSTANCE.setCastTargetName(device.name);
             XServerDialogState.INSTANCE.setCastStatus(XServerDialogState.CastStatus.CONNECTING);
-            XServerDialogState.INSTANCE.setCastStatusDetail("Starting capture…");
-            // Stop the wired-display watcher first so it doesn't fight over the game view.
+            XServerDialogState.INSTANCE.setCastStatusDetail("Recording a short clip…");
+            // Step 2a: record ~8s of the game, then serve + cast that clip to prove the whole chain
+            // (capture → phone web server → Chromecast → TV). Step 2b makes it a live stream.
             if (externalDisplayController != null) externalDisplayController.pauseForCast();
             java.io.File castOut = new java.io.File(getExternalFilesDir(null), "cast-test.mp4");
             boolean ok = gameCaster.start(1280, 720, 8_000_000, castOut.getAbsolutePath());
-            if (!ok && externalDisplayController != null) externalDisplayController.resumeAfterCast();
+            if (!ok) {
+                if (externalDisplayController != null) externalDisplayController.resumeAfterCast();
+                return;
+            }
+            pendingCastStart = () -> startCastPlayback(device, castOut);
+            handler.postDelayed(pendingCastStart, 8000);
         };
-        XServerDialogState.INSTANCE.onCastDisconnect = () -> {
-            if (gameCaster != null) gameCaster.stop();
-            if (externalDisplayController != null) externalDisplayController.resumeAfterCast();
-            XServerDialogState.INSTANCE.setCastStatus(XServerDialogState.CastStatus.IDLE);
-            XServerDialogState.INSTANCE.setCastTargetName("");
-            XServerDialogState.INSTANCE.setCastStatusDetail("");
-        };
+        XServerDialogState.INSTANCE.onCastDisconnect = () -> stopCast();
 
         globalCursorSpeed = preferences.getFloat("cursor_speed", 1.0f);
         touchpadView = new TouchpadView(this, xServer, timeoutHandler, hideControlsRunnable);
