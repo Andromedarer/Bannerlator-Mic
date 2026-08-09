@@ -197,6 +197,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         showControllerStatusToast(pendingToastReason != null ? pendingToastReason : "connected", pendingToastDescriptor);
         pendingToastReason = null;
         pendingToastDescriptor = null;
+        // #333: re-evaluate auto-hide on the same debounced tick, once slot assignment has settled.
+        updateAutoHideForControllers();
     };
     private TouchpadView touchpadView;
     private XEnvironment environment;
@@ -225,6 +227,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private boolean inGameEditorPreviousShowTouchscreen;
     private boolean inGameEditorPreviousTimeoutEnabled;
     private ControlsProfile inGameEditorPreviousProfile;
+    // #333 auto-hide OSC controls: the baseline visibility the USER chose (launch pref + live drawer
+    // toggles). Auto-hide hides/restores relative to this so it never forces controls on when the user
+    // wanted them off, and a manual re-show is remembered. controlsEditorOpen suspends auto-hide while
+    // the in-game controls editor is up (it force-shows controls for editing).
+    private boolean userWantsControlsShown;
+    private boolean controlsEditorOpen;
     private Shortcut shortcut;
     private String graphicsDriver = Container.DEFAULT_GRAPHICS_DRIVER;
     // Which Vulkan driver the host compositor/present layer runs on ("system" = Android's own driver,
@@ -4433,6 +4441,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         ds.onInputControlsConfirm = (profileIndex, showTouchscreen, timeout, haptics) -> {
             ds.setSelectedProfileIdx(profileIndex);
             inputControlsView.setShowTouchscreenControls(showTouchscreen);
+            userWantsControlsShown = showTouchscreen;   // #333: remember the user's manual choice
             SharedPreferences.Editor editor = preferences.edit();
             editor.putBoolean("touchscreen_timeout_enabled", timeout);
             editor.putBoolean("touchscreen_haptics_enabled", haptics);
@@ -4477,7 +4486,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
             // On-screen-controls priority (KEEP/YIELD/SHARE), same seed-after-container discipline as the
             // vibration tuning above: resolve per-game override else the container value and push it in.
-            winHandler.setOnScreenControllerMode(resolvedOnScreenControllerMode());
+            // #333: when auto-hide is on, unpinned pads take over the on-screen pad's slot (YIELD
+            // semantics) so a connecting controller becomes the touch player and the overlay can hide.
+            // This is also how "auto-hide wins over SHARE/KEEP" is realized. Pinned pads are still
+            // honored (handleOnScreenModeForNewPad skips explicit pins).
+            winHandler.setOnScreenControllerMode(resolvedAutoHideControlsOnPad()
+                    ? Container.ON_SCREEN_MODE_YIELD : resolvedOnScreenControllerMode());
             ds.setVibrationMode(vibMode);
             ds.setVibrationIntensity(vibIntensity);
             ds.onVibrationModeChanged = (mode) -> {
@@ -4800,6 +4814,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         ds.onInputControlsConfirm = (profileIndex, showTouchscreen, timeout, haptics) -> {
             ds.setSelectedProfileIdx(profileIndex);
             inputControlsView.setShowTouchscreenControls(showTouchscreen);
+            userWantsControlsShown = showTouchscreen;   // #333: remember the user's manual choice
             SharedPreferences.Editor editor = preferences.edit();
             editor.putBoolean("touchscreen_timeout_enabled", timeout);
             editor.putBoolean("touchscreen_haptics_enabled", haptics);
@@ -4845,6 +4860,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         inputControlsView.setShowTouchscreenControls(true);
         inputControlsView.setEditorBackgroundVisible(false);
         inputControlsView.setEditMode(true);
+        controlsEditorOpen = true;   // #333: suspend auto-hide while editing controls
 
         FrameLayout container = findViewById(R.id.FLXServerDisplay);
         inGameControlsEditor = new InGameControlsEditor(
@@ -4861,6 +4877,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         inGameControlsEditor.dispose();
         inputControlsView.setEditorBackgroundVisible(true);
         inputControlsView.setEditMode(false);
+        controlsEditorOpen = false;   // #333: resume auto-hide after editing
+        updateAutoHideForControllers();
         if (inGameEditorPreviousProfile != null) showInputControls(inGameEditorPreviousProfile);
         else hideInputControls();
         inGameEditorPreviousProfile = null;
@@ -4885,6 +4903,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         boolean isShowTouchscreenControls = preferences.getBoolean("show_touchscreen_controls_enabled", false); // default is false (hidden)
         inputControlsView.setShowTouchscreenControls(isShowTouchscreenControls);
+        userWantsControlsShown = isShowTouchscreenControls;   // #333: baseline for auto-hide restore
 
         boolean isTimeoutEnabled = preferences.getBoolean("touchscreen_timeout_enabled", false);
         boolean isHapticsEnabled = preferences.getBoolean("touchscreen_haptics_enabled", false);
@@ -4915,6 +4934,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
 
         Log.d("XServerDisplayActivity", "Input controls simulated confirmation executed.");
+
+        // #333: apply auto-hide at launch — a pad connected before/at launch should already have the
+        // overlay hidden, and the pad seated on the on-screen slot (YIELD pushed above).
+        updateAutoHideForControllers();
     }
 
     private void startTouchscreenTimeout() {
@@ -6366,6 +6389,62 @@ return true;
             return Integer.parseInt(shortcut.getExtra("onScreenControllerMode", String.valueOf(fallback)));
         } catch (NumberFormatException e) {
             return fallback;
+        }
+    }
+
+    // #333: auto-hide on-screen controls when a controller takes the on-screen slot. Resolved
+    // shortcut-override-else-container, same discipline as resolvedOnScreenControllerMode above.
+    private boolean resolvedAutoHideControlsOnPad() {
+        boolean fallback = container != null ? container.isAutoHideControlsOnPad()
+                : Container.AUTO_HIDE_CONTROLS_ON_PAD_DEFAULT;
+        if (shortcut == null) return fallback;
+        String extra = shortcut.getExtra("autoHideControlsOnPad");
+        if (extra == null || extra.isEmpty()) return fallback;
+        return extra.equals("1");
+    }
+
+    /**
+     * #333 slot-aware auto-hide. When enabled for this game/container, hide the on-screen touch controls
+     * once a physical controller takes over the on-screen pad's player slot, and restore them (to the
+     * user's chosen baseline) when none does. Locked disambiguation rule: only a controller that is
+     * UNPINNED (solo takeover) or PINNED to the on-screen slot triggers the hide; a controller pinned to
+     * a DIFFERENT player is treated as a separate player and leaves the overlay up. No-op while the
+     * controls editor is open, and never forces controls on that the user chose to keep off. Main-thread
+     * only (called from the debounced assignment listener, at launch, and on editor close).
+     */
+    private void updateAutoHideForControllers() {
+        if (controlsEditorOpen) return;
+        if (winHandler == null || inputControlsView == null) return;
+        if (!resolvedAutoHideControlsOnPad()) return;
+
+        java.util.List<WinHandler.PlayerSlotInfo> slots = winHandler.getPlayerSlotAssignments();
+        // The on-screen pad's "home" slot: its explicit pin if any, else Player 1 (slot 0).
+        int oscHomeSlot = 0;
+        for (WinHandler.PlayerSlotInfo s : slots) {
+            if (s.isOnScreen) { if (s.override >= 0) oscHomeSlot = s.override; break; }
+        }
+        // Does a physical controller own / take over the on-screen slot? Unpinned pad = solo takeover;
+        // pad pinned onto the on-screen slot = takeover. A pad pinned to a different slot (or set to
+        // Ignore, SLOT_IGNORE = -2) is a separate player and does NOT trigger a hide.
+        boolean padTakingOver = false;
+        for (WinHandler.PlayerSlotInfo s : slots) {
+            if (!s.isGameController) continue;
+            if (s.override == -1 || s.override == oscHomeSlot) { padTakingOver = true; break; }
+        }
+
+        if (padTakingOver) {
+            if (inputControlsView.isShowTouchscreenControls()) {
+                timeoutHandler.removeCallbacks(hideControlsRunnable);
+                inputControlsView.setShowTouchscreenControls(false);
+                inputControlsView.setVisibility(View.GONE);
+                Log.d("XServerDisplayActivity", "#333 auto-hide: controller took the on-screen slot -> hiding touch controls");
+            }
+        } else if (userWantsControlsShown && !inputControlsView.isShowTouchscreenControls()) {
+            // No controller owns the on-screen slot: restore to the user's baseline (never force on).
+            inputControlsView.setShowTouchscreenControls(true);
+            inputControlsView.setVisibility(View.VISIBLE);
+            if (preferences.getBoolean("touchscreen_timeout_enabled", false)) startTouchscreenTimeout();
+            Log.d("XServerDisplayActivity", "#333 auto-hide: no controller on the on-screen slot -> restoring touch controls");
         }
     }
 
