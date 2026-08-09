@@ -64,6 +64,7 @@ public class ExternalDisplayController {
     private boolean paused = false;
     private boolean tearingDown = false;
     private int preferredModeId = 0; // 0 = system default output mode
+    private int overscanPercent = 0; // 0..8 % safe-area inset applied to the game on the TV
 
     public ExternalDisplayController(Activity activity, View gameView, ViewGroup internalHost, Listener listener) {
         this.activity = activity;
@@ -152,6 +153,29 @@ public class ExternalDisplayController {
         WindowManager.LayoutParams lp = w.getAttributes();
         lp.preferredDisplayModeId = preferredModeId;
         w.setAttributes(lp);
+    }
+
+    /** Safe-area inset (0..8 %) for TVs that crop the picture: pads the Presentation root so the game
+     *  shrinks inward off the cropped edges. Applied live and re-asserted on each (re)create. */
+    public void setOverscanPercent(int pct) {
+        overscanPercent = Math.max(0, Math.min(8, pct));
+        applyOverscan();
+    }
+
+    private void applyOverscan() {
+        if (presentation == null) return;
+        FrameLayout root = presentation.getRoot();
+        if (root == null) return;
+        int w = root.getWidth(), h = root.getHeight();
+        // Fall back to the display metrics before the root is laid out.
+        if (w == 0 || h == 0) {
+            android.util.DisplayMetrics dm = new android.util.DisplayMetrics();
+            presentation.getDisplay().getRealMetrics(dm);
+            w = dm.widthPixels; h = dm.heightPixels;
+        }
+        int padX = (int) (w * (overscanPercent / 100f) / 2f);
+        int padY = (int) (h * (overscanPercent / 100f) / 2f);
+        root.setPadding(padX, padY, padX, padY);
     }
 
     /** Comma-separated HDR types the connected display reports (e.g. "HDR10, Dolby Vision"); "" if
@@ -256,6 +280,7 @@ public class ExternalDisplayController {
         }
         presentation = p;
         applyPreferredMode(); // re-assert the user's chosen output mode on the new Presentation window
+        applyOverscan();      // re-assert the safe-area inset on the fresh root
     }
 
     private void moveGameToExternal() {
@@ -268,6 +293,7 @@ public class ExternalDisplayController {
         gameView.setLayoutParams(new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         root.addView(gameView, 0); // behind the pause scrim
+        applyOverscan();            // shrink the game inward if a safe-area inset is set
         presentation.setPausedScrim(paused);
         setGameOnExternal(true);
     }

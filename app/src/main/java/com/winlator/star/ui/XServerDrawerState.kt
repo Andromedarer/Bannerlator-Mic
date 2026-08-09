@@ -218,6 +218,33 @@ object XServerDrawerState {
     val tvHdr: StateFlow<String> = _tvHdr
     fun setTvHdr(v: String) { _tvHdr.value = v }
 
+    // ---- TV Options v2 (NEW behaviours, TV-scoped via tv.* container extras) ----------------------
+    // Overscan / safe-area inset for TVs that crop edges: 0..8 % padding on GamePresentation.root.
+    private val _tvOverscan = MutableStateFlow(0)
+    val tvOverscan: StateFlow<Int> = _tvOverscan
+    fun setTvOverscan(v: Int) { _tvOverscan.value = v.coerceIn(0, 8) }
+    @JvmField var onTvOverscanChange: java.util.function.IntConsumer? = null
+
+    // Dim the handheld screen while the game is on the TV (battery/heat saver). Default on.
+    private val _tvDimHandheld = MutableStateFlow(true)
+    val tvDimHandheld: StateFlow<Boolean> = _tvDimHandheld
+    fun setTvDimHandheld(v: Boolean) { _tvDimHandheld.value = v }
+    @JvmField var onTvDimHandheldChange: java.util.function.Consumer<Boolean>? = null
+
+    // Audio output preference while on TV: 0 = follow system, 1 = force TV/HDMI, 2 = force handheld.
+    // Experimental — routes the Android media output; the guest AAudio sink may not always follow.
+    private val _tvAudioOut = MutableStateFlow(0)
+    val tvAudioOut: StateFlow<Int> = _tvAudioOut
+    fun setTvAudioOut(v: Int) { _tvAudioOut.value = v }
+    @JvmField var onTvAudioOutChange: java.util.function.IntConsumer? = null
+
+    // TV render resolution: 0 = Match TV, 1 = Match handheld, 2 = 1080p, 3 = 1440p. Applied on next
+    // launch (the X server resolution is fixed at bring-up), so this only stores the choice + notifies.
+    private val _tvRenderRes = MutableStateFlow(0)
+    val tvRenderRes: StateFlow<Int> = _tvRenderRes
+    fun setTvRenderRes(v: Int) { _tvRenderRes.value = v }
+    @JvmField var onTvRenderResChange: java.util.function.IntConsumer? = null
+
     private val _fpsExpanded = MutableStateFlow(false)
     val fpsExpanded: StateFlow<Boolean> = _fpsExpanded
 

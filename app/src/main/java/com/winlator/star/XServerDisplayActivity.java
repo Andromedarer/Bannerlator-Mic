@@ -1710,6 +1710,21 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
         preloaderDialog.step(1, "Preparing container…");
 
+        // TV render resolution (v2): when launching with an external display connected, honor the TV
+        // render-resolution choice (2 = 1080p, 3 = 1440p) before ScreenInfo is built. "Match TV" (0) /
+        // "Match handheld" (1) keep the container's screen size. Guarded to a TV being present at launch
+        // so it never changes handheld-only sessions.
+        try {
+            int tvRes = Integer.parseInt(container.getExtra("tv.renderRes", "0"));
+            if (tvRes == 2 || tvRes == 3) {
+                android.hardware.display.DisplayManager tvDm =
+                        (android.hardware.display.DisplayManager) getSystemService(DISPLAY_SERVICE);
+                boolean tvPresent = tvDm != null && tvDm.getDisplays(
+                        android.hardware.display.DisplayManager.DISPLAY_CATEGORY_PRESENTATION).length > 0;
+                if (tvPresent) screenSize = (tvRes == 2) ? "1920x1080" : "2560x1440";
+            }
+        } catch (Exception ignored) {}
+
         // Supersampling ("Render scale"): multiply the game's render resolution so it renders above
         // display res, then let the Vulkan compositor Lanczos-downscale it (see setHqDownscale below).
         // Stored via the "renderScale" extra; the per-game shortcut overrides the container default.
@@ -2049,6 +2064,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (externalDisplayController != null && externalDisplayController.isGameOnExternal()) {
             handler.postDelayed(this::resetGuestAudio, 600);
         }
+        applyHandheldDim(); // re-assert the handheld dim state after resume (brightness can reset)
     }
 
     @Override
@@ -2611,6 +2627,45 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 android.util.Log.w("XServerDisplay", "guest audio reset failed", e);
             }
         }, "audio-reset").start();
+    }
+
+    /** Dim the handheld (host) window while the game is on the TV, if the user enabled it (battery/heat
+     *  saver). Restores full brightness once the game is back on the phone or the toggle is off. */
+    private void applyHandheldDim() {
+        final boolean dim = XServerDrawerState.INSTANCE.getTvDimHandheld().getValue()
+                && externalDisplayController != null && externalDisplayController.isGameOnExternal();
+        runOnUiThread(() -> {
+            try {
+                android.view.WindowManager.LayoutParams lp = getWindow().getAttributes();
+                lp.screenBrightness = dim ? 0.02f
+                        : android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
+                getWindow().setAttributes(lp);
+            } catch (Exception ignored) {}
+        });
+    }
+
+    /** Best-effort media output routing while on TV (EXPERIMENTAL — the guest's PulseAudio AAudio sink
+     *  may not follow, as we don't own its output track). 0 = follow system, 1 = TV/HDMI, 2 = handheld. */
+    private void applyTvAudioRoute(int mode) {
+        try {
+            android.media.AudioManager am = (android.media.AudioManager) getSystemService(AUDIO_SERVICE);
+            if (am == null || android.os.Build.VERSION.SDK_INT < 31) return;
+            if (mode == 0) { am.clearCommunicationDevice(); resetGuestAudio(); return; }
+            for (android.media.AudioDeviceInfo d : am.getAvailableCommunicationDevices()) {
+                int t = d.getType();
+                boolean match = (mode == 1)
+                        ? (t == android.media.AudioDeviceInfo.TYPE_HDMI
+                            || t == android.media.AudioDeviceInfo.TYPE_HDMI_ARC
+                            || t == android.media.AudioDeviceInfo.TYPE_HDMI_EARC
+                            || t == android.media.AudioDeviceInfo.TYPE_AUX_LINE)
+                        : (t == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER);
+                if (match) { am.setCommunicationDevice(d); break; }
+            }
+            // Nudge PulseAudio to reopen its AAudio stream onto the new route.
+            resetGuestAudio();
+        } catch (Exception e) {
+            android.util.Log.w("XServerDisplay", "tv audio route failed", e);
+        }
     }
 
     private void setPausedState(boolean paused) {
@@ -3787,6 +3842,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                         // Show the on-handheld "playing on external display" indicator (the phone would
                         // otherwise be a black screen once the game surface moves to the TV).
                         XServerDialogState.INSTANCE.setPlayingOnExternal(onExternal);
+                        applyHandheldDim(); // dim the phone when the game is on the TV (restore when back)
                         if (onExternal) {
                             XServerDialogState.INSTANCE.showInfoToast(
                                     "GAME MOVED TO TV", "now", "Use the handheld as the controller");
@@ -3806,6 +3862,37 @@ public class XServerDisplayActivity extends AppCompatActivity {
         XServerDrawerState.INSTANCE.onBringBackFromTv = () -> externalDisplayController.bringBackToHandheld();
         XServerDrawerState.INSTANCE.onTvModeChange = (id) -> externalDisplayController.setPreferredModeId(id);
         XServerDrawerState.INSTANCE.onResetAudio = () -> resetGuestAudio();
+
+        // TV Options v2: seed from the container (TV settings are display-scoped, stored as tv.* extras).
+        try {
+            int tvOs = Integer.parseInt(container.getExtra("tv.overscan", "0"));
+            XServerDrawerState.INSTANCE.setTvOverscan(tvOs);
+            externalDisplayController.setOverscanPercent(tvOs);
+            XServerDrawerState.INSTANCE.setTvDimHandheld(!container.getExtra("tv.dim", "1").equals("0"));
+            XServerDrawerState.INSTANCE.setTvAudioOut(Integer.parseInt(container.getExtra("tv.audioOut", "0")));
+            XServerDrawerState.INSTANCE.setTvRenderRes(Integer.parseInt(container.getExtra("tv.renderRes", "0")));
+        } catch (Exception ignored) {}
+
+        XServerDrawerState.INSTANCE.onTvOverscanChange = (p) -> {
+            externalDisplayController.setOverscanPercent(p);
+            container.putExtra("tv.overscan", String.valueOf(p));
+            container.saveData();
+        };
+        XServerDrawerState.INSTANCE.onTvDimHandheldChange = (b) -> {
+            container.putExtra("tv.dim", b ? "1" : "0");
+            container.saveData();
+            applyHandheldDim();
+        };
+        XServerDrawerState.INSTANCE.onTvAudioOutChange = (i) -> {
+            container.putExtra("tv.audioOut", String.valueOf(i));
+            container.saveData();
+            applyTvAudioRoute(i);
+        };
+        XServerDrawerState.INSTANCE.onTvRenderResChange = (i) -> {
+            // Stored only — the render resolution is fixed at X-server bring-up, so it applies next launch.
+            container.putExtra("tv.renderRes", String.valueOf(i));
+            container.saveData();
+        };
 
         globalCursorSpeed = preferences.getFloat("cursor_speed", 1.0f);
         touchpadView = new TouchpadView(this, xServer, timeoutHandler, hideControlsRunnable);

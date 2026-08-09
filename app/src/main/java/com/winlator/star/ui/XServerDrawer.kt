@@ -358,6 +358,138 @@ private fun TvContent(state: XServerDrawerState) {
         fontSize = 11.sp,
         modifier = Modifier.padding(top = 4.dp)
     )
+
+    val rendererIsVulkan by state.rendererIsVulkan.collectAsState()
+
+    // ───────────── Picture ─────────────
+    HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 12.dp))
+    SectionHeader("Picture")
+
+    // Aspect on TV — reuses the same fullscreen-mode cycle as the handheld (OFF / FIT / STRETCH).
+    val fullscreenMode by state.fullscreenMode.collectAsState()
+    Text("Aspect", color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp,
+        fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 6.dp))
+    FullscreenModeButtons(fullscreenMode) { mode ->
+        state.setFullscreenMode(mode)
+        state.onSetFullscreenMode?.accept(mode)
+    }
+
+    // Overscan / safe area (v2) — pads the game inward on TVs that crop the edges.
+    Spacer(Modifier.height(8.dp))
+    val overscan by state.tvOverscan.collectAsState()
+    var overscanVal by remember(overscan) { mutableIntStateOf(overscan) }
+    IntSlider("Overscan / safe area", overscanVal, 0..8,
+        onValueChange = { overscanVal = it },
+        onValueChangeFinished = {
+            state.setTvOverscan(overscanVal)
+            state.onTvOverscanChange?.accept(overscanVal)
+        },
+        steps = 7, enabled = true)
+    Text("Shrinks the picture inward if your TV cuts off the edges.",
+        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp,
+        modifier = Modifier.padding(top = 2.dp, bottom = 6.dp))
+
+    // Scaling filter (v1) — GL EffectComposer only; grayed on the Vulkan renderer.
+    if (rendererIsVulkan) {
+        Text("Scaling filter is available on the OpenGL renderer.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp,
+            modifier = Modifier.padding(top = 4.dp))
+    } else {
+        Text("Scaling filter", color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp, bottom = 6.dp))
+        val initGlUpscalerMode by XServerDialogState.glUpscalerMode.collectAsState()
+        var glUpscalerMode by remember(initGlUpscalerMode) { mutableIntStateOf(initGlUpscalerMode) }
+        UpscalerModeButtons(glUpscalerMode, true) {
+            glUpscalerMode = it
+            XServerDialogState.onGlUpscalerApply?.invoke(it)
+        }
+    }
+
+    // ───────────── Latency & pacing ─────────────
+    HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 12.dp))
+
+    // Latency mode (present mode). PresentModeSection self-gates to the Vulkan renderer.
+    if (rendererIsVulkan) {
+        PresentModeSection(state)
+    } else {
+        SectionHeader("Latency")
+        Text("Latency mode (V-Sync / Low latency) is available on the Vulkan renderer.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp,
+            modifier = Modifier.padding(bottom = 6.dp))
+    }
+
+    // Frame cap — drives the standalone host FPS limiter (shared with the HUD tab).
+    Spacer(Modifier.height(6.dp))
+    val fpsLimiterEnabled by state.fpsLimiterEnabled.collectAsState()
+    val fpsLimit by state.fpsLimit.collectAsState()
+    val capOptions = listOf("Off", "30 FPS", "60 FPS", "90 FPS", "120 FPS")
+    val capValues = listOf(0, 30, 60, 90, 120)
+    val capIdx = if (!fpsLimiterEnabled) 0 else capValues.indexOf(fpsLimit).let { if (it >= 0) it else 0 }
+    ReshadeDropdown("Frame cap", capOptions, capIdx) { i ->
+        val v = capValues[i]
+        state.setFpsLimiterEnabled(v > 0)
+        if (v > 0) state.setFpsLimit(v)
+        state.onFpsLimitChange?.run()
+    }
+
+    // Frame generation — the full reused section (engine picker + multiplier + models).
+    Spacer(Modifier.height(6.dp))
+    FrameGenSection(state)
+
+    // TV Game Mode tip (biggest wired-latency win is TV-side; we can only advise).
+    Text("Tip: enable Game Mode on your TV for the lowest input lag.",
+        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp,
+        modifier = Modifier.padding(top = 8.dp))
+
+    // ───────────── Audio & power ─────────────
+    HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 12.dp))
+    SectionHeader("Audio & power")
+
+    val audioOut by state.tvAudioOut.collectAsState()
+    ReshadeDropdown("Audio output", listOf("Follow system", "TV / HDMI", "Handheld"), audioOut) { i ->
+        state.setTvAudioOut(i)
+        state.onTvAudioOutChange?.accept(i)
+    }
+    Text("Experimental — the guest audio route may not always follow.",
+        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp,
+        modifier = Modifier.padding(top = 2.dp, bottom = 6.dp))
+
+    val dimHandheld by state.tvDimHandheld.collectAsState()
+    ToggleRow("Dim handheld while on TV", dimHandheld) {
+        state.setTvDimHandheld(it)
+        state.onTvDimHandheldChange?.accept(it)
+    }
+    Text("Saves battery and heat by dimming the phone screen.",
+        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp,
+        modifier = Modifier.padding(top = 2.dp))
+
+    // ───────────── Advanced ─────────────
+    HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 12.dp))
+    SectionHeader("Advanced")
+
+    val renderRes by state.tvRenderRes.collectAsState()
+    ReshadeDropdown("TV render resolution", listOf("Match TV", "Match handheld", "1080p", "1440p"), renderRes) { i ->
+        state.setTvRenderRes(i)
+        state.onTvRenderResChange?.accept(i)
+    }
+    Text("Applies on the next game launch (the render resolution is fixed at startup).",
+        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp,
+        modifier = Modifier.padding(top = 2.dp))
+
+    // ───────────── Streaming (v3 — WiFi caster, not yet available) ─────────────
+    HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 12.dp))
+    val disabledColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+    Text("Streaming", style = MaterialTheme.typography.titleSmall.copy(
+        fontSize = 15.sp, fontWeight = FontWeight.Bold), color = disabledColor)
+    Text("Wireless streaming to a TV without a cable (bitrate, codec, transport) is coming in a " +
+        "future update. Wired HDMI / DeX casting works today via the controls above.",
+        color = disabledColor, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+    listOf("Bitrate", "Codec (H.264 / HEVC)", "Transport (WebRTC / DLNA)", "Stream resolution & FPS").forEach {
+        Text("• $it — requires WiFi streaming", color = disabledColor, fontSize = 11.sp,
+            modifier = Modifier.padding(top = 4.dp))
+    }
+
+    Spacer(Modifier.height(12.dp))
 }
 
 // ───── Modern Tab Button ─────
