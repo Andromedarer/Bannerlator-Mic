@@ -5690,3 +5690,14 @@ FIXES FOUND DURING DEVICE TESTING (all on main):
 - **The subtle one:** External Controllers list showed stale "0 Bindings" even though data was correct. Root-caused via a branch-only debug build (ICS333 logcat): the Compose `controllers` state held ExternalController objects whose equals() is id-only (bindings ignored, by design for slot dedup), so [pad:0]->[pad:1] looked structurally equal and Compose skipped the update. Fix = neverEqualPolicy() on that state.
 
 REMAINING (optional, not built): "?" help text on the auto-hide toggles (cosmetic). Everything functional is done.
+
+## 2026-08-10 — issue #339: DeX external-display misfire fix (branch fix/dex-external-display-339)
+Reported: on 2.9.8 in Samsung DeX, launching a game half-fullscreens, FPS HUD vanishes, mouse dies.
+Root cause: DeX's virtual desktop is a DISPLAY_CATEGORY_PRESENTATION display that the app already runs
+on; ExternalDisplayController auto-swapped the game into a Presentation over that same display.
+Fix (2 parts, clean branch off origin/main ca98c930):
+- ExternalDisplayController.findPresentationDisplay(): skip the display the activity window is on
+  (activity.getDisplay() API30+, getDefaultDisplay() fallback). Real HDMI TV = different displayId, unaffected.
+- XServerDisplayActivity: seed tv.enabled/tv.autoSwap from container BEFORE start() (start() runs the first
+  auto-swap), and persist both master switches on change (previously reset to ON every launch).
+Status: compile-level only, NOT device-proven. CI build dispatched for DeX device test.
