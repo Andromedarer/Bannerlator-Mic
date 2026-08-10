@@ -3053,8 +3053,16 @@ private fun PlayerSlotRowItem(row: XServerDialogState.PlayerSlotRow) {
                 modifier = Modifier.fillMaxWidth().menuAnchor(),
                 singleLine = true,
             )
-            ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                options.forEach { (label, value) ->
+            ExposedDropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+                // #333 polish: match the shared outlined-menu-card look (outline + thin divider between
+                // options), same as the out-of-game Player Slots pickers.
+                modifier = Modifier.outlinedMenuCard()
+            ) {
+                options.forEachIndexed { index, option ->
+                    if (index > 0) MenuItemDivider()
+                    val (label, value) = option
                     DropdownMenuItem(text = { Text(label) }, onClick = {
                         expanded = false
                         if (value != row.override) {
