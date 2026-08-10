@@ -309,8 +309,9 @@ private fun AudioContent(state: XServerDrawerState) {
         color = MaterialTheme.colorScheme.onSurface
     )
     Spacer(Modifier.height(2.dp))
+    val engine = state.audioDriverLabel
     Text(
-        "Current preset: ${cfg.preset}",
+        if (engine.isNotBlank()) "Engine: $engine  ·  preset: ${cfg.preset}" else "Current preset: ${cfg.preset}",
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         fontSize = 12.sp
     )
@@ -335,6 +336,7 @@ private fun AudioContent(state: XServerDrawerState) {
             initial = cfg,
             scopeLabel = "live · this session",
             latencyLive = false,
+            driverLabel = engine,
             onDismiss = { show = false },
             onSave = { newCfg ->
                 com.winlator.star.ui.components.saveAudioConfig(ctx, newCfg)

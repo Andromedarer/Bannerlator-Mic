@@ -948,9 +948,10 @@ private fun TopLevelFields(
                 onSelect = { viewModel.selectedAudioDriver = it },
                 modifier = Modifier.weight(1f)
             )
-            // Cog → adaptive audio presets & fine-tuning. Only meaningful for PulseAudio (ALSA path
-            // has no sink presets), so it's shown only when PulseAudio is selected.
-            if (StringUtils.parseIdentifier(viewModel.selectedAudioDriver) == "pulseaudio") {
+            // Cog → adaptive audio presets & fine-tuning. Both engines honor the same presets/knobs
+            // (PulseAudio sink + ALSA player), so it's shown for either driver.
+            val audioId = StringUtils.parseIdentifier(viewModel.selectedAudioDriver)
+            if (audioId == "pulseaudio" || audioId == "alsa") {
                 IconButton(onClick = { showAudioSettings = true }) {
                     Icon(Icons.Default.Settings, contentDescription = "Audio settings", modifier = Modifier.size(18.dp))
                 }
@@ -964,6 +965,10 @@ private fun TopLevelFields(
                 initial = audioConfigFromEnv(viewModel.envVarsStr),
                 scopeLabel = "this container",
                 latencyLive = true,
+                driverLabel = when (StringUtils.parseIdentifier(viewModel.selectedAudioDriver)) {
+                    "alsa" -> "ALSA"; "pulseaudio" -> "PulseAudio"
+                    else -> StringUtils.parseIdentifier(viewModel.selectedAudioDriver)
+                },
                 onDismiss = { showAudioSettings = false },
                 onSave = { cfg ->
                     viewModel.envVarsStr = audioConfigToEnv(viewModel.envVarsStr, cfg)

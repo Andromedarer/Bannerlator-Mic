@@ -134,6 +134,7 @@ fun AudioSettingsDialog(
     initial: AudioConfig,
     scopeLabel: String,
     latencyLive: Boolean,
+    driverLabel: String = "",
     onDismiss: () -> Unit,
     onSave: (AudioConfig) -> Unit
 ) {
@@ -151,6 +152,16 @@ fun AudioSettingsDialog(
                     verticalAlignment = Alignment.CenterVertically) {
                     Text("🎧 Audio settings", fontSize = 18.sp, fontWeight = FontWeight.Bold,
                         color = cs.onSurface, modifier = Modifier.weight(1f))
+                    // Engine badge — which audio engine these settings actually hit (dropdown value in
+                    // the editors; the driver chosen at launch in-game). Makes "correct settings" explicit.
+                    if (driverLabel.isNotBlank()) {
+                        Surface(shape = RoundedCornerShape(8.dp), color = cs.primary.copy(alpha = 0.16f),
+                            modifier = Modifier.padding(end = 8.dp)) {
+                            Text("🔊 $driverLabel", color = cs.primary, fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp))
+                        }
+                    }
                     TextButton(onClick = onDismiss) { Text("✕", color = cs.onSurface, fontSize = 16.sp) }
                 }
                 Text("Balance crackle-free vs low delay  ·  $scopeLabel",

@@ -11,7 +11,11 @@
 // load and went silent when headphones/BT (dis)connected. Now the stream is wrapped in AlsaStream and
 // write() (a) GROWS the buffer one burst at a time on underruns (xrun-driven, up to capacity), and
 // (b) REOPENS the stream on a route disconnect (AAUDIO_ERROR_DISCONNECTED) so audio follows to the new
-// device. streamPtr stays an opaque handle to Java (ALSAClient), so no Java changes are needed.
+// device. streamPtr stays an opaque handle to Java (ALSAClient).
+//
+// The engine is driven by a process-global config (perf mode / adaptive / buffer target / max) pushed
+// from Java via nativeSetAudioConfig — the same presets/fine-tune knobs the PulseAudio path exposes,
+// wired to the shared "banner_audio" prefs so the one in-game/container/shortcut UI drives both engines.
 
 #define TAG "alsa_client"
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, TAG, __VA_ARGS__)
@@ -32,12 +36,34 @@ typedef struct {
     int      started;        // was requestStart called (so a reopen can re-start)
     int64_t  writes;         // write() call count (for the measurement heartbeat)
     int64_t  lastReopenNs;   // monotonic time of last reopen (throttle a disconnect storm)
+    int      gen;            // config generation this stream opened with (live re-apply on change)
 } AlsaStream;
+
+// Process-global adaptive-audio config, mirroring the PulseAudio module's presets/fine-tune knobs.
+// Set from Java (ALSAClient.nativeSetAudioConfig) at launch and on every in-game "apply"; read at
+// stream open. Single writer (Java main thread) / many readers (per-stream audio threads): plain int
+// read/write is atomic on arm64, and a stale read only defers a config pickup by one buffer. A bumped
+// g_configGen makes each live stream reopen on its next write() so changes apply without a relaunch.
+// Defaults = today's device-proven ALSA behavior (NONE + adaptive on, auto buffer) so an unconfigured
+// container behaves exactly as the proven build until the user picks a preset.
+static volatile int g_perfMode  = 0;   // 0=NONE (proven-clean), 1=LOW_LATENCY, 2=POWER_SAVING
+static volatile int g_adaptive  = 1;   // grow the buffer on underruns
+static volatile int g_bufTarget = 0;   // frames; 0 = guest-requested (winealsa) size
+static volatile int g_maxBuf    = 0;   // frames; 0 = device capacity (else clamp capacity down)
+static volatile int g_configGen = 0;   // bumped on each config change -> live reopen
 
 static int64_t nowNs(void) {
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
     return (int64_t) t.tv_sec * 1000000000LL + t.tv_nsec;
+}
+
+static aaudio_performance_mode_t toAAudioPerfMode(int m) {
+    switch (m) {
+        case 1:  return AAUDIO_PERFORMANCE_MODE_LOW_LATENCY;
+        case 2:  return AAUDIO_PERFORMANCE_MODE_POWER_SAVING;
+        default: return AAUDIO_PERFORMANCE_MODE_NONE;
+    }
 }
 
 static aaudio_format_t toAAudioFormat(int format) {
@@ -59,12 +85,12 @@ static int openStream(AlsaStream *s) {
     AAudioStreamBuilder *builder;
     if (AAudio_createStreamBuilder(&builder) != AAUDIO_OK) return -1;
 
-    // NONE, not LOW_LATENCY: LOW_LATENCY caps the device buffer capacity to a tiny FAST buffer
-    // (measured ~3844 frames @48k here) — far below what winealsa requests (~13454 frames, ~280ms).
-    // That starvation dripped underruns (xruns kept climbing) AND made the requested buffer
-    // unrepresentable, so the heartbeat lied (buf>cap) and adaptBuffer thought it was already maxed.
-    // NONE gives a capacity large enough to actually honor the guest's requested buffer.
-    AAudioStreamBuilder_setPerformanceMode(builder, AAUDIO_PERFORMANCE_MODE_NONE);
+    // Performance mode from the shared config (default NONE). NONE, not LOW_LATENCY, is the proven
+    // default: LOW_LATENCY caps the device buffer capacity to a tiny FAST buffer (measured ~3844 frames
+    // @48k) — far below what winealsa requests (~13454, ~280ms) — which starves the stream and dripped
+    // underruns. NONE gives a capacity large enough to honor the guest's buffer. The user can still pick
+    // LOW_LATENCY via the "Low latency" preset (lowest delay, may crackle) — that's their explicit call.
+    AAudioStreamBuilder_setPerformanceMode(builder, toAAudioPerfMode(g_perfMode));
     AAudioStreamBuilder_setFormat(builder, toAAudioFormat(s->format));
     AAudioStreamBuilder_setChannelCount(builder, s->channelCount);
     AAudioStreamBuilder_setSampleRate(builder, s->sampleRate);
@@ -78,11 +104,15 @@ static int openStream(AlsaStream *s) {
 
     s->framesPerBurst = AAudioStream_getFramesPerBurst(s->stream);
     s->capacity       = AAudioStream_getBufferCapacityInFrames(s->stream);
-    // Clamp the requested buffer to the device capacity, then capture what the device ACTUALLY gave us
-    // (setBufferSizeInFrames silently caps at capacity). The old code stored the requested value, which
-    // made the heartbeat report buf>cap and made adaptBuffer's "curBufferSize >= capacity" guard fire
-    // immediately — so the buffer never grew despite live underruns. curBufferSize must be the truth.
-    int32_t want = s->curBufferSize;
+    // Optional user cap on the buffer (g_maxBuf): clamp the effective capacity down so the adaptive
+    // ceiling and the target below never exceed it — this is the "max buffer / max latency" knob.
+    if (g_maxBuf > 0 && g_maxBuf < s->capacity) s->capacity = g_maxBuf;
+    // Buffer target: g_bufTarget when set (the "buffer frames" knob), else the guest-requested size
+    // (winealsa), else two bursts. Clamp to the effective capacity, then capture what the device
+    // ACTUALLY gave us (setBufferSizeInFrames silently caps). The old code stored the requested value,
+    // which made the heartbeat report buf>cap and made adaptBuffer's "curBufferSize >= capacity" guard
+    // fire immediately — so the buffer never grew despite live underruns. curBufferSize must be truth.
+    int32_t want = g_bufTarget > 0 ? g_bufTarget : s->curBufferSize;
     if (want <= 0) want = s->framesPerBurst > 0 ? s->framesPerBurst * 2 : 0;
     if (s->capacity > 0 && want > s->capacity) want = s->capacity;
     if (want > 0) {
@@ -90,14 +120,16 @@ static int openStream(AlsaStream *s) {
         if (got > 0) s->curBufferSize = got;
     }
     s->lastXrun       = 0;
-    LOGI("open: fmt=%d ch=%d rate=%d buf=%d burst=%d cap=%d",
-         s->format, (int) s->channelCount, s->sampleRate,
-         (int) s->curBufferSize, (int) s->framesPerBurst, (int) s->capacity);
+    s->gen            = g_configGen;   // remember which config this stream is running
+    LOGI("open: perf=%d adaptive=%d fmt=%d ch=%d rate=%d buf=%d burst=%d cap=%d gen=%d",
+         g_perfMode, g_adaptive, s->format, (int) s->channelCount, s->sampleRate,
+         (int) s->curBufferSize, (int) s->framesPerBurst, (int) s->capacity, s->gen);
     return 0;
 }
 
 // Grow the buffer by one burst on a fresh underrun (monotonic, capped at capacity). Cheap; safe here.
 static void adaptBuffer(AlsaStream *s) {
+    if (!g_adaptive) return;   // adaptive safety net disabled by the user (e.g. "Low latency" preset)
     if (s->framesPerBurst <= 0 || s->curBufferSize <= 0 || s->capacity <= 0) return;
     int32_t x = AAudioStream_getXRunCount(s->stream);
     if (x <= s->lastXrun) return;
@@ -138,6 +170,22 @@ Java_com_winlator_star_alsaserver_ALSAClient_create(JNIEnv *env, jobject obj, ji
     return (jlong) s;
 }
 
+// Static config setter (ALSAClient.nativeSetAudioConfig). Called from Java at launch (resolved from
+// the container/shortcut env + banner_audio prefs) and on every in-game "apply". Bumping g_configGen
+// makes all live streams reopen on their next write() so the change applies without a relaunch.
+JNIEXPORT void JNICALL
+Java_com_winlator_star_alsaserver_ALSAClient_nativeSetAudioConfig(JNIEnv *env, jclass clazz,
+                                               jint perfMode, jint adaptive, jint bufTarget, jint maxBuf) {
+    (void) env; (void) clazz;
+    g_perfMode  = perfMode;
+    g_adaptive  = adaptive ? 1 : 0;
+    g_bufTarget = bufTarget > 0 ? bufTarget : 0;
+    g_maxBuf    = maxBuf > 0 ? maxBuf : 0;
+    g_configGen++;
+    LOGI("config set: perf=%d adaptive=%d bufTarget=%d maxBuf=%d gen=%d",
+         g_perfMode, g_adaptive, g_bufTarget, g_maxBuf, g_configGen);
+}
+
 JNIEXPORT jint JNICALL
 Java_com_winlator_star_alsaserver_ALSAClient_write(JNIEnv *env, jobject obj, jlong streamPtr, jobject buffer,
                                               jint numFrames) {
@@ -145,6 +193,15 @@ Java_com_winlator_star_alsaserver_ALSAClient_write(JNIEnv *env, jobject obj, jlo
     AlsaStream *s = (AlsaStream *) streamPtr;
     if (!s || !s->stream) return -1;
     void *buf = (*env)->GetDirectBufferAddress(env, buffer);
+
+    // Live config apply: the in-game AUDIO tab bumps g_configGen; reopen so the new perf mode / adaptive
+    // / buffer settings take effect this session without a relaunch (throttled to avoid a churn storm).
+    if (s->gen != g_configGen && (nowNs() - s->lastReopenNs) >= 200000000LL) {
+        s->lastReopenNs = nowNs();
+        LOGI("config changed (gen %d->%d) — reopening", s->gen, g_configGen);
+        reopen(s);
+        if (!s->stream) return -1;   // reopen failed (route gone); skip this buffer, retry next write
+    }
 
     adaptBuffer(s);   // grow the buffer if we've been underrunning
     // Measurement heartbeat (~every 1000 writes ≈ 20s): current underruns + buffer vs capacity.

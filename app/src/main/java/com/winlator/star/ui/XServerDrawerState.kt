@@ -200,6 +200,9 @@ object XServerDrawerState {
     // Re-apply the audio config live in-game after the preset/fine-tune dialog saves (sink recreate
     // reads the just-written banner_audio prefs). Guest latency change still needs a relaunch.
     @JvmField var onReapplyAudio: Runnable? = null
+    // Engine that actually launched ("PulseAudio" / "ALSA"), shown at the top of the in-game AUDIO tab
+    // so the user knows which engine these settings hit. Set by the activity at launch.
+    @JvmField var audioDriverLabel: String = ""
 
     // TV output display modes (resolution + refresh rate). Seeded by the activity from the connected
     // display's getSupportedModes() so the user can switch off e.g. 4K@30 to 1080p@60. id 0 = default.

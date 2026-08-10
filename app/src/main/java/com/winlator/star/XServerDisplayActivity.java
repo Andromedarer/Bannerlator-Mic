@@ -2647,6 +2647,52 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // preview-ownership flag on any resume, and mirrors to BOTH Compose holders (the drawer Pause
     // button + the centered pause box). Everything that pauses/resumes (manual Pause, the ReShade
     // preview, the box tap, lifecycle) routes through here so the flag never disagrees with reality.
+    private static String audioDriverLabel(String d) {
+        if ("alsa".equals(d)) return "ALSA";
+        if ("pulseaudio".equals(d)) return "PulseAudio";
+        return d == null ? "" : d;
+    }
+
+    private static Integer envInt(EnvVars ev, String key) {
+        if (ev == null || !ev.has(key)) return null;
+        try { return Integer.parseInt(ev.get(key).trim()); } catch (Exception ex) { return null; }
+    }
+
+    // Bridge the per-container/per-game audio cog (BANNER_AUDIO_* env, resolved shortcut-over-container)
+    // into the "banner_audio" prefs that BOTH audio engines read. Only keys actually present are written,
+    // so a container with no audio cog set leaves the prefs (and any in-game choice) untouched.
+    private void seedAudioPrefsFromEnv(EnvVars ev) {
+        if (ev == null) return;
+        android.content.SharedPreferences.Editor e =
+                getSharedPreferences("banner_audio", MODE_PRIVATE).edit();
+        boolean any = false;
+        if (ev.has("BANNER_AUDIO_PRESET"))   { e.putString("preset", ev.get("BANNER_AUDIO_PRESET")); any = true; }
+        Integer perf = envInt(ev, "BANNER_AUDIO_PERF"); if (perf != null) { e.putInt("perf_mode", perf); any = true; }
+        if (ev.has("BANNER_AUDIO_ADAPTIVE")) { e.putBoolean("adaptive", !"0".equals(ev.get("BANNER_AUDIO_ADAPTIVE"))); any = true; }
+        Integer bf  = envInt(ev, "BANNER_AUDIO_BF");  if (bf  != null) { e.putInt("buffer_frames", bf);  any = true; }
+        Integer mbf = envInt(ev, "BANNER_AUDIO_MBF"); if (mbf != null) { e.putInt("max_buffer_frames", mbf); any = true; }
+        Integer lat = envInt(ev, "BANNER_AUDIO_LAT"); if (lat != null) { e.putInt("latency_msec", lat); any = true; }
+        if (any) e.apply();
+    }
+
+    // Resolve the effective audio config from banner_audio prefs (already seeded from the container/
+    // shortcut env, plus any live in-game tweak) and push it to the native ALSA player. ALSA defaults to
+    // NONE — the device-proven crackle-free mode — when the user hasn't explicitly chosen a performance
+    // mode; explicit presets win. Safe before streams open (config is process-global) and again on
+    // in-game apply, where the bumped generation makes live streams reopen without a relaunch.
+    private void applyAlsaAudioConfig() {
+        try {
+            android.content.SharedPreferences p = getSharedPreferences("banner_audio", MODE_PRIVATE);
+            int perf = p.contains("perf_mode") ? p.getInt("perf_mode", 0) : 0; // ALSA proven default = NONE
+            int adaptive = p.getBoolean("adaptive", true) ? 1 : 0;
+            int bf  = p.getInt("buffer_frames", 0);
+            int mbf = p.getInt("max_buffer_frames", 0);
+            com.winlator.star.alsaserver.ALSAClient.nativeSetAudioConfig(perf, adaptive, bf, mbf);
+        } catch (Throwable t) {
+            android.util.Log.w("ALSAAudio", "applyAlsaAudioConfig failed", t);
+        }
+    }
+
     // Restart the guest audio server (PulseAudio + its AAudio sink). The AAudio output stream can be
     // torn down when the app is backgrounded or the HDMI audio route changes, and the sink does not
     // always re-establish it — leaving the game silent (notably after returning to a game on the TV).
@@ -3740,10 +3786,15 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 )
         );
 
-        // Audio driver logic
+        // Audio driver logic. First bridge the container/shortcut audio cog (BANNER_AUDIO_* env, already
+        // merged shortcut-over-container above) into the "banner_audio" prefs that BOTH engines read —
+        // otherwise those per-game settings would be written but never consumed. In-game tweaks then
+        // override for the session (they write the same prefs).
+        seedAudioPrefsFromEnv(envVars);
         if (audioDriver.equals("alsa")) {
             envVars.put("ANDROID_ALSA_SERVER", rootPath + UnixSocketConfig.ALSA_SERVER_PATH);
             envVars.put("ANDROID_ASERVER_USE_SHM", "true");
+            applyAlsaAudioConfig();   // push perf/adaptive/buffer to the native ALSA player before streams open
             environment.addComponent(
                     new ALSAServerComponent(
                             UnixSocketConfig.createSocket(rootPath, UnixSocketConfig.ALSA_SERVER_PATH)
@@ -4195,9 +4246,16 @@ public class XServerDisplayActivity extends AppCompatActivity {
         XServerDialogState.INSTANCE.onCastDisconnect = () -> stopCast();
         } // end FeatureFlags.TV_OUTPUT_ENABLED
 
-        // Audio-tab callback — independent of the TV feature, so it is wired unconditionally.
-        XServerDrawerState.INSTANCE.onResetAudio = () -> resetGuestAudioForRouteChange();
-        XServerDrawerState.INSTANCE.onReapplyAudio = () -> resetGuestAudioForRouteChange();
+        // Audio-tab callbacks — independent of the TV feature, so wired unconditionally. Routed to the
+        // engine that actually launched: PulseAudio recreates its sink; ALSA re-pushes its native config
+        // (which bumps the generation so live streams reopen). The drawer shows this label at the top.
+        XServerDrawerState.INSTANCE.audioDriverLabel = audioDriverLabel(audioDriver);
+        XServerDrawerState.INSTANCE.onResetAudio = () -> {
+            if ("alsa".equals(audioDriver)) applyAlsaAudioConfig(); else resetGuestAudioForRouteChange();
+        };
+        XServerDrawerState.INSTANCE.onReapplyAudio = () -> {
+            if ("alsa".equals(audioDriver)) applyAlsaAudioConfig(); else resetGuestAudioForRouteChange();
+        };
 
         globalCursorSpeed = preferences.getFloat("cursor_speed", 1.0f);
         touchpadView = new TouchpadView(this, xServer, timeoutHandler, hideControlsRunnable);
