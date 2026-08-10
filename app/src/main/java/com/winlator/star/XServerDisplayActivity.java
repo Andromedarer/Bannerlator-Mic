@@ -2095,7 +2095,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // after resume so sound comes back. Only after a real background (not a PiP/dialog pause).
         if (wasBackgrounded) {
             wasBackgrounded = false;
-            handler.postDelayed(this::resetGuestAudio, 600);
+            handler.postDelayed(this::resetGuestAudioForRouteChange, 600); // recreate: also recovers a route change (BT/headset) made while backgrounded, which suspend/resume can't
         }
         applyHandheldDim(); // re-assert the handheld dim state after resume (brightness can reset)
         // Watch for headphone/USB/BT/HDMI plug changes during play so audio follows the new route.
@@ -4196,7 +4196,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         } // end FeatureFlags.TV_OUTPUT_ENABLED
 
         // Audio-tab callback — independent of the TV feature, so it is wired unconditionally.
-        XServerDrawerState.INSTANCE.onResetAudio = () -> resetGuestAudio();
+        XServerDrawerState.INSTANCE.onResetAudio = () -> resetGuestAudioForRouteChange();
         XServerDrawerState.INSTANCE.onReapplyAudio = () -> resetGuestAudioForRouteChange();
 
         globalCursorSpeed = preferences.getFloat("cursor_speed", 1.0f);
