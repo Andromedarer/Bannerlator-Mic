@@ -4193,6 +4193,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         // Audio-tab callback — independent of the TV feature, so it is wired unconditionally.
         XServerDrawerState.INSTANCE.onResetAudio = () -> resetGuestAudio();
+        XServerDrawerState.INSTANCE.onReapplyAudio = () -> resetGuestAudioForRouteChange();
 
         globalCursorSpeed = preferences.getFloat("cursor_speed", 1.0f);
         touchpadView = new TouchpadView(this, xServer, timeoutHandler, hideControlsRunnable);
