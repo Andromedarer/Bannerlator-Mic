@@ -14,6 +14,7 @@
 
 #define TAG "alsa_client"
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, TAG, __VA_ARGS__)
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
 #define WAIT_COMPLETION_TIMEOUT 100 * 1000000L
 
 enum Format {U8, S16LE, S16BE, FLOATLE, FLOATBE};
@@ -28,6 +29,7 @@ typedef struct {
     int32_t capacity;        // device max buffer (frames)
     int32_t lastXrun;        // last-seen underrun count
     int      started;        // was requestStart called (so a reopen can re-start)
+    int64_t  writes;         // write() call count (for the measurement heartbeat)
 } AlsaStream;
 
 static aaudio_format_t toAAudioFormat(int format) {
@@ -65,6 +67,9 @@ static int openStream(AlsaStream *s) {
     s->framesPerBurst = AAudioStream_getFramesPerBurst(s->stream);
     s->capacity       = AAudioStream_getBufferCapacityInFrames(s->stream);
     s->lastXrun       = 0;
+    LOGI("open: fmt=%d ch=%d rate=%d buf=%d burst=%d cap=%d",
+         s->format, (int) s->channelCount, s->sampleRate,
+         (int) s->curBufferSize, (int) s->framesPerBurst, (int) s->capacity);
     return 0;
 }
 
@@ -78,7 +83,10 @@ static void adaptBuffer(AlsaStream *s) {
     int32_t want = s->curBufferSize + s->framesPerBurst;
     if (want > s->capacity) want = s->capacity;
     int32_t got = AAudioStream_setBufferSizeInFrames(s->stream, want);
-    if (got > 0) s->curBufferSize = got;
+    if (got > 0) {
+        LOGI("grow: xruns=%d buf %d->%d (cap %d)", (int) x, (int) s->curBufferSize, (int) got, (int) s->capacity);
+        s->curBufferSize = got;
+    }
 }
 
 // Reopen on the current route after a disconnect (headset/BT/HDMI change), preserving state.
@@ -116,6 +124,10 @@ Java_com_winlator_star_alsaserver_ALSAClient_write(JNIEnv *env, jobject obj, jlo
     void *buf = (*env)->GetDirectBufferAddress(env, buffer);
 
     adaptBuffer(s);   // grow the buffer if we've been underrunning
+    // Measurement heartbeat (~every 1000 writes ≈ 20s): current underruns + buffer vs capacity.
+    if ((++s->writes % 1000) == 0)
+        LOGI("hb: writes=%lld xruns=%d buf=%d cap=%d", (long long) s->writes,
+             (int) AAudioStream_getXRunCount(s->stream), (int) s->curBufferSize, (int) s->capacity);
     aaudio_result_t n = AAudioStream_write(s->stream, buf, numFrames, WAIT_COMPLETION_TIMEOUT);
     if (n < 0) {
         // Route change (disconnect) or other stream error → reopen on the current device and retry once.
