@@ -1,6 +1,7 @@
 #include <aaudio/AAudio.h>
 #include <jni.h>
 #include <stdlib.h>
+#include <time.h>
 #include <android/log.h>
 
 // ALSA-path AAudio player (guest winealsa -> aserver -> here). Blocking-write stream.
@@ -30,7 +31,14 @@ typedef struct {
     int32_t lastXrun;        // last-seen underrun count
     int      started;        // was requestStart called (so a reopen can re-start)
     int64_t  writes;         // write() call count (for the measurement heartbeat)
+    int64_t  lastReopenNs;   // monotonic time of last reopen (throttle a disconnect storm)
 } AlsaStream;
+
+static int64_t nowNs(void) {
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (int64_t) t.tv_sec * 1000000000LL + t.tv_nsec;
+}
 
 static aaudio_format_t toAAudioFormat(int format) {
     switch (format) {
@@ -51,7 +59,12 @@ static int openStream(AlsaStream *s) {
     AAudioStreamBuilder *builder;
     if (AAudio_createStreamBuilder(&builder) != AAUDIO_OK) return -1;
 
-    AAudioStreamBuilder_setPerformanceMode(builder, AAUDIO_PERFORMANCE_MODE_LOW_LATENCY);
+    // NONE, not LOW_LATENCY: LOW_LATENCY caps the device buffer capacity to a tiny FAST buffer
+    // (measured ~3844 frames @48k here) — far below what winealsa requests (~13454 frames, ~280ms).
+    // That starvation dripped underruns (xruns kept climbing) AND made the requested buffer
+    // unrepresentable, so the heartbeat lied (buf>cap) and adaptBuffer thought it was already maxed.
+    // NONE gives a capacity large enough to actually honor the guest's requested buffer.
+    AAudioStreamBuilder_setPerformanceMode(builder, AAUDIO_PERFORMANCE_MODE_NONE);
     AAudioStreamBuilder_setFormat(builder, toAAudioFormat(s->format));
     AAudioStreamBuilder_setChannelCount(builder, s->channelCount);
     AAudioStreamBuilder_setSampleRate(builder, s->sampleRate);
@@ -63,9 +76,19 @@ static int openStream(AlsaStream *s) {
     }
     AAudioStreamBuilder_delete(builder);
 
-    if (s->curBufferSize > 0) AAudioStream_setBufferSizeInFrames(s->stream, s->curBufferSize);
     s->framesPerBurst = AAudioStream_getFramesPerBurst(s->stream);
     s->capacity       = AAudioStream_getBufferCapacityInFrames(s->stream);
+    // Clamp the requested buffer to the device capacity, then capture what the device ACTUALLY gave us
+    // (setBufferSizeInFrames silently caps at capacity). The old code stored the requested value, which
+    // made the heartbeat report buf>cap and made adaptBuffer's "curBufferSize >= capacity" guard fire
+    // immediately — so the buffer never grew despite live underruns. curBufferSize must be the truth.
+    int32_t want = s->curBufferSize;
+    if (want <= 0) want = s->framesPerBurst > 0 ? s->framesPerBurst * 2 : 0;
+    if (s->capacity > 0 && want > s->capacity) want = s->capacity;
+    if (want > 0) {
+        int32_t got = AAudioStream_setBufferSizeInFrames(s->stream, want);
+        if (got > 0) s->curBufferSize = got;
+    }
     s->lastXrun       = 0;
     LOGI("open: fmt=%d ch=%d rate=%d buf=%d burst=%d cap=%d",
          s->format, (int) s->channelCount, s->sampleRate,
@@ -131,6 +154,11 @@ Java_com_winlator_star_alsaserver_ALSAClient_write(JNIEnv *env, jobject obj, jlo
     aaudio_result_t n = AAudioStream_write(s->stream, buf, numFrames, WAIT_COMPLETION_TIMEOUT);
     if (n < 0) {
         // Route change (disconnect) or other stream error → reopen on the current device and retry once.
+        // Throttle: if we reopened <200ms ago, drop this buffer instead of reopening again — otherwise a
+        // device that stays disconnected would thrash close/open every write() and stall the aserver.
+        int64_t now = nowNs();
+        if (now - s->lastReopenNs < 200000000LL) return (jint) n;
+        s->lastReopenNs = now;
         LOGW("AAudioStream_write err=%d — reopening", (int) n);
         if (reopen(s) == 0)
             n = AAudioStream_write(s->stream, buf, numFrames, WAIT_COMPLETION_TIMEOUT);
