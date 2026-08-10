@@ -2668,6 +2668,25 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }, "audio-reset").start();
     }
 
+    // Recover audio after a MID-PLAY output-route change. A route change (headphone/USB/BT/HDMI plug or
+    // unplug) DISCONNECTS the guest's AAudio stream, which can never be restarted — so the suspend/
+    // resume in resetGuestAudio() is useless here. Instead we build a fresh sink on the new route and
+    // move the guest's streams onto it (see PulseAudioComponent.recreateSinkForRouteChange). Runs off
+    // the main thread (native PulseAudio client IO). Distinct from resetGuestAudio(), which stays the
+    // right tool for background/foreground + the TV "Reset audio" button (stream idle, not disconnected).
+    public void resetGuestAudioForRouteChange() {
+        final XEnvironment env = environment;
+        if (env == null) return;
+        new Thread(() -> {
+            try {
+                PulseAudioComponent audio = env.getComponent(PulseAudioComponent.class);
+                if (audio != null) audio.recreateSinkForRouteChange();
+            } catch (Exception e) {
+                android.util.Log.w("XServerDisplay", "guest audio route recovery failed", e);
+            }
+        }, "audio-route-recreate").start();
+    }
+
     // True for the physical output routes that, when (un)plugged mid-game, require the AAudio sink to
     // reopen onto the new default (3.5mm, USB-C, Bluetooth, HDMI). Internal speaker/earpiece are the
     // fallback route resetGuestAudio() re-grabs, so a change involving one of these still needs a reset.
@@ -2691,9 +2710,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
     }
 
-    // Debounced reset: a single plug event can surface as several add/remove callbacks in quick
-    // succession, so coalesce them into one resetGuestAudio() ~350ms after the last one settles.
-    private final Runnable audioRouteResetRunnable = this::resetGuestAudio;
+    // Debounced recovery: a single plug event can surface as several add/remove callbacks in quick
+    // succession, so coalesce them into one recovery ~350ms after the last one settles.
+    private final Runnable audioRouteResetRunnable = this::resetGuestAudioForRouteChange;
 
     private void onAudioRouteChanged(android.media.AudioDeviceInfo[] devices) {
         boolean relevant = false;

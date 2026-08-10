@@ -35,6 +35,17 @@ public class PulseAudioComponent extends EnvironmentComponent {
     // survives; safe to call on pause/resume (never at startup).
     private static native int nativeSuspendSink(String pulseDir, String server, String sink, boolean suspend);
 
+    // Recreate the guest sink onto the CURRENT output route and move the guest's streams onto it, then
+    // unload the previous recovery sink (unloadModuleIdx, or < 0 to skip). Returns the NEW module index
+    // (>= 0) to feed back as unloadModuleIdx next time; negative on error. Implemented in pasink.c.
+    private static native int nativeRecreateSink(String pulseDir, String server, String newSinkName, int unloadModuleIdx);
+
+    // Bookkeeping for the recreate path: the module index of the sink we created last (to unload on the
+    // next route change) and a monotonic counter for unique sink names. Guarded by recoverLock.
+    private static final Object recoverLock = new Object();
+    private static int lastRecoverModuleIdx = -1;
+    private static int recoverCounter = 0;
+
     public PulseAudioComponent(UnixSocketConfig socketConfig) {
         this.socketConfig = socketConfig;
     }
@@ -89,6 +100,29 @@ public class PulseAudioComponent extends EnvironmentComponent {
     public void setSinkSuspended(boolean suspend) {
         try { nativeSuspendSink(pulseDir().getAbsolutePath(), pulseServer(), "AAudioSink", suspend); }
         catch (Throwable t) { android.util.Log.w("PulseAudio", "setSinkSuspended failed", t); }
+    }
+
+    /**
+     * Recover audio after a MID-PLAY output-route change (headphones/USB/BT/HDMI plug or unplug). Unlike
+     * a background drop, a route change DISCONNECTS the AAudio stream, and a disconnected AAudio stream
+     * can never be restarted — so suspend/resume (resetAudioSink) cannot recover it. Instead we build a
+     * brand-new sink whose AAudio stream opens on the current route, move the guest's streams onto it,
+     * make it default, and unload the previous (now-dead) recovery sink. The daemon and the guest's
+     * audio connection stay alive throughout (proven live with pactl against the 13.0 daemon). Call off
+     * the main thread. No-op safe if the daemon isn't reachable.
+     */
+    public void recreateSinkForRouteChange() {
+        String dir = pulseDir().getAbsolutePath(), server = pulseServer();
+        synchronized (recoverLock) {
+            String name = "recover" + (++recoverCounter);
+            try {
+                int idx = nativeRecreateSink(dir, server, name, lastRecoverModuleIdx);
+                if (idx >= 0) lastRecoverModuleIdx = idx;
+                else android.util.Log.w("PulseAudio", "recreateSink rc=" + idx);
+            } catch (Throwable t) {
+                android.util.Log.w("PulseAudio", "recreateSinkForRouteChange failed", t);
+            }
+        }
     }
     
     private void copyFromLibraryDir(File dst) {
