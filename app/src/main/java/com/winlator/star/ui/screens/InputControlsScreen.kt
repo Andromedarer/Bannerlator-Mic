@@ -62,6 +62,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -87,6 +88,7 @@ import kotlin.math.abs
 @Composable
 fun InputControlsScreen() {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val activity = context as? MainActivity
     val manager = remember { InputControlsManager(context) }
 
@@ -118,7 +120,9 @@ fun InputControlsScreen() {
         val connected = ExternalController.getControllers()
         val loaded = currentProfile?.loadControllers()?.toMutableList() ?: mutableListOf()
         for (c in connected) if (c !in loaded) loaded.add(c)
-        controllers = loaded
+        // #333: the Default/Any-Controller template (__default__) has its own dedicated top row, so
+        // don't also render it as a regular controller row (that produced a duplicate box once saved).
+        controllers = loaded.filter { it.getId() != com.winlator.star.inputcontrols.ControlsProfile.DEFAULT_CONTROLLER_ID }
     }
 
     fun loadProfile(position: Int) {
@@ -139,7 +143,18 @@ fun InputControlsScreen() {
             override fun onInputDeviceChanged(deviceId: Int) { refreshControllers() }
         }
         inputManager?.registerInputDeviceListener(hotplugListener, android.os.Handler(android.os.Looper.getMainLooper()))
-        onDispose { inputManager?.unregisterInputDeviceListener(hotplugListener) }
+        // #333: also refresh when the screen resumes (e.g. returning from the bindings editor), so a
+        // controller's binding count / the Default template reflect edits made in that editor without
+        // needing to leave and re-enter this screen.
+        val lifecycle = lifecycleOwner.lifecycle
+        val resumeObserver = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) refreshControllers()
+        }
+        lifecycle.addObserver(resumeObserver)
+        onDispose {
+            inputManager?.unregisterInputDeviceListener(hotplugListener)
+            lifecycle.removeObserver(resumeObserver)
+        }
     }
 
     // Shared import logic: read a control profile from any Uri (in-app file:// or SAF content://).
@@ -571,17 +586,26 @@ fun InputControlsScreen() {
                             }
                             DropdownMenu(expanded = copyMenuForId == controller.getId(), onDismissRequest = { copyMenuForId = null }) {
                                 DropdownMenuItem(text = { Text("From Default / Any Controller") }, onClick = {
-                                    val tgt = currentProfile?.addController(controller.getId())
-                                    val src = currentProfile?.getOrCreateDefaultController()
-                                    if (tgt != null) { tgt.copyBindingsFrom(src); currentProfile?.save(); refreshControllers() }
+                                    // #333: reload from disk first (the editor saves to a separate profile
+                                    // instance), and never apply an EMPTY source — that would wipe the
+                                    // target's bindings.
+                                    currentProfile?.loadControllers()
+                                    val src = currentProfile?.getController(com.winlator.star.inputcontrols.ControlsProfile.DEFAULT_CONTROLLER_ID)
+                                    if (src != null && src.getControllerBindingCount() > 0) {
+                                        val tgt = currentProfile?.addController(controller.getId())
+                                        if (tgt != null) { tgt.copyBindingsFrom(src); currentProfile?.save(); refreshControllers() }
+                                    }
                                     copyMenuForId = null
                                 })
                                 for (other in controllers) {
                                     if (other.getId() == controller.getId() || other.getControllerBindingCount() == 0) continue
                                     DropdownMenuItem(text = { Text("From ${other.getName()}") }, onClick = {
-                                        val tgt = currentProfile?.addController(controller.getId())
+                                        currentProfile?.loadControllers()
                                         val src = currentProfile?.getController(other.getId())
-                                        if (tgt != null && src != null) { tgt.copyBindingsFrom(src); currentProfile?.save(); refreshControllers() }
+                                        if (src != null && src.getControllerBindingCount() > 0) {
+                                            val tgt = currentProfile?.addController(controller.getId())
+                                            if (tgt != null) { tgt.copyBindingsFrom(src); currentProfile?.save(); refreshControllers() }
+                                        }
                                         copyMenuForId = null
                                     })
                                 }
