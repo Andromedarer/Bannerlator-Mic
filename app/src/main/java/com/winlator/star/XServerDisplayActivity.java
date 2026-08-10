@@ -2658,21 +2658,30 @@ public class XServerDisplayActivity extends AppCompatActivity {
         try { return Integer.parseInt(ev.get(key).trim()); } catch (Exception ex) { return null; }
     }
 
-    // Bridge the per-container/per-game audio cog (BANNER_AUDIO_* env, resolved shortcut-over-container)
-    // into the "banner_audio" prefs that BOTH audio engines read. Only keys actually present are written,
-    // so a container with no audio cog set leaves the prefs (and any in-game choice) untouched.
-    private void seedAudioPrefsFromEnv(EnvVars ev) {
-        if (ev == null) return;
-        android.content.SharedPreferences.Editor e =
-                getSharedPreferences("banner_audio", MODE_PRIVATE).edit();
-        boolean any = false;
-        if (ev.has("BANNER_AUDIO_PRESET"))   { e.putString("preset", ev.get("BANNER_AUDIO_PRESET")); any = true; }
-        Integer perf = envInt(ev, "BANNER_AUDIO_PERF"); if (perf != null) { e.putInt("perf_mode", perf); any = true; }
-        if (ev.has("BANNER_AUDIO_ADAPTIVE")) { e.putBoolean("adaptive", !"0".equals(ev.get("BANNER_AUDIO_ADAPTIVE"))); any = true; }
-        Integer bf  = envInt(ev, "BANNER_AUDIO_BF");  if (bf  != null) { e.putInt("buffer_frames", bf);  any = true; }
-        Integer mbf = envInt(ev, "BANNER_AUDIO_MBF"); if (mbf != null) { e.putInt("max_buffer_frames", mbf); any = true; }
-        Integer lat = envInt(ev, "BANNER_AUDIO_LAT"); if (lat != null) { e.putInt("latency_msec", lat); any = true; }
-        if (any) e.apply();
+    // Establish the per-game/container audio baseline in banner_audio prefs at launch. ALWAYS writes a
+    // FULL config (not just the keys present) so a stale value from a prior session or the OTHER engine
+    // can't bleed in — the exact bug where a Pulse-era "Custom" (perf=1, adaptive off) leaked into ALSA
+    // and defeated its NONE default. BANNER_AUDIO_* env (shortcut-over-container) wins per key; where a
+    // key is absent the engine default fills it: ALSA -> NONE / "Stable" (the device-proven crackle-free
+    // mode), PulseAudio -> LOW_LATENCY / "Auto". In-game tweaks overwrite prefs for the running session;
+    // to make a choice persist per-game, set it in the shortcut/container audio cog (which this reads).
+    private void seedAudioPrefsForLaunch(EnvVars ev, boolean alsa) {
+        int defPerf = alsa ? 0 : 1;                       // ALSA NONE (proven) vs Pulse Auto/LOW_LATENCY
+        String defPreset = alsa ? "stable" : "auto";
+        boolean hasPreset   = ev != null && ev.has("BANNER_AUDIO_PRESET");
+        boolean hasAdaptive = ev != null && ev.has("BANNER_AUDIO_ADAPTIVE");
+        Integer perf = envInt(ev, "BANNER_AUDIO_PERF");
+        Integer bf   = envInt(ev, "BANNER_AUDIO_BF");
+        Integer mbf  = envInt(ev, "BANNER_AUDIO_MBF");
+        Integer lat  = envInt(ev, "BANNER_AUDIO_LAT");
+        getSharedPreferences("banner_audio", MODE_PRIVATE).edit()
+                .putString("preset", hasPreset ? ev.get("BANNER_AUDIO_PRESET") : defPreset)
+                .putInt("perf_mode", perf != null ? perf : defPerf)
+                .putBoolean("adaptive", hasAdaptive ? !"0".equals(ev.get("BANNER_AUDIO_ADAPTIVE")) : true)
+                .putInt("buffer_frames", bf != null ? bf : 0)
+                .putInt("max_buffer_frames", mbf != null ? mbf : 0)
+                .putInt("latency_msec", lat != null ? lat : 100)
+                .apply();
     }
 
     // Resolve the effective audio config from banner_audio prefs (already seeded from the container/
@@ -3786,11 +3795,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 )
         );
 
-        // Audio driver logic. First bridge the container/shortcut audio cog (BANNER_AUDIO_* env, already
-        // merged shortcut-over-container above) into the "banner_audio" prefs that BOTH engines read —
-        // otherwise those per-game settings would be written but never consumed. In-game tweaks then
-        // override for the session (they write the same prefs).
-        seedAudioPrefsFromEnv(envVars);
+        // Audio driver logic. First establish the per-game baseline (BANNER_AUDIO_* env, already merged
+        // shortcut-over-container above) in the "banner_audio" prefs that BOTH engines read — a FULL
+        // write with engine defaults for absent keys, so a stale value from a prior session or the other
+        // engine can't bleed in (the Pulse->ALSA "Custom" leak). In-game tweaks then override for the
+        // session; the shortcut/container cog is the persistent per-game store.
+        seedAudioPrefsForLaunch(envVars, audioDriver.equals("alsa"));
         if (audioDriver.equals("alsa")) {
             envVars.put("ANDROID_ALSA_SERVER", rootPath + UnixSocketConfig.ALSA_SERVER_PATH);
             envVars.put("ANDROID_ASERVER_USE_SHM", "true");
