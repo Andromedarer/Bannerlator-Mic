@@ -6,6 +6,7 @@ import android.content.Context;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.hardware.display.DisplayManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -250,10 +251,22 @@ public class ExternalDisplayController {
 
     private Display findPresentationDisplay() {
         if (displayManager == null) return null;
+        // Never target the display the activity's own window is already on. Samsung DeX exposes its
+        // virtual desktop as a DISPLAY_CATEGORY_PRESENTATION display, but the app is *running* on it —
+        // reparenting the game into a Presentation over the same display breaks fullscreen, the HUD,
+        // and pointer input (issue #339). A real USB-C→HDMI TV is a different displayId, so genuine
+        // external output is unaffected.
+        int currentId = Display.DEFAULT_DISPLAY;
+        Display cur = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+                ? activity.getDisplay()
+                : activity.getWindowManager().getDefaultDisplay();
+        if (cur != null) currentId = cur.getDisplayId();
         Display[] displays = displayManager.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION);
         for (Display d : displays) {
             // "HiddenDisplay" is a virtual overlay some OEMs expose; never target it.
-            if (d != null && !"HiddenDisplay".equals(d.getName())) return d;
+            if (d != null
+                    && !"HiddenDisplay".equals(d.getName())
+                    && d.getDisplayId() != currentId) return d;
         }
         return null;
     }

@@ -4059,11 +4059,32 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     }
                 };
         externalDisplayController = new com.winlator.star.display.ExternalDisplayController(this, xServerView, rootView, tvListener);
+
+        // Seed the master "Play on TV" / "Auto-switch" state from the container BEFORE start(): start()
+        // runs the first update() and would auto-swap immediately, so the persisted off-switch has to be
+        // applied first (issue #339 — the toggle previously reset to ON every launch).
+        try {
+            boolean tvEnabled = !"0".equals(container.getExtra("tv.enabled", "1"));
+            boolean tvAutoSwap = !"0".equals(container.getExtra("tv.autoSwap", "1"));
+            externalDisplayController.setEnabled(tvEnabled);
+            externalDisplayController.setAutoSwap(tvAutoSwap);
+            XServerDrawerState.INSTANCE.setTvPlayOnTv(tvEnabled);
+            XServerDrawerState.INSTANCE.setTvAutoSwap(tvAutoSwap);
+        } catch (Exception ignored) {}
+
         externalDisplayController.start();
 
-        // Wire the in-game TV tab controls to the controller.
-        XServerDrawerState.INSTANCE.onTvPlayOnTvChange = (b) -> externalDisplayController.setEnabled(b);
-        XServerDrawerState.INSTANCE.onTvAutoSwapChange = (b) -> externalDisplayController.setAutoSwap(b);
+        // Wire the in-game TV tab controls to the controller. Both master switches persist per-container.
+        XServerDrawerState.INSTANCE.onTvPlayOnTvChange = (b) -> {
+            externalDisplayController.setEnabled(b);
+            container.putExtra("tv.enabled", b ? "1" : "0");
+            container.saveData();
+        };
+        XServerDrawerState.INSTANCE.onTvAutoSwapChange = (b) -> {
+            externalDisplayController.setAutoSwap(b);
+            container.putExtra("tv.autoSwap", b ? "1" : "0");
+            container.saveData();
+        };
         XServerDrawerState.INSTANCE.onMoveToTv = () -> externalDisplayController.requestMoveToExternal();
         XServerDrawerState.INSTANCE.onBringBackFromTv = () -> externalDisplayController.bringBackToHandheld();
         XServerDrawerState.INSTANCE.onTvModeChange = (id) -> externalDisplayController.setPreferredModeId(id);
