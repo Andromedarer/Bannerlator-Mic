@@ -5728,3 +5728,39 @@ Contents on main since 2.9.8: #338 controller/touch fix (already merged) + THIS 
 Release: release.yml dispatch, release_tag=2.9.9, prerelease=false, make_latest=true. Notes = full markdown
 blob (matches 2.9.8 pattern) from scratchpad notes-2.9.9.md. ⚠️ release.yml tags DEFAULT branch (main) — pushed
 docs+version to main FIRST so tag lands on the cut commit; verify headSha==pushed + curl update.json after.
+
+## 2026-08-10 — 🔊 ALSA adaptive audio + full settings mirror + strict per-scope/per-engine config — ✅ MERGED to main
+Branch feat/alsa-adaptive-aaudio (tested @ ec5bbbb5, "alsa-hier") merged to main (fast-forward). Sibling
+to the merged PulseAudio adaptive stack; applies the same treatment to the ALSA path and unifies the
+settings model across BOTH engines. Device-proven end to end. Staging flavor = pubg.
+
+CRACKLE FIX (cpp/winlator/alsa_client.c, DEVICE-PROVEN via logcat `alsa_client`):
+- AlsaStream wrapper: grow buffer on xrun (getXRunCount+setBufferSizeInFrames), reopen on
+  AAUDIO_ERROR_DISCONNECTED (-899) to follow headphone/BT route changes, 200ms reopen throttle,
+  measurement logging (open/grow/hb).
+- Measurement caught two bugs the ear missed: stored REQUESTED buffer not device-capped actual (heartbeat
+  lied buf>cap + adaptBuffer cap-guard tripped so it never grew); LOW_LATENCY caps AAudio capacity to a
+  tiny FAST buffer (~3844 @48k) vs winealsa's ~13454 = starvation. Fix = PERFORMANCE_MODE_NONE + capture
+  actual got. Re-test: buf<=cap, adaptive grows, xruns 0->12-climbing collapsed to flat 0, route recovery
+  intact. User: "sounded clean both ways."
+
+FULL SETTINGS MIRROR (same presets/fine-tune popup driven for the active engine):
+- ALSAClient.nativeSetAudioConfig(perf,adaptive,bufTarget,maxBuf); perf passthrough (default NONE), maxBuf
+  clamps capacity, bufTarget sets buffer, adaptive gated; config-gen bump reopens live streams so in-game
+  changes apply WITHOUT relaunch (NULL-guarded). Driver badge in the popup; cog shown for ALSA too;
+  in-game AUDIO tab shows launch engine via XServerDrawerState.audioDriverId. Device-proven live apply.
+
+STRICT PER-SCOPE + PER-ENGINE CONFIG (no bleed on any axis) — DEVICE-PROVEN:
+- PERSISTENT = each scope's env, ENGINE-SCOPED keys BANNER_AUDIO_ALSA_* / BANNER_AUDIO_PULSE_* (container
+  + shortcut each own theirs; audioConfigToEnv writes only the active engine's prefix; audioConfigFromEnv
+  engine-aware default; shortcut-over-container). RUNTIME = banner_audio_<engine> prefs, EPHEMERAL,
+  reseeded IN FULL every launch from resolved per-scope env (seedAudioPrefsForLaunch) — no cross-launch/
+  cross-game memory. IN-GAME save persists to the launching SHORTCUT's env only (persistAudioToShortcut =
+  putExtra+saveData, mirrors resetPerfKey) — per-game, per-engine, never container/other games.
+- Verified on device (alsa-hier 84c988e2): in-game Low -> DiRT3 shortcut BANNER_AUDIO_ALSA_PERF=1; Pulse
+  keys absent; all 14 other games' shortcuts clean; container .container config untouched; cog<->in-game
+  agree; live apply (gen 1->2 reopening); launch reads the shortcut's cog. Cross-engine/cross-game/
+  game->container bleed all impossible. Contract doc atop AudioSettingsDialog.kt = 3-axis model.
+- Pulse internals untouched (merged/proven stack): resolveSinkArgs just re-pointed at banner_audio_pulseaudio.
+- ⚠ Existing single-store banner_audio prefs from older builds are orphaned -> first post-merge launch
+  uses safe engine defaults (no migration; the old shared file was the polluted one).
