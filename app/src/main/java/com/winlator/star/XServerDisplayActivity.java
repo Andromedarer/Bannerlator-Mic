@@ -175,6 +175,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private com.winlator.star.display.ExternalDisplayController externalDisplayController;
     // Set on a real background (onPause outside PiP) so onResume rebuilds the guest audio sink.
     private boolean wasBackgrounded = false;
+    // Mid-game output-route watcher: plugging/unplugging wired (or USB/BT/HDMI) headphones during play
+    // changes Android's default output, but the guest's PulseAudio AAudioSink keeps its already-open
+    // stream on the old device (and on unplug the stream dies without reopening -> muted speaker). We
+    // catch add/remove and fire the same resetGuestAudio() the HDMI/background path uses. Registered in
+    // onResume / dropped in onPause. `primed` swallows the initial device list delivered at register.
+    private android.media.AudioDeviceCallback audioRouteCallback;
+    private boolean audioRouteCallbackPrimed = false;
     // In-app wireless-cast device discovery (Google Cast via mDNS) for the Cast dialog.
     private com.winlator.star.cast.CastDiscovery castDiscovery;
     // Version B Part 2: captures + H.264-encodes the game for casting (Step 1 records to a file).
@@ -2091,6 +2098,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
             handler.postDelayed(this::resetGuestAudio, 600);
         }
         applyHandheldDim(); // re-assert the handheld dim state after resume (brightness can reset)
+        // Watch for headphone/USB/BT/HDMI plug changes during play so audio follows the new route.
+        registerAudioRouteWatcher();
     }
 
     @Override
@@ -2121,6 +2130,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         handler.removeCallbacks(savePlaytimeRunnable);
         ProcessHelper.pauseAllWineProcesses();
         unregisterGyroSensor();
+        unregisterAudioRouteWatcher();
     }
 
     // Re-reads the calibration bias from the global prefs and hands it to WinHandler. GyroCalibrator
@@ -2656,6 +2666,87 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 android.util.Log.w("XServerDisplay", "guest audio reset failed", e);
             }
         }, "audio-reset").start();
+    }
+
+    // True for the physical output routes that, when (un)plugged mid-game, require the AAudio sink to
+    // reopen onto the new default (3.5mm, USB-C, Bluetooth, HDMI). Internal speaker/earpiece are the
+    // fallback route resetGuestAudio() re-grabs, so a change involving one of these still needs a reset.
+    private static boolean isRouteChangingOutput(android.media.AudioDeviceInfo d) {
+        if (d == null || !d.isSink()) return false;
+        switch (d.getType()) {
+            case android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES:
+            case android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET:
+            case android.media.AudioDeviceInfo.TYPE_USB_HEADSET:
+            case android.media.AudioDeviceInfo.TYPE_USB_DEVICE:
+            case android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP:
+            case android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO:
+            case android.media.AudioDeviceInfo.TYPE_HDMI:
+            case android.media.AudioDeviceInfo.TYPE_HDMI_ARC:
+            case android.media.AudioDeviceInfo.TYPE_HDMI_EARC:
+            case android.media.AudioDeviceInfo.TYPE_AUX_LINE:
+                return true;
+            default:
+                return d.getType() == 26 /* TYPE_BLE_HEADSET, API 31 */
+                    || d.getType() == 27 /* TYPE_BLE_SPEAKER, API 31 */;
+        }
+    }
+
+    // Debounced reset: a single plug event can surface as several add/remove callbacks in quick
+    // succession, so coalesce them into one resetGuestAudio() ~350ms after the last one settles.
+    private final Runnable audioRouteResetRunnable = this::resetGuestAudio;
+
+    private void onAudioRouteChanged(android.media.AudioDeviceInfo[] devices) {
+        boolean relevant = false;
+        if (devices != null) {
+            for (android.media.AudioDeviceInfo d : devices) {
+                if (isRouteChangingOutput(d)) { relevant = true; break; }
+            }
+        }
+        if (!relevant) return;
+        handler.removeCallbacks(audioRouteResetRunnable);
+        handler.postDelayed(audioRouteResetRunnable, 350);
+    }
+
+    /** Start watching for mid-game output-route changes (headphone plug/unplug etc.). Idempotent. */
+    private void registerAudioRouteWatcher() {
+        if (audioRouteCallback != null) return;
+        try {
+            final android.media.AudioManager am =
+                (android.media.AudioManager) getSystemService(AUDIO_SERVICE);
+            if (am == null) return;
+            audioRouteCallbackPrimed = false;
+            audioRouteCallback = new android.media.AudioDeviceCallback() {
+                @Override
+                public void onAudioDevicesAdded(android.media.AudioDeviceInfo[] addedDevices) {
+                    // The first callback after register is the current device list — not a route change.
+                    if (!audioRouteCallbackPrimed) { audioRouteCallbackPrimed = true; return; }
+                    onAudioRouteChanged(addedDevices);
+                }
+                @Override
+                public void onAudioDevicesRemoved(android.media.AudioDeviceInfo[] removedDevices) {
+                    onAudioRouteChanged(removedDevices);
+                }
+            };
+            am.registerAudioDeviceCallback(audioRouteCallback, handler);
+        } catch (Exception e) {
+            android.util.Log.w("XServerDisplay", "audio route watcher register failed", e);
+            audioRouteCallback = null;
+        }
+    }
+
+    /** Stop watching output-route changes and cancel any pending debounced reset. Idempotent. */
+    private void unregisterAudioRouteWatcher() {
+        handler.removeCallbacks(audioRouteResetRunnable);
+        if (audioRouteCallback == null) return;
+        try {
+            final android.media.AudioManager am =
+                (android.media.AudioManager) getSystemService(AUDIO_SERVICE);
+            if (am != null) am.unregisterAudioDeviceCallback(audioRouteCallback);
+        } catch (Exception e) {
+            android.util.Log.w("XServerDisplay", "audio route watcher unregister failed", e);
+        } finally {
+            audioRouteCallback = null;
+        }
     }
 
     /** Dim the handheld (host) window while the game is on the TV, if the user enabled it (battery/heat
