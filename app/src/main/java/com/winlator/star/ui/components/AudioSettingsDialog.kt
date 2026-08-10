@@ -24,6 +24,29 @@ import androidx.compose.ui.window.Dialog
  * Fixes crackling (AAudio buffer underruns) with an adaptive, self-sizing buffer, plus manual presets
  * and fine-tuning. Sink-side fields (perfMode/adaptive/buffer) apply LIVE in-game via sink recreate;
  * latencyMsec is the guest winepulse buffer, fixed at connect → applies next launch.
+ *
+ * ── CONFIG MODEL & NO-BLEED CONTRACT (read before changing any audio-config path) ──────────────────
+ * There are exactly TWO stores. Keep them straight or settings leak between games/engines:
+ *
+ *   1. PER-GAME ENV  (BANNER_AUDIO_* in a container's/shortcut's env)  — the PERSISTENT per-game store.
+ *      Written by the cog via [audioConfigToEnv] (which strips old BANNER_AUDIO_* first — no stale
+ *      accumulation). Read back by [audioConfigFromEnv]. Never shared between games. Shortcut overrides
+ *      container (normal env-merge precedence).
+ *
+ *   2. banner_audio PREFS  — a SINGLE process-wide store BOTH engines (PulseAudio + ALSA) read at run
+ *      time. This is the only cross-engine/cross-game bleed surface, so it is treated as EPHEMERAL:
+ *      XServerDisplayActivity.seedAudioPrefsForLaunch REWRITES IT IN FULL at every launch from store #1,
+ *      filling any absent key with the launching engine's default (ALSA→NONE/"stable", Pulse→"auto").
+ *      That full overwrite is what stops a value left by the other engine (or a prior game) from
+ *      bleeding in. In-game edits ([saveAudioConfig]) overwrite prefs for the running session only.
+ *
+ * INVARIANTS — do not break:
+ *   • The launch seed must write EVERY key (never "only keys present"), or the previous value survives
+ *     and bleeds. (This was the DiRT-3 Pulse→ALSA "Custom" leak.)
+ *   • Any DEFAULT shown/used before a game is configured must be engine-aware — Pulse-oriented perf=1
+ *     defaults must NOT appear on the ALSA path. [audioConfigFromEnv] takes driverId for this reason;
+ *     keep the launch-seed defaults and these UI defaults in lock-step.
+ *   • The in-game tab is a live session tweak, not persistence — the cog is the sticky per-game store.
  */
 data class AudioConfig(
     val preset: String = PRESET_AUTO,
@@ -110,14 +133,23 @@ fun audioConfigToEnv(existingEnv: String, c: AudioConfig): String {
     return (keep + add).joinToString(" ")
 }
 
-fun audioConfigFromEnv(env: String): AudioConfig {
+/**
+ * Read a container/shortcut env string into an AudioConfig. `driverId` makes the DEFAULTS (used only
+ * when a game has no BANNER_AUDIO_* set yet) engine-appropriate, so the Pulse-oriented Auto/perf=1
+ * default never bleeds into the ALSA editor: ALSA shows "Stable" (perf=0, its proven crackle-free mode),
+ * PulseAudio shows "Auto". This matches XServerDisplayActivity.seedAudioPrefsForLaunch's launch defaults.
+ */
+fun audioConfigFromEnv(env: String, driverId: String = ""): AudioConfig {
     val m = env.split(" ").filter { it.contains("=") }.associate {
         val i = it.indexOf('='); it.substring(0, i) to it.substring(i + 1)
     }
     val def = AudioConfig()
+    val alsa = driverId == "alsa"
+    val defPerf = if (alsa) 0 else def.perfMode          // ALSA -> NONE, Pulse -> LOW_LATENCY (Auto)
+    val defPreset = if (alsa) PRESET_STABLE else def.preset
     return AudioConfig(
-        preset = m["BANNER_AUDIO_PRESET"] ?: def.preset,
-        perfMode = m["BANNER_AUDIO_PERF"]?.toIntOrNull() ?: def.perfMode,
+        preset = m["BANNER_AUDIO_PRESET"] ?: defPreset,
+        perfMode = m["BANNER_AUDIO_PERF"]?.toIntOrNull() ?: defPerf,
         adaptive = (m["BANNER_AUDIO_ADAPTIVE"]?.toIntOrNull() ?: 1) != 0,
         bufferFrames = m["BANNER_AUDIO_BF"]?.toIntOrNull() ?: 0,
         maxBufferFrames = m["BANNER_AUDIO_MBF"]?.toIntOrNull() ?: 0,

@@ -6495,7 +6495,7 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                     }
                     if (showScAudioSettings) {
                         AudioSettingsDialog(
-                            initial = audioConfigFromEnv(envVarsStr),
+                            initial = audioConfigFromEnv(envVarsStr, StringUtils.parseIdentifier(selectedAudioDriver)),
                             scopeLabel = "this game",
                             latencyLive = true,
                             driverLabel = when (StringUtils.parseIdentifier(selectedAudioDriver)) {

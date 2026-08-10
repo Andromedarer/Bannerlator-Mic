@@ -962,7 +962,7 @@ private fun TopLevelFields(
         }
         if (showAudioSettings) {
             AudioSettingsDialog(
-                initial = audioConfigFromEnv(viewModel.envVarsStr),
+                initial = audioConfigFromEnv(viewModel.envVarsStr, StringUtils.parseIdentifier(viewModel.selectedAudioDriver)),
                 scopeLabel = "this container",
                 latencyLive = true,
                 driverLabel = when (StringUtils.parseIdentifier(viewModel.selectedAudioDriver)) {
