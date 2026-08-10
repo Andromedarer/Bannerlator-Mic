@@ -2095,7 +2095,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // after resume so sound comes back. Only after a real background (not a PiP/dialog pause).
         if (wasBackgrounded) {
             wasBackgrounded = false;
-            handler.postDelayed(this::resetGuestAudioForRouteChange, 600); // recreate: also recovers a route change (BT/headset) made while backgrounded, which suspend/resume can't
+            handler.postDelayed(this::resetGuestAudio, 600); // smooth: suspend/resume the CURRENT sink for a plain background/foreground; real route changes are recreated live by the always-registered watcher
         }
         applyHandheldDim(); // re-assert the handheld dim state after resume (brightness can reset)
         // Watch for headphone/USB/BT/HDMI plug changes during play so audio follows the new route.
@@ -2130,7 +2130,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
         handler.removeCallbacks(savePlaytimeRunnable);
         ProcessHelper.pauseAllWineProcesses();
         unregisterGyroSensor();
-        unregisterAudioRouteWatcher();
     }
 
     // Re-reads the calibration bias from the global prefs and hands it to WinHandler. GyroCalibrator
@@ -3221,6 +3220,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         com.winlator.star.perf.TempWatchdog.INSTANCE.stop();
         com.winlator.star.perf.PerfRevertRegistry.INSTANCE.revertAll();
         unregisterGyroSensor();
+        unregisterAudioRouteWatcher();
         stopDxApiDetection();
         cancelLaunchTimers();
         // Version-A spike: unregister the display listener, dismiss the Presentation, and pull the

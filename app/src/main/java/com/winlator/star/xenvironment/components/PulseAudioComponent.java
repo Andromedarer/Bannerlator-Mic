@@ -73,6 +73,9 @@ public class PulseAudioComponent extends EnvironmentComponent {
     private static final Object recoverLock = new Object();
     private static int lastRecoverModuleIdx = -1;
     private static int recoverCounter = 0;
+    // Live sink name the guest is playing through — starts "AAudioSink", becomes recoverN after
+    // any route-change recreate. suspend/resume must target THIS, not a stale hardcoded name.
+    private static volatile String currentSinkName = "AAudioSink";
 
     public PulseAudioComponent(UnixSocketConfig socketConfig) {
         this.socketConfig = socketConfig;
@@ -110,9 +113,9 @@ public class PulseAudioComponent extends EnvironmentComponent {
     public void resetAudioSink() {
         String dir = pulseDir().getAbsolutePath(), server = pulseServer();
         try {
-            int r1 = nativeSuspendSink(dir, server, "AAudioSink", true);
+            int r1 = nativeSuspendSink(dir, server, currentSinkName, true);
             try { Thread.sleep(200); } catch (InterruptedException ignored) {}
-            int r2 = nativeSuspendSink(dir, server, "AAudioSink", false);
+            int r2 = nativeSuspendSink(dir, server, currentSinkName, false);
             if (r1 != 0 || r2 != 0) android.util.Log.w("PulseAudio", "sink suspend/resume rc=" + r1 + "/" + r2);
         } catch (Throwable t) {
             android.util.Log.w("PulseAudio", "resetAudioSink failed", t);
@@ -126,7 +129,7 @@ public class PulseAudioComponent extends EnvironmentComponent {
      * main thread. No-op safe if the daemon isn't reachable.
      */
     public void setSinkSuspended(boolean suspend) {
-        try { nativeSuspendSink(pulseDir().getAbsolutePath(), pulseServer(), "AAudioSink", suspend); }
+        try { nativeSuspendSink(pulseDir().getAbsolutePath(), pulseServer(), currentSinkName, suspend); }
         catch (Throwable t) { android.util.Log.w("PulseAudio", "setSinkSuspended failed", t); }
     }
 
@@ -145,7 +148,7 @@ public class PulseAudioComponent extends EnvironmentComponent {
             String name = "recover" + (++recoverCounter);
             try {
                 int idx = nativeRecreateSink(dir, server, name, resolveSinkArgs(), lastRecoverModuleIdx);
-                if (idx >= 0) lastRecoverModuleIdx = idx;
+                if (idx >= 0) { lastRecoverModuleIdx = idx; currentSinkName = name; }
                 else android.util.Log.w("PulseAudio", "recreateSink rc=" + idx);
             } catch (Throwable t) {
                 android.util.Log.w("PulseAudio", "recreateSinkForRouteChange failed", t);
