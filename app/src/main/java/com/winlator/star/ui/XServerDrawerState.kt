@@ -203,6 +203,8 @@ object XServerDrawerState {
     // Engine that actually launched ("PulseAudio" / "ALSA"), shown at the top of the in-game AUDIO tab
     // so the user knows which engine these settings hit. Set by the activity at launch.
     @JvmField var audioDriverLabel: String = ""
+    // Engine id ("alsa" / "pulseaudio") — selects the per-engine prefs file the in-game tab reads/writes.
+    @JvmField var audioDriverId: String = ""
 
     // TV output display modes (resolution + refresh rate). Seeded by the activity from the connected
     // display's getSupportedModes() so the user can switch off e.g. 4K@30 to 1080p@60. id 0 = default.

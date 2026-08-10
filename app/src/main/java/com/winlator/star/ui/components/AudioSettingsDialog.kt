@@ -26,27 +26,28 @@ import androidx.compose.ui.window.Dialog
  * latencyMsec is the guest winepulse buffer, fixed at connect → applies next launch.
  *
  * ── CONFIG MODEL & NO-BLEED CONTRACT (read before changing any audio-config path) ──────────────────
- * There are exactly TWO stores. Keep them straight or settings leak between games/engines:
+ * Settings must never bleed between the two engines. That is guaranteed STRUCTURALLY: each engine has
+ * its OWN prefs file, so PulseAudio literally never reads ALSA's keys or vice-versa. Two kinds of store:
  *
- *   1. PER-GAME ENV  (BANNER_AUDIO_* in a container's/shortcut's env)  — the PERSISTENT per-game store.
- *      Written by the cog via [audioConfigToEnv] (which strips old BANNER_AUDIO_* first — no stale
- *      accumulation). Read back by [audioConfigFromEnv]. Never shared between games. Shortcut overrides
- *      container (normal env-merge precedence).
+ *   1. PER-ENGINE PREFS  — [audioPrefsName]: "banner_audio_alsa" / "banner_audio_pulseaudio". The
+ *      PERSISTENT per-engine memory ("each engine remembers its own"): the in-game AUDIO tab reads/writes
+ *      it via [loadAudioConfig]/[saveAudioConfig], and each engine reads only its own at run time
+ *      (ALSA: applyAlsaAudioConfig; Pulse: PulseAudioComponent.resolveSinkArgs). Empty file → engine
+ *      default (ALSA→NONE/"stable", Pulse→LOW_LATENCY/"auto").
  *
- *   2. banner_audio PREFS  — a SINGLE process-wide store BOTH engines (PulseAudio + ALSA) read at run
- *      time. This is the only cross-engine/cross-game bleed surface, so it is treated as EPHEMERAL:
- *      XServerDisplayActivity.seedAudioPrefsForLaunch REWRITES IT IN FULL at every launch from store #1,
- *      filling any absent key with the launching engine's default (ALSA→NONE/"stable", Pulse→"auto").
- *      That full overwrite is what stops a value left by the other engine (or a prior game) from
- *      bleeding in. In-game edits ([saveAudioConfig]) overwrite prefs for the running session only.
+ *   2. PER-GAME ENV  (BANNER_AUDIO_* in a container's/shortcut's env)  — an optional per-game OVERRIDE
+ *      set by the cog via [audioConfigToEnv] (strips old BANNER_AUDIO_* first — no stale accumulation),
+ *      read by [audioConfigFromEnv]. At launch, if present, XServerDisplayActivity.seedAudioPrefsForLaunch
+ *      writes it into that engine's file (cog wins for this launch); if absent, the engine's remembered
+ *      file is left untouched. Shortcut overrides container (normal env-merge precedence).
  *
  * INVARIANTS — do not break:
- *   • The launch seed must write EVERY key (never "only keys present"), or the previous value survives
- *     and bleeds. (This was the DiRT-3 Pulse→ALSA "Custom" leak.)
- *   • Any DEFAULT shown/used before a game is configured must be engine-aware — Pulse-oriented perf=1
- *     defaults must NOT appear on the ALSA path. [audioConfigFromEnv] takes driverId for this reason;
- *     keep the launch-seed defaults and these UI defaults in lock-step.
- *   • The in-game tab is a live session tweak, not persistence — the cog is the sticky per-game store.
+ *   • Every engine reader/writer must go through [audioPrefsName] for its OWN engine — never a shared
+ *     "banner_audio" file, or the two engines start sharing state again.
+ *   • Any DEFAULT used before an engine is configured must be engine-aware ([audioConfigFromEnv]/
+ *     [loadAudioConfig] take driverId): a Pulse perf=1 default must never appear on the ALSA path.
+ *   • A per-game cog wins at launch and (by writing that engine's file) also becomes the engine's
+ *     remembered default until changed — this is within one engine only; it can never cross to the other.
  */
 data class AudioConfig(
     val preset: String = PRESET_AUTO,
@@ -100,12 +101,18 @@ val AUDIO_PRESETS = listOf(
         "Manual control of every buffer knob.")
 )
 
-/* ---- persistence: session prefs (in-game / effective) ---- */
-fun loadAudioConfig(ctx: Context): AudioConfig {
-    val p = ctx.getSharedPreferences(AUDIO_PREFS, Context.MODE_PRIVATE)
+/* ---- persistence: PER-ENGINE prefs (each engine remembers its own; no cross-engine bleed) ---- */
+/** Prefs file for an engine. ALSA and PulseAudio get separate files so their settings never mix. */
+fun audioPrefsName(driverId: String): String =
+    if (driverId == "alsa") "${AUDIO_PREFS}_alsa" else "${AUDIO_PREFS}_pulseaudio"
+
+fun loadAudioConfig(ctx: Context, driverId: String): AudioConfig {
+    val p = ctx.getSharedPreferences(audioPrefsName(driverId), Context.MODE_PRIVATE)
+    val alsa = driverId == "alsa"
+    val defPreset = if (alsa) PRESET_STABLE else PRESET_AUTO   // engine-aware default for a fresh file
     return AudioConfig(
-        preset = p.getString("preset", PRESET_AUTO) ?: PRESET_AUTO,
-        perfMode = p.getInt("perf_mode", 1),
+        preset = p.getString("preset", defPreset) ?: defPreset,
+        perfMode = p.getInt("perf_mode", if (alsa) 0 else 1),  // ALSA -> NONE (proven), Pulse -> LOW_LATENCY
         adaptive = p.getBoolean("adaptive", true),
         bufferFrames = p.getInt("buffer_frames", 0),
         maxBufferFrames = p.getInt("max_buffer_frames", 0),
@@ -113,8 +120,8 @@ fun loadAudioConfig(ctx: Context): AudioConfig {
     )
 }
 
-fun saveAudioConfig(ctx: Context, c: AudioConfig) {
-    ctx.getSharedPreferences(AUDIO_PREFS, Context.MODE_PRIVATE).edit()
+fun saveAudioConfig(ctx: Context, driverId: String, c: AudioConfig) {
+    ctx.getSharedPreferences(audioPrefsName(driverId), Context.MODE_PRIVATE).edit()
         .putString("preset", c.preset).putInt("perf_mode", c.perfMode)
         .putBoolean("adaptive", c.adaptive).putInt("buffer_frames", c.bufferFrames)
         .putInt("max_buffer_frames", c.maxBufferFrames).putInt("latency_msec", c.latencyMsec)

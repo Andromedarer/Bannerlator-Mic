@@ -2658,23 +2658,25 @@ public class XServerDisplayActivity extends AppCompatActivity {
         try { return Integer.parseInt(ev.get(key).trim()); } catch (Exception ex) { return null; }
     }
 
-    // Establish the per-game/container audio baseline in banner_audio prefs at launch. ALWAYS writes a
-    // FULL config (not just the keys present) so a stale value from a prior session or the OTHER engine
-    // can't bleed in — the exact bug where a Pulse-era "Custom" (perf=1, adaptive off) leaked into ALSA
-    // and defeated its NONE default. BANNER_AUDIO_* env (shortcut-over-container) wins per key; where a
-    // key is absent the engine default fills it: ALSA -> NONE / "Stable" (the device-proven crackle-free
-    // mode), PulseAudio -> LOW_LATENCY / "Auto". In-game tweaks overwrite prefs for the running session;
-    // to make a choice persist per-game, set it in the shortcut/container audio cog (which this reads).
+    private String audioPrefsName(boolean alsa) { return alsa ? "banner_audio_alsa" : "banner_audio_pulseaudio"; }
+
+    // Apply a per-game cog (BANNER_AUDIO_* env, shortcut-over-container) at launch by writing it into the
+    // launching engine's OWN prefs file — so the cog wins for this launch AND both engines stay strictly
+    // separate (Pulse never touches ALSA's file, so nothing can bleed across engines, ever). If the game
+    // has NO cog, the engine's remembered file is left untouched ("each engine remembers its own"); the
+    // engine reader supplies the engine-correct default for a fresh file. A full write (engine default
+    // for any key the cog omits) so a cog is a complete, self-contained config for that engine.
     private void seedAudioPrefsForLaunch(EnvVars ev, boolean alsa) {
-        int defPerf = alsa ? 0 : 1;                       // ALSA NONE (proven) vs Pulse Auto/LOW_LATENCY
+        if (ev == null || !ev.has("BANNER_AUDIO_PERF")) return;   // no per-game cog -> keep engine memory
+        int defPerf = alsa ? 0 : 1;                                // ALSA NONE (proven) vs Pulse Auto
         String defPreset = alsa ? "stable" : "auto";
-        boolean hasPreset   = ev != null && ev.has("BANNER_AUDIO_PRESET");
-        boolean hasAdaptive = ev != null && ev.has("BANNER_AUDIO_ADAPTIVE");
+        boolean hasPreset   = ev.has("BANNER_AUDIO_PRESET");
+        boolean hasAdaptive = ev.has("BANNER_AUDIO_ADAPTIVE");
         Integer perf = envInt(ev, "BANNER_AUDIO_PERF");
         Integer bf   = envInt(ev, "BANNER_AUDIO_BF");
         Integer mbf  = envInt(ev, "BANNER_AUDIO_MBF");
         Integer lat  = envInt(ev, "BANNER_AUDIO_LAT");
-        getSharedPreferences("banner_audio", MODE_PRIVATE).edit()
+        getSharedPreferences(audioPrefsName(alsa), MODE_PRIVATE).edit()
                 .putString("preset", hasPreset ? ev.get("BANNER_AUDIO_PRESET") : defPreset)
                 .putInt("perf_mode", perf != null ? perf : defPerf)
                 .putBoolean("adaptive", hasAdaptive ? !"0".equals(ev.get("BANNER_AUDIO_ADAPTIVE")) : true)
@@ -2684,14 +2686,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 .apply();
     }
 
-    // Resolve the effective audio config from banner_audio prefs (already seeded from the container/
-    // shortcut env, plus any live in-game tweak) and push it to the native ALSA player. ALSA defaults to
-    // NONE — the device-proven crackle-free mode — when the user hasn't explicitly chosen a performance
-    // mode; explicit presets win. Safe before streams open (config is process-global) and again on
-    // in-game apply, where the bumped generation makes live streams reopen without a relaunch.
+    // Resolve the effective ALSA config from the ALSA engine's OWN prefs file (banner_audio_alsa — a
+    // per-game cog was written here at launch if present, else it's the remembered/in-game config) and
+    // push it to the native ALSA player. Defaults to NONE — the device-proven crackle-free mode — for a
+    // fresh file. Never reads Pulse's file, so no cross-engine bleed. Safe before streams open (config is
+    // process-global) and again on in-game apply, where the bumped generation reopens streams live.
     private void applyAlsaAudioConfig() {
         try {
-            android.content.SharedPreferences p = getSharedPreferences("banner_audio", MODE_PRIVATE);
+            android.content.SharedPreferences p = getSharedPreferences("banner_audio_alsa", MODE_PRIVATE);
             int perf = p.contains("perf_mode") ? p.getInt("perf_mode", 0) : 0; // ALSA proven default = NONE
             int adaptive = p.getBoolean("adaptive", true) ? 1 : 0;
             int bf  = p.getInt("buffer_frames", 0);
@@ -3795,11 +3797,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 )
         );
 
-        // Audio driver logic. First establish the per-game baseline (BANNER_AUDIO_* env, already merged
-        // shortcut-over-container above) in the "banner_audio" prefs that BOTH engines read — a FULL
-        // write with engine defaults for absent keys, so a stale value from a prior session or the other
-        // engine can't bleed in (the Pulse->ALSA "Custom" leak). In-game tweaks then override for the
-        // session; the shortcut/container cog is the persistent per-game store.
+        // Audio driver logic. If this game has a per-game audio cog (BANNER_AUDIO_* env, already merged
+        // shortcut-over-container above), apply it into the LAUNCHING ENGINE'S OWN prefs file; if not,
+        // that engine's remembered file is left as-is. Each engine has its own file (banner_audio_alsa /
+        // banner_audio_pulseaudio), so settings can never bleed between the two stacks — the Pulse->ALSA
+        // "Custom" leak is structurally impossible. In-game tweaks persist to the same per-engine file.
         seedAudioPrefsForLaunch(envVars, audioDriver.equals("alsa"));
         if (audioDriver.equals("alsa")) {
             envVars.put("ANDROID_ALSA_SERVER", rootPath + UnixSocketConfig.ALSA_SERVER_PATH);
@@ -3813,11 +3815,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
         } else if (audioDriver.equals("pulseaudio")) {
             envVars.put("PULSE_SERVER", rootPath + UnixSocketConfig.PULSE_SERVER_PATH);
             // Guest-side audio buffer (winepulse). Paired with the sink-side adaptive buffer, this is
-            // the other half of the crackle/latency tradeoff. Default comes from the audio preset
-            // ("banner_audio" prefs, default 100ms); a container/shortcut PULSE_LATENCY_MSEC still wins
-            // (env is already merged above, so only set it when the user hasn't).
+            // the other half of the crackle/latency tradeoff. Default comes from the Pulse engine's own
+            // prefs ("banner_audio_pulseaudio", default 100ms); a container/shortcut PULSE_LATENCY_MSEC
+            // still wins (env is already merged above, so only set it when the user hasn't).
             if (!envVars.has("PULSE_LATENCY_MSEC")) {
-                int lat = getSharedPreferences("banner_audio", MODE_PRIVATE).getInt("latency_msec", 100);
+                int lat = getSharedPreferences("banner_audio_pulseaudio", MODE_PRIVATE).getInt("latency_msec", 100);
                 if (lat > 0) envVars.put("PULSE_LATENCY_MSEC", String.valueOf(lat));
             }
             environment.addComponent(
@@ -4260,6 +4262,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // engine that actually launched: PulseAudio recreates its sink; ALSA re-pushes its native config
         // (which bumps the generation so live streams reopen). The drawer shows this label at the top.
         XServerDrawerState.INSTANCE.audioDriverLabel = audioDriverLabel(audioDriver);
+        XServerDrawerState.INSTANCE.audioDriverId = audioDriver;   // "alsa"/"pulseaudio" → per-engine prefs file
         XServerDrawerState.INSTANCE.onResetAudio = () -> {
             if ("alsa".equals(audioDriver)) applyAlsaAudioConfig(); else resetGuestAudioForRouteChange();
         };

@@ -301,7 +301,8 @@ private fun handleTabClick(tab: TabType, state: XServerDrawerState) {
 private fun AudioContent(state: XServerDrawerState) {
     val ctx = LocalContext.current
     var show by remember { mutableStateOf(false) }
-    var cfg by remember { mutableStateOf(com.winlator.star.ui.components.loadAudioConfig(ctx)) }
+    val driverId = state.audioDriverId
+    var cfg by remember { mutableStateOf(com.winlator.star.ui.components.loadAudioConfig(ctx, driverId)) }
     Text(
         "Audio",
         fontSize = 18.sp,
@@ -339,7 +340,7 @@ private fun AudioContent(state: XServerDrawerState) {
             driverLabel = engine,
             onDismiss = { show = false },
             onSave = { newCfg ->
-                com.winlator.star.ui.components.saveAudioConfig(ctx, newCfg)
+                com.winlator.star.ui.components.saveAudioConfig(ctx, driverId, newCfg)
                 cfg = newCfg
                 state.onReapplyAudio?.run()
                 show = false

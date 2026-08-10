@@ -43,13 +43,14 @@ public class PulseAudioComponent extends EnvironmentComponent {
     /**
      * Resolve the module-aaudio-sink argument string from the saved audio settings (written by the
      * in-app audio presets/fine-tune UI). Defaults to the "Auto / Smart" preset: AAudio LOW_LATENCY
-     * start + adaptive buffer growth on underruns. Keys live in the "banner_audio" prefs so the UI and
-     * the daemon agree; the same string is used for the initial default.pa load AND route-change recovery.
+     * start + adaptive buffer growth on underruns. Keys live in the PER-ENGINE "banner_audio_pulseaudio"
+     * prefs (NOT the shared store) so Pulse settings can never bleed into/out of the ALSA path; the same
+     * string is used for the initial default.pa load AND route-change recovery.
      */
     private String resolveSinkArgs() {
         try {
             android.content.SharedPreferences p = environment.getContext()
-                    .getSharedPreferences("banner_audio", android.content.Context.MODE_PRIVATE);
+                    .getSharedPreferences("banner_audio_pulseaudio", android.content.Context.MODE_PRIVATE);
             int perf = p.getInt("perf_mode", 1);            // 0=NONE, 1=LOW_LATENCY, 2=POWER_SAVING
             boolean adaptive = p.getBoolean("adaptive", true);
             int bf = p.getInt("buffer_frames", 0);          // 0 = auto (framesPerBurst*2)
