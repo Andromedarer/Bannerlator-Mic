@@ -129,7 +129,17 @@ fun InputControlsScreen() {
     DisposableEffect(Unit) {
         refreshProfiles()
         refreshControllers()
-        onDispose { }
+        // #333: live-refresh the External Controllers list on controller hot-plug while this screen is
+        // open (it otherwise only rebuilds on load / profile switch), so connecting or removing a pad
+        // updates the list without leaving and re-entering the screen.
+        val inputManager = context.getSystemService(Context.INPUT_SERVICE) as? android.hardware.input.InputManager
+        val hotplugListener = object : android.hardware.input.InputManager.InputDeviceListener {
+            override fun onInputDeviceAdded(deviceId: Int) { refreshControllers() }
+            override fun onInputDeviceRemoved(deviceId: Int) { refreshControllers() }
+            override fun onInputDeviceChanged(deviceId: Int) { refreshControllers() }
+        }
+        inputManager?.registerInputDeviceListener(hotplugListener, android.os.Handler(android.os.Looper.getMainLooper()))
+        onDispose { inputManager?.unregisterInputDeviceListener(hotplugListener) }
     }
 
     // Shared import logic: read a control profile from any Uri (in-app file:// or SAF content://).
