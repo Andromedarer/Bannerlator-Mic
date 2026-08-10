@@ -4016,6 +4016,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         // Version A: watch for an external (TV) display and reparent the game onto it, using the
         // handheld as the controller. The listener updates the in-game TV tab + raises Compose toasts.
+        // Gated behind FeatureFlags.TV_OUTPUT_ENABLED — while off, none of this is constructed or
+        // started, so a TV/DeX display never triggers an auto-swap and the in-game TV tab stays hidden
+        // (tvConnected / castSupported are left false). All external call sites null-guard the
+        // controller / caster, so leaving them null is safe. See issue #339.
+        if (com.winlator.star.FeatureFlags.TV_OUTPUT_ENABLED) {
         com.winlator.star.display.ExternalDisplayController.Listener tvListener =
                 new com.winlator.star.display.ExternalDisplayController.Listener() {
                     @Override public void onTvConnectedChanged(boolean connected, String displayName) {
@@ -4088,7 +4093,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
         XServerDrawerState.INSTANCE.onMoveToTv = () -> externalDisplayController.requestMoveToExternal();
         XServerDrawerState.INSTANCE.onBringBackFromTv = () -> externalDisplayController.bringBackToHandheld();
         XServerDrawerState.INSTANCE.onTvModeChange = (id) -> externalDisplayController.setPreferredModeId(id);
-        XServerDrawerState.INSTANCE.onResetAudio = () -> resetGuestAudio();
 
         // TV Options v2: seed from the container (TV settings are display-scoped, stored as tv.* extras).
         try {
@@ -4177,6 +4181,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
             startLiveCast(device, castSegmenter);
         };
         XServerDialogState.INSTANCE.onCastDisconnect = () -> stopCast();
+        } // end FeatureFlags.TV_OUTPUT_ENABLED
+
+        // Audio-tab callback — independent of the TV feature, so it is wired unconditionally.
+        XServerDrawerState.INSTANCE.onResetAudio = () -> resetGuestAudio();
 
         globalCursorSpeed = preferences.getFloat("cursor_speed", 1.0f);
         touchpadView = new TouchpadView(this, xServer, timeoutHandler, hideControlsRunnable);

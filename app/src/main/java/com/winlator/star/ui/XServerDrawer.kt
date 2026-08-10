@@ -214,8 +214,11 @@ fun XServerDrawer() {
                             handleTabClick(TabType.ADVANCED, state)
                         }
                         // TV / Cast tab: shown while a TV is wired-connected OR wireless casting is
-                        // available (so the "Cast to a TV" button is always reachable).
-                        if (tvConnected || castSupported) {
+                        // available (so the "Cast to a TV" button is always reachable). Gated behind
+                        // FeatureFlags.TV_OUTPUT_ENABLED so the whole tab disappears while the feature
+                        // is disabled (issue #339) — belt-and-braces on top of the controller/caster
+                        // never being constructed (which already leaves tvConnected/castSupported false).
+                        if (com.winlator.star.FeatureFlags.TV_OUTPUT_ENABLED && (tvConnected || castSupported)) {
                             Spacer(Modifier.height(6.dp))
                             TvTabButton(selectedTab == TabType.TV) {
                                 handleTabClick(TabType.TV, state)

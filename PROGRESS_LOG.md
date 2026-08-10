@@ -5701,3 +5701,15 @@ Fix (2 parts, clean branch off origin/main ca98c930):
 - XServerDisplayActivity: seed tv.enabled/tv.autoSwap from container BEFORE start() (start() runs the first
   auto-swap), and persist both master switches on change (previously reset to ON every launch).
 Status: compile-level only, NOT device-proven. CI build dispatched for DeX device test.
+
+## 2026-08-10 — TV feature kill-switch (branch fix/dex-external-display-339, on top of #339 fix)
+User wants the whole TV/external-display feature dormant ("as if it never existed") until finished.
+- New com/winlator/star/FeatureFlags.java: TV_OUTPUT_ENABLED = false.
+- XServerDisplayActivity: the entire ExternalDisplayController + wireless-cast setup block is wrapped in
+  `if (FeatureFlags.TV_OUTPUT_ENABLED) { ... }`. While off, controller/castDiscovery/gameCaster are never
+  constructed, so a TV/DeX connection NEVER auto-swaps (onResume/onPause/onDestroy all null-guard through).
+  onResetAudio (Audio tab, unrelated) was pulled OUT of the block so audio reset still works.
+- XServerDrawer.kt: TV tab gated `if (FeatureFlags.TV_OUTPUT_ENABLED && (tvConnected || castSupported))` —
+  tab hidden entirely.
+Reversible: flip the boolean to true to restore the feature + the #339 DeX guard + persisted toggle.
+NOTE: parallel session is working feat/pulseaudio-adaptive-aaudio-sink; #339 branch is separate.
