@@ -201,8 +201,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
         updateAutoHideForControllers();
         // #333: keep the in-game Players tab list current on hot-plug — it otherwise only rebuilds at
         // launch / manual slot change / Reset Input, so a controller connected or removed mid-session
-        // wouldn't appear/disappear in the list until one of those fired.
-        if (winHandler != null) XServerDialogState.INSTANCE.setPlayerSlots(buildPlayerSlotRows());
+        // wouldn't appear/disappear in the list until one of those fired. Via a method (not an inline
+        // field ref) so the field initializer doesn't forward-reference winHandler.
+        refreshInGamePlayerSlotList();
     };
     private TouchpadView touchpadView;
     private XEnvironment environment;
@@ -6442,6 +6443,12 @@ return true;
      * controls editor is open, and never forces controls on that the user chose to keep off. Main-thread
      * only (called from the debounced assignment listener, at launch, and on editor close).
      */
+    // #333: rebuild the in-game Players tab list from live slot state. In a method (not the
+    // fireControllerToast field initializer) to avoid an illegal forward reference to winHandler.
+    private void refreshInGamePlayerSlotList() {
+        if (winHandler != null) XServerDialogState.INSTANCE.setPlayerSlots(buildPlayerSlotRows());
+    }
+
     private void updateAutoHideForControllers() {
         if (controlsEditorOpen) return;
         if (winHandler == null || inputControlsView == null) return;
