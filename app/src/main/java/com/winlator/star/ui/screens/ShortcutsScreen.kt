@@ -249,6 +249,9 @@ import com.winlator.star.ui.theme.SurfaceVariant
 import com.winlator.star.ui.theme.SurfaceVariant as SurfaceVariantColor
 import com.winlator.star.widget.CPUListView
 import com.winlator.star.ui.components.EnvVarsEditor
+import com.winlator.star.ui.components.AudioSettingsDialog
+import com.winlator.star.ui.components.audioConfigFromEnv
+import com.winlator.star.ui.components.audioConfigToEnv
 import com.winlator.star.ui.components.PlayerSlotsEditor
 import com.winlator.star.winhandler.WinHandler
 import android.net.Uri
@@ -5760,6 +5763,7 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
     // Env vars live in dialog-level state (not in the tab) so switching tabs can't drop
     // in-progress edits; written back to the shortcut's extras in save() below.
     var envVarsStr by remember { mutableStateOf(shortcut.getExtra("envVars")) }
+    var showScAudioSettings by remember { mutableStateOf(false) }
     // The game's folder on the Android side, derived from the shortcut's Exec= path, so the
     // editor can look for DLLs the game ships. Null when the drive letter isn't mapped.
     val gameDir = remember(shortcut) {
@@ -6479,9 +6483,26 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                             onSelect = { selectedAudioDriver = it },
                             modifier = Modifier.weight(1f)
                         )
+                        if (StringUtils.parseIdentifier(selectedAudioDriver) == "pulseaudio") {
+                            IconButton(onClick = { showScAudioSettings = true }) {
+                                Icon(Icons.Default.Settings, contentDescription = "Audio settings", modifier = Modifier.size(18.dp))
+                            }
+                        }
                         IconButton(onClick = { helpRes = R.string.help_audio_driver }) {
                             Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
                         }
+                    }
+                    if (showScAudioSettings) {
+                        AudioSettingsDialog(
+                            initial = audioConfigFromEnv(envVarsStr),
+                            scopeLabel = "this game",
+                            latencyLive = true,
+                            onDismiss = { showScAudioSettings = false },
+                            onSave = { cfg ->
+                                envVarsStr = audioConfigToEnv(envVarsStr, cfg)
+                                showScAudioSettings = false
+                            }
+                        )
                     }
 
                     // Emulator
