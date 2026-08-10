@@ -588,7 +588,12 @@ fun InputControlsScreen() {
                             IconButton(onClick = { copyMenuForId = controller.getId() }) {
                                 Icon(Icons.Default.ContentCopy, "Copy bindings", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                            DropdownMenu(expanded = copyMenuForId == controller.getId(), onDismissRequest = { copyMenuForId = null }) {
+                            DropdownMenu(
+                                expanded = copyMenuForId == controller.getId(),
+                                onDismissRequest = { copyMenuForId = null },
+                                // #333 polish: match the shared outlined-menu-card look.
+                                modifier = Modifier.outlinedMenuCard()
+                            ) {
                                 DropdownMenuItem(text = { Text("From Default / Any Controller") }, onClick = {
                                     // #333: reload from disk first (the editor saves to a separate profile
                                     // instance), and never apply an EMPTY source — that would wipe the
@@ -603,6 +608,7 @@ fun InputControlsScreen() {
                                 })
                                 for (other in controllers) {
                                     if (other.getId() == controller.getId() || other.getControllerBindingCount() == 0) continue
+                                    MenuItemDivider()
                                     DropdownMenuItem(text = { Text("From ${other.getName()}") }, onClick = {
                                         currentProfile?.loadControllers()
                                         val src = currentProfile?.getController(other.getId())
