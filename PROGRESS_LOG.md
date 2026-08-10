@@ -5713,3 +5713,13 @@ User wants the whole TV/external-display feature dormant ("as if it never existe
   tab hidden entirely.
 Reversible: flip the boolean to true to restore the feature + the #339 DeX guard + persisted toggle.
 NOTE: parallel session is working feat/pulseaudio-adaptive-aaudio-sink; #339 branch is separate.
+
+## 2026-08-10 — 🏁 2.9.9 HOTFIX cut (vc 71, over 2.9.8)
+Contents on main since 2.9.8: #338 controller/touch fix (already merged) + THIS cut's changes:
+- TV feature fully disabled via FeatureFlags.TV_OUTPUT_ENABLED=false (no auto-swap, tab hidden) + #339 DeX
+  guard/persist underneath (dormant). Device-verified on user's device: tab gone, plug-in does nothing, audio OK.
+- LogcatCapture.DEFAULT_LINES 1000 -> 10000 (deeper bug-report logs; still app-scoped + redacted).
+- build.gradle versionCode 70->71, versionName 2.9.8->2.9.9. README What's New 2.9.9 + version box.
+Release: release.yml dispatch, release_tag=2.9.9, prerelease=false, make_latest=true. Notes = full markdown
+blob (matches 2.9.8 pattern) from scratchpad notes-2.9.9.md. ⚠️ release.yml tags DEFAULT branch (main) — pushed
+docs+version to main FIRST so tag lands on the cut commit; verify headSha==pushed + curl update.json after.

@@ -64,7 +64,7 @@
 |---|---|
 | **App label** | `Bannerlator Bionic` (standard) · `Bannerlator Bionic PuBG` (pubg) · `Bannerlator Bionic Ludashi` (ludashi) |
 | **Packages** | `com.winlator.banner` (standard) · `com.tencent.ig` (pubg) · `com.ludashi.benchmark` (ludashi) |
-| **Version** | Bannerlator **V 2.9.8** — built from Star **marcescence** (`versionName 2.9.8`, `versionCode 70`) |
+| **Version** | Bannerlator **V 2.9.9** — built from Star **marcescence** (`versionName 2.9.9`, `versionCode 71`) |
 | **Android SDK** | `compileSdk 34` · `targetSdk 28` · `minSdk 26` (Android 8.0+) |
 | **Lineage** | Winlator → cmod → Bionic Nightly → Star Bionic → **marcescence** → **Bannerlator** |
 
@@ -95,6 +95,7 @@ Every report gets its own **public discussion thread**. You can reply as the ori
 - [📌 Project Notice](#-project-notice)
 - [ℹ️ Information](#ℹ️-information)
 - [🐛 Report a Mali GPU Issue](#-report-a-mali-gpu-game-issue)
+- [🆕 What's New in 2.9.9](#-whats-new-in-299)
 - [🆕 What's New in 2.9.8](#-whats-new-in-298)
 - [🆕 What's New in 2.9.7](#-whats-new-in-297)
 - [🆕 What's New in 2.9.6](#-whats-new-in-296)
@@ -115,6 +116,14 @@ Every report gets its own **public discussion thread**. You can reply as the ori
 - [📄 License](#-license)
 
 ---
+
+## 🆕 What's New in 2.9.9
+
+**Hotfix over 2.9.8.** Entirely app-side — install over 2.9.8, everything carries over.
+
+- **📺 TV / external-display output temporarily turned off.** After reports it misbehaved on Samsung DeX ([#339](https://github.com/The412Banner/Bannerlator/issues/339)) — game wouldn't go fullscreen, FPS HUD vanished, mouse stopped — the whole TV feature (auto-swap onto a TV/DeX display, the in-game **TV tab**, and the experimental wireless caster) is disabled until it's finished and properly tested. Plugging in a TV no longer pushes the game to it. Nothing is lost; saved TV settings stay on disk and the feature (with the DeX fix in place) returns in a later build.
+- **🎮 Controller/touch fix ([#338](https://github.com/The412Banner/Bannerlator/issues/338), thanks @NaufalFajri).** An explicit "-- Disabled --" touch-controls choice is honored and persists across launches (no phantom on-screen pad, no fake timeout), and the smart-default on-screen pad no longer spawns when a physical controller is already connected at launch.
+- **📝 Deeper log capture.** Log Manager → "Capture logcat now" now grabs up to **10,000 lines** (was 1,000) — still app-scoped, redacted, and on-demand — so bug-report logs reach much further back.
 
 ## 🆕 What's New in 2.9.8
 

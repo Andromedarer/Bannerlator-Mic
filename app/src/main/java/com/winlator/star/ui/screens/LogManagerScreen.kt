@@ -266,7 +266,7 @@ fun LogManagerScreen(onClose: () -> Unit) {
                         modifier = Modifier.weight(1f).alpha(if (logcat) 1f else 0.4f)
                     ) {
                         if (!logcat) return@CardAction
-                        // Runtime.exec + 1000 lines + a redaction pass + a file write: far too
+                        // Runtime.exec + up to 10000 lines + a redaction pass + a file write: far too
                         // much for the UI thread (its own docs say so). Off to IO, refresh after.
                         scope.launch {
                             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
