@@ -6504,7 +6504,7 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                             },
                             onDismiss = { showScAudioSettings = false },
                             onSave = { cfg ->
-                                envVarsStr = audioConfigToEnv(envVarsStr, cfg)
+                                envVarsStr = audioConfigToEnv(envVarsStr, cfg, StringUtils.parseIdentifier(selectedAudioDriver))
                                 showScAudioSettings = false
                             }
                         )

@@ -2660,30 +2660,64 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     private String audioPrefsName(boolean alsa) { return alsa ? "banner_audio_alsa" : "banner_audio_pulseaudio"; }
 
-    // Apply a per-game cog (BANNER_AUDIO_* env, shortcut-over-container) at launch by writing it into the
-    // launching engine's OWN prefs file — so the cog wins for this launch AND both engines stay strictly
-    // separate (Pulse never touches ALSA's file, so nothing can bleed across engines, ever). If the game
-    // has NO cog, the engine's remembered file is left untouched ("each engine remembers its own"); the
-    // engine reader supplies the engine-correct default for a fresh file. A full write (engine default
-    // for any key the cog omits) so a cog is a complete, self-contained config for that engine.
+    // Reseed the launching engine's EPHEMERAL runtime prefs (banner_audio_<engine>) from the resolved
+    // per-scope config: engine-scoped env keys BANNER_AUDIO_<ENG>_* (already merged shortcut-over-
+    // container), else the engine default. A FULL write EVERY launch — the runtime file carries no
+    // cross-launch/cross-game memory; persistence lives only in the per-scope env. Reads only THIS
+    // engine's keys, so Pulse and ALSA never touch each other's config.
     private void seedAudioPrefsForLaunch(EnvVars ev, boolean alsa) {
-        if (ev == null || !ev.has("BANNER_AUDIO_PERF")) return;   // no per-game cog -> keep engine memory
+        String kp = "BANNER_AUDIO_" + (alsa ? "ALSA" : "PULSE") + "_";
         int defPerf = alsa ? 0 : 1;                                // ALSA NONE (proven) vs Pulse Auto
         String defPreset = alsa ? "stable" : "auto";
-        boolean hasPreset   = ev.has("BANNER_AUDIO_PRESET");
-        boolean hasAdaptive = ev.has("BANNER_AUDIO_ADAPTIVE");
-        Integer perf = envInt(ev, "BANNER_AUDIO_PERF");
-        Integer bf   = envInt(ev, "BANNER_AUDIO_BF");
-        Integer mbf  = envInt(ev, "BANNER_AUDIO_MBF");
-        Integer lat  = envInt(ev, "BANNER_AUDIO_LAT");
+        boolean hasPreset   = ev != null && ev.has(kp + "PRESET");
+        boolean hasAdaptive = ev != null && ev.has(kp + "ADAPTIVE");
+        Integer perf = envInt(ev, kp + "PERF");
+        Integer bf   = envInt(ev, kp + "BF");
+        Integer mbf  = envInt(ev, kp + "MBF");
+        Integer lat  = envInt(ev, kp + "LAT");
         getSharedPreferences(audioPrefsName(alsa), MODE_PRIVATE).edit()
-                .putString("preset", hasPreset ? ev.get("BANNER_AUDIO_PRESET") : defPreset)
+                .putString("preset", hasPreset ? ev.get(kp + "PRESET") : defPreset)
                 .putInt("perf_mode", perf != null ? perf : defPerf)
-                .putBoolean("adaptive", hasAdaptive ? !"0".equals(ev.get("BANNER_AUDIO_ADAPTIVE")) : true)
+                .putBoolean("adaptive", hasAdaptive ? !"0".equals(ev.get(kp + "ADAPTIVE")) : true)
                 .putInt("buffer_frames", bf != null ? bf : 0)
                 .putInt("max_buffer_frames", mbf != null ? mbf : 0)
                 .putInt("latency_msec", lat != null ? lat : 100)
                 .apply();
+    }
+
+    // Persist an in-game audio change to the LAUNCHING SHORTCUT only (never the container, never another
+    // game). Reads the just-updated runtime prefs for the active engine and writes them into the
+    // shortcut's env under that engine's key prefix, replacing only this engine's keys (the other
+    // engine's config + all non-audio env survive). Mirrors resetPerfKey's putExtra+saveData pattern.
+    private void persistAudioToShortcut(boolean alsa) {
+        if (shortcut == null) return;   // no per-game store (e.g. direct/installer launch)
+        try {
+            android.content.SharedPreferences p = getSharedPreferences(audioPrefsName(alsa), MODE_PRIVATE);
+            String kp = "BANNER_AUDIO_" + (alsa ? "ALSA" : "PULSE") + "_";
+            int perf = p.getInt("perf_mode", alsa ? 0 : 1);
+            boolean adaptive = p.getBoolean("adaptive", true);
+            int bf = p.getInt("buffer_frames", 0), mbf = p.getInt("max_buffer_frames", 0);
+            int lat = p.getInt("latency_msec", 100);
+            String preset = p.getString("preset", alsa ? "stable" : "auto");
+            StringBuilder sb = new StringBuilder();
+            String existing = shortcut.getExtra("envVars");
+            if (existing != null) for (String tok : existing.split(" ")) {
+                if (tok.isEmpty() || tok.startsWith(kp)) continue;   // drop this engine's old keys
+                if (sb.length() > 0) sb.append(' ');
+                sb.append(tok);
+            }
+            if (sb.length() > 0) sb.append(' ');
+            sb.append(kp).append("PRESET=").append(preset).append(' ')
+              .append(kp).append("PERF=").append(perf).append(' ')
+              .append(kp).append("ADAPTIVE=").append(adaptive ? 1 : 0).append(' ')
+              .append(kp).append("LAT=").append(lat);
+            if (bf > 0)  sb.append(' ').append(kp).append("BF=").append(bf);
+            if (mbf > 0) sb.append(' ').append(kp).append("MBF=").append(mbf);
+            shortcut.putExtra("envVars", sb.toString());
+            shortcut.saveData();
+        } catch (Throwable t) {
+            android.util.Log.w("ALSAAudio", "persistAudioToShortcut failed", t);
+        }
     }
 
     // Resolve the effective ALSA config from the ALSA engine's OWN prefs file (banner_audio_alsa — a
@@ -3797,11 +3831,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 )
         );
 
-        // Audio driver logic. If this game has a per-game audio cog (BANNER_AUDIO_* env, already merged
-        // shortcut-over-container above), apply it into the LAUNCHING ENGINE'S OWN prefs file; if not,
-        // that engine's remembered file is left as-is. Each engine has its own file (banner_audio_alsa /
-        // banner_audio_pulseaudio), so settings can never bleed between the two stacks — the Pulse->ALSA
-        // "Custom" leak is structurally impossible. In-game tweaks persist to the same per-engine file.
+        // Audio driver logic. Reseed the launching engine's EPHEMERAL runtime prefs from the resolved
+        // per-scope config (engine-scoped BANNER_AUDIO_<ENG>_* env, shortcut-over-container, else engine
+        // default). Full write every launch = no cross-launch/cross-game memory in the runtime file;
+        // persistence lives only in each scope's env. Reads only this engine's keys → no cross-engine
+        // bleed. In-game saves persist back to THIS shortcut's env (persistAudioToShortcut).
         seedAudioPrefsForLaunch(envVars, audioDriver.equals("alsa"));
         if (audioDriver.equals("alsa")) {
             envVars.put("ANDROID_ALSA_SERVER", rootPath + UnixSocketConfig.ALSA_SERVER_PATH);
@@ -4263,11 +4297,15 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // (which bumps the generation so live streams reopen). The drawer shows this label at the top.
         XServerDrawerState.INSTANCE.audioDriverLabel = audioDriverLabel(audioDriver);
         XServerDrawerState.INSTANCE.audioDriverId = audioDriver;   // "alsa"/"pulseaudio" → per-engine prefs file
+        // Reset audio = live route recovery only (no persist). Reapply = user saved in-game → apply live
+        // AND persist to THIS shortcut's env (per-game; never the container/other games).
         XServerDrawerState.INSTANCE.onResetAudio = () -> {
             if ("alsa".equals(audioDriver)) applyAlsaAudioConfig(); else resetGuestAudioForRouteChange();
         };
         XServerDrawerState.INSTANCE.onReapplyAudio = () -> {
-            if ("alsa".equals(audioDriver)) applyAlsaAudioConfig(); else resetGuestAudioForRouteChange();
+            boolean alsa = "alsa".equals(audioDriver);
+            if (alsa) applyAlsaAudioConfig(); else resetGuestAudioForRouteChange();
+            persistAudioToShortcut(alsa);
         };
 
         globalCursorSpeed = preferences.getFloat("cursor_speed", 1.0f);

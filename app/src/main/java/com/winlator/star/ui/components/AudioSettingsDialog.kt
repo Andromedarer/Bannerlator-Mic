@@ -26,28 +26,29 @@ import androidx.compose.ui.window.Dialog
  * latencyMsec is the guest winepulse buffer, fixed at connect → applies next launch.
  *
  * ── CONFIG MODEL & NO-BLEED CONTRACT (read before changing any audio-config path) ──────────────────
- * Settings must never bleed between the two engines. That is guaranteed STRUCTURALLY: each engine has
- * its OWN prefs file, so PulseAudio literally never reads ALSA's keys or vice-versa. Two kinds of store:
+ * Strict hierarchy, isolated on THREE axes at once — engine (ALSA≠Pulse), scope (container≠shortcut≠
+ * other games), and store role (persistent≠runtime). Nothing bleeds in any direction. Two stores:
  *
- *   1. PER-ENGINE PREFS  — [audioPrefsName]: "banner_audio_alsa" / "banner_audio_pulseaudio". The
- *      PERSISTENT per-engine memory ("each engine remembers its own"): the in-game AUDIO tab reads/writes
- *      it via [loadAudioConfig]/[saveAudioConfig], and each engine reads only its own at run time
- *      (ALSA: applyAlsaAudioConfig; Pulse: PulseAudioComponent.resolveSinkArgs). Empty file → engine
- *      default (ALSA→NONE/"stable", Pulse→LOW_LATENCY/"auto").
+ *   1. PER-SCOPE ENV — engine-scoped keys BANNER_AUDIO_ALSA_* / BANNER_AUDIO_PULSE_* in a container's or
+ *      a shortcut's env. This is the ONLY PERSISTENT store. [audioConfigToEnv] writes just THIS engine's
+ *      prefix (leaves the other engine + non-audio env intact); [audioConfigFromEnv] reads it with an
+ *      engine-aware default. Set by the editor cog AND by in-game saves (which the activity writes into
+ *      the launching SHORTCUT's env only — never the container, never another game). Shortcut overrides
+ *      container by normal env-merge precedence.
  *
- *   2. PER-GAME ENV  (BANNER_AUDIO_* in a container's/shortcut's env)  — an optional per-game OVERRIDE
- *      set by the cog via [audioConfigToEnv] (strips old BANNER_AUDIO_* first — no stale accumulation),
- *      read by [audioConfigFromEnv]. At launch, if present, XServerDisplayActivity.seedAudioPrefsForLaunch
- *      writes it into that engine's file (cog wins for this launch); if absent, the engine's remembered
- *      file is left untouched. Shortcut overrides container (normal env-merge precedence).
+ *   2. PER-ENGINE PREFS — [audioPrefsName]: "banner_audio_alsa" / "banner_audio_pulseaudio". EPHEMERAL
+ *      runtime only: the engine reads it while a game runs (ALSA: applyAlsaAudioConfig; Pulse:
+ *      resolveSinkArgs) and the in-game tab reads/writes it live. XServerDisplayActivity reseeds it IN
+ *      FULL every launch from store #1 (resolved shortcut→container→engine-default), so it holds NO
+ *      cross-launch memory — persistence lives only in #1, per scope.
  *
  * INVARIANTS — do not break:
- *   • Every engine reader/writer must go through [audioPrefsName] for its OWN engine — never a shared
- *     "banner_audio" file, or the two engines start sharing state again.
- *   • Any DEFAULT used before an engine is configured must be engine-aware ([audioConfigFromEnv]/
- *     [loadAudioConfig] take driverId): a Pulse perf=1 default must never appear on the ALSA path.
- *   • A per-game cog wins at launch and (by writing that engine's file) also becomes the engine's
- *     remembered default until changed — this is within one engine only; it can never cross to the other.
+ *   • Engine keys/files are ALWAYS engine-scoped (BANNER_AUDIO_<ENG>_* / banner_audio_<engine>). Never a
+ *     bare shared "banner_audio" / "BANNER_AUDIO_*", or the two engines start sharing state again.
+ *   • The runtime prefs (#2) is reseeded every launch and must never be treated as persistence.
+ *   • In-game saves persist to the launching SHORTCUT's env only (per-game); never the container/others.
+ *   • Any pre-config DEFAULT is engine-aware (ALSA→NONE/"stable", Pulse→"auto"), matching across
+ *     [audioConfigFromEnv], [loadAudioConfig] and seedAudioPrefsForLaunch.
  */
 data class AudioConfig(
     val preset: String = PRESET_AUTO,
@@ -128,39 +129,49 @@ fun saveAudioConfig(ctx: Context, driverId: String, c: AudioConfig) {
         .apply()
 }
 
-/* ---- persistence: container/shortcut env-var string (per-container / per-game) ---- */
-fun audioConfigToEnv(existingEnv: String, c: AudioConfig): String {
-    val keep = existingEnv.split(" ").filter { it.isNotBlank() && !it.startsWith("BANNER_AUDIO_") }
+/* ---- persistence: per-scope env, ENGINE-SCOPED keys (BANNER_AUDIO_ALSA_* / BANNER_AUDIO_PULSE_*) ----
+ * This is the PERSISTENT store (per container / per shortcut). Engine-scoped so one scope can hold
+ * independent ALSA and Pulse configs, and so the two engines can never read each other's keys. The
+ * per-engine prefs file (loadAudioConfig above) is only the EPHEMERAL runtime the engine reads while a
+ * game runs — reseeded from this env every launch (see XServerDisplayActivity.seedAudioPrefsForLaunch),
+ * so nothing persists globally and no config bleeds across games/containers/engines. */
+private fun engTag(driverId: String) = if (driverId == "alsa") "ALSA" else "PULSE"
+
+/** Write cfg into the scope's env under THIS engine's key prefix only, preserving the OTHER engine's
+ *  audio keys and all non-audio env — so setting ALSA never disturbs the scope's Pulse config. */
+fun audioConfigToEnv(existingEnv: String, c: AudioConfig, driverId: String): String {
+    val pfx = "BANNER_AUDIO_${engTag(driverId)}_"
+    val keep = existingEnv.split(" ").filter { it.isNotBlank() && !it.startsWith(pfx) }
     val add = mutableListOf(
-        "BANNER_AUDIO_PRESET=${c.preset}", "BANNER_AUDIO_PERF=${c.perfMode}",
-        "BANNER_AUDIO_ADAPTIVE=${if (c.adaptive) 1 else 0}", "BANNER_AUDIO_LAT=${c.latencyMsec}"
+        "${pfx}PRESET=${c.preset}", "${pfx}PERF=${c.perfMode}",
+        "${pfx}ADAPTIVE=${if (c.adaptive) 1 else 0}", "${pfx}LAT=${c.latencyMsec}"
     )
-    if (c.bufferFrames > 0) add.add("BANNER_AUDIO_BF=${c.bufferFrames}")
-    if (c.maxBufferFrames > 0) add.add("BANNER_AUDIO_MBF=${c.maxBufferFrames}")
+    if (c.bufferFrames > 0) add.add("${pfx}BF=${c.bufferFrames}")
+    if (c.maxBufferFrames > 0) add.add("${pfx}MBF=${c.maxBufferFrames}")
     return (keep + add).joinToString(" ")
 }
 
 /**
- * Read a container/shortcut env string into an AudioConfig. `driverId` makes the DEFAULTS (used only
- * when a game has no BANNER_AUDIO_* set yet) engine-appropriate, so the Pulse-oriented Auto/perf=1
- * default never bleeds into the ALSA editor: ALSA shows "Stable" (perf=0, its proven crackle-free mode),
- * PulseAudio shows "Auto". This matches XServerDisplayActivity.seedAudioPrefsForLaunch's launch defaults.
+ * Read a scope's env into an AudioConfig for the given engine. Reads only THIS engine's keys; DEFAULTS
+ * (when the scope has no config for this engine yet) are engine-appropriate — ALSA "Stable"/perf=0 (its
+ * proven crackle-free mode), Pulse "Auto"/perf=1 — matching seedAudioPrefsForLaunch's launch defaults.
  */
 fun audioConfigFromEnv(env: String, driverId: String = ""): AudioConfig {
     val m = env.split(" ").filter { it.contains("=") }.associate {
         val i = it.indexOf('='); it.substring(0, i) to it.substring(i + 1)
     }
+    val pfx = "BANNER_AUDIO_${engTag(driverId)}_"
     val def = AudioConfig()
     val alsa = driverId == "alsa"
     val defPerf = if (alsa) 0 else def.perfMode          // ALSA -> NONE, Pulse -> LOW_LATENCY (Auto)
     val defPreset = if (alsa) PRESET_STABLE else def.preset
     return AudioConfig(
-        preset = m["BANNER_AUDIO_PRESET"] ?: defPreset,
-        perfMode = m["BANNER_AUDIO_PERF"]?.toIntOrNull() ?: defPerf,
-        adaptive = (m["BANNER_AUDIO_ADAPTIVE"]?.toIntOrNull() ?: 1) != 0,
-        bufferFrames = m["BANNER_AUDIO_BF"]?.toIntOrNull() ?: 0,
-        maxBufferFrames = m["BANNER_AUDIO_MBF"]?.toIntOrNull() ?: 0,
-        latencyMsec = m["BANNER_AUDIO_LAT"]?.toIntOrNull() ?: def.latencyMsec
+        preset = m["${pfx}PRESET"] ?: defPreset,
+        perfMode = m["${pfx}PERF"]?.toIntOrNull() ?: defPerf,
+        adaptive = (m["${pfx}ADAPTIVE"]?.toIntOrNull() ?: 1) != 0,
+        bufferFrames = m["${pfx}BF"]?.toIntOrNull() ?: 0,
+        maxBufferFrames = m["${pfx}MBF"]?.toIntOrNull() ?: 0,
+        latencyMsec = m["${pfx}LAT"]?.toIntOrNull() ?: def.latencyMsec
     )
 }
 

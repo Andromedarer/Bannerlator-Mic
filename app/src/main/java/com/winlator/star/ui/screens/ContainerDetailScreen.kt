@@ -971,7 +971,7 @@ private fun TopLevelFields(
                 },
                 onDismiss = { showAudioSettings = false },
                 onSave = { cfg ->
-                    viewModel.envVarsStr = audioConfigToEnv(viewModel.envVarsStr, cfg)
+                    viewModel.envVarsStr = audioConfigToEnv(viewModel.envVarsStr, cfg, StringUtils.parseIdentifier(viewModel.selectedAudioDriver))
                     showAudioSettings = false
                 }
             )
