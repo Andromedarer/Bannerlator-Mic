@@ -314,7 +314,10 @@ int pa__init(pa_module* m) {
     u->req_buffer_frames = 0;
     u->max_buffer_frames = 0;
 
-    double volume = 0.0;
+    // Default 1.0 (unity), NOT 0.0: pa_modargs_get_value_double returns 0 (success) and leaves `volume`
+    // UNCHANGED when the arg is absent — with a 0.0 init that silently muted the sink. Start at 1.0 so
+    // an absent volume arg keeps the sink at unity.
+    double volume = 1.0;
     if (!pa_modargs_get_value_double(ma, "volume", &volume)) u->volume = volume;
 
     int performance_mode = 0;

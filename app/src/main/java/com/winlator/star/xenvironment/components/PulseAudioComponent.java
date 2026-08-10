@@ -58,9 +58,13 @@ public class PulseAudioComponent extends EnvironmentComponent {
             sb.append("performance_mode=").append(perf).append(" adaptive=").append(adaptive ? 1 : 0);
             if (bf > 0) sb.append(" buffer_frames=").append(bf);
             if (mbf > 0) sb.append(" max_buffer_frames=").append(mbf);
+            // ALWAYS pass volume=1.0 (unity). module-aaudio-sink has a latent bug: with no volume arg
+            // it defaults u->volume to 0.0 and force-sets the sink to 0% → silence. Passing 1.0 keeps
+            // it at unity (the game controls its own volume). GameNative/WinNative also always pass it.
+            sb.append(" volume=1.0");
             return sb.toString();
         } catch (Throwable t) {
-            return "performance_mode=1 adaptive=1";         // Auto/Smart fallback
+            return "performance_mode=1 adaptive=1 volume=1.0"; // Auto/Smart fallback (unity volume)
         }
     }
 
