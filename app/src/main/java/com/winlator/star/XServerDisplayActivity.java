@@ -4560,6 +4560,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
             SharedPreferences.Editor editor = preferences.edit();
             editor.putBoolean("touchscreen_timeout_enabled", timeout);
             editor.putBoolean("touchscreen_haptics_enabled", haptics);
+            // #338: remember an explicit "-- Disabled --" choice (profileIndex 0) so the #333 smart
+            // default never re-seeds the phantom pad on later launches; picking a real profile clears it.
+            editor.putBoolean("smart_default_touch_optout", profileIndex == 0);
             editor.apply();
             if (timeout) startTouchscreenTimeout();
             else touchpadView.setOnTouchListener(null);
@@ -4939,6 +4942,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
             SharedPreferences.Editor editor = preferences.edit();
             editor.putBoolean("touchscreen_timeout_enabled", timeout);
             editor.putBoolean("touchscreen_haptics_enabled", haptics);
+            // #338: remember an explicit "-- Disabled --" choice (profileIndex 0) so the #333 smart
+            // default never re-seeds the phantom pad on later launches; picking a real profile clears it.
+            editor.putBoolean("smart_default_touch_optout", profileIndex == 0);
             editor.apply();
             if (timeout) startTouchscreenTimeout();
             else touchpadView.setOnTouchListener(null);
@@ -5047,7 +5053,19 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // "Virtual Gamepad" touch layout so there's a working touch controller out of the box —
             // but ONLY when auto-hide is on (new/opted-in containers), so existing setups with no
             // profile are unchanged. The overlay then auto-hides once a controller takes over.
-            ControlsProfile defaultVg = resolvedAutoHideControlsOnPad() ? findVirtualGamepadProfile() : null;
+            //
+            // #338: two suppressions so an explicit "Disabled" is honored and the phantom pad never
+            // fights a real one. (a) If the user has explicitly confirmed "-- Disabled --" in the
+            // controls dialog we persist an opt-out and never re-seed. (b) If a physical controller is
+            // already connected at launch, the out-of-box need ("a working touch controller") is
+            // already met — seeding a phantom pad here is unwanted AND grabs a player slot, which then
+            // defeats auto-hide's own same-slot rule (real pad on P1, phantom pad bumped to P2 reads as
+            // a second player, so the overlay is kept). Not seeding it removes the whole chain.
+            boolean smartDefaultOptOut = preferences.getBoolean("smart_default_touch_optout", false);
+            ControlsProfile defaultVg = (resolvedAutoHideControlsOnPad()
+                    && !smartDefaultOptOut
+                    && !hasConnectedGameController())
+                    ? findVirtualGamepadProfile() : null;
             if (defaultVg != null) {
                 inputControlsView.setShowTouchscreenControls(true);
                 userWantsControlsShown = true;
@@ -6531,6 +6549,18 @@ return true;
             if (p != null && "Virtual Gamepad".equalsIgnoreCase(p.getName())) return p;
         }
         return null;
+    }
+
+    // #338: is a physical game controller connected right now? Used to suppress the #333 smart-default
+    // touch overlay at launch — if a real pad is already present there's no out-of-box need for a
+    // phantom one, and seeding it would grab a player slot that defeats auto-hide. Reads the same live
+    // slot data as updateAutoHideForControllers(); on-screen ("virtual") pads are excluded.
+    private boolean hasConnectedGameController() {
+        if (winHandler == null) return false;
+        for (WinHandler.PlayerSlotInfo s : winHandler.getPlayerSlotAssignments()) {
+            if (s.isGameController && !s.isOnScreen) return true;
+        }
+        return false;
     }
 
     // #333: auto-hide on-screen controls when a controller takes the on-screen slot. Resolved
