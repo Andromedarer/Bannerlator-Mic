@@ -121,6 +121,8 @@ Every report gets its own **public discussion thread**. You can reply as the ori
 
 **Hotfix over 2.9.8.** Entirely app-side — install over 2.9.8, everything carries over.
 
+> 🙏 **Sorry for the churn** — 2.9.8 shipped the TV / external-display feature before it was ready (it broke on Samsung DeX and Motorola desktop modes), so 2.9.9 is a quick turnaround to pull that feature until it's finished rather than leave a half-working release up. Thanks for the reports and patience.
+
 - **📺 TV / external-display output temporarily turned off.** After reports it misbehaved on Samsung (DeX) and Motorola devices ([#339](https://github.com/The412Banner/Bannerlator/issues/339)) — game wouldn't go fullscreen, FPS HUD vanished, mouse stopped — the whole TV feature (auto-swap onto a TV/DeX display, the in-game **TV tab**, and the experimental wireless caster) is disabled until it's finished and properly tested. Plugging in a TV no longer pushes the game to it. Nothing is lost; saved TV settings stay on disk and the feature (with the DeX fix in place) returns in a later build.
 - **🎮 Controller/touch fix ([#338](https://github.com/The412Banner/Bannerlator/issues/338), thanks @NaufalFajri).** An explicit "-- Disabled --" touch-controls choice is honored and persists across launches (no phantom on-screen pad, no fake timeout), and the smart-default on-screen pad no longer spawns when a physical controller is already connected at launch.
 - **📝 Deeper log capture.** Log Manager → "Capture logcat now" now grabs up to **10,000 lines** (was 1,000) — still app-scoped, redacted, and on-demand — so bug-report logs reach much further back.
