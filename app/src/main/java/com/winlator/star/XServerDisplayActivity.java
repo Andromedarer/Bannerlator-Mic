@@ -199,6 +199,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
         pendingToastDescriptor = null;
         // #333: re-evaluate auto-hide on the same debounced tick, once slot assignment has settled.
         updateAutoHideForControllers();
+        // #333: keep the in-game Players tab list current on hot-plug — it otherwise only rebuilds at
+        // launch / manual slot change / Reset Input, so a controller connected or removed mid-session
+        // wouldn't appear/disappear in the list until one of those fired.
+        if (winHandler != null) XServerDialogState.INSTANCE.setPlayerSlots(buildPlayerSlotRows());
     };
     private TouchpadView touchpadView;
     private XEnvironment environment;
