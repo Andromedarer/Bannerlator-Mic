@@ -56,6 +56,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.neverEqualPolicy
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -95,7 +96,10 @@ fun InputControlsScreen() {
     var profiles by remember { mutableStateOf(listOf<ControlsProfile>()) }
     var currentProfile by remember { mutableStateOf<ControlsProfile?>(null) }
     var selectedProfileIdx by remember { mutableStateOf(0) }
-    var controllers by remember { mutableStateOf(listOf<ExternalController>()) }
+    // #333: neverEqualPolicy so a refresh that swaps in the same controllers (equal by id — our
+    // ExternalController.equals ignores bindings) still recomposes; otherwise an updated binding count
+    // (e.g. inherited from Default) never reaches the UI (the list kept showing a stale "0 Bindings").
+    var controllers by remember { mutableStateOf(listOf<ExternalController>(), neverEqualPolicy()) }
     // #333: which controller row's "copy bindings from…" menu is open (by descriptor id), or null.
     var copyMenuForId by remember { mutableStateOf<String?>(null) }
 
