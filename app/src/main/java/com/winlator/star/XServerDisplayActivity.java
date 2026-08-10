@@ -6449,13 +6449,14 @@ return true;
         for (WinHandler.PlayerSlotInfo s : slots) {
             if (s.isOnScreen) { if (s.override >= 0) oscHomeSlot = s.override; break; }
         }
-        // Does a physical controller own / take over the on-screen slot? Unpinned pad = solo takeover;
-        // pad pinned onto the on-screen slot = takeover. A pad pinned to a different slot (or set to
-        // Ignore, SLOT_IGNORE = -2) is a separate player and does NOT trigger a hide.
+        // Does a physical controller actually OCCUPY the on-screen slot? Key off the resolved current
+        // slot, not the pin: a solo pad yields onto the on-screen slot (hide); a pad on a DIFFERENT
+        // player (pinned to P2, or bumped to P2 because the on-screen pad is pinned to P1) is a separate
+        // player and leaves the overlay up; an Ignored/unassigned pad (currentSlot -1) never triggers.
         boolean padTakingOver = false;
         for (WinHandler.PlayerSlotInfo s : slots) {
             if (!s.isGameController) continue;
-            if (s.override == -1 || s.override == oscHomeSlot) { padTakingOver = true; break; }
+            if (s.currentSlot >= 0 && s.currentSlot == oscHomeSlot) { padTakingOver = true; break; }
         }
 
         if (padTakingOver) {
