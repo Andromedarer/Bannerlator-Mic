@@ -210,6 +210,10 @@ fun XServerDrawer() {
                             handleTabClick(TabType.CONTROLS, state)
                         }
                         Spacer(Modifier.height(6.dp))
+                        TabIconButton(R.drawable.icon_audio, selectedTab == TabType.AUDIO) {
+                            handleTabClick(TabType.AUDIO, state)
+                        }
+                        Spacer(Modifier.height(6.dp))
                         TabIconButton(R.drawable.icon_debug, selectedTab == TabType.ADVANCED) {
                             handleTabClick(TabType.ADVANCED, state)
                         }
@@ -278,6 +282,7 @@ fun XServerDrawer() {
                 TabType.ADVANCED -> AdvancedContent(state)
                 TabType.TASK_MANAGER -> TmContent()
                 TabType.TV -> TvContent(state)
+                TabType.AUDIO -> AudioContent(state)
             }
         }
     }
@@ -290,6 +295,57 @@ private fun handleTabClick(tab: TabType, state: XServerDrawerState) {
 // ───── TV / External Display tab ─────
 // Version A: game on the TV, handheld as the controller. This minimal panel exposes the display
 // controls; picture/latency controls (aspect, overscan, latency mode, audio) land in a later pass.
+// In-game Audio tab: adaptive presets + fine-tuning, applied LIVE via onReapplyAudio (sink recreate).
+// Guest-buffer latency is fixed at connect, so that one knob is flagged "next launch" in the dialog.
+@Composable
+private fun AudioContent(state: XServerDrawerState) {
+    val ctx = LocalContext.current
+    var show by remember { mutableStateOf(false) }
+    var cfg by remember { mutableStateOf(com.winlator.star.ui.components.loadAudioConfig(ctx)) }
+    Text(
+        "Audio",
+        fontSize = 18.sp,
+        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+        color = MaterialTheme.colorScheme.onSurface
+    )
+    Spacer(Modifier.height(2.dp))
+    Text(
+        "Current preset: ${cfg.preset}",
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        fontSize = 12.sp
+    )
+    Spacer(Modifier.height(12.dp))
+    AccentButton("Presets & fine-tuning", Modifier.fillMaxWidth()) { show = true }
+    Text(
+        "Balance crackle vs delay. Applies live; guest buffer needs a relaunch.",
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        fontSize = 11.sp,
+        modifier = Modifier.padding(top = 4.dp)
+    )
+    Spacer(Modifier.height(12.dp))
+    AccentButton("Reset audio", Modifier.fillMaxWidth()) { state.onResetAudio?.run() }
+    Text(
+        "Fixes lost sound after switching apps.",
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        fontSize = 11.sp,
+        modifier = Modifier.padding(top = 4.dp)
+    )
+    if (show) {
+        com.winlator.star.ui.components.AudioSettingsDialog(
+            initial = cfg,
+            scopeLabel = "live · this session",
+            latencyLive = false,
+            onDismiss = { show = false },
+            onSave = { newCfg ->
+                com.winlator.star.ui.components.saveAudioConfig(ctx, newCfg)
+                cfg = newCfg
+                state.onReapplyAudio?.run()
+                show = false
+            }
+        )
+    }
+}
+
 @Composable
 private fun TvContent(state: XServerDrawerState) {
     val tvConnected by state.tvConnected.collectAsState()
@@ -397,31 +453,6 @@ private fun TvContent(state: XServerDrawerState) {
         modifier = Modifier.padding(top = 4.dp)
     )
 
-    // Adaptive audio presets & fine-tuning, live in-game. Sink-side changes apply instantly (sink
-    // recreate); guest buffer is fixed at connect → applies next launch (dialog notes it).
-    Spacer(Modifier.height(8.dp))
-    val audioCtx = LocalContext.current
-    var showAudioDialog by remember { mutableStateOf(false) }
-    AccentButton("Audio settings", Modifier.fillMaxWidth()) { showAudioDialog = true }
-    Text(
-        text = "Presets & fine-tuning — balance crackle vs delay.",
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        fontSize = 11.sp,
-        modifier = Modifier.padding(top = 4.dp)
-    )
-    if (showAudioDialog) {
-        com.winlator.star.ui.components.AudioSettingsDialog(
-            initial = com.winlator.star.ui.components.loadAudioConfig(audioCtx),
-            scopeLabel = "live · this session",
-            latencyLive = false,
-            onDismiss = { showAudioDialog = false },
-            onSave = { cfg ->
-                com.winlator.star.ui.components.saveAudioConfig(audioCtx, cfg)
-                state.onReapplyAudio?.run()
-                showAudioDialog = false
-            }
-        )
-    }
 
     val rendererIsVulkan by state.rendererIsVulkan.collectAsState()
 

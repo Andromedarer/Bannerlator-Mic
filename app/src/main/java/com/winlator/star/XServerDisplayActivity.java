@@ -3371,7 +3371,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
     //          "6" = drop Pale Moon DESKTOP shortcut (kept in Start Menu only); the repacked
     //                pattern no longer ships it, and existing containers get it deleted on next
     //                launch via removePaleMoonDesktopShortcut() (2026-08-06).
-    private static final String PATTERN_CONTENT_VERSION = "6";
+    //          "7" = adaptive PulseAudio module: repacked pulseaudio.tzst carries the new
+    //                module-aaudio-sink (performance_mode/adaptive/buffer modargs). MUST bump so
+    //                existing containers re-extract it — vc is frozen, so without this the old module
+    //                lingers and the new default.pa args are rejected → silence (2026-08-10).
+    private static final String PATTERN_CONTENT_VERSION = "7";
 
     private void setupWineSystemFiles() {
         String appVersion = String.valueOf(AppUtils.getVersionCode(this));
