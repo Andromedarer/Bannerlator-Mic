@@ -945,7 +945,11 @@ private fun TopLevelFields(
                 label = stringResource(R.string.audio_driver),
                 options = viewModel.audioDriverEntries,
                 selectedOption = viewModel.selectedAudioDriver,
-                onSelect = { viewModel.selectedAudioDriver = it },
+                onSelect = {
+                    viewModel.selectedAudioDriver = it
+                    // DirectAudio is experimental — warn on select (reuses the HelpDialog surface).
+                    if (StringUtils.parseIdentifier(it) == "directaudio") helpRes = R.string.directaudio_experimental_warning
+                },
                 modifier = Modifier.weight(1f)
             )
             // Cog → adaptive audio presets & fine-tuning. Both engines honor the same presets/knobs

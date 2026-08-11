@@ -432,7 +432,13 @@
     ]]></string>
     <string name="help_audio_driver"><![CDATA[
         <b>Audio Driver</b><br /><br />
-        How the game\'s sound reaches Android. <b>ALSA</b> is the simple, low-overhead default and works for most games. <b>PulseAudio</b> is a more capable sound server that some games or voice features need. Switch to PulseAudio if a game has no sound or crackles; otherwise leave it on ALSA.
+        How the game\'s sound reaches Android. <b>PulseAudio</b> is the default — a capable sound server that works for most games and voice features. <b>ALSA</b> is a lighter, low-overhead alternative. <b>DirectAudio (Experimental)</b> sends sound straight to Android with no server in between (lowest latency), but it\'s new — see its warning. Switch drivers if a game has no sound or crackles.
+    ]]></string>
+    <string name="directaudio_experimental_warning"><![CDATA[
+        <b>DirectAudio is experimental</b><br /><br />
+        It sends the game\'s sound straight to Android\'s audio system with <b>no PulseAudio or ALSA server</b> in between — the lowest-latency path, and it mixes all the game\'s sounds itself.<br /><br />
+        Because it\'s new, some games may have audio quirks — occasional skips, or a preset that doesn\'t stick. The <b>Auto</b> preset is the smoothest.<br /><br />
+        If you hit audio problems, switch back to <b>PulseAudio</b> or <b>ALSA</b>.
     ]]></string>
     <string name="help_fexcore_preset"><![CDATA[
         <b>FEXCore Preset</b><br /><br />

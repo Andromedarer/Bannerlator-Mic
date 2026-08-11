@@ -6480,7 +6480,11 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                             label = stringResource(R.string.audio_driver),
                             options = audioDriverEntries,
                             selected = selectedAudioDriver,
-                            onSelect = { selectedAudioDriver = it },
+                            onSelect = {
+                                selectedAudioDriver = it
+                                // DirectAudio is experimental — warn on select (reuses the HelpDialog surface).
+                                if (StringUtils.parseIdentifier(it) == "directaudio") helpRes = R.string.directaudio_experimental_warning
+                            },
                             modifier = Modifier.weight(1f)
                         )
                         val scAudioId = StringUtils.parseIdentifier(selectedAudioDriver)
