@@ -5764,3 +5764,9 @@ STRICT PER-SCOPE + PER-ENGINE CONFIG (no bleed on any axis) — DEVICE-PROVEN:
 - Pulse internals untouched (merged/proven stack): resolveSinkArgs just re-pointed at banner_audio_pulseaudio.
 - ⚠ Existing single-store banner_audio prefs from older builds are orphaned -> first post-merge launch
   uses safe engine defaults (no migration; the old shared file was the polluted one).
+
+## fix/pause-longname-exe — game not pausing/backgrounding for long-exe-name games (audio kept playing)
+- **Symptom (user report + on-device `ps` proof):** with a game whose exe name is long (repro: `NINJA GAIDEN SIGMA.exe`), backgrounding / locking / manual in-game pause stopped the whole Wine tree (`T`) but the GAME engine process stayed `S` (running, RSS climbing) — so its FMV/audio kept playing. Reproduced regardless of ALSA vs PulseAudio (not an audio-stack bug).
+- **Root cause:** `ProcessHelper.listRunningWineProcesses()` matched the filter `{"wine","exe"}` against `/proc/<pid>/stat`, whose `comm` field is truncated to 15 chars (TASK_COMM_LEN). `NINJA GAIDEN SI` → `.exe` chopped off → no match → never SIGSTOP'd by `pauseAllWineProcesses()`. Short-named exes (e.g. `witcher3.exe`) keep `.exe` within 15 chars, which is why it paused correctly for most users.
+- **Fix (additive, no regression surface):** also match the FULL untruncated argv from `/proc/<pid>/cmdline` (new `readCmdline()` helper — same source `findLinuxPidByExe` already uses). A pid the stat check matched is still matched; we only ADD the previously-missed game process. Also added a `break` so a pid matching both filters is added once (was double-added). Java-only, single file.
+- Base: clean `ad03f23f` (branched off before the stray `mali-report … wine_debug.log` commits that landed on origin/main a36ecc25→8b314ef2 — those look accidental, clean up separately).

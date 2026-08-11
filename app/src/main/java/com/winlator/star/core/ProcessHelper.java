@@ -386,11 +386,38 @@ public abstract class ProcessHelper {
                 data = br.readLine();
             }
             catch (IOException e) {}
+            // The comm field in /proc/<pid>/stat is truncated to 15 chars (TASK_COMM_LEN), so a game whose
+            // exe name pushes ".exe" past char 15 (e.g. "NINJA GAIDEN SIGMA.exe") never matched the filter
+            // and so was never paused/suspended — it kept running (and playing audio) while backgrounded or
+            // manually paused. Also match the FULL, untruncated argv from /proc/<pid>/cmdline (same source
+            // findLinuxPidByExe already uses) so the game engine is caught too. Additive: a pid the stat
+            // check already matched is still matched — we only ever ADD the previously-missed process.
+            if (data == null) data = "";
+            String cmdline = readCmdline(proc, allPids[index]);
+            String haystack = data + " " + cmdline;
             for (String filter : filterList) {
-                if (data.contains(filter))
+                if (haystack.contains(filter)) {
                     filteredPids.add(allPids[index]);
+                    break;   // add each pid at most once (avoids the double-add when it matches both filters)
+                }
             }
         }
         return filteredPids;
+    }
+
+    // Read /proc/<pid>/cmdline (NUL-separated argv) as a space-joined string. Returns "" if unreadable
+    // (other-uid or gone). Same-uid guest processes launched by wine carry their full exe path here,
+    // untruncated — unlike the 15-char comm in /proc/<pid>/stat.
+    private static String readCmdline(File proc, String pid) {
+        try (FileInputStream fr = new FileInputStream(proc + "/" + pid + "/cmdline")) {
+            byte[] buf = new byte[512];
+            int n = fr.read(buf);
+            if (n <= 0) return "";
+            StringBuilder sb = new StringBuilder(n);
+            for (int i = 0; i < n; i++) sb.append(buf[i] == 0 ? ' ' : (char) buf[i]);
+            return sb.toString();
+        } catch (Exception e) {
+            return "";
+        }
     }
 }
