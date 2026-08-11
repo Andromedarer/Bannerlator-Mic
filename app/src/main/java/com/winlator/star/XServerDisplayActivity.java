@@ -2756,6 +2756,40 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
     }
 
+    // Resolve the DirectAudio cog preset to the engine-scoped env the unixlib reads at stream open
+    // (BANNER_AUDIO_DIRECT_PERF/BF/ADAPTIVE/MBF). Unlike ALSA/Pulse — which read prefs into a native
+    // player / PULSE_LATENCY_MSEC — the DirectAudio driver takes its config straight from the guest env,
+    // so without this the cog never reaches it and it runs the driver's compiled defaults. Named presets
+    // map to a CONCRETE buffer and ALWAYS force LOW_LATENCY (device-proven; NONE = normal-priority thread
+    // the guest preempts under box64/FEX -> choppy). Custom honours the user's own knobs. Initial buffers
+    // stay within the proven-safe LOW_LATENCY envelope (<=62.5 ms; the adaptive path grows on xruns). The
+    // cog is authoritative for DirectAudio, so we OVERWRITE any keys the shared-preset env carried (its
+    // perfMode/latency are tuned for ALSA/Pulse). Reads only DirectAudio's own prefs -> no cross-engine bleed.
+    private void applyDirectAudioConfig(EnvVars envVars) {
+        try {
+            android.content.SharedPreferences p = getSharedPreferences("banner_audio_directaudio", MODE_PRIVATE);
+            String preset = p.getString("preset", "stable");
+            int perf = 1, bf, mbf = 0; boolean adaptive = true;   // perf 1 = LOW_LATENCY
+            switch (preset) {
+                case "low":      bf = 1248; adaptive = false; break;   // ~26 ms, tightest sync (device-proven)
+                case "auto":     bf = 1248; adaptive = true;  break;   // ~26 ms + adaptive safety net
+                case "balanced": bf = 2000; adaptive = true;  break;   // ~42 ms
+                case "custom":   perf = p.getInt("perf_mode", 1);
+                                 bf   = p.getInt("buffer_frames", 0);
+                                 mbf  = p.getInt("max_buffer_frames", 0);
+                                 adaptive = p.getBoolean("adaptive", true); break;
+                case "stable":
+                default:         bf = 3000; adaptive = true;  break;   // ~62.5 ms, biggest safety margin
+            }
+            envVars.put("BANNER_AUDIO_DIRECT_PERF", String.valueOf(perf));
+            envVars.put("BANNER_AUDIO_DIRECT_ADAPTIVE", adaptive ? "1" : "0");
+            if (bf  > 0) envVars.put("BANNER_AUDIO_DIRECT_BF",  String.valueOf(bf));
+            if (mbf > 0) envVars.put("BANNER_AUDIO_DIRECT_MBF", String.valueOf(mbf));
+        } catch (Throwable t) {
+            android.util.Log.w("DirectAudio", "applyDirectAudioConfig failed", t);
+        }
+    }
+
     // Restart the guest audio server (PulseAudio + its AAudio sink). The AAudio output stream can be
     // torn down when the app is backgrounded or the HDMI audio route changes, and the sink does not
     // always re-establish it — leaving the game silent (notably after returning to a game on the TV).
@@ -3881,9 +3915,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
             );
         } else if (audioDriver.equals("directaudio")) {
             // Native AAudio via winedirectaudio.drv: no host audio server and no ALSA/Pulse socket — the
-            // guest reaches AAudio directly. Config (BANNER_AUDIO_DIRECT_*) is already merged into envVars
-            // and read by the unixlib at stream open; the Wine "Audio" registry driver is set by
-            // changeWineAudioDriver(). Route changes are handled inside the driver. Nothing to start here.
+            // guest reaches AAudio directly and the unixlib reads BANNER_AUDIO_DIRECT_* from the env at
+            // stream open. Resolve the cog preset to concrete env here (LOW_LATENCY + a real per-preset
+            // buffer) so the menu actually controls the driver. The Wine "Audio" registry driver is set
+            // by changeWineAudioDriver(); route changes are handled inside the driver.
+            applyDirectAudioConfig(envVars);
         }
 
         // Turnip TU_DEBUG composition (per-container + per-game). Runs AFTER every env source is
