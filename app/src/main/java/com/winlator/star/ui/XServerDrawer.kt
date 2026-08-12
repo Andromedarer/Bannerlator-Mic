@@ -1230,7 +1230,7 @@ private fun FrameGenSection(state: XServerDrawerState) {
 
         FgMultiplierButtons(fgMult) { fgMult = it; applyFg() }
 
-        // Interpolation model, bionic-fg only. The layer rebuilds its framegen context when the
+        // Interpolation model, win-fg only. The layer rebuilds its framegen context when the
         // model changes (same path as a multiplier change), so this switches live. Hidden while
         // frame gen is Off, where it would have nothing to act on.
         AnimatedVisibility(
@@ -1305,17 +1305,17 @@ private fun FrameGenSection(state: XServerDrawerState) {
 private fun FgModelButtons(selected: Int, onSelect: (Int) -> Unit) {
     val accent = MaterialTheme.colorScheme.primary
     val accentDim = LocalAccentDim.current
-    // 0 is the long-standing default chain; 1-4 are newer engines, not yet device-proven.
-    // 4 ("FSR3+") is 3's optical flow reworked — per-block search, sub-pixel refinement
-    // and a true bidirectional solve that gates the flow at occlusion edges. 3 is kept
-    // alongside it so the two can be compared live in the same scene.
-    val options = listOf(0 to "Default", 1 to "Traced", 2 to "V2", 3 to "FSR3", 4 to "FSR3+")
+    // win-fg's two optical-flow models: 3 = single-direction flow, 4 = block-grid
+    // bidirectional flow with occlusion gating (softer at occlusion edges). Legacy
+    // stored values 0-2 map to the standard flow (model 3), matching the layer's clamp.
+    val options = listOf(3 to "Optical flow", 4 to "Bidirectional")
+    val sel = if (selected < 3) 3 else selected
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         options.forEach { (model, label) ->
-            val isSel = selected == model
+            val isSel = sel == model
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
