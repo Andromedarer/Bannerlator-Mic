@@ -1228,7 +1228,7 @@ private fun FrameGenSection(state: XServerDrawerState) {
             state.onBionicFgConfigChange?.run()
         }
 
-        FgMultiplierButtons(fgMult) { fgMult = it; applyFg() }
+        FgMultiplierButtons(fgMult, engine) { fgMult = it; applyFg() }
 
         // Interpolation model, win-fg only. The layer rebuilds its framegen context when the
         // model changes (same path as a multiplier change), so this switches live. Hidden while
@@ -1342,10 +1342,15 @@ private fun FgModelButtons(selected: Int, onSelect: (Int) -> Unit) {
 }
 
 @Composable
-private fun FgMultiplierButtons(selected: Int, onSelect: (Int) -> Unit) {
+private fun FgMultiplierButtons(selected: Int, engine: String, onSelect: (Int) -> Unit) {
     val accent = MaterialTheme.colorScheme.primary
     val accentDim = LocalAccentDim.current
-    val options = listOf(0 to "Off", 2 to "2×", 3 to "3×", 4 to "4×")
+    // win-fg is a simple Off / On toggle for now (On = 2×); selecting On reveals the
+    // model + flow-scale controls (gated on multiplier > 0). lsfg-vk keeps 2×/3×/4×.
+    val options = if (engine == "bionic")
+        listOf(0 to "Off", 2 to "On")
+    else
+        listOf(0 to "Off", 2 to "2×", 3 to "3×", 4 to "4×")
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(6.dp)
