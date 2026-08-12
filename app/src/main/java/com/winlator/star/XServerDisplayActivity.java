@@ -1195,6 +1195,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // layer) and persist to the container. Only effective when the layer is loaded this session
         // (bionicFgActive). NOTE: initial drawer state is synced after `container` is loaded (below);
         // this callback is lazy so it safely captures the field.
+        // Auto bg/fg pulse to reset win-fg cleanly on an FG toggle-on / model change.
+        state.onFgResetPulse = () -> runOnUiThread(this::pulseFgReset);
         state.onBionicFgConfigChange = () -> {
             XServerDrawerState s = XServerDrawerState.INSTANCE;
             if (!s.getBionicFgActive().getValue()) return; // layer not loaded -> needs a relaunch
@@ -4962,8 +4964,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
         };
         // Tapping the centered pause box = full resume (covers preview pause AND manual pause).
         ds.onRequestResume = () -> runOnUiThread(() -> setPausedState(false));
-        // Auto bg/fg pulse to reset win-fg on an FG toggle-on / model change.
-        ds.onFgResetPulse = () -> runOnUiThread(this::pulseFgReset);
 
         // Input Controls state (renderer-independent: controller profiles + vibration work on
         // BOTH the GL and Vulkan host renderers, so this must run before the GL-only guard below.
