@@ -1180,7 +1180,7 @@ private fun FrameGenSection(state: XServerDrawerState) {
     // labeled twice. Badge shows bionic-fg / lsfg-vk depending on the container's selection.
     val engineLabel = when (engine) {
         "lsfg"   -> "lsfg-vk"
-        "bionic" -> "bionic-fg"
+        "bionic" -> "win-fg"
         else     -> "Off"
     }
     // Green dot = engine actually multiplying frames right now. Frame gen starts at multiplier 0
