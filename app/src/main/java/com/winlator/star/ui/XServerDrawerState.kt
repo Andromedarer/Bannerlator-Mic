@@ -200,6 +200,10 @@ object XServerDrawerState {
     // Re-apply the audio config live in-game after the preset/fine-tune dialog saves (sink recreate
     // reads the just-written banner_audio prefs). Guest latency change still needs a relaunch.
     @JvmField var onReapplyAudio: Runnable? = null
+    // Brief auto pause-pulse (SIGSTOP ~0.4s then SIGCONT, no pause UI) fired on an FG toggle-on /
+    // model change: the guest goes momentarily still so win-fg's optical flow restarts from a
+    // near-zero-motion frame pair instead of coming up artifacty.
+    @JvmField var onFgResetPulse: Runnable? = null
     // Engine that actually launched ("PulseAudio" / "ALSA"), shown at the top of the in-game AUDIO tab
     // so the user knows which engine these settings hit. Set by the activity at launch.
     @JvmField var audioDriverLabel: String = ""

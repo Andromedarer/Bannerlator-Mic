@@ -3208,6 +3208,32 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (externalDisplayController != null) externalDisplayController.setPaused(paused);
     }
 
+    // Brief automatic "background + foreground" pulse used to reset frame generation on an FG
+    // toggle-on / model change. A bare SIGSTOP/SIGCONT is not enough — win-fg comes up artifacty
+    // because its optical flow starts on a moving frame pair. Replicating the FULL bg/fg cycle
+    // (pause the X server + render view, freeze the guest, then resume all of it ~0.5s later) makes
+    // the guest go fully still so win-fg restarts from a near-zero-motion pair. Does NOT flip
+    // isPaused (no pause UI, no user tap needed); debounced; bails if a real pause is active.
+    private boolean fgResetPulseInProgress = false;
+    private void pulseFgReset() {
+        if (fgResetPulseInProgress || isPaused || environment == null) return;
+        fgResetPulseInProgress = true;
+        // --- background half (mirrors the onPause path) ---
+        environment.onPause();
+        if (xServerView != null) xServerView.onPause();
+        ProcessHelper.pauseAllWineProcesses();
+        // --- resume half ~0.5s later (mirrors the onResume path) ---
+        handler.postDelayed(() -> {
+            if (!isPaused) {
+                if (xServerView != null) xServerView.onResume();
+                environment.onResume();
+                ProcessHelper.resumeAllWineProcesses();
+                reapplyVrr();
+            }
+            fgResetPulseInProgress = false;
+        }, 500);
+    }
+
     private void savePlaytimeData() {
         long endTime = System.currentTimeMillis();
         long playtime = endTime - startTime;
@@ -4936,6 +4962,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         };
         // Tapping the centered pause box = full resume (covers preview pause AND manual pause).
         ds.onRequestResume = () -> runOnUiThread(() -> setPausedState(false));
+        // Auto bg/fg pulse to reset win-fg on an FG toggle-on / model change.
+        ds.onFgResetPulse = () -> runOnUiThread(this::pulseFgReset);
 
         // Input Controls state (renderer-independent: controller profiles + vibration work on
         // BOTH the GL and Vulkan host renderers, so this must run before the GL-only guard below.

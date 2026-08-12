@@ -1229,7 +1229,12 @@ private fun FrameGenSection(state: XServerDrawerState) {
             state.onBionicFgConfigChange?.run()
         }
 
-        FgMultiplierButtons(fgMult, engine) { fgMult = it; applyFg() }
+        FgMultiplierButtons(fgMult, engine) { newMult ->
+            val wasOff = fgMult == 0
+            fgMult = newMult; applyFg()
+            // Turning FG on: pulse a bg/fg reset so win-fg starts clean, not artifacty.
+            if (wasOff && newMult >= 2) state.onFgResetPulse?.run()
+        }
 
         // Interpolation model, win-fg only. The layer rebuilds its framegen context when the
         // model changes (same path as a multiplier change), so this switches live. Hidden while
@@ -1247,7 +1252,11 @@ private fun FrameGenSection(state: XServerDrawerState) {
                     fontSize = 12.sp,
                     modifier = Modifier.padding(start = 4.dp, bottom = 6.dp)
                 )
-                FgModelButtons(fgModel) { fgModel = it; applyFg() }
+                FgModelButtons(fgModel) { newModel ->
+                    fgModel = newModel; applyFg()
+                    // Model switch while FG is on -> same bg/fg reset pulse.
+                    if (fgMult >= 2) state.onFgResetPulse?.run()
+                }
             }
         }
 
