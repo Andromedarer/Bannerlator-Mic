@@ -1228,7 +1228,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // FPS limiter is no longer part of frame gen — it's a standalone host pacer
             // (onFpsLimitChange). bionic-fg conf carries frame gen only; pass the limiter off.
             int fgModel = s.getFrameGenModel().getValue();
-            writeBionicFgConfig(mult, flow, false, 0, fgModel);
+            writeWinFgConfig(mult, flow, false, 0, fgModel);
             if (fgOn) container.setFrameGenMultiplier(mult);
             container.setFrameGenFlowScale(flow);
             container.setFrameGenModel(fgModel);
@@ -2251,28 +2251,27 @@ public class XServerDisplayActivity extends AppCompatActivity {
     }
 
 
-    // Writes the bionic-fg layer config (TOML) into the guest HOME so it is present before the
-    // first swapchain present. The layer hot-reloads this file, so it doubles as the live-control
-    // path (see in-game drawer). Keys: multiplier (2-4), flow_scale (0.2-1.0), model (0-3).
-    // multiplier: 0 = frame gen off (Off in the menu), else 2-4. fpsLimit: 0 = no cap, else 10-200.
-    private void writeBionicFgConfig(int multiplier, float flowScale, boolean fpsLimiterEnabled, int fpsLimitValue, int model) {
+    // Writes the win-fg layer config (TOML) into the guest HOME so it is present before the first
+    // swapchain present. The layer hot-reloads this file, so it doubles as the live-control path
+    // (see in-game drawer). win-fg keys: enabled (0/1), multiplier (2-4), flowScale, model (3-4).
+    // multiplier: 0 = frame gen off (Off in the menu / not yet enabled), else 2-4.
+    // (win-fg is the clean-room replacement for the removed bionic-fg layer; the fpsLimiter args are
+    //  retained for call-site compatibility — the host pacer owns limiting, not this layer.)
+    private void writeWinFgConfig(int multiplier, float flowScale, boolean fpsLimiterEnabled, int fpsLimitValue, int model) {
         try {
-            File configDir = new File(imageFs.home_path, ".config/bionic-fg");
+            File configDir = new File(imageFs.home_path, ".config/win-fg");
             configDir.mkdirs();
             File confFile = new File(configDir, "conf.toml");
-            // conf.toml is self-describing: the enabled flag and the remembered cap
-            // value are written separately so toggling the limiter off in the UI does
-            // not throw away the chosen value (the layer keeps it as the remembered cap).
+            boolean on = multiplier >= 2;
             String toml = "# Written by Bannerlator (per-container frame generation)\n"
-                    + "multiplier = " + multiplier + "\n"
-                    + "flow_scale = " + String.format(java.util.Locale.US, "%.2f", flowScale) + "\n"
-                    + "model = " + Math.max(0, Math.min(4, model)) + "\n"
-                    + "fps_limit_enabled = " + (fpsLimiterEnabled ? "true" : "false") + "\n"
-                    + "fps_limit = " + fpsLimitValue + "\n";
+                    + "enabled = " + (on ? "1" : "0") + "\n"
+                    + "multiplier = " + Math.max(2, Math.min(4, on ? multiplier : 2)) + "\n"
+                    + "flowScale = " + String.format(java.util.Locale.US, "%.2f", flowScale) + "\n"
+                    + "model = " + Math.max(3, Math.min(4, model)) + "\n";
             FileUtils.writeString(confFile, toml);
         }
         catch (Exception e) {
-            Log.e("BionicFG", "Failed to write bionic-fg conf.toml", e);
+            Log.e("WinFG", "Failed to write win-fg conf.toml", e);
         }
     }
 
@@ -3819,8 +3818,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 // to load. multiplier=0 -> frame gen starts Off in-game (layer loaded, enable live).
                 boolean fgOn = resolvedFrameGenEngine().equals("bionic");
                 if (fgOn) {
-                    envVars.put("BIONIC_FG_ENABLE", "1");
-                    writeBionicFgConfig(
+                    envVars.put("WIN_FG_ENABLE", "1");
+                    writeWinFgConfig(
                             0,
                             container.getFrameGenFlowScale(),
                             false,
