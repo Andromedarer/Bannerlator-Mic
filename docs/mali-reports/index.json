@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-08-13T22-48-32-ea612e",
+    "created": "2026-08-13T22:48:32.894Z",
+    "reporter": "Oscar",
+    "device": "S24 ultra",
+    "gpu": "Adreno 750",
+    "game": "Todos los juegos",
+    "symptom": "Otro",
+    "logs": 1
+  },
+  {
     "id": "2026-08-13T12-45-26-770e94",
     "created": "2026-08-13T12:45:26.336Z",
     "reporter": "",
