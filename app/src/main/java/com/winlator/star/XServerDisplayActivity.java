@@ -2771,10 +2771,26 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private void applyAlsaAudioConfig() {
         try {
             android.content.SharedPreferences p = getSharedPreferences("banner_audio_alsa", MODE_PRIVATE);
-            int perf = p.contains("perf_mode") ? p.getInt("perf_mode", 0) : 0; // ALSA proven default = NONE
-            int adaptive = p.getBoolean("adaptive", true) ? 1 : 0;
-            int bf  = p.getInt("buffer_frames", 0);
-            int mbf = p.getInt("max_buffer_frames", 0);
+            String preset = p.getString("preset", "stable");
+            int perf, adaptive, bf, mbf;
+            if ("custom".equals(preset)) {
+                perf = p.contains("perf_mode") ? p.getInt("perf_mode", 0) : 0; // ALSA proven default = NONE
+                adaptive = p.getBoolean("adaptive", true) ? 1 : 0;
+                bf  = p.getInt("buffer_frames", 0);
+                mbf = p.getInt("max_buffer_frames", 0);
+            } else {
+                // Named presets come from alsaPresetConfig(), so the greyed fine-tune rows in the cog
+                // show the values actually pushed to the native player. It gives the two SAFER rungs a
+                // real buffer - without it Auto, Balanced and Stable differed only by performance mode
+                // - while leaving Auto/Low on the native default (framesPerBurst * 2), which is both
+                // device-adaptive and lower than any fixed number we could pick here.
+                com.winlator.star.ui.components.AudioConfig c =
+                        com.winlator.star.ui.components.AudioSettingsDialogKt.alsaPresetConfig(preset);
+                perf = c.getPerfMode();
+                adaptive = c.getAdaptive() ? 1 : 0;
+                bf  = c.getBufferFrames();
+                mbf = c.getMaxBufferFrames();
+            }
             com.winlator.star.alsaserver.ALSAClient.nativeSetAudioConfig(perf, adaptive, bf, mbf);
         } catch (Throwable t) {
             android.util.Log.w("ALSAAudio", "applyAlsaAudioConfig failed", t);

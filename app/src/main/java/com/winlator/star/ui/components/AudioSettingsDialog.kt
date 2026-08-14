@@ -162,13 +162,45 @@ fun directPresetConfig(preset: String): AudioConfig = when (preset) {
 }
 
 /**
+ * What ALSA actually applies for a named preset.
+ *
+ * The shared preset objects set no buffer at all (bufferFrames = 0), so on ALSA three of the five
+ * rungs collapsed to nothing but a performance mode - Auto, Balanced and Stable differed only in
+ * that one field. These give the upper rungs a real buffer.
+ *
+ * DELIBERATELY CONSERVATIVE. Auto and Low keep 0, which means the native client's own default of
+ * framesPerBurst * 2 - device-adaptive, and lower than any fixed number we could pick here (8 ms on
+ * the reference device, where a hardcoded 1248 frames would be 26 ms). Only the two rungs that exist
+ * to be SAFER get an explicit, larger buffer, so a wrong guess costs latency rather than crackle.
+ * These sizes are a sensible ladder, not measurements: the ALSA path has an extra server hop that has
+ * never been characterised the way DirectAudio's has.
+ *
+ * Performance mode and adaptive are left exactly as the shared preset defines them - changing those
+ * would alter behaviour for every existing ALSA user, which is not what adding buffer values is for.
+ */
+fun alsaPresetConfig(preset: String): AudioConfig {
+    val base = AUDIO_PRESETS.first { it.id == preset }.cfg
+    return when (preset) {
+        PRESET_BALANCED -> base.copy(bufferFrames = 1152)   // 24 ms
+        PRESET_STABLE   -> base.copy(bufferFrames = 2304)   // 48 ms
+        else            -> base                              // auto/low: native default (burst * 2)
+    }
+}
+
+/**
  * The config to DISPLAY. Custom shows what the user set; a named preset shows what the engine will
  * really apply, which on DirectAudio is not the preset object. Never what gets SAVED - a preset saves
  * its id and the engine re-derives from that at launch.
  */
-fun effectiveConfigFor(cfg: AudioConfig, driverId: String): AudioConfig =
-    if (cfg.preset == PRESET_CUSTOM || driverId != "directaudio") cfg
-    else directPresetConfig(cfg.preset)
+fun effectiveConfigFor(cfg: AudioConfig, driverId: String): AudioConfig = when {
+    cfg.preset == PRESET_CUSTOM -> cfg
+    driverId == "directaudio" -> directPresetConfig(cfg.preset)
+    driverId == "alsa" -> alsaPresetConfig(cfg.preset)
+    else -> cfg
+}
+
+/** ALSA never reads the latency field: nothing in the native client or its env consumes it. */
+fun latencyUsedBy(driverId: String) = driverId != "alsa"
 
 fun loadAudioConfig(ctx: Context, driverId: String): AudioConfig {
     val p = ctx.getSharedPreferences(audioPrefsName(driverId), Context.MODE_PRIVATE)
@@ -387,21 +419,30 @@ fun AudioSettingsDialog(
                             // needs a range that can reach the hardware floor - one 4 ms burst - and a
                             // label that states the total, since Android adds a fixed ~21 ms nobody can
                             // go below. PulseAudio keeps the guest winepulse buffer it always had.
+                            val latencyUsed = latencyUsedBy(driverId)
                             FtRow(
                                 if (directBuffer) "Audio buffer" else "Guest buffer",
-                                (if (directBuffer) "≈${shown.latencyMsec + ANDROID_OUTPUT_MS} ms total · ${shown.latencyMsec} ms buffer"
-                                 else "winepulse · ${shown.latencyMsec} ms") +
+                                // ALSA reaches AAudio through the app's own server, which takes its sizing
+                                // from the buffer rows below - there is no guest-side latency for this row
+                                // to set, so say that rather than leaving a live-looking slider that does
+                                // nothing.
+                                if (!latencyUsed) "not used by ALSA — set the buffer rows below"
+                                else (if (directBuffer) "≈${shown.latencyMsec + ANDROID_OUTPUT_MS} ms total · ${shown.latencyMsec} ms buffer"
+                                      else "winepulse · ${shown.latencyMsec} ms") +
                                     if (!latencyLive) "  · next launch" else "", cs,
-                                onHelp = { helpRes = if (directBuffer) R.string.help_audio_direct_buffer
-                                                     else R.string.help_audio_guest_buffer }) {
+                                onHelp = { helpRes = when {
+                                    !latencyUsed -> R.string.help_audio_latency_unused
+                                    directBuffer -> R.string.help_audio_direct_buffer
+                                    else -> R.string.help_audio_guest_buffer
+                                } }) {
                                 if (directBuffer)
                                     Slider(value = shown.latencyMsec.toFloat(), valueRange = 4f..120f, steps = 28,
-                                        enabled = custom,
+                                        enabled = custom && latencyUsed,
                                         onValueChange = { cfg = cfg.copy(latencyMsec = (it / 4).toInt() * 4) },
                                         modifier = Modifier.width(140.dp))
                                 else
                                     Slider(value = shown.latencyMsec.toFloat(), valueRange = 20f..200f, steps = 17,
-                                        enabled = custom,
+                                        enabled = custom && latencyUsed,
                                         onValueChange = { cfg = cfg.copy(latencyMsec = (it / 10).toInt() * 10) },
                                         modifier = Modifier.width(140.dp))
                             }

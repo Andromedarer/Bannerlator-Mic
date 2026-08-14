@@ -1260,4 +1260,11 @@ E.g. <b>META</b> for <i>META key</i>, \n
         <b>device max</b> uses the driver default (100 ms). Setting it too low means a struggling game runs
         out of room and keeps crackling.
     ]]></string>
+    <string name="help_audio_latency_unused"><![CDATA[
+        <b>Not used by ALSA.</b><br /><br />
+        This row sets the guest-side buffer, which only PulseAudio has. ALSA reaches Android through the
+        app\'s own sound server, and that takes its sizing from the <b>Initial buffer</b> and <b>Max
+        buffer</b> rows below instead.<br /><br />
+        Change those to adjust ALSA\'s delay. This slider is greyed out here because nothing reads it.
+    ]]></string>
 </resources>
