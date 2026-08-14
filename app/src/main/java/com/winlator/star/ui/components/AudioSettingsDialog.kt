@@ -8,7 +8,11 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Help
 import androidx.compose.material3.*
+import com.winlator.star.R
+import com.winlator.star.ui.screens.HelpDialog
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -76,30 +80,32 @@ const val AUDIO_PREFS = "banner_audio"
 
 data class AudioPreset(
     val id: String, val emoji: String, val name: String, val badge: String?, val desc: String,
-    val cfg: AudioConfig, val pos: Float, val note: String
+    val cfg: AudioConfig, val pos: Float, val note: String,
+    /** Long-form "?" help, shown in the app's standard HelpDialog. */
+    val helpRes: Int
 )
 
 val AUDIO_PRESETS = listOf(
     AudioPreset(PRESET_AUTO, "✨", "Auto / Smart", "Recommended",
         "Starts low-latency, grows the buffer only if it hears crackle.",
         AudioConfig(PRESET_AUTO, 1, true, 0, 0, 100), 0.46f,
-        "Aims for the lowest delay your device can hold without crackling."),
+        "Aims for the lowest delay your device can hold without crackling.", R.string.help_audio_preset_auto),
     AudioPreset(PRESET_LOW, "⚡", "Low latency", null,
         "Tightest sync. May crackle under heavy load.",
         AudioConfig(PRESET_LOW, 1, false, 0, 0, 40), 0.10f,
-        "Minimal delay; switch to Auto if heavy scenes crackle."),
+        "Minimal delay; switch to Auto if heavy scenes crackle.", R.string.help_audio_preset_low),
     AudioPreset(PRESET_BALANCED, "⚖️", "Balanced", null,
         "Calmer buffer with an adaptive safety net.",
         AudioConfig(PRESET_BALANCED, 2, true, 0, 0, 100), 0.60f,
-        "Smooth all-rounder for most games."),
+        "Smooth all-rounder for most games.", R.string.help_audio_preset_balanced),
     AudioPreset(PRESET_STABLE, "🛡️", "Stable (no crackle)", null,
         "Biggest safety margin for weak devices / demanding games.",
         AudioConfig(PRESET_STABLE, 0, true, 0, 0, 144), 0.90f,
-        "Maximum crackle protection; most audio delay."),
+        "Maximum crackle protection; most audio delay.", R.string.help_audio_preset_stable),
     AudioPreset(PRESET_CUSTOM, "🎛️", "Custom", "Fine-tune",
         "Set every knob yourself.",
         AudioConfig(PRESET_CUSTOM, 1, true, 0, 0, 100), 0.46f,
-        "Manual control of every buffer knob.")
+        "Manual control of every buffer knob.", R.string.help_audio_preset_custom)
 )
 
 /* ---- persistence: PER-ENGINE prefs (each engine remembers its own; no cross-engine bleed) ---- */
@@ -257,9 +263,14 @@ fun AudioSettingsDialog(
     // On DirectAudio the latency field is a real control (it sets the driver's buffer), not a
     // winepulse-only knob, so a preset must not stamp its own Pulse-shaped value over it.
     val directBuffer = latencyIsDirectBuffer(driverId)
+    // Per-row "?" help, same pattern as the container/shortcut editors: null = closed, else the
+    // string res to show. HelpDialog renders on top of this dialog.
+    var helpRes by remember { mutableStateOf<Int?>(null) }
     fun applyPreset(p: AudioPreset) {
         cfg = if (directBuffer) p.cfg.copy(latencyMsec = cfg.latencyMsec) else p.cfg
     }
+
+    helpRes?.let { HelpDialog(it) { helpRes = null } }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(shape = RoundedCornerShape(22.dp), color = cs.surface,
@@ -326,6 +337,13 @@ fun AudioSettingsDialog(
                                                 modifier = Modifier.border(1.dp, cs.primary, RoundedCornerShape(10.dp))
                                                     .padding(horizontal = 7.dp, vertical = 1.dp))
                                         }
+                                        Spacer(Modifier.weight(1f))
+                                        // Inside the card, but its own click target - tapping "?" explains the
+                                        // preset without selecting it, which matters when you are deciding.
+                                        IconButton(onClick = { helpRes = p.helpRes }, modifier = Modifier.size(30.dp)) {
+                                            Icon(Icons.Default.Help, contentDescription = "What is \"${p.name}\"?",
+                                                 tint = cs.onSurfaceVariant, modifier = Modifier.size(17.dp))
+                                        }
                                     }
                                     Text(p.desc, color = cs.onSurfaceVariant, fontSize = 12.sp)
                                 }
@@ -347,7 +365,8 @@ fun AudioSettingsDialog(
                         modifier = Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(horizontal = 14.dp).alpha(ftAlpha)) {
                             // Output mode
-                            FtRow("Output mode", "AAudio performance mode", cs) {
+                            FtRow("Output mode", "AAudio performance mode", cs,
+                                onHelp = { helpRes = R.string.help_audio_perf_mode }) {
                                 Row {
                                     listOf("None" to 0, "Low lat." to 1, "Power" to 2).forEach { (lbl, v) ->
                                         val on = shown.perfMode == v
@@ -359,7 +378,8 @@ fun AudioSettingsDialog(
                                     }
                                 }
                             }
-                            FtRow("Adaptive buffer", "Auto-grow only if it hears crackle", cs) {
+                            FtRow("Adaptive buffer", "Auto-grow only if it hears crackle", cs,
+                                onHelp = { helpRes = R.string.help_audio_adaptive }) {
                                 Switch(checked = shown.adaptive, enabled = custom,
                                     onCheckedChange = { cfg = cfg.copy(adaptive = it) })
                             }
@@ -371,7 +391,9 @@ fun AudioSettingsDialog(
                                 if (directBuffer) "Audio buffer" else "Guest buffer",
                                 (if (directBuffer) "≈${shown.latencyMsec + ANDROID_OUTPUT_MS} ms total · ${shown.latencyMsec} ms buffer"
                                  else "winepulse · ${shown.latencyMsec} ms") +
-                                    if (!latencyLive) "  · next launch" else "", cs) {
+                                    if (!latencyLive) "  · next launch" else "", cs,
+                                onHelp = { helpRes = if (directBuffer) R.string.help_audio_direct_buffer
+                                                     else R.string.help_audio_guest_buffer }) {
                                 if (directBuffer)
                                     Slider(value = shown.latencyMsec.toFloat(), valueRange = 4f..120f, steps = 28,
                                         enabled = custom,
@@ -384,11 +406,13 @@ fun AudioSettingsDialog(
                                         modifier = Modifier.width(140.dp))
                             }
                             FtStepper("Initial sink buffer", "frames · 0 = auto",
-                                if (shown.bufferFrames > 0) "${shown.bufferFrames}" else "auto", custom, cs) {
+                                if (shown.bufferFrames > 0) "${shown.bufferFrames}" else "auto", custom, cs,
+                                onHelp = { helpRes = R.string.help_audio_buffer_frames }) {
                                 cfg = cfg.copy(bufferFrames = (cfg.bufferFrames + it * 256).coerceAtLeast(0))
                             }
                             FtStepper("Max sink buffer", "growth cap · 0 = device max",
-                                if (shown.maxBufferFrames > 0) "${shown.maxBufferFrames}" else "device max", custom, cs) {
+                                if (shown.maxBufferFrames > 0) "${shown.maxBufferFrames}" else "device max", custom, cs,
+                                onHelp = { helpRes = R.string.help_audio_max_buffer_frames }) {
                                 cfg = cfg.copy(maxBufferFrames = (cfg.maxBufferFrames + it * 256).coerceAtLeast(0))
                             }
                         }
@@ -407,11 +431,18 @@ fun AudioSettingsDialog(
 }
 
 @Composable
-private fun FtRow(name: String, hint: String, cs: ColorScheme, control: @Composable () -> Unit) {
+private fun FtRow(name: String, hint: String, cs: ColorScheme, onHelp: (() -> Unit)? = null,
+                  control: @Composable () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(name, color = cs.onSurface, fontSize = 14.sp, fontWeight = FontWeight.Medium)
             Text(hint, color = cs.onSurfaceVariant, fontSize = 11.5.sp)
+        }
+        // The "?" stays enabled while the row is greyed out: not being allowed to change a setting is
+        // the moment you most want to know what it does.
+        if (onHelp != null) IconButton(onClick = onHelp, modifier = Modifier.size(30.dp)) {
+            Icon(Icons.Default.Help, contentDescription = "What is \"$name\"?",
+                 tint = cs.onSurfaceVariant, modifier = Modifier.size(17.dp))
         }
         control()
     }
@@ -419,8 +450,9 @@ private fun FtRow(name: String, hint: String, cs: ColorScheme, control: @Composa
 }
 
 @Composable
-private fun FtStepper(name: String, hint: String, value: String, enabled: Boolean, cs: ColorScheme, onStep: (Int) -> Unit) {
-    FtRow(name, hint, cs) {
+private fun FtStepper(name: String, hint: String, value: String, enabled: Boolean, cs: ColorScheme,
+                      onHelp: (() -> Unit)? = null, onStep: (Int) -> Unit) {
+    FtRow(name, hint, cs, onHelp) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedButton(onClick = { onStep(-1) }, enabled = enabled,
                 contentPadding = PaddingValues(0.dp), modifier = Modifier.size(34.dp)) { Text("−") }
