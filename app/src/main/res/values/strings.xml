@@ -1228,7 +1228,8 @@ E.g. <b>META</b> for <i>META key</i>, \n
         lowest delay <i>this</i> game can hold on <i>your</i> device rather than a number someone guessed.<br /><br />
         Turning it off pins the buffer. If the game then cannot keep up, <b>it crackles until you relaunch</b>
         — nothing recovers on its own.<br /><br />
-        Leave it on unless you are deliberately testing a fixed size.
+        Every preset now leaves this on, so switching it off is a deliberate choice you make here, on Custom.
+        Do that only when you are testing a fixed size and want no interference.
     ]]></string>
     <string name="help_audio_direct_buffer"><![CDATA[
         <b>Audio buffer</b> — how much sound DirectAudio keeps ready, in milliseconds.<br /><br />

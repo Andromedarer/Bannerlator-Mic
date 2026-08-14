@@ -92,7 +92,15 @@ val AUDIO_PRESETS = listOf(
         "Aims for the lowest delay your device can hold without crackling.", R.string.help_audio_preset_auto),
     AudioPreset(PRESET_LOW, "⚡", "Low latency", null,
         "Tightest sync. May crackle under heavy load.",
-        AudioConfig(PRESET_LOW, 1, false, 0, 0, 40), 0.10f,
+        // adaptive TRUE. This rung pinned the buffer with no way to grow, so a title that
+        // could not hold it crackled for the whole session with nothing to recover it -
+        // the one genuinely dangerous cell in the preset matrix, and on every engine, not
+        // just DirectAudio. A buffer that grows on underrun is strictly safer than one
+        // that cannot, so this can only add recovery where there was none. Turning
+        // adaptation off is still reachable, from Custom or the engine's ADAPTIVE env key,
+        // which is where a deliberate choice belongs - not hidden inside a preset named
+        // for its latency.
+        AudioConfig(PRESET_LOW, 1, true, 0, 0, 40), 0.10f,
         "Minimal delay; switch to Auto if heavy scenes crackle.", R.string.help_audio_preset_low),
     AudioPreset(PRESET_BALANCED, "⚖️", "Balanced", null,
         "Calmer buffer with an adaptive safety net.",
