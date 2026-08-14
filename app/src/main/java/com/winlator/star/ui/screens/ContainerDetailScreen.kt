@@ -2466,6 +2466,9 @@ internal fun GraphicsDriverConfigDialog(
     var blacklisted   by remember { mutableStateOf(initialBlacklist) }
     var showAllDrivers by remember { mutableStateOf(false) }
     var showExtPicker by remember { mutableStateOf(false) }
+    // True when the picked custom driver couldn't load on this GPU and the native probe fell
+    // back to the system ICD (instead of crashing). Drives the inline note under the dropdown.
+    var driverFellBack by remember { mutableStateOf(false) }
 
     LaunchedEffect(showAllDrivers) {
         val atVersions = withContext(Dispatchers.IO) {
@@ -2502,7 +2505,12 @@ internal fun GraphicsDriverConfigDialog(
         if (version.isNotEmpty()) {
             val exts = GPUInformation.enumerateExtensions(version, context)?.toList() ?: emptyList()
             allExtensions = exts
+            // If a real installed Adrenotools driver couldn't load on this GPU, the native
+            // probe now falls back to the system ICD instead of crashing — reflect that.
+            driverFellBack = GPUInformation.driverLoadedFellBack()
             if (version != cfg["version"]) blacklisted = emptySet()
+        } else {
+            driverFellBack = false
         }
     }
 
@@ -2553,6 +2561,14 @@ internal fun GraphicsDriverConfigDialog(
                     IconButton(onClick = { helpRes = R.string.help_graphics_driver_version }) {
                         Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
                     }
+                }
+                if (driverFellBack) {
+                    Text(
+                        text = "This driver couldn't load on your GPU — using the system driver instead. It may need a build patched for this chipset.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 4.dp, start = 4.dp)
+                    )
                 }
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {

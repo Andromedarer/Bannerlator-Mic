@@ -25,6 +25,12 @@ PFN_vkDestroyInstance destroyInstance;
 
 static void *vulkan_handle = NULL;
 
+// Set by init_vulkan when a real, installed Adrenotools custom driver was selected but
+// could NOT be loaded on this GPU, so we fell back to the system Vulkan ICD instead of
+// crashing. Read by GPUInformation.driverLoadedFellBack() to surface a UI note. Never
+// set for wrapper/turnip probes — those legitimately probe against the system ICD.
+static int last_driver_fell_back = 0;
+
 static sigjmp_buf sigill_jmp_buf;
 static struct sigaction saved_sigill_action;
 
@@ -41,7 +47,7 @@ static void cleanup_vulkan() {
 
 
 static char *get_native_library_dir(JNIEnv *env, jobject context) {
-    char *native_libdir;
+    char *native_libdir = NULL;
 
     if (context != NULL) {
         jclass class_ = (*env)->FindClass(env,"com/winlator/star/core/AppUtils");
@@ -58,7 +64,7 @@ static char *get_native_library_dir(JNIEnv *env, jobject context) {
 }
 
 static char *get_driver_path(JNIEnv *env, jobject context, const char *driver_name) {
-    char *driver_path;
+    char *driver_path = NULL;
     char *absolute_path;
 
     jclass contextWrapperClass = (*env)->FindClass(env, "android/content/ContextWrapper");
@@ -79,7 +85,7 @@ static char *get_driver_path(JNIEnv *env, jobject context, const char *driver_na
 }
 
 static char *get_library_name(JNIEnv *env, jobject context, const char *driver_name) {
-    char *library_name;
+    char *library_name = NULL;
 
     jclass adrenotoolsManager = (*env)->FindClass(env, "com/winlator/star/contents/AdrenotoolsManager");
     jmethodID constructor = (*env)->GetMethodID(env, adrenotoolsManager, "<init>", "(Landroid/content/Context;)V");
@@ -98,27 +104,82 @@ static void init_original_vulkan() {
     vulkan_handle = dlopen("/system/lib64/libvulkan.so", RTLD_LOCAL | RTLD_NOW);
 }
 
+// Vendor Vulkan ICD dependencies (especially newer Qualcomm blobs, e.g. Adrenotools
+// custom drivers) are resolved lazily by the loader; make them globally visible BEFORE
+// the custom driver is dlopen'd, or the driver's init can fail to resolve them and fault
+// (a native SIGSEGV the app-scoped logcat never captures). Ported from WinNative, which
+// loads the same drivers on the same GPUs without crashing (both apps are GPL-3.0).
+static void preload_first_existing(const char **candidates) {
+    for (int i = 0; candidates[i]; i++) {
+        if (dlopen(candidates[i], RTLD_GLOBAL | RTLD_NOW))
+            return;
+    }
+}
+
+static void preload_vendor_icd_deps() {
+    const char *jpeg_candidates[] = {
+        "/system/lib64/libjpeg.so",
+        "/system_ext/lib64/libjpeg.so",
+        "libjpeg.so",
+        NULL,
+    };
+    preload_first_existing(jpeg_candidates);
+
+    const char *crypto_candidates[] = {
+        "libcrypto.so",
+        NULL,
+    };
+    preload_first_existing(crypto_candidates);
+}
+
 static void init_vulkan(JNIEnv  *env, jobject context, const char *driver_name) {
-    char *tmpdir;
-    char *library_name;
-    char *native_library_dir;
+    preload_vendor_icd_deps();
 
     const char *driver_path = get_driver_path(env, context, driver_name);
-
-    if (driver_path && (access(driver_path, F_OK) == 0)) {
-        library_name = get_library_name(env, context, driver_name);
-        native_library_dir = get_native_library_dir(env, context);
-        asprintf(&tmpdir, "%s%s", driver_path, "temp");
-        mkdir(tmpdir, S_IRWXU | S_IRWXG);
+    // Not an installed Adrenotools custom driver (e.g. a wrapper/turnip version name) —
+    // probe against the system ICD, exactly as before. This is the expected path, NOT a
+    // failure, so we leave last_driver_fell_back at 0.
+    if (!driver_path || access(driver_path, F_OK) != 0) {
+        init_original_vulkan();
+        return;
     }
 
+    char *library_name = get_library_name(env, context, driver_name);
+    char *native_library_dir = get_native_library_dir(env, context);
+    if (!library_name || !native_library_dir) {
+        init_original_vulkan();
+        return;
+    }
+
+    // NOTE: adrenotools retains these strings (tmpdir/dirs/name) internally, so they must
+    // NOT be freed here — freeing would be a use-after-free (matches WinNative).
+    char *tmpdir = NULL;
+    asprintf(&tmpdir, "%s%s", driver_path, "temp");
+    mkdir(tmpdir, S_IRWXU | S_IRWXG);
+
     vulkan_handle = adrenotools_open_libvulkan(RTLD_LOCAL | RTLD_NOW, ADRENOTOOLS_DRIVER_CUSTOM, tmpdir, native_library_dir, driver_path, library_name, NULL, NULL);
+
+    // A real, installed custom driver that wouldn't load on this GPU: fall back to the
+    // system ICD so the app never crashes, and flag it so the UI can say what happened.
+    if (!vulkan_handle) {
+        last_driver_fell_back = 1;
+        init_original_vulkan();
+    }
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_winlator_star_core_GPUInformation_driverLoadedFellBack(JNIEnv *env, jclass obj) {
+    return last_driver_fell_back ? JNI_TRUE : JNI_FALSE;
 }
 
 static VkResult create_instance(jstring driverName, JNIEnv *env, jobject context) {
     VkResult result;
     VkInstanceCreateInfo create_info = {};
     char *driver_name = NULL;
+
+    // Reset once per probe; init_vulkan raises it only when a real installed custom
+    // driver was chosen but couldn't load (System/wrapper paths leave it at 0).
+    last_driver_fell_back = 0;
 
     if (driverName != NULL)
         driver_name = (char *)(*env)->GetStringUTFChars(env, driverName, NULL);
