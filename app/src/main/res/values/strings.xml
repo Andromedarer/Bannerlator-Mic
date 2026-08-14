@@ -1175,4 +1175,96 @@ E.g. <b>META</b> for <i>META key</i>, \n
         <b>Reset Input</b> (in-game side menu) rebuilds the controller connection without restarting the game.<br /><br />
         Changes made here (out of game) apply on the game\'s <b>next launch</b>; the in-game side menu changes players live. The app-drawer Input Controls copy of this sets the default for <b>newly-created</b> containers.
     ]]></string>
+    <!-- ── Audio settings: per-preset and per-row "?" help ────────────────────────────────────
+         Latency figures are TOTALS (driver buffer + Android's fixed ~21 ms mixer/HAL cost), because
+         the total is what a player hears; a bare buffer number is not comparable to it. -->
+    <string name="help_audio_preset_auto"><![CDATA[
+        <b>Auto / Smart</b> — the recommended setting.<br /><br />
+        Starts at a low delay and only adds more if it actually hears crackling. On DirectAudio that is a
+        1248-frame buffer, about <b>47 ms total</b>.<br /><br />
+        The safety net is the point: a fixed low buffer crackles the moment a heavy scene stalls the GPU,
+        while this one grows just enough to stop that and no further.<br /><br />
+        Pick this unless you have a reason not to.
+    ]]></string>
+    <string name="help_audio_preset_low"><![CDATA[
+        <b>Low latency</b> — tightest sync, no safety net.<br /><br />
+        Same starting buffer as Auto (about <b>47 ms total</b> on DirectAudio) but <b>adaptive growth is
+        switched off</b>, so the buffer can never grow to rescue itself.<br /><br />
+        <b>If a game cannot hold it, it crackles for the whole session</b> and nothing recovers it. That is
+        the only genuinely risky choice in this list.<br /><br />
+        Use it when you have already tested a game and know it copes. Otherwise Auto gives you the same
+        delay with a way out.
+    ]]></string>
+    <string name="help_audio_preset_balanced"><![CDATA[
+        <b>Balanced</b> — a calmer buffer that still adapts.<br /><br />
+        About <b>63 ms total</b> on DirectAudio (2000 frames). Noticeably later than Auto, and noticeably
+        safer on a device that struggles.<br /><br />
+        Worth trying if Auto crackles during loading screens or busy scenes.
+    ]]></string>
+    <string name="help_audio_preset_stable"><![CDATA[
+        <b>Stable</b> — biggest safety margin, most delay.<br /><br />
+        About <b>84 ms total</b> on DirectAudio (3000 frames). Sound lags visibly behind the picture in
+        fast games, which is the trade you are making.<br /><br />
+        For weak devices, very demanding games, or anything that crackles on every other setting.
+    ]]></string>
+    <string name="help_audio_preset_custom"><![CDATA[
+        <b>Custom</b> — unlocks the fine-tune rows below.<br /><br />
+        Every other preset fills those rows in for you and greys them out; they still <i>show</i> what the
+        preset applies, so you can read them before switching.<br /><br />
+        Only choose this if you want to set the buffer yourself. The "?" on each row explains what it does.
+    ]]></string>
+    <string name="help_audio_perf_mode"><![CDATA[
+        <b>Output mode</b> — which Android audio path is requested.<br /><br />
+        <b>Low latency</b> asks for the fast path with a high-priority audio thread. On this emulator that
+        is the tested choice: under box64/FEX a normal-priority thread gets preempted by the game and the
+        sound turns choppy.<br /><br />
+        <b>None</b> is the ordinary path — steadier on paper, choppier here for that reason.<br /><br />
+        <b>Power saving</b> favours battery over delay.<br /><br />
+        DirectAudio forces <b>Low latency</b> for every named preset regardless of this row; it only takes
+        effect on Custom.
+    ]]></string>
+    <string name="help_audio_adaptive"><![CDATA[
+        <b>Adaptive buffer</b> — grow only when something actually goes wrong.<br /><br />
+        The buffer starts small. Each time the audio underruns, a little is added, so it settles at the
+        lowest delay <i>this</i> game can hold on <i>your</i> device rather than a number someone guessed.<br /><br />
+        Turning it off pins the buffer. If the game then cannot keep up, <b>it crackles until you relaunch</b>
+        — nothing recovers on its own.<br /><br />
+        Leave it on unless you are deliberately testing a fixed size.
+    ]]></string>
+    <string name="help_audio_direct_buffer"><![CDATA[
+        <b>Audio buffer</b> — how much sound DirectAudio keeps ready, in milliseconds.<br /><br />
+        Smaller is tighter but more fragile; larger rides out stutters at the cost of delay.<br /><br />
+        The row shows the <b>total</b>, because Android adds a fixed <b>21 ms</b> of its own that no
+        application can avoid. A 12 ms buffer is 33 ms total. The lowest possible is one hardware burst —
+        4 ms of buffer, <b>25 ms total</b>, the floor for any app on this device.<br /><br />
+        With adaptive on, this is a starting point <i>and</i> the level the buffer returns to once things
+        are calm again — it never drops below what you set here.
+    ]]></string>
+    <string name="help_audio_guest_buffer"><![CDATA[
+        <b>Guest buffer</b> — how much sound Windows hands to PulseAudio at a time.<br /><br />
+        This is the guest side of the delay, separate from the sink buffer below. It is fixed when the game
+        connects, so a change takes effect on the <b>next launch</b>.<br /><br />
+        Lower means tighter sync and more work per second; higher is steadier.
+    ]]></string>
+    <string name="help_audio_buffer_frames"><![CDATA[
+        <b>Initial buffer</b> — the starting size, in audio frames rather than milliseconds.<br /><br />
+        48 frames is 1 ms, so 576 frames is a 12 ms buffer (33 ms total). <b>auto</b> lets the engine
+        choose.<br /><br />
+        This is the advanced form of the millisecond row above. If you set both, <b>frames win</b> — clear
+        it back to auto to go by milliseconds again.
+    ]]></string>
+    <string name="help_audio_max_buffer_frames"><![CDATA[
+        <b>Max buffer</b> — how far adaptive growth is allowed to go.<br /><br />
+        A ceiling, not a target: the buffer only reaches it if the game repeatedly underruns. It stops a bad
+        patch from inflating the delay without limit.<br /><br />
+        <b>device max</b> uses the driver default (100 ms). Setting it too low means a struggling game runs
+        out of room and keeps crackling.
+    ]]></string>
+    <string name="help_audio_latency_unused"><![CDATA[
+        <b>Not used by ALSA.</b><br /><br />
+        This row sets the guest-side buffer, which only PulseAudio has. ALSA reaches Android through the
+        app\'s own sound server, and that takes its sizing from the <b>Initial buffer</b> and <b>Max
+        buffer</b> rows below instead.<br /><br />
+        Change those to adjust ALSA\'s delay. This slider is greyed out here because nothing reads it.
+    ]]></string>
 </resources>

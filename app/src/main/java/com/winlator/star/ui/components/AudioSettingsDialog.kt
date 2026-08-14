@@ -8,7 +8,11 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Help
 import androidx.compose.material3.*
+import com.winlator.star.R
+import com.winlator.star.ui.screens.HelpDialog
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -76,30 +80,32 @@ const val AUDIO_PREFS = "banner_audio"
 
 data class AudioPreset(
     val id: String, val emoji: String, val name: String, val badge: String?, val desc: String,
-    val cfg: AudioConfig, val pos: Float, val note: String
+    val cfg: AudioConfig, val pos: Float, val note: String,
+    /** Long-form "?" help, shown in the app's standard HelpDialog. */
+    val helpRes: Int
 )
 
 val AUDIO_PRESETS = listOf(
     AudioPreset(PRESET_AUTO, "✨", "Auto / Smart", "Recommended",
         "Starts low-latency, grows the buffer only if it hears crackle.",
         AudioConfig(PRESET_AUTO, 1, true, 0, 0, 100), 0.46f,
-        "Aims for the lowest delay your device can hold without crackling."),
+        "Aims for the lowest delay your device can hold without crackling.", R.string.help_audio_preset_auto),
     AudioPreset(PRESET_LOW, "⚡", "Low latency", null,
         "Tightest sync. May crackle under heavy load.",
         AudioConfig(PRESET_LOW, 1, false, 0, 0, 40), 0.10f,
-        "Minimal delay; switch to Auto if heavy scenes crackle."),
+        "Minimal delay; switch to Auto if heavy scenes crackle.", R.string.help_audio_preset_low),
     AudioPreset(PRESET_BALANCED, "⚖️", "Balanced", null,
         "Calmer buffer with an adaptive safety net.",
         AudioConfig(PRESET_BALANCED, 2, true, 0, 0, 100), 0.60f,
-        "Smooth all-rounder for most games."),
+        "Smooth all-rounder for most games.", R.string.help_audio_preset_balanced),
     AudioPreset(PRESET_STABLE, "🛡️", "Stable (no crackle)", null,
         "Biggest safety margin for weak devices / demanding games.",
         AudioConfig(PRESET_STABLE, 0, true, 0, 0, 144), 0.90f,
-        "Maximum crackle protection; most audio delay."),
+        "Maximum crackle protection; most audio delay.", R.string.help_audio_preset_stable),
     AudioPreset(PRESET_CUSTOM, "🎛️", "Custom", "Fine-tune",
         "Set every knob yourself.",
         AudioConfig(PRESET_CUSTOM, 1, true, 0, 0, 100), 0.46f,
-        "Manual control of every buffer knob.")
+        "Manual control of every buffer knob.", R.string.help_audio_preset_custom)
 )
 
 /* ---- persistence: PER-ENGINE prefs (each engine remembers its own; no cross-engine bleed) ---- */
@@ -114,6 +120,88 @@ fun audioPrefsName(driverId: String): String = when (driverId) {
  *  both of which drive AAudio directly. PulseAudio defaults to LOW_LATENCY/Auto. */
 private fun engineNoneDefault(driverId: String) = driverId == "alsa" || driverId == "directaudio"
 
+/** DirectAudio's shipping buffer, in ms (DA_DEFAULT_MS in winedirectaudio.drv). ~33 ms to the ear
+ *  once Android's fixed ~21 ms output latency is added. */
+const val DIRECT_DEFAULT_MS = 12
+
+/** Android's own mixer + HAL output latency, measured at 21 ms on the reference device. Every app
+ *  pays it, so it is added when showing a total the user can compare against what they hear. */
+const val ANDROID_OUTPUT_MS = 21
+
+/**
+ * Default for the latency field, which means different things per engine. For PulseAudio it is the
+ * guest winepulse buffer (PULSE_LATENCY_MSEC, 100 ms). For DirectAudio it is the driver's own buffer
+ * target, and 100 ms there would be eight times the driver's default - so the two cannot share a
+ * number. ALSA ignores the field entirely.
+ */
+fun defaultLatencyMsec(driverId: String): Int =
+    if (driverId == "directaudio") DIRECT_DEFAULT_MS else 100
+
+/** True where the latency field drives the DirectAudio buffer (BANNER_AUDIO_DIRECT_MS). */
+fun latencyIsDirectBuffer(driverId: String) = driverId == "directaudio"
+
+/**
+ * What DirectAudio ACTUALLY applies for a named preset.
+ *
+ * The generic preset objects below describe the PulseAudio sink; DirectAudio maps the same names to
+ * its own buffer sizes and always forces LOW_LATENCY (device-proven: NONE runs a normal-priority
+ * thread the guest preempts under box64/FEX, which is audibly choppy). This is the single source of
+ * truth for that mapping - the dialog reads it to show the greyed fine-tune rows, and
+ * XServerDisplayActivity.applyDirectAudioConfig reads it to build the launch environment, so what is
+ * on screen cannot drift from what is used.
+ *
+ * latencyMsec is the ms equivalent of the buffer (frames / 48), so the latency row reads correctly
+ * for a preset even though a preset applies its buffer in frames.
+ */
+fun directPresetConfig(preset: String): AudioConfig = when (preset) {
+    // perf is 1 (LOW_LATENCY) in every case, deliberately - see above.
+    PRESET_LOW      -> AudioConfig(PRESET_LOW, 1, false, 1248, 0, 26)
+    PRESET_AUTO     -> AudioConfig(PRESET_AUTO, 1, true, 1248, 0, 26)
+    PRESET_BALANCED -> AudioConfig(PRESET_BALANCED, 1, true, 2000, 0, 42)
+    else            -> AudioConfig(PRESET_STABLE, 1, true, 3000, 0, 63)   // stable, and the default
+}
+
+/**
+ * What ALSA actually applies for a named preset.
+ *
+ * The shared preset objects set no buffer at all (bufferFrames = 0), so on ALSA three of the five
+ * rungs collapsed to nothing but a performance mode - Auto, Balanced and Stable differed only in
+ * that one field. These give the upper rungs a real buffer.
+ *
+ * DELIBERATELY CONSERVATIVE. Auto and Low keep 0, which means the native client's own default of
+ * framesPerBurst * 2 - device-adaptive, and lower than any fixed number we could pick here (8 ms on
+ * the reference device, where a hardcoded 1248 frames would be 26 ms). Only the two rungs that exist
+ * to be SAFER get an explicit, larger buffer, so a wrong guess costs latency rather than crackle.
+ * These sizes are a sensible ladder, not measurements: the ALSA path has an extra server hop that has
+ * never been characterised the way DirectAudio's has.
+ *
+ * Performance mode and adaptive are left exactly as the shared preset defines them - changing those
+ * would alter behaviour for every existing ALSA user, which is not what adding buffer values is for.
+ */
+fun alsaPresetConfig(preset: String): AudioConfig {
+    val base = AUDIO_PRESETS.first { it.id == preset }.cfg
+    return when (preset) {
+        PRESET_BALANCED -> base.copy(bufferFrames = 1152)   // 24 ms
+        PRESET_STABLE   -> base.copy(bufferFrames = 2304)   // 48 ms
+        else            -> base                              // auto/low: native default (burst * 2)
+    }
+}
+
+/**
+ * The config to DISPLAY. Custom shows what the user set; a named preset shows what the engine will
+ * really apply, which on DirectAudio is not the preset object. Never what gets SAVED - a preset saves
+ * its id and the engine re-derives from that at launch.
+ */
+fun effectiveConfigFor(cfg: AudioConfig, driverId: String): AudioConfig = when {
+    cfg.preset == PRESET_CUSTOM -> cfg
+    driverId == "directaudio" -> directPresetConfig(cfg.preset)
+    driverId == "alsa" -> alsaPresetConfig(cfg.preset)
+    else -> cfg
+}
+
+/** ALSA never reads the latency field: nothing in the native client or its env consumes it. */
+fun latencyUsedBy(driverId: String) = driverId != "alsa"
+
 fun loadAudioConfig(ctx: Context, driverId: String): AudioConfig {
     val p = ctx.getSharedPreferences(audioPrefsName(driverId), Context.MODE_PRIVATE)
     val none = engineNoneDefault(driverId)
@@ -124,7 +212,7 @@ fun loadAudioConfig(ctx: Context, driverId: String): AudioConfig {
         adaptive = p.getBoolean("adaptive", true),
         bufferFrames = p.getInt("buffer_frames", 0),
         maxBufferFrames = p.getInt("max_buffer_frames", 0),
-        latencyMsec = p.getInt("latency_msec", 100)
+        latencyMsec = p.getInt("latency_msec", defaultLatencyMsec(driverId))
     )
 }
 
@@ -182,7 +270,7 @@ fun audioConfigFromEnv(env: String, driverId: String = ""): AudioConfig {
         adaptive = (m["${pfx}ADAPTIVE"]?.toIntOrNull() ?: 1) != 0,
         bufferFrames = m["${pfx}BF"]?.toIntOrNull() ?: 0,
         maxBufferFrames = m["${pfx}MBF"]?.toIntOrNull() ?: 0,
-        latencyMsec = m["${pfx}LAT"]?.toIntOrNull() ?: def.latencyMsec
+        latencyMsec = m["${pfx}LAT"]?.toIntOrNull() ?: defaultLatencyMsec(driverId)
     )
 }
 
@@ -196,6 +284,7 @@ fun AudioSettingsDialog(
     scopeLabel: String,
     latencyLive: Boolean,
     driverLabel: String = "",
+    driverId: String = "",
     onDismiss: () -> Unit,
     onSave: (AudioConfig) -> Unit
 ) {
@@ -203,6 +292,17 @@ fun AudioSettingsDialog(
     var cfg by remember { mutableStateOf(initial) }
     val custom = cfg.preset == PRESET_CUSTOM
     val curPreset = AUDIO_PRESETS.first { it.id == cfg.preset }
+    // On DirectAudio the latency field is a real control (it sets the driver's buffer), not a
+    // winepulse-only knob, so a preset must not stamp its own Pulse-shaped value over it.
+    val directBuffer = latencyIsDirectBuffer(driverId)
+    // Per-row "?" help, same pattern as the container/shortcut editors: null = closed, else the
+    // string res to show. HelpDialog renders on top of this dialog.
+    var helpRes by remember { mutableStateOf<Int?>(null) }
+    fun applyPreset(p: AudioPreset) {
+        cfg = if (directBuffer) p.cfg.copy(latencyMsec = cfg.latencyMsec) else p.cfg
+    }
+
+    helpRes?.let { HelpDialog(it) { helpRes = null } }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(shape = RoundedCornerShape(22.dp), color = cs.surface,
@@ -256,9 +356,9 @@ fun AudioSettingsDialog(
                             color = if (sel) cs.primary.copy(alpha = 0.14f) else cs.surfaceVariant,
                             modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
                                 .border(1.5.dp, if (sel) cs.primary else Color.Transparent, RoundedCornerShape(16.dp))
-                                .clickable { cfg = p.cfg }) {
+                                .clickable { applyPreset(p) }) {
                             Row(Modifier.padding(13.dp), verticalAlignment = Alignment.Top) {
-                                RadioButton(selected = sel, onClick = { cfg = p.cfg })
+                                RadioButton(selected = sel, onClick = { applyPreset(p) })
                                 Text(p.emoji, fontSize = 18.sp, modifier = Modifier.padding(top = 12.dp, end = 8.dp))
                                 Column(Modifier.weight(1f).padding(top = 8.dp)) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -269,6 +369,13 @@ fun AudioSettingsDialog(
                                                 modifier = Modifier.border(1.dp, cs.primary, RoundedCornerShape(10.dp))
                                                     .padding(horizontal = 7.dp, vertical = 1.dp))
                                         }
+                                        Spacer(Modifier.weight(1f))
+                                        // Inside the card, but its own click target - tapping "?" explains the
+                                        // preset without selecting it, which matters when you are deciding.
+                                        IconButton(onClick = { helpRes = p.helpRes }, modifier = Modifier.size(30.dp)) {
+                                            Icon(Icons.Default.Help, contentDescription = "What is \"${p.name}\"?",
+                                                 tint = cs.onSurfaceVariant, modifier = Modifier.size(17.dp))
+                                        }
                                     }
                                     Text(p.desc, color = cs.onSurfaceVariant, fontSize = 12.sp)
                                 }
@@ -276,18 +383,25 @@ fun AudioSettingsDialog(
                         }
                     }
 
-                    Text(if (custom) "FINE-TUNE" else "FINE-TUNE — (Custom only)",
+                    Text(if (custom) "FINE-TUNE" else "FINE-TUNE — what this preset applies (Custom to edit)",
                         color = cs.onSurfaceVariant, fontSize = 11.sp, fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(4.dp, 16.dp, 0.dp, 8.dp))
                     val ftAlpha = if (custom) 1f else 0.4f
+                    // Greyed rows must show what the engine will actually use, not the preset object:
+                    // on DirectAudio a named preset means a specific buffer and a forced LOW_LATENCY,
+                    // so showing the generic preset values would state the wrong thing in the one panel
+                    // whose job is telling you what the preset does. Edits still go to `cfg`; this is
+                    // only what is rendered, and it equals `cfg` whenever the rows are editable.
+                    val shown = effectiveConfigFor(cfg, driverId)
                     Surface(shape = RoundedCornerShape(16.dp), color = cs.surfaceVariant,
                         modifier = Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(horizontal = 14.dp).alpha(ftAlpha)) {
                             // Output mode
-                            FtRow("Output mode", "AAudio performance mode", cs) {
+                            FtRow("Output mode", "AAudio performance mode", cs,
+                                onHelp = { helpRes = R.string.help_audio_perf_mode }) {
                                 Row {
                                     listOf("None" to 0, "Low lat." to 1, "Power" to 2).forEach { (lbl, v) ->
-                                        val on = cfg.perfMode == v
+                                        val on = shown.perfMode == v
                                         Text(lbl, color = if (on) cs.onPrimary else cs.onSurfaceVariant, fontSize = 12.sp,
                                             modifier = Modifier.padding(horizontal = 3.dp)
                                                 .background(if (on) cs.primary else cs.surface, RoundedCornerShape(9.dp))
@@ -296,22 +410,50 @@ fun AudioSettingsDialog(
                                     }
                                 }
                             }
-                            FtRow("Adaptive buffer", "Auto-grow only if it hears crackle", cs) {
-                                Switch(checked = cfg.adaptive, enabled = custom,
+                            FtRow("Adaptive buffer", "Auto-grow only if it hears crackle", cs,
+                                onHelp = { helpRes = R.string.help_audio_adaptive }) {
+                                Switch(checked = shown.adaptive, enabled = custom,
                                     onCheckedChange = { cfg = cfg.copy(adaptive = it) })
                             }
-                            FtRow("Guest buffer",
-                                "winepulse · ${cfg.latencyMsec} ms" + if (!latencyLive) "  · next launch" else "", cs) {
-                                Slider(value = cfg.latencyMsec.toFloat(), valueRange = 20f..200f, steps = 17,
-                                    enabled = custom, onValueChange = { cfg = cfg.copy(latencyMsec = (it / 10).toInt() * 10) },
-                                    modifier = Modifier.width(140.dp))
+                            // DirectAudio: this is the driver's own buffer (BANNER_AUDIO_DIRECT_MS), so it
+                            // needs a range that can reach the hardware floor - one 4 ms burst - and a
+                            // label that states the total, since Android adds a fixed ~21 ms nobody can
+                            // go below. PulseAudio keeps the guest winepulse buffer it always had.
+                            val latencyUsed = latencyUsedBy(driverId)
+                            FtRow(
+                                if (directBuffer) "Audio buffer" else "Guest buffer",
+                                // ALSA reaches AAudio through the app's own server, which takes its sizing
+                                // from the buffer rows below - there is no guest-side latency for this row
+                                // to set, so say that rather than leaving a live-looking slider that does
+                                // nothing.
+                                if (!latencyUsed) "not used by ALSA — set the buffer rows below"
+                                else (if (directBuffer) "≈${shown.latencyMsec + ANDROID_OUTPUT_MS} ms total · ${shown.latencyMsec} ms buffer"
+                                      else "winepulse · ${shown.latencyMsec} ms") +
+                                    if (!latencyLive) "  · next launch" else "", cs,
+                                onHelp = { helpRes = when {
+                                    !latencyUsed -> R.string.help_audio_latency_unused
+                                    directBuffer -> R.string.help_audio_direct_buffer
+                                    else -> R.string.help_audio_guest_buffer
+                                } }) {
+                                if (directBuffer)
+                                    Slider(value = shown.latencyMsec.toFloat(), valueRange = 4f..120f, steps = 28,
+                                        enabled = custom && latencyUsed,
+                                        onValueChange = { cfg = cfg.copy(latencyMsec = (it / 4).toInt() * 4) },
+                                        modifier = Modifier.width(140.dp))
+                                else
+                                    Slider(value = shown.latencyMsec.toFloat(), valueRange = 20f..200f, steps = 17,
+                                        enabled = custom && latencyUsed,
+                                        onValueChange = { cfg = cfg.copy(latencyMsec = (it / 10).toInt() * 10) },
+                                        modifier = Modifier.width(140.dp))
                             }
                             FtStepper("Initial sink buffer", "frames · 0 = auto",
-                                if (cfg.bufferFrames > 0) "${cfg.bufferFrames}" else "auto", custom, cs) {
+                                if (shown.bufferFrames > 0) "${shown.bufferFrames}" else "auto", custom, cs,
+                                onHelp = { helpRes = R.string.help_audio_buffer_frames }) {
                                 cfg = cfg.copy(bufferFrames = (cfg.bufferFrames + it * 256).coerceAtLeast(0))
                             }
                             FtStepper("Max sink buffer", "growth cap · 0 = device max",
-                                if (cfg.maxBufferFrames > 0) "${cfg.maxBufferFrames}" else "device max", custom, cs) {
+                                if (shown.maxBufferFrames > 0) "${shown.maxBufferFrames}" else "device max", custom, cs,
+                                onHelp = { helpRes = R.string.help_audio_max_buffer_frames }) {
                                 cfg = cfg.copy(maxBufferFrames = (cfg.maxBufferFrames + it * 256).coerceAtLeast(0))
                             }
                         }
@@ -330,11 +472,18 @@ fun AudioSettingsDialog(
 }
 
 @Composable
-private fun FtRow(name: String, hint: String, cs: ColorScheme, control: @Composable () -> Unit) {
+private fun FtRow(name: String, hint: String, cs: ColorScheme, onHelp: (() -> Unit)? = null,
+                  control: @Composable () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(name, color = cs.onSurface, fontSize = 14.sp, fontWeight = FontWeight.Medium)
             Text(hint, color = cs.onSurfaceVariant, fontSize = 11.5.sp)
+        }
+        // The "?" stays enabled while the row is greyed out: not being allowed to change a setting is
+        // the moment you most want to know what it does.
+        if (onHelp != null) IconButton(onClick = onHelp, modifier = Modifier.size(30.dp)) {
+            Icon(Icons.Default.Help, contentDescription = "What is \"$name\"?",
+                 tint = cs.onSurfaceVariant, modifier = Modifier.size(17.dp))
         }
         control()
     }
@@ -342,8 +491,9 @@ private fun FtRow(name: String, hint: String, cs: ColorScheme, control: @Composa
 }
 
 @Composable
-private fun FtStepper(name: String, hint: String, value: String, enabled: Boolean, cs: ColorScheme, onStep: (Int) -> Unit) {
-    FtRow(name, hint, cs) {
+private fun FtStepper(name: String, hint: String, value: String, enabled: Boolean, cs: ColorScheme,
+                      onHelp: (() -> Unit)? = null, onStep: (Int) -> Unit) {
+    FtRow(name, hint, cs, onHelp) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedButton(onClick = { onStep(-1) }, enabled = enabled,
                 contentPadding = PaddingValues(0.dp), modifier = Modifier.size(34.dp)) { Text("−") }

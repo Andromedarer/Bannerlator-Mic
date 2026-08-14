@@ -2677,6 +2677,16 @@ public class XServerDisplayActivity extends AppCompatActivity {
         return "banner_audio_pulseaudio";
     }
 
+    /** DirectAudio's shipping buffer in ms (DA_DEFAULT_MS in winedirectaudio.drv) => ~33 ms total. */
+    private static final int DIRECT_DEFAULT_MS = 12;
+
+    /** The latency field means the guest winepulse buffer on Pulse (100 ms) but the DRIVER's own buffer
+     *  on DirectAudio, where 100 ms would be eight times its default - so the default cannot be shared.
+     *  ALSA ignores the field entirely. */
+    private static int defaultLatencyMsec(String driverId) {
+        return "directaudio".equals(driverId) ? DIRECT_DEFAULT_MS : 100;
+    }
+
     // Reseed the launching engine's EPHEMERAL runtime prefs (banner_audio_<engine>) from the resolved
     // per-scope config: engine-scoped env keys BANNER_AUDIO_<ENG>_* (already merged shortcut-over-
     // container), else the engine default. A FULL write EVERY launch — the runtime file carries no
@@ -2698,7 +2708,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 .putBoolean("adaptive", hasAdaptive ? !"0".equals(ev.get(kp + "ADAPTIVE")) : true)
                 .putInt("buffer_frames", bf != null ? bf : 0)
                 .putInt("max_buffer_frames", mbf != null ? mbf : 0)
-                .putInt("latency_msec", lat != null ? lat : 100)
+                .putInt("latency_msec", lat != null ? lat : defaultLatencyMsec(driverId))
                 .apply();
     }
 
@@ -2706,6 +2716,22 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // game). Reads the just-updated runtime prefs for the active engine and writes them into the
     // shortcut's env under that engine's key prefix, replacing only this engine's keys (the other
     // engine's config + all non-audio env survive). Mirrors resetPerfKey's putExtra+saveData pattern.
+    // The exact engine-scoped keys persistAudioToShortcut re-emits. Everything else carrying the same
+    // prefix belongs to whoever typed it — the audio cog owns the keys it writes, not the whole
+    // BANNER_AUDIO_<ENG>_ namespace. Blanket-dropping the prefix silently deleted hand-set driver knobs
+    // (DirectAudio's _MS/_MAXMS/_DECAY and its watchdog/decay tuning) the first time the cog was applied:
+    // they survived every launch, then vanished on the first in-game audio change. Keeping this list
+    // narrow means a knob added to a driver later is preserved without touching this code.
+    private static final String[] COG_OWNED_AUDIO_KEYS = { "PRESET", "PERF", "ADAPTIVE", "LAT", "BF", "MBF" };
+
+    private static boolean isCogOwnedAudioKey(String tok, String kp) {
+        if (!tok.startsWith(kp)) return false;
+        int eq = tok.indexOf('=');
+        String name = eq >= 0 ? tok.substring(kp.length(), eq) : tok.substring(kp.length());
+        for (String k : COG_OWNED_AUDIO_KEYS) if (k.equals(name)) return true;
+        return false;
+    }
+
     private void persistAudioToShortcut(String driverId) {
         if (shortcut == null) return;   // no per-game store (e.g. direct/installer launch)
         try {
@@ -2714,12 +2740,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
             int perf = p.getInt("perf_mode", audioNoneDefault(driverId) ? 0 : 1);
             boolean adaptive = p.getBoolean("adaptive", true);
             int bf = p.getInt("buffer_frames", 0), mbf = p.getInt("max_buffer_frames", 0);
-            int lat = p.getInt("latency_msec", 100);
+            int lat = p.getInt("latency_msec", defaultLatencyMsec(driverId));
             String preset = p.getString("preset", audioNoneDefault(driverId) ? "stable" : "auto");
             StringBuilder sb = new StringBuilder();
             String existing = shortcut.getExtra("envVars");
             if (existing != null) for (String tok : existing.split(" ")) {
-                if (tok.isEmpty() || tok.startsWith(kp)) continue;   // drop this engine's old keys
+                if (tok.isEmpty() || isCogOwnedAudioKey(tok, kp)) continue;   // drop only what we rewrite below
                 if (sb.length() > 0) sb.append(' ');
                 sb.append(tok);
             }
@@ -2745,10 +2771,26 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private void applyAlsaAudioConfig() {
         try {
             android.content.SharedPreferences p = getSharedPreferences("banner_audio_alsa", MODE_PRIVATE);
-            int perf = p.contains("perf_mode") ? p.getInt("perf_mode", 0) : 0; // ALSA proven default = NONE
-            int adaptive = p.getBoolean("adaptive", true) ? 1 : 0;
-            int bf  = p.getInt("buffer_frames", 0);
-            int mbf = p.getInt("max_buffer_frames", 0);
+            String preset = p.getString("preset", "stable");
+            int perf, adaptive, bf, mbf;
+            if ("custom".equals(preset)) {
+                perf = p.contains("perf_mode") ? p.getInt("perf_mode", 0) : 0; // ALSA proven default = NONE
+                adaptive = p.getBoolean("adaptive", true) ? 1 : 0;
+                bf  = p.getInt("buffer_frames", 0);
+                mbf = p.getInt("max_buffer_frames", 0);
+            } else {
+                // Named presets come from alsaPresetConfig(), so the greyed fine-tune rows in the cog
+                // show the values actually pushed to the native player. It gives the two SAFER rungs a
+                // real buffer - without it Auto, Balanced and Stable differed only by performance mode
+                // - while leaving Auto/Low on the native default (framesPerBurst * 2), which is both
+                // device-adaptive and lower than any fixed number we could pick here.
+                com.winlator.star.ui.components.AudioConfig c =
+                        com.winlator.star.ui.components.AudioSettingsDialogKt.alsaPresetConfig(preset);
+                perf = c.getPerfMode();
+                adaptive = c.getAdaptive() ? 1 : 0;
+                bf  = c.getBufferFrames();
+                mbf = c.getMaxBufferFrames();
+            }
             com.winlator.star.alsaserver.ALSAClient.nativeSetAudioConfig(perf, adaptive, bf, mbf);
         } catch (Throwable t) {
             android.util.Log.w("ALSAAudio", "applyAlsaAudioConfig failed", t);
@@ -2768,21 +2810,34 @@ public class XServerDisplayActivity extends AppCompatActivity {
         try {
             android.content.SharedPreferences p = getSharedPreferences("banner_audio_directaudio", MODE_PRIVATE);
             String preset = p.getString("preset", "stable");
-            int perf = 1, bf, mbf = 0; boolean adaptive = true;   // perf 1 = LOW_LATENCY
-            switch (preset) {
-                case "low":      bf = 1248; adaptive = false; break;   // ~26 ms, tightest sync (device-proven)
-                case "auto":     bf = 1248; adaptive = true;  break;   // ~26 ms + adaptive safety net
-                case "balanced": bf = 2000; adaptive = true;  break;   // ~42 ms
-                case "custom":   perf = p.getInt("perf_mode", 1);
-                                 bf   = p.getInt("buffer_frames", 0);
-                                 mbf  = p.getInt("max_buffer_frames", 0);
-                                 adaptive = p.getBoolean("adaptive", true); break;
-                case "stable":
-                default:         bf = 3000; adaptive = true;  break;   // ~62.5 ms, biggest safety margin
+            int perf, bf, mbf = 0, ms = 0; boolean adaptive;
+            if ("custom".equals(preset)) {
+                perf = p.getInt("perf_mode", 1);
+                bf   = p.getInt("buffer_frames", 0);
+                mbf  = p.getInt("max_buffer_frames", 0);
+                ms   = p.getInt("latency_msec", DIRECT_DEFAULT_MS);
+                adaptive = p.getBoolean("adaptive", true);
+            } else {
+                // Named presets come from directPresetConfig() rather than a switch of their own, so
+                // the greyed fine-tune rows in the audio cog show these exact values instead of a
+                // second copy that can drift from them. It forces LOW_LATENCY for every preset -
+                // device-proven, NONE is a normal-priority thread the guest preempts under box64/FEX.
+                com.winlator.star.ui.components.AudioConfig c =
+                        com.winlator.star.ui.components.AudioSettingsDialogKt.directPresetConfig(preset);
+                perf = c.getPerfMode();
+                bf   = c.getBufferFrames();
+                mbf  = c.getMaxBufferFrames();
+                adaptive = c.getAdaptive();
             }
             envVars.put("BANNER_AUDIO_DIRECT_PERF", String.valueOf(perf));
             envVars.put("BANNER_AUDIO_DIRECT_ADAPTIVE", adaptive ? "1" : "0");
-            if (bf  > 0) envVars.put("BANNER_AUDIO_DIRECT_BF",  String.valueOf(bf));
+            // Exactly ONE buffer key, never both. _MS overrides _BF inside the driver, so emitting the
+            // pair would make the frame stepper silently lose to the millisecond slider. Frames win when
+            // set - that stepper is the advanced control and 0 means "not set" - otherwise the latency
+            // slider is what the user actually moved, and on DirectAudio it IS the buffer. Named presets
+            // carry their own frame count and never reach here with ms.
+            if (bf  > 0) envVars.put("BANNER_AUDIO_DIRECT_BF", String.valueOf(bf));
+            else if (ms > 0) envVars.put("BANNER_AUDIO_DIRECT_MS", String.valueOf(ms));
             if (mbf > 0) envVars.put("BANNER_AUDIO_DIRECT_MBF", String.valueOf(mbf));
         } catch (Throwable t) {
             android.util.Log.w("DirectAudio", "applyDirectAudioConfig failed", t);

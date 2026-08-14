@@ -6506,6 +6506,7 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                                 "alsa" -> "ALSA"; "pulseaudio" -> "PulseAudio"; "directaudio" -> "DirectAudio"
                                 else -> StringUtils.parseIdentifier(selectedAudioDriver)
                             },
+                            driverId = StringUtils.parseIdentifier(selectedAudioDriver),
                             onDismiss = { showScAudioSettings = false },
                             onSave = { cfg ->
                                 envVarsStr = audioConfigToEnv(envVarsStr, cfg, StringUtils.parseIdentifier(selectedAudioDriver))
