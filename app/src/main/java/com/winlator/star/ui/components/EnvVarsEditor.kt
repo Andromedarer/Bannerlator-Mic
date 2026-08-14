@@ -479,6 +479,12 @@ internal fun EnvVarsEditor(
                 // Escape hatch: edit the whole string by hand. Same format that gets stored,
                 // so anything the typed controls can't express can still be entered here.
                 var rawText by remember { mutableStateOf(renderRows(rows)) }
+                // Tokens that aren't NAME=VALUE. The add-picker can't produce these — it splits the
+                // name and value for you — but this box stores exactly what is typed, so a missing
+                // '=' lands in the saved string. The launcher skips such tokens rather than failing,
+                // which means the variable silently does nothing; say so here instead, while the
+                // cursor is still in the box. Leading '=' counts: there is no name to bind to.
+                val malformed = rawText.split(" ").filter { it.isNotBlank() && it.indexOf('=') <= 0 }
                 OutlinedTextField(
                     value = rawText,
                     onValueChange = {
@@ -491,6 +497,16 @@ internal fun EnvVarsEditor(
                         onValueChange(it)
                     },
                     label = { Text("NAME=VALUE, separated by spaces") },
+                    isError = malformed.isNotEmpty(),
+                    supportingText = if (malformed.isEmpty()) null else {
+                        {
+                            Text(
+                                "Ignored — needs NAME=VALUE: " + malformed.joinToString(", ") +
+                                    ". Values can't contain spaces.",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp)
                 )
             } else if (rows.isEmpty()) {
