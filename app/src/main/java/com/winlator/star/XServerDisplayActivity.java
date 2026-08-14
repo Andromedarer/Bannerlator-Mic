@@ -2833,6 +2833,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 mbf  = c.getMaxBufferFrames();
                 adaptive = c.getAdaptive();
             }
+            // POWER_SAVING (2) churns on DirectAudio under box64/FEX (stream errors + reopens); the cog no
+            // longer offers it, but coerce here too so a legacy pref or hand-set env can't select it.
+            if (perf == 2) perf = 1;
             envVars.put("BANNER_AUDIO_DIRECT_PERF", String.valueOf(perf));
             envVars.put("BANNER_AUDIO_DIRECT_ADAPTIVE", adaptive ? "1" : "0");
             // Exactly ONE buffer key, never both. _MS overrides _BF inside the driver, so emitting the
@@ -2876,6 +2879,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 bf   = c.getBufferFrames();
                 mbf  = c.getMaxBufferFrames();
             }
+            if (perf == 2) perf = 1;   // no POWER_SAVING on DirectAudio (churns) - same as applyDirectAudioConfig
             int outMs = bf > 0 ? (bf * 1000 + 47999) / 48000 : ms;   // frames -> ms, round up
             StringBuilder sb = new StringBuilder();
             if (outMs > 0) sb.append("MS=").append(outMs).append('\n');

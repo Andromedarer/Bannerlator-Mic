@@ -427,7 +427,14 @@ fun AudioSettingsDialog(
                             FtRow("Output mode", "AAudio performance mode", cs,
                                 onHelp = { helpRes = R.string.help_audio_perf_mode }) {
                                 Row {
-                                    listOf("None" to 0, "Low lat." to 1, "Power" to 2).forEach { (lbl, v) ->
+                                    // DirectAudio must NOT offer POWER_SAVING: on this engine its AAudio
+                                    // power-saving stream errors and reopens ~1/s under box64/FEX (device-
+                                    // proven 2026-08-14), a wasteful churn. Every DirectAudio preset already
+                                    // forces LOW_LATENCY for the same reason, so drop "Power" here too.
+                                    val perfOpts = if (driverId == "directaudio")
+                                        listOf("None" to 0, "Low lat." to 1)
+                                    else listOf("None" to 0, "Low lat." to 1, "Power" to 2)
+                                    perfOpts.forEach { (lbl, v) ->
                                         val on = shown.perfMode == v
                                         Text(lbl, color = if (on) cs.onPrimary else cs.onSurfaceVariant, fontSize = 12.sp,
                                             modifier = Modifier.padding(horizontal = 3.dp)
