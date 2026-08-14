@@ -74,11 +74,18 @@ import java.io.File
 
 internal enum class EnvVarType { CHECKBOX, SELECT, SELECT_MULTIPLE, NUMBER, TEXT }
 
-/** One catalog entry. For CHECKBOX, [options] is exactly [offValue, onValue]. */
+/**
+ * One catalog entry. For CHECKBOX, [options] is exactly [offValue, onValue].
+ *
+ * [defaultValue] is what a freshly added row starts at. Without it a CHECKBOX starts at
+ * options[0] — "off" — which is wrong for anything the underlying component enables by
+ * default: adding the variable to look at it would silently turn the feature off.
+ */
 internal data class KnownEnvVar(
     val name: String,
     val type: EnvVarType,
     val options: List<String> = emptyList(),
+    val defaultValue: String? = null,
 )
 
 /**
@@ -186,6 +193,28 @@ internal object KnownEnvVars {
         KnownEnvVar("COMPAT_EMULATE_PUSH_DESCRIPTORS", EnvVarType.CHECKBOX, listOf("0", "1")),
         KnownEnvVar("COMPAT_EMULATE_NULL_DESCRIPTORS", EnvVarType.CHECKBOX, listOf("0", "1")),
         KnownEnvVar("COMPAT_FORCE_MASKING", EnvVarType.CHECKBOX, listOf("0", "1")),
+        // ── DirectAudio (winedirectaudio.drv) ────────────────────────────────────────────
+        // The driver reads these from the guest environment at stream open; the audio cog
+        // exposes none of them. Buffer values are OUR side of the delay only — Android adds
+        // a fixed ~21 ms on top, so _MS=12 is ~33 ms to the ear and one burst (~4 ms) is the
+        // ~25 ms floor no app on Android goes below.
+        //
+        // Deliberately NOT listed: _PERF, _ADAPTIVE, _BF, _MBF. The audio cog rewrites those
+        // from the selected preset on every launch, so offering them here would hand out a
+        // control that loses a fight the user cannot see. _MS/_MAXMS override _BF/_MBF inside
+        // the driver, which is why they are the ones worth setting by hand.
+        KnownEnvVar("BANNER_AUDIO_DIRECT_MS", EnvVarType.NUMBER),
+        KnownEnvVar("BANNER_AUDIO_DIRECT_MAXMS", EnvVarType.NUMBER),
+        KnownEnvVar("BANNER_AUDIO_DIRECT_DECAY", EnvVarType.CHECKBOX, listOf("0", "1"), defaultValue = "1"),
+        KnownEnvVar("BANNER_AUDIO_DIRECT_PERIOD_MS", EnvVarType.NUMBER),
+        KnownEnvVar("BANNER_AUDIO_DIRECT_MINPERIOD_MS", EnvVarType.NUMBER),
+        KnownEnvVar("BANNER_AUDIO_DIRECT_EXCLUSIVE", EnvVarType.CHECKBOX, listOf("0", "1")),
+        KnownEnvVar("BANNER_AUDIO_DIRECT_WATCHDOG", EnvVarType.CHECKBOX, listOf("0", "1"), defaultValue = "1"),
+        KnownEnvVar("BANNER_AUDIO_DIRECT_STALL_MS", EnvVarType.NUMBER),
+        KnownEnvVar("BANNER_AUDIO_DIRECT_DECAY_QUIET_MS", EnvVarType.NUMBER),
+        KnownEnvVar("BANNER_AUDIO_DIRECT_DECAY_PUNISH_MS", EnvVarType.NUMBER),
+        KnownEnvVar("BANNER_AUDIO_DIRECT_DECAY_MAXBACKOFF", EnvVarType.NUMBER),
+        KnownEnvVar("BANNER_AUDIO_DIRECT_LOG", EnvVarType.CHECKBOX, listOf("0", "1")),
     )
 
     private val byName = all.associateBy { it.name }
@@ -568,6 +597,7 @@ internal fun EnvVarsEditor(
 /** Seed value for a freshly added variable so the row renders with a sane control state. */
 private fun defaultValueFor(name: String): String {
     val known = KnownEnvVars.find(name) ?: return ""
+    known.defaultValue?.let { return it }
     return when (known.type) {
         EnvVarType.CHECKBOX -> known.options.getOrElse(0) { "0" }
         EnvVarType.SELECT -> known.options.firstOrNull() ?: ""
