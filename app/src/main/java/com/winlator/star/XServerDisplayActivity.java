@@ -2843,8 +2843,50 @@ public class XServerDisplayActivity extends AppCompatActivity {
             if (bf  > 0) envVars.put("BANNER_AUDIO_DIRECT_BF", String.valueOf(bf));
             else if (ms > 0) envVars.put("BANNER_AUDIO_DIRECT_MS", String.valueOf(ms));
             if (mbf > 0) envVars.put("BANNER_AUDIO_DIRECT_MBF", String.valueOf(mbf));
+            // Live-config "mailbox": tell the driver where to watch for in-game changes, and clear any
+            // stale file from a previous session so THIS launch starts from the env above, not an old
+            // override. The driver reads config from the env at stream open; the mailbox lets an in-game
+            // cog save reach the ALREADY-RUNNING driver (see writeDirectAudioRuntime / onReapplyAudio).
+            java.io.File rt = new java.io.File(getFilesDir(), "banner_audio_directaudio.rt");
+            rt.delete();
+            envVars.put("BANNER_AUDIO_DIRECT_RUNTIME", rt.getAbsolutePath());
         } catch (Throwable t) {
             android.util.Log.w("DirectAudio", "applyDirectAudioConfig failed", t);
+        }
+    }
+
+    // Write the live-config "mailbox" the winedirectaudio.drv watcher polls, so an in-game cog SAVE
+    // reaches the running driver (which otherwise only reads config at stream open). Same resolution as
+    // applyDirectAudioConfig, emitted as the mailbox's ms/perf keys (it takes milliseconds, not frames;
+    // a frame count converts at 48 kHz). PERF stays 0/1/2 - the driver maps it to the AAudio enum.
+    private void writeDirectAudioRuntime() {
+        try {
+            android.content.SharedPreferences p = getSharedPreferences("banner_audio_directaudio", MODE_PRIVATE);
+            String preset = p.getString("preset", "stable");
+            int perf, bf, mbf = 0, ms = 0;
+            if ("custom".equals(preset)) {
+                perf = p.getInt("perf_mode", 1);
+                bf   = p.getInt("buffer_frames", 0);
+                mbf  = p.getInt("max_buffer_frames", 0);
+                ms   = p.getInt("latency_msec", DIRECT_DEFAULT_MS);
+            } else {
+                com.winlator.star.ui.components.AudioConfig c =
+                        com.winlator.star.ui.components.AudioSettingsDialogKt.directPresetConfig(preset);
+                perf = c.getPerfMode();
+                bf   = c.getBufferFrames();
+                mbf  = c.getMaxBufferFrames();
+            }
+            int outMs = bf > 0 ? (bf * 1000 + 47999) / 48000 : ms;   // frames -> ms, round up
+            StringBuilder sb = new StringBuilder();
+            if (outMs > 0) sb.append("MS=").append(outMs).append('\n');
+            if (mbf  > 0) sb.append("MAXMS=").append((mbf * 1000 + 47999) / 48000).append('\n');
+            sb.append("PERF=").append(perf).append('\n');
+            java.io.File f = new java.io.File(getFilesDir(), "banner_audio_directaudio.rt");
+            try (java.io.FileOutputStream os = new java.io.FileOutputStream(f)) {
+                os.write(sb.toString().getBytes());
+            }
+        } catch (Throwable t) {
+            android.util.Log.w("DirectAudio", "writeDirectAudioRuntime failed", t);
         }
     }
 
@@ -4425,8 +4467,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
         XServerDrawerState.INSTANCE.onReapplyAudio = () -> {
             if ("alsa".equals(audioDriver)) applyAlsaAudioConfig();
             else if ("pulseaudio".equals(audioDriver)) resetGuestAudioForRouteChange();
-            // directaudio has no live in-game apply (config is read at stream open); it persists to the
-            // shortcut env and takes effect on the next launch.
+            // directaudio applies LIVE by writing its mailbox file, which the running winedirectaudio.drv
+            // watcher picks up and reopens the stream from (no relaunch); it also persists below.
+            else if ("directaudio".equals(audioDriver)) writeDirectAudioRuntime();
             persistAudioToShortcut(audioDriver);
         };
 
