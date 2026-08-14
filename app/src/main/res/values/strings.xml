@@ -1181,29 +1181,28 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="help_audio_preset_auto"><![CDATA[
         <b>Auto / Smart</b> — the recommended setting.<br /><br />
         Starts at a low delay and only adds more if it actually hears crackling. On DirectAudio that is a
-        1248-frame buffer, about <b>47 ms total</b>.<br /><br />
+        576-frame buffer, about <b>33 ms total</b>.<br /><br />
         The safety net is the point: a fixed low buffer crackles the moment a heavy scene stalls the GPU,
         while this one grows just enough to stop that and no further.<br /><br />
         Pick this unless you have a reason not to.
     ]]></string>
     <string name="help_audio_preset_low"><![CDATA[
-        <b>Low latency</b> — tightest sync, no safety net.<br /><br />
-        Same starting buffer as Auto (about <b>47 ms total</b> on DirectAudio) but <b>adaptive growth is
-        switched off</b>, so the buffer can never grow to rescue itself.<br /><br />
-        <b>If a game cannot hold it, it crackles for the whole session</b> and nothing recovers it. That is
-        the only genuinely risky choice in this list.<br /><br />
-        Use it when you have already tested a game and know it copes. Otherwise Auto gives you the same
-        delay with a way out.
+        <b>Low latency</b> — the floor.<br /><br />
+        One hardware burst: about <b>25 ms total</b> on DirectAudio, which is as low as anything on Android
+        goes. Adaptive stays on, so a title that cannot hold it grows a step rather than crackling all
+        session.<br /><br />
+        Measured across three games, one held this comfortably and two needed a step up. Nothing breaks
+        either way — but if you hear anything, Auto is the setting to return to.
     ]]></string>
     <string name="help_audio_preset_balanced"><![CDATA[
         <b>Balanced</b> — a calmer buffer that still adapts.<br /><br />
-        About <b>63 ms total</b> on DirectAudio (2000 frames). Noticeably later than Auto, and noticeably
+        About <b>47 ms total</b> on DirectAudio (1248 frames). Noticeably later than Auto, and noticeably
         safer on a device that struggles.<br /><br />
         Worth trying if Auto crackles during loading screens or busy scenes.
     ]]></string>
     <string name="help_audio_preset_stable"><![CDATA[
         <b>Stable</b> — biggest safety margin, most delay.<br /><br />
-        About <b>84 ms total</b> on DirectAudio (3000 frames). Sound lags visibly behind the picture in
+        About <b>83 ms total</b> on DirectAudio (3000 frames). Sound lags visibly behind the picture in
         fast games, which is the trade you are making.<br /><br />
         For weak devices, very demanding games, or anything that crackles on every other setting.
     ]]></string>

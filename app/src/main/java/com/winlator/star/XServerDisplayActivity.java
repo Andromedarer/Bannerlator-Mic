@@ -2695,7 +2695,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private void seedAudioPrefsForLaunch(EnvVars ev, String driverId) {
         String kp = "BANNER_AUDIO_" + audioEngTag(driverId) + "_";
         int defPerf = audioNoneDefault(driverId) ? 0 : 1;         // ALSA/DirectAudio NONE (proven) vs Pulse Auto
-        String defPreset = audioNoneDefault(driverId) ? "stable" : "auto";
+        // ALSA keeps Stable (its floor is unmeasured, and it pays an extra server hop);
+        // DirectAudio moves to Auto - Stable is 83 ms of total latency against 33 ms
+        // measured holding through 7 minutes of gameplay on one underrun. See
+        // AudioSettingsDialogKt.defaultPresetFor, which must agree with this.
+        String defPreset = "alsa".equals(driverId) ? "stable" : "auto";
         boolean hasPreset   = ev != null && ev.has(kp + "PRESET");
         boolean hasAdaptive = ev != null && ev.has(kp + "ADAPTIVE");
         Integer perf = envInt(ev, kp + "PERF");

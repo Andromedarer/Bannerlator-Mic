@@ -120,6 +120,16 @@ fun audioPrefsName(driverId: String): String = when (driverId) {
  *  both of which drive AAudio directly. PulseAudio defaults to LOW_LATENCY/Auto. */
 private fun engineNoneDefault(driverId: String) = driverId == "alsa" || driverId == "directaudio"
 
+/**
+ * The preset a scope starts on. ALSA keeps Stable - its own floor is unmeasured and it
+ * reaches Android through an extra server hop. DirectAudio moves to Auto: its Stable rung
+ * is 83 ms of total latency, and 33 ms was measured holding through seven minutes of
+ * gameplay with a single underrun, so starting on Stable spent 50 ms to protect against
+ * something no tested title does.
+ */
+fun defaultPresetFor(driverId: String): String =
+    if (driverId == "alsa") PRESET_STABLE else PRESET_AUTO
+
 /** DirectAudio's shipping buffer, in ms (DA_DEFAULT_MS in winedirectaudio.drv). ~33 ms to the ear
  *  once Android's fixed ~21 ms output latency is added. */
 const val DIRECT_DEFAULT_MS = 12
@@ -155,10 +165,19 @@ fun latencyIsDirectBuffer(driverId: String) = driverId == "directaudio"
  */
 fun directPresetConfig(preset: String): AudioConfig = when (preset) {
     // perf is 1 (LOW_LATENCY) in every case, deliberately - see above.
-    PRESET_LOW      -> AudioConfig(PRESET_LOW, 1, false, 1248, 0, 26)
-    PRESET_AUTO     -> AudioConfig(PRESET_AUTO, 1, true, 1248, 0, 26)
-    PRESET_BALANCED -> AudioConfig(PRESET_BALANCED, 1, true, 2000, 0, 42)
-    else            -> AudioConfig(PRESET_STABLE, 1, true, 3000, 0, 63)   // stable, and the default
+    // The ladder is device-measured (DiRT 3, FNAF Security Breach, DRAGON QUEST VII on
+    // an Adreno 750). Totals in the comments are what a player hears: the buffer plus
+    // Android's fixed ~21 ms mixer/HAL cost, which nothing can go under.
+    //
+    // Low is one hardware burst - the floor - and now runs ADAPTIVE. It used to pin the
+    // buffer with no safety net, which is the one genuinely dangerous cell in the matrix:
+    // a title that cannot hold it crackles for the whole session with no recovery. Two of
+    // three titles measured could not hold 4 ms unaided; with adaptive they grow a step
+    // and decay back down when it passes.
+    PRESET_LOW      -> AudioConfig(PRESET_LOW, 1, true, 192, 0, 4)      // 25 ms total - the floor
+    PRESET_AUTO     -> AudioConfig(PRESET_AUTO, 1, true, 576, 0, 12)    // 33 ms total - the default
+    PRESET_BALANCED -> AudioConfig(PRESET_BALANCED, 1, true, 1248, 0, 26) // 47 ms total
+    else            -> AudioConfig(PRESET_STABLE, 1, true, 3000, 0, 63) // 83 ms total - most margin
 }
 
 /**
@@ -205,7 +224,7 @@ fun latencyUsedBy(driverId: String) = driverId != "alsa"
 fun loadAudioConfig(ctx: Context, driverId: String): AudioConfig {
     val p = ctx.getSharedPreferences(audioPrefsName(driverId), Context.MODE_PRIVATE)
     val none = engineNoneDefault(driverId)
-    val defPreset = if (none) PRESET_STABLE else PRESET_AUTO   // engine-aware default for a fresh file
+    val defPreset = defaultPresetFor(driverId)
     return AudioConfig(
         preset = p.getString("preset", defPreset) ?: defPreset,
         perfMode = p.getInt("perf_mode", if (none) 0 else 1),  // ALSA/DirectAudio -> NONE, Pulse -> LOW_LATENCY
@@ -263,7 +282,7 @@ fun audioConfigFromEnv(env: String, driverId: String = ""): AudioConfig {
     val def = AudioConfig()
     val none = engineNoneDefault(driverId)
     val defPerf = if (none) 0 else def.perfMode          // ALSA/DirectAudio -> NONE, Pulse -> LOW_LATENCY (Auto)
-    val defPreset = if (none) PRESET_STABLE else def.preset
+    val defPreset = defaultPresetFor(driverId)
     return AudioConfig(
         preset = m["${pfx}PRESET"] ?: defPreset,
         perfMode = m["${pfx}PERF"]?.toIntOrNull() ?: defPerf,
