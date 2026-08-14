@@ -3275,6 +3275,17 @@ internal fun DxvkConfigDialog(
                         }
                     }
                 }
+                // When VKD3D is on, filteredDxvk hides DXVK 1.x (it can't back VKD3D-Proton's DXGI, #113).
+                // Tell the user why those versions vanished — but only when the filter is actually active
+                // (the Mali relaxDxvkFilter driver keeps 1.x visible, so no reminder there).
+                if (selectedVkd3d != "None" && !relaxDxvkFilter) {
+                    Text(
+                        text = "VKD3D needs DXVK 2.0 or newer — older 1.x versions are hidden.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp, start = 4.dp)
+                    )
+                }
                 if (isProcessing) {
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
                 }
