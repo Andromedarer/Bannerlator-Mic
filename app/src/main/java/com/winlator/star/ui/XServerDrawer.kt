@@ -338,6 +338,7 @@ private fun AudioContent(state: XServerDrawerState) {
             scopeLabel = "live · this session",
             latencyLive = false,
             driverLabel = engine,
+            driverId = driverId,
             onDismiss = { show = false },
             onSave = { newCfg ->
                 com.winlator.star.ui.components.saveAudioConfig(ctx, driverId, newCfg)

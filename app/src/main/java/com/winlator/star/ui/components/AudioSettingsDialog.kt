@@ -114,6 +114,26 @@ fun audioPrefsName(driverId: String): String = when (driverId) {
  *  both of which drive AAudio directly. PulseAudio defaults to LOW_LATENCY/Auto. */
 private fun engineNoneDefault(driverId: String) = driverId == "alsa" || driverId == "directaudio"
 
+/** DirectAudio's shipping buffer, in ms (DA_DEFAULT_MS in winedirectaudio.drv). ~33 ms to the ear
+ *  once Android's fixed ~21 ms output latency is added. */
+const val DIRECT_DEFAULT_MS = 12
+
+/** Android's own mixer + HAL output latency, measured at 21 ms on the reference device. Every app
+ *  pays it, so it is added when showing a total the user can compare against what they hear. */
+const val ANDROID_OUTPUT_MS = 21
+
+/**
+ * Default for the latency field, which means different things per engine. For PulseAudio it is the
+ * guest winepulse buffer (PULSE_LATENCY_MSEC, 100 ms). For DirectAudio it is the driver's own buffer
+ * target, and 100 ms there would be eight times the driver's default - so the two cannot share a
+ * number. ALSA ignores the field entirely.
+ */
+fun defaultLatencyMsec(driverId: String): Int =
+    if (driverId == "directaudio") DIRECT_DEFAULT_MS else 100
+
+/** True where the latency field drives the DirectAudio buffer (BANNER_AUDIO_DIRECT_MS). */
+fun latencyIsDirectBuffer(driverId: String) = driverId == "directaudio"
+
 fun loadAudioConfig(ctx: Context, driverId: String): AudioConfig {
     val p = ctx.getSharedPreferences(audioPrefsName(driverId), Context.MODE_PRIVATE)
     val none = engineNoneDefault(driverId)
@@ -124,7 +144,7 @@ fun loadAudioConfig(ctx: Context, driverId: String): AudioConfig {
         adaptive = p.getBoolean("adaptive", true),
         bufferFrames = p.getInt("buffer_frames", 0),
         maxBufferFrames = p.getInt("max_buffer_frames", 0),
-        latencyMsec = p.getInt("latency_msec", 100)
+        latencyMsec = p.getInt("latency_msec", defaultLatencyMsec(driverId))
     )
 }
 
@@ -182,7 +202,7 @@ fun audioConfigFromEnv(env: String, driverId: String = ""): AudioConfig {
         adaptive = (m["${pfx}ADAPTIVE"]?.toIntOrNull() ?: 1) != 0,
         bufferFrames = m["${pfx}BF"]?.toIntOrNull() ?: 0,
         maxBufferFrames = m["${pfx}MBF"]?.toIntOrNull() ?: 0,
-        latencyMsec = m["${pfx}LAT"]?.toIntOrNull() ?: def.latencyMsec
+        latencyMsec = m["${pfx}LAT"]?.toIntOrNull() ?: defaultLatencyMsec(driverId)
     )
 }
 
@@ -196,6 +216,7 @@ fun AudioSettingsDialog(
     scopeLabel: String,
     latencyLive: Boolean,
     driverLabel: String = "",
+    driverId: String = "",
     onDismiss: () -> Unit,
     onSave: (AudioConfig) -> Unit
 ) {
@@ -203,6 +224,12 @@ fun AudioSettingsDialog(
     var cfg by remember { mutableStateOf(initial) }
     val custom = cfg.preset == PRESET_CUSTOM
     val curPreset = AUDIO_PRESETS.first { it.id == cfg.preset }
+    // On DirectAudio the latency field is a real control (it sets the driver's buffer), not a
+    // winepulse-only knob, so a preset must not stamp its own Pulse-shaped value over it.
+    val directBuffer = latencyIsDirectBuffer(driverId)
+    fun applyPreset(p: AudioPreset) {
+        cfg = if (directBuffer) p.cfg.copy(latencyMsec = cfg.latencyMsec) else p.cfg
+    }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(shape = RoundedCornerShape(22.dp), color = cs.surface,
@@ -256,9 +283,9 @@ fun AudioSettingsDialog(
                             color = if (sel) cs.primary.copy(alpha = 0.14f) else cs.surfaceVariant,
                             modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
                                 .border(1.5.dp, if (sel) cs.primary else Color.Transparent, RoundedCornerShape(16.dp))
-                                .clickable { cfg = p.cfg }) {
+                                .clickable { applyPreset(p) }) {
                             Row(Modifier.padding(13.dp), verticalAlignment = Alignment.Top) {
-                                RadioButton(selected = sel, onClick = { cfg = p.cfg })
+                                RadioButton(selected = sel, onClick = { applyPreset(p) })
                                 Text(p.emoji, fontSize = 18.sp, modifier = Modifier.padding(top = 12.dp, end = 8.dp))
                                 Column(Modifier.weight(1f).padding(top = 8.dp)) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -300,11 +327,25 @@ fun AudioSettingsDialog(
                                 Switch(checked = cfg.adaptive, enabled = custom,
                                     onCheckedChange = { cfg = cfg.copy(adaptive = it) })
                             }
-                            FtRow("Guest buffer",
-                                "winepulse · ${cfg.latencyMsec} ms" + if (!latencyLive) "  · next launch" else "", cs) {
-                                Slider(value = cfg.latencyMsec.toFloat(), valueRange = 20f..200f, steps = 17,
-                                    enabled = custom, onValueChange = { cfg = cfg.copy(latencyMsec = (it / 10).toInt() * 10) },
-                                    modifier = Modifier.width(140.dp))
+                            // DirectAudio: this is the driver's own buffer (BANNER_AUDIO_DIRECT_MS), so it
+                            // needs a range that can reach the hardware floor - one 4 ms burst - and a
+                            // label that states the total, since Android adds a fixed ~21 ms nobody can
+                            // go below. PulseAudio keeps the guest winepulse buffer it always had.
+                            FtRow(
+                                if (directBuffer) "Audio buffer" else "Guest buffer",
+                                (if (directBuffer) "≈${cfg.latencyMsec + ANDROID_OUTPUT_MS} ms total · ${cfg.latencyMsec} ms buffer"
+                                 else "winepulse · ${cfg.latencyMsec} ms") +
+                                    if (!latencyLive) "  · next launch" else "", cs) {
+                                if (directBuffer)
+                                    Slider(value = cfg.latencyMsec.toFloat(), valueRange = 4f..120f, steps = 28,
+                                        enabled = custom,
+                                        onValueChange = { cfg = cfg.copy(latencyMsec = (it / 4).toInt() * 4) },
+                                        modifier = Modifier.width(140.dp))
+                                else
+                                    Slider(value = cfg.latencyMsec.toFloat(), valueRange = 20f..200f, steps = 17,
+                                        enabled = custom,
+                                        onValueChange = { cfg = cfg.copy(latencyMsec = (it / 10).toInt() * 10) },
+                                        modifier = Modifier.width(140.dp))
                             }
                             FtStepper("Initial sink buffer", "frames · 0 = auto",
                                 if (cfg.bufferFrames > 0) "${cfg.bufferFrames}" else "auto", custom, cs) {

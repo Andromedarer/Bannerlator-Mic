@@ -2677,6 +2677,16 @@ public class XServerDisplayActivity extends AppCompatActivity {
         return "banner_audio_pulseaudio";
     }
 
+    /** DirectAudio's shipping buffer in ms (DA_DEFAULT_MS in winedirectaudio.drv) => ~33 ms total. */
+    private static final int DIRECT_DEFAULT_MS = 12;
+
+    /** The latency field means the guest winepulse buffer on Pulse (100 ms) but the DRIVER's own buffer
+     *  on DirectAudio, where 100 ms would be eight times its default - so the default cannot be shared.
+     *  ALSA ignores the field entirely. */
+    private static int defaultLatencyMsec(String driverId) {
+        return "directaudio".equals(driverId) ? DIRECT_DEFAULT_MS : 100;
+    }
+
     // Reseed the launching engine's EPHEMERAL runtime prefs (banner_audio_<engine>) from the resolved
     // per-scope config: engine-scoped env keys BANNER_AUDIO_<ENG>_* (already merged shortcut-over-
     // container), else the engine default. A FULL write EVERY launch — the runtime file carries no
@@ -2698,7 +2708,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 .putBoolean("adaptive", hasAdaptive ? !"0".equals(ev.get(kp + "ADAPTIVE")) : true)
                 .putInt("buffer_frames", bf != null ? bf : 0)
                 .putInt("max_buffer_frames", mbf != null ? mbf : 0)
-                .putInt("latency_msec", lat != null ? lat : 100)
+                .putInt("latency_msec", lat != null ? lat : defaultLatencyMsec(driverId))
                 .apply();
     }
 
@@ -2730,7 +2740,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             int perf = p.getInt("perf_mode", audioNoneDefault(driverId) ? 0 : 1);
             boolean adaptive = p.getBoolean("adaptive", true);
             int bf = p.getInt("buffer_frames", 0), mbf = p.getInt("max_buffer_frames", 0);
-            int lat = p.getInt("latency_msec", 100);
+            int lat = p.getInt("latency_msec", defaultLatencyMsec(driverId));
             String preset = p.getString("preset", audioNoneDefault(driverId) ? "stable" : "auto");
             StringBuilder sb = new StringBuilder();
             String existing = shortcut.getExtra("envVars");
@@ -2784,7 +2794,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         try {
             android.content.SharedPreferences p = getSharedPreferences("banner_audio_directaudio", MODE_PRIVATE);
             String preset = p.getString("preset", "stable");
-            int perf = 1, bf, mbf = 0; boolean adaptive = true;   // perf 1 = LOW_LATENCY
+            int perf = 1, bf, mbf = 0, ms = 0; boolean adaptive = true;   // perf 1 = LOW_LATENCY
             switch (preset) {
                 case "low":      bf = 1248; adaptive = false; break;   // ~26 ms, tightest sync (device-proven)
                 case "auto":     bf = 1248; adaptive = true;  break;   // ~26 ms + adaptive safety net
@@ -2792,13 +2802,20 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 case "custom":   perf = p.getInt("perf_mode", 1);
                                  bf   = p.getInt("buffer_frames", 0);
                                  mbf  = p.getInt("max_buffer_frames", 0);
+                                 ms   = p.getInt("latency_msec", DIRECT_DEFAULT_MS);
                                  adaptive = p.getBoolean("adaptive", true); break;
                 case "stable":
                 default:         bf = 3000; adaptive = true;  break;   // ~62.5 ms, biggest safety margin
             }
             envVars.put("BANNER_AUDIO_DIRECT_PERF", String.valueOf(perf));
             envVars.put("BANNER_AUDIO_DIRECT_ADAPTIVE", adaptive ? "1" : "0");
-            if (bf  > 0) envVars.put("BANNER_AUDIO_DIRECT_BF",  String.valueOf(bf));
+            // Exactly ONE buffer key, never both. _MS overrides _BF inside the driver, so emitting the
+            // pair would make the frame stepper silently lose to the millisecond slider. Frames win when
+            // set - that stepper is the advanced control and 0 means "not set" - otherwise the latency
+            // slider is what the user actually moved, and on DirectAudio it IS the buffer. Named presets
+            // carry their own frame count and never reach here with ms.
+            if (bf  > 0) envVars.put("BANNER_AUDIO_DIRECT_BF", String.valueOf(bf));
+            else if (ms > 0) envVars.put("BANNER_AUDIO_DIRECT_MS", String.valueOf(ms));
             if (mbf > 0) envVars.put("BANNER_AUDIO_DIRECT_MBF", String.valueOf(mbf));
         } catch (Throwable t) {
             android.util.Log.w("DirectAudio", "applyDirectAudioConfig failed", t);

@@ -973,6 +973,7 @@ private fun TopLevelFields(
                     "alsa" -> "ALSA"; "pulseaudio" -> "PulseAudio"; "directaudio" -> "DirectAudio"
                     else -> StringUtils.parseIdentifier(viewModel.selectedAudioDriver)
                 },
+                driverId = StringUtils.parseIdentifier(viewModel.selectedAudioDriver),
                 onDismiss = { showAudioSettings = false },
                 onSave = { cfg ->
                     viewModel.envVarsStr = audioConfigToEnv(viewModel.envVarsStr, cfg, StringUtils.parseIdentifier(viewModel.selectedAudioDriver))
