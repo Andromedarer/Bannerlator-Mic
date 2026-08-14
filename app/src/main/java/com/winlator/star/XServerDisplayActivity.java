@@ -2794,18 +2794,24 @@ public class XServerDisplayActivity extends AppCompatActivity {
         try {
             android.content.SharedPreferences p = getSharedPreferences("banner_audio_directaudio", MODE_PRIVATE);
             String preset = p.getString("preset", "stable");
-            int perf = 1, bf, mbf = 0, ms = 0; boolean adaptive = true;   // perf 1 = LOW_LATENCY
-            switch (preset) {
-                case "low":      bf = 1248; adaptive = false; break;   // ~26 ms, tightest sync (device-proven)
-                case "auto":     bf = 1248; adaptive = true;  break;   // ~26 ms + adaptive safety net
-                case "balanced": bf = 2000; adaptive = true;  break;   // ~42 ms
-                case "custom":   perf = p.getInt("perf_mode", 1);
-                                 bf   = p.getInt("buffer_frames", 0);
-                                 mbf  = p.getInt("max_buffer_frames", 0);
-                                 ms   = p.getInt("latency_msec", DIRECT_DEFAULT_MS);
-                                 adaptive = p.getBoolean("adaptive", true); break;
-                case "stable":
-                default:         bf = 3000; adaptive = true;  break;   // ~62.5 ms, biggest safety margin
+            int perf, bf, mbf = 0, ms = 0; boolean adaptive;
+            if ("custom".equals(preset)) {
+                perf = p.getInt("perf_mode", 1);
+                bf   = p.getInt("buffer_frames", 0);
+                mbf  = p.getInt("max_buffer_frames", 0);
+                ms   = p.getInt("latency_msec", DIRECT_DEFAULT_MS);
+                adaptive = p.getBoolean("adaptive", true);
+            } else {
+                // Named presets come from directPresetConfig() rather than a switch of their own, so
+                // the greyed fine-tune rows in the audio cog show these exact values instead of a
+                // second copy that can drift from them. It forces LOW_LATENCY for every preset -
+                // device-proven, NONE is a normal-priority thread the guest preempts under box64/FEX.
+                com.winlator.star.ui.components.AudioConfig c =
+                        com.winlator.star.ui.components.AudioSettingsDialogKt.directPresetConfig(preset);
+                perf = c.getPerfMode();
+                bf   = c.getBufferFrames();
+                mbf  = c.getMaxBufferFrames();
+                adaptive = c.getAdaptive();
             }
             envVars.put("BANNER_AUDIO_DIRECT_PERF", String.valueOf(perf));
             envVars.put("BANNER_AUDIO_DIRECT_ADAPTIVE", adaptive ? "1" : "0");

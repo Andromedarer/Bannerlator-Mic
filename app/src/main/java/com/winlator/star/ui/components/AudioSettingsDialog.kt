@@ -134,6 +134,36 @@ fun defaultLatencyMsec(driverId: String): Int =
 /** True where the latency field drives the DirectAudio buffer (BANNER_AUDIO_DIRECT_MS). */
 fun latencyIsDirectBuffer(driverId: String) = driverId == "directaudio"
 
+/**
+ * What DirectAudio ACTUALLY applies for a named preset.
+ *
+ * The generic preset objects below describe the PulseAudio sink; DirectAudio maps the same names to
+ * its own buffer sizes and always forces LOW_LATENCY (device-proven: NONE runs a normal-priority
+ * thread the guest preempts under box64/FEX, which is audibly choppy). This is the single source of
+ * truth for that mapping - the dialog reads it to show the greyed fine-tune rows, and
+ * XServerDisplayActivity.applyDirectAudioConfig reads it to build the launch environment, so what is
+ * on screen cannot drift from what is used.
+ *
+ * latencyMsec is the ms equivalent of the buffer (frames / 48), so the latency row reads correctly
+ * for a preset even though a preset applies its buffer in frames.
+ */
+fun directPresetConfig(preset: String): AudioConfig = when (preset) {
+    // perf is 1 (LOW_LATENCY) in every case, deliberately - see above.
+    PRESET_LOW      -> AudioConfig(PRESET_LOW, 1, false, 1248, 0, 26)
+    PRESET_AUTO     -> AudioConfig(PRESET_AUTO, 1, true, 1248, 0, 26)
+    PRESET_BALANCED -> AudioConfig(PRESET_BALANCED, 1, true, 2000, 0, 42)
+    else            -> AudioConfig(PRESET_STABLE, 1, true, 3000, 0, 63)   // stable, and the default
+}
+
+/**
+ * The config to DISPLAY. Custom shows what the user set; a named preset shows what the engine will
+ * really apply, which on DirectAudio is not the preset object. Never what gets SAVED - a preset saves
+ * its id and the engine re-derives from that at launch.
+ */
+fun effectiveConfigFor(cfg: AudioConfig, driverId: String): AudioConfig =
+    if (cfg.preset == PRESET_CUSTOM || driverId != "directaudio") cfg
+    else directPresetConfig(cfg.preset)
+
 fun loadAudioConfig(ctx: Context, driverId: String): AudioConfig {
     val p = ctx.getSharedPreferences(audioPrefsName(driverId), Context.MODE_PRIVATE)
     val none = engineNoneDefault(driverId)
@@ -303,10 +333,16 @@ fun AudioSettingsDialog(
                         }
                     }
 
-                    Text(if (custom) "FINE-TUNE" else "FINE-TUNE — (Custom only)",
+                    Text(if (custom) "FINE-TUNE" else "FINE-TUNE — what this preset applies (Custom to edit)",
                         color = cs.onSurfaceVariant, fontSize = 11.sp, fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(4.dp, 16.dp, 0.dp, 8.dp))
                     val ftAlpha = if (custom) 1f else 0.4f
+                    // Greyed rows must show what the engine will actually use, not the preset object:
+                    // on DirectAudio a named preset means a specific buffer and a forced LOW_LATENCY,
+                    // so showing the generic preset values would state the wrong thing in the one panel
+                    // whose job is telling you what the preset does. Edits still go to `cfg`; this is
+                    // only what is rendered, and it equals `cfg` whenever the rows are editable.
+                    val shown = effectiveConfigFor(cfg, driverId)
                     Surface(shape = RoundedCornerShape(16.dp), color = cs.surfaceVariant,
                         modifier = Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(horizontal = 14.dp).alpha(ftAlpha)) {
@@ -314,7 +350,7 @@ fun AudioSettingsDialog(
                             FtRow("Output mode", "AAudio performance mode", cs) {
                                 Row {
                                     listOf("None" to 0, "Low lat." to 1, "Power" to 2).forEach { (lbl, v) ->
-                                        val on = cfg.perfMode == v
+                                        val on = shown.perfMode == v
                                         Text(lbl, color = if (on) cs.onPrimary else cs.onSurfaceVariant, fontSize = 12.sp,
                                             modifier = Modifier.padding(horizontal = 3.dp)
                                                 .background(if (on) cs.primary else cs.surface, RoundedCornerShape(9.dp))
@@ -324,7 +360,7 @@ fun AudioSettingsDialog(
                                 }
                             }
                             FtRow("Adaptive buffer", "Auto-grow only if it hears crackle", cs) {
-                                Switch(checked = cfg.adaptive, enabled = custom,
+                                Switch(checked = shown.adaptive, enabled = custom,
                                     onCheckedChange = { cfg = cfg.copy(adaptive = it) })
                             }
                             // DirectAudio: this is the driver's own buffer (BANNER_AUDIO_DIRECT_MS), so it
@@ -333,26 +369,26 @@ fun AudioSettingsDialog(
                             // go below. PulseAudio keeps the guest winepulse buffer it always had.
                             FtRow(
                                 if (directBuffer) "Audio buffer" else "Guest buffer",
-                                (if (directBuffer) "≈${cfg.latencyMsec + ANDROID_OUTPUT_MS} ms total · ${cfg.latencyMsec} ms buffer"
-                                 else "winepulse · ${cfg.latencyMsec} ms") +
+                                (if (directBuffer) "≈${shown.latencyMsec + ANDROID_OUTPUT_MS} ms total · ${shown.latencyMsec} ms buffer"
+                                 else "winepulse · ${shown.latencyMsec} ms") +
                                     if (!latencyLive) "  · next launch" else "", cs) {
                                 if (directBuffer)
-                                    Slider(value = cfg.latencyMsec.toFloat(), valueRange = 4f..120f, steps = 28,
+                                    Slider(value = shown.latencyMsec.toFloat(), valueRange = 4f..120f, steps = 28,
                                         enabled = custom,
                                         onValueChange = { cfg = cfg.copy(latencyMsec = (it / 4).toInt() * 4) },
                                         modifier = Modifier.width(140.dp))
                                 else
-                                    Slider(value = cfg.latencyMsec.toFloat(), valueRange = 20f..200f, steps = 17,
+                                    Slider(value = shown.latencyMsec.toFloat(), valueRange = 20f..200f, steps = 17,
                                         enabled = custom,
                                         onValueChange = { cfg = cfg.copy(latencyMsec = (it / 10).toInt() * 10) },
                                         modifier = Modifier.width(140.dp))
                             }
                             FtStepper("Initial sink buffer", "frames · 0 = auto",
-                                if (cfg.bufferFrames > 0) "${cfg.bufferFrames}" else "auto", custom, cs) {
+                                if (shown.bufferFrames > 0) "${shown.bufferFrames}" else "auto", custom, cs) {
                                 cfg = cfg.copy(bufferFrames = (cfg.bufferFrames + it * 256).coerceAtLeast(0))
                             }
                             FtStepper("Max sink buffer", "growth cap · 0 = device max",
-                                if (cfg.maxBufferFrames > 0) "${cfg.maxBufferFrames}" else "device max", custom, cs) {
+                                if (shown.maxBufferFrames > 0) "${shown.maxBufferFrames}" else "device max", custom, cs) {
                                 cfg = cfg.copy(maxBufferFrames = (cfg.maxBufferFrames + it * 256).coerceAtLeast(0))
                             }
                         }
