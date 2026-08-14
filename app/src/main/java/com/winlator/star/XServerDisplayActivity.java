@@ -2706,6 +2706,22 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // game). Reads the just-updated runtime prefs for the active engine and writes them into the
     // shortcut's env under that engine's key prefix, replacing only this engine's keys (the other
     // engine's config + all non-audio env survive). Mirrors resetPerfKey's putExtra+saveData pattern.
+    // The exact engine-scoped keys persistAudioToShortcut re-emits. Everything else carrying the same
+    // prefix belongs to whoever typed it — the audio cog owns the keys it writes, not the whole
+    // BANNER_AUDIO_<ENG>_ namespace. Blanket-dropping the prefix silently deleted hand-set driver knobs
+    // (DirectAudio's _MS/_MAXMS/_DECAY and its watchdog/decay tuning) the first time the cog was applied:
+    // they survived every launch, then vanished on the first in-game audio change. Keeping this list
+    // narrow means a knob added to a driver later is preserved without touching this code.
+    private static final String[] COG_OWNED_AUDIO_KEYS = { "PRESET", "PERF", "ADAPTIVE", "LAT", "BF", "MBF" };
+
+    private static boolean isCogOwnedAudioKey(String tok, String kp) {
+        if (!tok.startsWith(kp)) return false;
+        int eq = tok.indexOf('=');
+        String name = eq >= 0 ? tok.substring(kp.length(), eq) : tok.substring(kp.length());
+        for (String k : COG_OWNED_AUDIO_KEYS) if (k.equals(name)) return true;
+        return false;
+    }
+
     private void persistAudioToShortcut(String driverId) {
         if (shortcut == null) return;   // no per-game store (e.g. direct/installer launch)
         try {
@@ -2719,7 +2735,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             StringBuilder sb = new StringBuilder();
             String existing = shortcut.getExtra("envVars");
             if (existing != null) for (String tok : existing.split(" ")) {
-                if (tok.isEmpty() || tok.startsWith(kp)) continue;   // drop this engine's old keys
+                if (tok.isEmpty() || isCogOwnedAudioKey(tok, kp)) continue;   // drop only what we rewrite below
                 if (sb.length() > 0) sb.append(' ');
                 sb.append(tok);
             }
