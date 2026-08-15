@@ -33,9 +33,32 @@ static int last_driver_fell_back = 0;
 
 static sigjmp_buf sigill_jmp_buf;
 static struct sigaction saved_sigill_action;
+static struct sigaction saved_sigsegv_action;
+static struct sigaction saved_sigbus_action;
 
-static void sigill_handler(int sig) {
+// A bad/mismatched vendor ICD can fault DEEP inside Qualcomm code during instance
+// creation (e.g. libadreno_app_profiles.so's per-app profile lookup), which is a
+// SIGSEGV/SIGBUS, not a SIGILL. Trapping only SIGILL let those hard-crash the whole app
+// (reporter's a6xx, Aug 2026). Catch all three around the probe and siglongjmp back so a
+// driver that won't load on this GPU degrades to the system ICD instead of killing us.
+static void probe_signal_handler(int sig) {
     siglongjmp(sigill_jmp_buf, 1);
+}
+
+static void install_probe_signal_guard() {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = probe_signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGILL, &sa, &saved_sigill_action);
+    sigaction(SIGSEGV, &sa, &saved_sigsegv_action);
+    sigaction(SIGBUS, &sa, &saved_sigbus_action);
+}
+
+static void restore_probe_signal_guard() {
+    sigaction(SIGILL, &saved_sigill_action, NULL);
+    sigaction(SIGSEGV, &saved_sigsegv_action, NULL);
+    sigaction(SIGBUS, &saved_sigbus_action, NULL);
 }
 
 static void cleanup_vulkan() {
@@ -203,9 +226,9 @@ static VkResult create_instance(jstring driverName, JNIEnv *env, jobject context
 
     VkApplicationInfo app_info = {};
     app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    app_info.pApplicationName = "Winlator";
+    app_info.pApplicationName = "Bannerlator";
     app_info.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-    app_info.pEngineName = "Winlator";
+    app_info.pEngineName = "Bannerlator";
     app_info.engineVersion = VK_MAKE_VERSION(1, 0, 0);
     if (apiLevel > 32)
         app_info.apiVersion = VK_API_VERSION_1_0;
@@ -266,11 +289,7 @@ static VkResult enumerate_physical_devices() {
 
 JNIEXPORT jstring JNICALL
 Java_com_winlator_star_core_GPUInformation_getVulkanVersion(JNIEnv *env, jclass obj, jstring driverName, jobject context) {
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = sigill_handler;
-    sigemptyset(&sa.sa_mask);
-    sigaction(SIGILL, &sa, &saved_sigill_action);
+    install_probe_signal_guard();
 
     if (sigsetjmp(sigill_jmp_buf, 1) == 0) {
         VkPhysicalDeviceProperties props = {};
@@ -278,14 +297,14 @@ Java_com_winlator_star_core_GPUInformation_getVulkanVersion(JNIEnv *env, jclass 
 
         if (create_instance(driverName, env, context) != VK_SUCCESS) {
             printf("Failed to create instance");
-            sigaction(SIGILL, &saved_sigill_action, NULL);
+            restore_probe_signal_guard();
             cleanup_vulkan();
             return (*env)->NewStringUTF(env, "Unknown");
         }
 
         if (enumerate_physical_devices() != VK_SUCCESS) {
             printf("Failed to query physical devices");
-            sigaction(SIGILL, &saved_sigill_action, NULL);
+            restore_probe_signal_guard();
             cleanup_vulkan();
             return (*env)->NewStringUTF(env, "Unknown");
         }
@@ -298,24 +317,20 @@ Java_com_winlator_star_core_GPUInformation_getVulkanVersion(JNIEnv *env, jclass 
 
         destroyInstance(instance, NULL);
 
-        sigaction(SIGILL, &saved_sigill_action, NULL);
+        restore_probe_signal_guard();
         cleanup_vulkan();
         return (*env)->NewStringUTF(env, driverVersion);
     }
 
-    printf("SIGILL caught: driver incompatible");
-    sigaction(SIGILL, &saved_sigill_action, NULL);
+    printf("Probe signal caught: driver incompatible");
+    restore_probe_signal_guard();
     cleanup_vulkan();
     return (*env)->NewStringUTF(env, "Unknown");
 }
 
 JNIEXPORT jint JNICALL
 Java_com_winlator_star_core_GPUInformation_getVendorID(JNIEnv *env, jclass obj, jstring driverName, jobject context) {
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = sigill_handler;
-    sigemptyset(&sa.sa_mask);
-    sigaction(SIGILL, &sa, &saved_sigill_action);
+    install_probe_signal_guard();
 
     if (sigsetjmp(sigill_jmp_buf, 1) == 0) {
         VkPhysicalDeviceProperties props = {};
@@ -323,14 +338,14 @@ Java_com_winlator_star_core_GPUInformation_getVendorID(JNIEnv *env, jclass obj, 
 
         if (create_instance(driverName, env, context) != VK_SUCCESS) {
             printf("Failed to create instance");
-            sigaction(SIGILL, &saved_sigill_action, NULL);
+            restore_probe_signal_guard();
             cleanup_vulkan();
             return 0;
         }
 
         if (enumerate_physical_devices() != VK_SUCCESS) {
             printf("Failed to query physical devices");
-            sigaction(SIGILL, &saved_sigill_action, NULL);
+            restore_probe_signal_guard();
             cleanup_vulkan();
             return 0;
         }
@@ -340,13 +355,13 @@ Java_com_winlator_star_core_GPUInformation_getVendorID(JNIEnv *env, jclass obj, 
 
         destroyInstance(instance, NULL);
 
-        sigaction(SIGILL, &saved_sigill_action, NULL);
+        restore_probe_signal_guard();
         cleanup_vulkan();
         return vendorID;
     }
 
-    printf("SIGILL caught: driver incompatible");
-    sigaction(SIGILL, &saved_sigill_action, NULL);
+    printf("Probe signal caught: driver incompatible");
+    restore_probe_signal_guard();
     cleanup_vulkan();
     return 0;
 }
@@ -354,11 +369,7 @@ Java_com_winlator_star_core_GPUInformation_getVendorID(JNIEnv *env, jclass obj, 
 
 JNIEXPORT jstring JNICALL
 Java_com_winlator_star_core_GPUInformation_getRenderer(JNIEnv *env, jclass obj, jstring driverName, jobject context) {
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = sigill_handler;
-    sigemptyset(&sa.sa_mask);
-    sigaction(SIGILL, &sa, &saved_sigill_action);
+    install_probe_signal_guard();
 
     if (sigsetjmp(sigill_jmp_buf, 1) == 0) {
         VkPhysicalDeviceProperties props = {};
@@ -366,14 +377,14 @@ Java_com_winlator_star_core_GPUInformation_getRenderer(JNIEnv *env, jclass obj, 
 
         if (create_instance(driverName, env, context) != VK_SUCCESS) {
             printf("Failed to create instance");
-            sigaction(SIGILL, &saved_sigill_action, NULL);
+            restore_probe_signal_guard();
             cleanup_vulkan();
             return (*env)->NewStringUTF(env, "Unknown");
         }
 
         if (enumerate_physical_devices() != VK_SUCCESS) {
             printf("Failed to query physical devices");
-            sigaction(SIGILL, &saved_sigill_action, NULL);
+            restore_probe_signal_guard();
             cleanup_vulkan();
             return (*env)->NewStringUTF(env, "Unknown");
         }
@@ -383,24 +394,20 @@ Java_com_winlator_star_core_GPUInformation_getRenderer(JNIEnv *env, jclass obj, 
 
         destroyInstance(instance, NULL);
 
-        sigaction(SIGILL, &saved_sigill_action, NULL);
+        restore_probe_signal_guard();
         cleanup_vulkan();
         return (*env)->NewStringUTF(env, renderer);
     }
 
-    printf("SIGILL caught: driver incompatible");
-    sigaction(SIGILL, &saved_sigill_action, NULL);
+    printf("Probe signal caught: driver incompatible");
+    restore_probe_signal_guard();
     cleanup_vulkan();
     return (*env)->NewStringUTF(env, "Unknown");
 }
 
 JNIEXPORT jobjectArray JNICALL
 Java_com_winlator_star_core_GPUInformation_enumerateExtensions(JNIEnv *env, jclass obj, jstring driverName, jobject context) {
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = sigill_handler;
-    sigemptyset(&sa.sa_mask);
-    sigaction(SIGILL, &sa, &saved_sigill_action);
+    install_probe_signal_guard();
 
     if (sigsetjmp(sigill_jmp_buf, 1) == 0) {
         jobjectArray extensions;
@@ -409,14 +416,14 @@ Java_com_winlator_star_core_GPUInformation_enumerateExtensions(JNIEnv *env, jcla
 
         if (create_instance(driverName, env, context) != VK_SUCCESS) {
             printf("Failed to create instance");
-            sigaction(SIGILL, &saved_sigill_action, NULL);
+            restore_probe_signal_guard();
             cleanup_vulkan();
             return (*env)->NewObjectArray(env, 0, (*env)->FindClass(env, "java/lang/String"), NULL);
         }
 
         if (enumerate_physical_devices() != VK_SUCCESS) {
             printf("Failed to query physical devices");
-            sigaction(SIGILL, &saved_sigill_action, NULL);
+            restore_probe_signal_guard();
             cleanup_vulkan();
             return (*env)->NewObjectArray(env, 0, (*env)->FindClass(env, "java/lang/String"), NULL);
         }
@@ -425,7 +432,7 @@ Java_com_winlator_star_core_GPUInformation_enumerateExtensions(JNIEnv *env, jcla
 
         if (result != VK_SUCCESS || extensionCount < 1) {
             printf("Failed to query extension count");
-            sigaction(SIGILL, &saved_sigill_action, NULL);
+            restore_probe_signal_guard();
             cleanup_vulkan();
             return (*env)->NewObjectArray(env, 0, (*env)->FindClass(env, "java/lang/String"), NULL);
         }
@@ -436,7 +443,7 @@ Java_com_winlator_star_core_GPUInformation_enumerateExtensions(JNIEnv *env, jcla
 
         if (result != VK_SUCCESS) {
             printf("Failed to query extensions");
-            sigaction(SIGILL, &saved_sigill_action, NULL);
+            restore_probe_signal_guard();
             cleanup_vulkan();
             if (extensionProperties) free(extensionProperties);
             return (*env)->NewObjectArray(env, 0, (*env)->FindClass(env, "java/lang/String"), NULL);
@@ -453,13 +460,13 @@ Java_com_winlator_star_core_GPUInformation_enumerateExtensions(JNIEnv *env, jcla
         if (extensionProperties) free(extensionProperties);
         destroyInstance(instance, NULL);
 
-        sigaction(SIGILL, &saved_sigill_action, NULL);
+        restore_probe_signal_guard();
         cleanup_vulkan();
         return extensions;
     }
 
-    printf("SIGILL caught: driver incompatible");
-    sigaction(SIGILL, &saved_sigill_action, NULL);
+    printf("Probe signal caught: driver incompatible");
+    restore_probe_signal_guard();
     cleanup_vulkan();
     return (*env)->NewObjectArray(env, 0, (*env)->FindClass(env, "java/lang/String"), NULL);
 }
