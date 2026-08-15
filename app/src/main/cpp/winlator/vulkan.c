@@ -465,7 +465,11 @@ Java_com_winlator_star_core_GPUInformation_enumerateExtensions(JNIEnv *env, jcla
         return extensions;
     }
 
+    // A real, installed custom driver that faults during probe (e.g. Adreno per-app
+    // profile null-deref) is caught here. It "loaded" but is unusable on this GPU, so
+    // mark it fell-back — otherwise the UI shows a bare "0/0 extensions" with no reason.
     printf("Probe signal caught: driver incompatible");
+    last_driver_fell_back = 1;
     restore_probe_signal_guard();
     cleanup_vulkan();
     return (*env)->NewObjectArray(env, 0, (*env)->FindClass(env, "java/lang/String"), NULL);
