@@ -2502,15 +2502,30 @@ internal fun GraphicsDriverConfigDialog(
     }
 
     LaunchedEffect(version) {
-        if (version.isNotEmpty()) {
+        // Is the selected version an installed Adrenotools custom (Qualcomm proprietary)
+        // driver? Query the filesystem directly so this is race-free regardless of when the
+        // driver-list effect above finishes.
+        val isCustomAdrenotools = version.isNotEmpty() && withContext(Dispatchers.IO) {
+            AdrenotoolsManager(context).enumarateInstalledDrivers()
+                .any { it.equals(version, ignoreCase = true) }
+        }
+        if (version.isEmpty()) {
+            driverFellBack = false
+        } else if (isCustomAdrenotools) {
+            // Installed Adrenotools custom (Qualcomm proprietary) driver: skip the native
+            // extension probe entirely — it instantiates the proprietary blob in-app and can
+            // SIGSEGV inside the vendor Adreno app-profile HAL. The driver is realized at game
+            // launch instead (GameNative's approach). No extension blacklist offered here.
+            allExtensions = emptyList()
+            driverFellBack = false
+            if (version != cfg["version"]) blacklisted = emptySet()
+        } else {
             val exts = GPUInformation.enumerateExtensions(version, context)?.toList() ?: emptyList()
             allExtensions = exts
             // If a real installed Adrenotools driver couldn't load on this GPU, the native
             // probe now falls back to the system ICD instead of crashing — reflect that.
             driverFellBack = GPUInformation.driverLoadedFellBack()
             if (version != cfg["version"]) blacklisted = emptySet()
-        } else {
-            driverFellBack = false
         }
     }
 
