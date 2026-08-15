@@ -2469,6 +2469,10 @@ internal fun GraphicsDriverConfigDialog(
     // True when the picked custom driver couldn't load on this GPU and the native probe fell
     // back to the system ICD (instead of crashing). Drives the inline note under the dropdown.
     var driverFellBack by remember { mutableStateOf(false) }
+    // True when the selected version is an installed custom (Qualcomm proprietary) Adreno
+    // driver, whose extensions we intentionally don't probe here — the UI shows an explanatory
+    // note instead of a misleading "0/0 extensions".
+    var isCustomDriver by remember { mutableStateOf(false) }
 
     LaunchedEffect(showAllDrivers) {
         val atVersions = withContext(Dispatchers.IO) {
@@ -2509,6 +2513,7 @@ internal fun GraphicsDriverConfigDialog(
             AdrenotoolsManager(context).enumarateInstalledDrivers()
                 .any { it.equals(version, ignoreCase = true) }
         }
+        isCustomDriver = isCustomAdrenotools
         if (version.isEmpty()) {
             driverFellBack = false
         } else if (isCustomAdrenotools) {
@@ -2594,16 +2599,25 @@ internal fun GraphicsDriverConfigDialog(
                     }
                 }
                 Spacer(Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedButton(
-                        onClick = { showExtPicker = true },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        val enabled = allExtensions.size - blacklisted.size
-                        Text(stringResource(R.string.graphics_driver_available_extensions) + " ($enabled/${allExtensions.size})")
-                    }
-                    IconButton(onClick = { helpRes = R.string.help_available_extensions }) {
-                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                if (isCustomDriver) {
+                    Text(
+                        text = "Custom Qualcomm (Adreno) driver — its extensions load when a game starts, so none are listed here. That's expected, not an error: the driver is applied in-game, where your HUD will show it's active.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 4.dp, end = 4.dp)
+                    )
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedButton(
+                            onClick = { showExtPicker = true },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            val enabled = allExtensions.size - blacklisted.size
+                            Text(stringResource(R.string.graphics_driver_available_extensions) + " ($enabled/${allExtensions.size})")
+                        }
+                        IconButton(onClick = { helpRes = R.string.help_available_extensions }) {
+                            Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                        }
                     }
                 }
                 Spacer(Modifier.height(8.dp))
