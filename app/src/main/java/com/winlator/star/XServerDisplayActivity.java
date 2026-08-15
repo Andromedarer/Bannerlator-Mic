@@ -2858,6 +2858,55 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
     }
 
+    // Deliver the bundled DirectAudio driver into the shared Proton 11.0-5 layer at launch, so a user's
+    // dormant/old winedirectaudio.drv auto-upgrades to the APK's version before the guest loads it. The
+    // shared-layer copy is the one Wine actually loads, so overlaying it upgrades EVERY P11-5 container.
+    // Version-gated (a marker in the layer), ABI-gated to the 11.0-5 arm64ec layer, and page-size aware
+    // (4KB -> sdk28, 16KB -> sdk35). Idempotent + best-effort: any failure just leaves the existing driver.
+    private void overlayDirectAudioDriver() {
+        try {
+            if (container == null) return;
+            com.winlator.star.contents.ContentProfile prof =
+                    contentsManager.getProfileByEntryName(container.getWineVersion());
+            if (prof == null) return;
+            java.io.File layer = com.winlator.star.contents.ContentsManager.getInstallDir(this, prof);
+            java.io.File unixDir = new java.io.File(layer, "lib/wine/aarch64-unix");
+            java.io.File winDir  = new java.io.File(layer, "lib/wine/aarch64-windows");
+            // ABI gate: only the arm64ec Wine 11.0-5 layer the bundled driver is built for. The two dirs
+            // exist only on an arm64ec Proton layer, and the name carries the version.
+            if (!unixDir.isDirectory() || !winDir.isDirectory()) return;
+            if (!layer.getName().contains("11.0-5")) return;
+
+            String want = FileUtils.readString(this, "directaudio/version.txt");
+            if (want == null) return;
+            want = want.trim();
+            java.io.File marker = new java.io.File(unixDir, ".directaudio_bundled");
+            String have = marker.isFile() ? FileUtils.readString(marker) : null;
+            if (have != null && want.equals(have.trim())) return;   // already current
+
+            String sdk = (android.system.Os.sysconf(android.system.OsConstants._SC_PAGESIZE) >= 16384)
+                    ? "sdk35" : "sdk28";
+            assetToFile("directaudio/" + sdk + "/winedirectaudio.so",  new java.io.File(unixDir, "winedirectaudio.so"));
+            assetToFile("directaudio/" + sdk + "/winedirectaudio.drv", new java.io.File(winDir,  "winedirectaudio.drv"));
+            FileUtils.writeString(marker, want);
+            android.util.Log.i("DirectAudio", "overlaid bundled driver v" + want + " (" + sdk + ") -> " + layer.getName());
+        } catch (Throwable t) {
+            android.util.Log.w("DirectAudio", "driver overlay failed (keeping existing)", t);
+        }
+    }
+
+    // Copy an APK asset to a file, then make it readable+executable (Wine dlopen's the .so). Overwrites.
+    private void assetToFile(String assetPath, java.io.File dst) throws java.io.IOException {
+        try (java.io.InputStream in = getAssets().open(assetPath);
+             java.io.FileOutputStream out = new java.io.FileOutputStream(dst)) {
+            byte[] buf = new byte[65536];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+        }
+        dst.setReadable(true, false);
+        dst.setExecutable(true, false);
+    }
+
     // Write the live-config "mailbox" the winedirectaudio.drv watcher polls, so an in-game cog SAVE
     // reaches the running driver (which otherwise only reads config at stream open). Same resolution as
     // applyDirectAudioConfig, emitted as the mailbox's ms/perf keys (it takes milliseconds, not frames;
@@ -4023,6 +4072,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // stream open. Resolve the cog preset to concrete env here (LOW_LATENCY + a real per-preset
             // buffer) so the menu actually controls the driver. The Wine "Audio" registry driver is set
             // by changeWineAudioDriver(); route changes are handled inside the driver.
+            overlayDirectAudioDriver();   // ensure the P11-5 layer has the bundled driver before the guest loads it
             applyDirectAudioConfig(envVars);
         }
 
