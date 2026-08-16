@@ -35,6 +35,7 @@ static sigjmp_buf sigill_jmp_buf;
 static struct sigaction saved_sigill_action;
 static struct sigaction saved_sigsegv_action;
 static struct sigaction saved_sigbus_action;
+static struct sigaction saved_sigabrt_action;
 
 // A bad/mismatched vendor ICD can fault DEEP inside Qualcomm code during instance
 // creation (e.g. libadreno_app_profiles.so's per-app profile lookup), which is a
@@ -53,9 +54,17 @@ static void install_probe_signal_guard() {
     sigaction(SIGILL, &sa, &saved_sigill_action);
     sigaction(SIGSEGV, &sa, &saved_sigsegv_action);
     sigaction(SIGBUS, &sa, &saved_sigbus_action);
+    // Backstop only: a proprietary Adreno blob probed in-process can abort() with a
+    // -fstack-protector stack smash (SIGABRT) inside the vendor app-profile/log path on some
+    // a6xx (hotice77's Redmi Note 11, Aug 2026) — this sails past the SEGV/BUS traps. We now
+    // gate proprietary blobs out of the probe in Kotlin, so this should never fire; keep it as
+    // a weak net for any future rogue wrapper. (Stack is already corrupt here, so recovery is
+    // best-effort; do NOT rely on it for heap-corruption aborts, which happen at dlopen time.)
+    sigaction(SIGABRT, &sa, &saved_sigabrt_action);
 }
 
 static void restore_probe_signal_guard() {
+    sigaction(SIGABRT, &saved_sigabrt_action, NULL);
     sigaction(SIGILL, &saved_sigill_action, NULL);
     sigaction(SIGSEGV, &saved_sigsegv_action, NULL);
     sigaction(SIGBUS, &saved_sigbus_action, NULL);

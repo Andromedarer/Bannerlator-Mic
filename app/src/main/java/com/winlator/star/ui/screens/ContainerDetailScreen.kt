@@ -83,6 +83,8 @@ import android.widget.Toast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import java.util.concurrent.Executors
 import com.winlator.star.container.Container
@@ -98,6 +100,10 @@ import com.winlator.star.ui.components.RailItem
 import com.winlator.star.ui.components.RailLink
 import com.winlator.star.ui.components.RailSection
 import com.winlator.star.ui.components.rememberRailState
+
+// Serializes all native adrenotools probing (isDriverSupported + enumerateExtensions) off the
+// main thread. Serial = no concurrent AdrenoTools hooks (old SIGSEGV); off-main = no ANR.
+private val graphicsProbeMutex = Mutex()
 
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
@@ -2506,13 +2512,16 @@ internal fun GraphicsDriverConfigDialog(
             } catch (_: Exception) {}
             list
         }
-        // isDriverSupported() is a native JNI call — must run on main thread to avoid
-        // concurrent AdrenoTools hook invocations that cause SIGSEGV.
+        // isDriverSupported() is a native JNI call. It used to run on the main thread to keep
+        // AdrenoTools hook calls serial (concurrency caused SIGSEGV); running it there blocked
+        // the UI and caused ANRs. Run it off-main but serialized via graphicsProbeMutex instead.
         val wrapperVersions = context.resources
             .getStringArray(R.array.wrapper_graphics_driver_version_entries)
             .let { arr ->
                 if (showAllDrivers) arr.toList()
-                else arr.filter { GPUInformation.isDriverSupported(it, context) }
+                else withContext(Dispatchers.IO) {
+                    graphicsProbeMutex.withLock { arr.filter { GPUInformation.isDriverSupported(it, context) } }
+                }
             }
 
         driverVersions = wrapperVersions + atVersions
@@ -2531,21 +2540,41 @@ internal fun GraphicsDriverConfigDialog(
             isCustomDriver = false
             return@LaunchedEffect
         }
-        // Soft-probe EVERY driver and let the actual result decide what we show. The native
-        // probe is wrapped in a SIGSEGV/SIGBUS guard (vulkan.c), so a driver whose in-app
-        // instantiation faults — e.g. a proprietary Adreno blob tripping the vendor app-profile
-        // HAL on some chipsets — degrades to an empty list + driverFellBack instead of crashing.
-        // This lets Turnip AND well-behaved proprietary drivers list their real extensions.
+        // Proprietary Qualcomm (Adreno) blobs must NEVER be probed in-process: on some a6xx
+        // devices the in-app instance creation aborts inside the vendor app-profile/log path
+        // with a -fstack-protector stack smash (SIGABRT) — uncatchable by the SEGV/BUS guard —
+        // or corrupts the linker heap on dlopen (hotice77's Redmi Note 11, Aug 2026). Mesa
+        // wrappers (Turnip/freedreno, panfrost, ...) export libvulkan_*.so and ARE safe to
+        // probe, so they still list their real extensions. Anything that isn't a libvulkan_*
+        // Mesa wrapper (a vulkan.ad*.so Qualcomm blob, or an unreadable meta) is skipped here
+        // and shows the "applied in-game" note; the driver still loads at game launch.
+        val probeUnsafe = withContext(Dispatchers.IO) {
+            graphicsProbeMutex.withLock {
+                val mgr = AdrenotoolsManager(context)
+                val installed = mgr.enumarateInstalledDrivers()
+                if (installed.none { it.equals(version, ignoreCase = true) }) {
+                    false // wrapper/bundled entry (not a custom import) -> safe to probe
+                } else {
+                    !mgr.getLibraryName(version).startsWith("libvulkan", ignoreCase = true)
+                }
+            }
+        }
+        if (probeUnsafe) {
+            allExtensions = emptyList()
+            driverFellBack = false
+            isCustomDriver = true
+            if (version != cfg["version"]) blacklisted = emptySet()
+            return@LaunchedEffect
+        }
+        // Soft-probe the (Mesa/wrapper) driver. Serialized + off-main via the mutex so it can
+        // never wedge the UI thread (ANR) or run concurrently with the isDriverSupported filter.
         val exts = withContext(Dispatchers.IO) {
-            GPUInformation.enumerateExtensions(version, context)?.toList() ?: emptyList()
+            graphicsProbeMutex.withLock {
+                GPUInformation.enumerateExtensions(version, context)?.toList() ?: emptyList()
+            }
         }
         allExtensions = exts
         driverFellBack = GPUInformation.driverLoadedFellBack()
-        // Any 0/0 result — a clean probe with no device extensions OR a probe the native guard
-        // caught faulting — shows the reassuring "extensions load in-game" note, NOT an error.
-        // The extension list is a config-UI probe only; the driver is loaded independently at
-        // game launch (adrenotools at exec), so 0/0 here never means the driver won't run — a
-        // user with a proprietary Adreno blob confirms it in-game via the HUD. Never scare them.
         isCustomDriver = exts.isEmpty()
         if (version != cfg["version"]) blacklisted = emptySet()
     }
