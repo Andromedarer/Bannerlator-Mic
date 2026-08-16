@@ -2506,25 +2506,30 @@ internal fun GraphicsDriverConfigDialog(
     }
 
     LaunchedEffect(version) {
-        // Is the selected version an installed Adrenotools custom (Qualcomm proprietary)
-        // driver? Query the filesystem directly so this is race-free regardless of when the
-        // driver-list effect above finishes.
-        val isCustomAdrenotools = version.isNotEmpty() && withContext(Dispatchers.IO) {
-            AdrenotoolsManager(context).enumarateInstalledDrivers()
-                .any { it.equals(version, ignoreCase = true) }
+        // Is the selected version an installed *proprietary Qualcomm* driver? Only those are
+        // unsafe to probe (their in-app instantiation SIGSEGVs in the Adreno app-profile HAL).
+        // A self-contained Mesa Turnip driver is safe to probe and SHOULD list its extensions,
+        // so classify by driver fingerprint (vendor tag / proprietary shim libs), not merely by
+        // "is it an installed custom driver". Query the filesystem directly so this is race-free.
+        val isProprietaryDriver = version.isNotEmpty() && withContext(Dispatchers.IO) {
+            val mgr = AdrenotoolsManager(context)
+            mgr.enumarateInstalledDrivers().any { it.equals(version, ignoreCase = true) } &&
+                mgr.isProprietaryQualcommDriver(version)
         }
-        isCustomDriver = isCustomAdrenotools
+        isCustomDriver = isProprietaryDriver
         if (version.isEmpty()) {
             driverFellBack = false
-        } else if (isCustomAdrenotools) {
-            // Installed Adrenotools custom (Qualcomm proprietary) driver: skip the native
-            // extension probe entirely — it instantiates the proprietary blob in-app and can
-            // SIGSEGV inside the vendor Adreno app-profile HAL. The driver is realized at game
-            // launch instead (GameNative's approach). No extension blacklist offered here.
+        } else if (isProprietaryDriver) {
+            // Proprietary Qualcomm blob: skip the native extension probe entirely — it
+            // instantiates the proprietary blob in-app and can SIGSEGV inside the vendor Adreno
+            // app-profile HAL. The driver is realized at game launch instead (GameNative's
+            // approach). No extension blacklist offered here.
             allExtensions = emptyList()
             driverFellBack = false
             if (version != cfg["version"]) blacklisted = emptySet()
         } else {
+            // Turnip / wrapper / system driver: safe to probe -> enumerate and list its real
+            // extensions (a caught native fault degrades to empty + driverFellBack, below).
             val exts = GPUInformation.enumerateExtensions(version, context)?.toList() ?: emptyList()
             allExtensions = exts
             // If a real installed Adrenotools driver couldn't load on this GPU, the native

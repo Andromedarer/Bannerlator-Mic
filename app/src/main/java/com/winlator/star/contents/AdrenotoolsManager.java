@@ -58,6 +58,49 @@ public class AdrenotoolsManager {
         return libraryName;
     }
 
+    /**
+     * Heuristic: does this installed driver look like a proprietary Qualcomm/Adreno blob
+     * (UNSAFE to probe in-app — enumerating its extensions instantiates the vendor blob and
+     * runs the Adreno per-app-profile HAL, which SIGSEGVs on some a6xx devices), as opposed to
+     * a self-contained Mesa Turnip driver (safe to probe, and whose extensions we WANT to list)?
+     *
+     * Two structural fingerprints, matching how the two kinds actually ship on disk:
+     *   - meta.json "vendor" == "Qualcomm", and/or
+     *   - the folder carries proprietary dependency-shim libraries (notadreno_utils.so,
+     *     notgsl.so, notllvm-*.so, adrenoutils_extra.so, *dmabufheap*.so). A Mesa Turnip
+     *     driver ships only vulkan.*.so + meta.json (2-3 files) and never has these; a
+     *     proprietary blob ships ~10-11 files including exactly these shims.
+     * A barebones Turnip meta (only libraryName, e.g. the bundled turnip-sdk36) has neither
+     * signal, so it correctly falls through to false. JNI-safe: never throws.
+     */
+    public boolean isProprietaryQualcommDriver(String adrenoToolsDriverId) {
+        File driverPath = new File(adrenotoolsContentDir, adrenoToolsDriverId);
+        if (!driverPath.isDirectory()) return false;
+        // Signal 1: an explicit Qualcomm vendor tag.
+        try {
+            File metaProfile = new File(driverPath, "meta.json");
+            if (metaProfile.exists()) {
+                JSONObject jsonObject = new JSONObject(FileUtils.readString(metaProfile));
+                if ("qualcomm".equalsIgnoreCase(jsonObject.optString("vendor", "")))
+                    return true;
+            }
+        }
+        catch (Exception e) {
+        }
+        // Signal 2: proprietary dependency-shim libraries a Turnip driver never carries.
+        File[] files = driverPath.listFiles();
+        if (files != null) {
+            for (File f : files) {
+                String n = f.getName().toLowerCase(java.util.Locale.ROOT);
+                if (n.equals("notadreno_utils.so") || n.equals("notgsl.so")
+                        || n.startsWith("notllvm") || n.equals("adrenoutils_extra.so")
+                        || n.contains("dmabufheap"))
+                    return true;
+            }
+        }
+        return false;
+    }
+
     public String getDriverName(String adrenoToolsDriverId) {
         String driverName = "";
         File driverPath = new File(adrenotoolsContentDir, adrenoToolsDriverId);
