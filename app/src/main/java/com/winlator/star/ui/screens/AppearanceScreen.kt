@@ -21,9 +21,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -209,8 +212,8 @@ fun AppearanceScreen() {
     }
 }
 
-/** Percentage slider (0.5×–1.5×) for the interface-scale prefs. Same shape as the
- *  editor's LabeledSlider, kept local since AppearanceScreen has no shared slider. */
+/** Percentage slider (0.5×–1.5×) for the interface-scale prefs, flanked by −/+ steppers
+ *  that nudge one 5% tick at a time. Kept local since AppearanceScreen has no shared slider. */
 @Composable
 private fun ScaleSlider(
     label: String,
@@ -238,13 +241,35 @@ private fun ScaleSlider(
                 fontSize = 14.sp,
             )
         }
-        Slider(
-            value = value,
-            onValueChange = onValueChange,
-            valueRange = 0.5f..1.5f,
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(
+                onClick = { onValueChange((value - SCALE_STEP).coerceIn(SCALE_MIN, SCALE_MAX)) },
+                enabled = value > SCALE_MIN,
+            ) {
+                Icon(Icons.Filled.Remove, contentDescription = "Decrease $label", tint = OnSurface)
+            }
+            Slider(
+                value = value,
+                onValueChange = onValueChange,
+                valueRange = SCALE_MIN..SCALE_MAX,
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(
+                onClick = { onValueChange((value + SCALE_STEP).coerceIn(SCALE_MIN, SCALE_MAX)) },
+                enabled = value < SCALE_MAX,
+            ) {
+                Icon(Icons.Filled.Add, contentDescription = "Increase $label", tint = OnSurface)
+            }
+        }
     }
 }
+
+private const val SCALE_MIN = 0.5f
+private const val SCALE_MAX = 1.5f
+private const val SCALE_STEP = 0.05f
 
 /** One labelled switch. Three of these now, so they share a shape rather than drift apart. */
 @Composable
