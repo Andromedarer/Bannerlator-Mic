@@ -51,6 +51,19 @@ class BannerlatorApp : Application() {
             Log.w("BannerlatorApp", "exit-reason autosave not scheduled", t)
         }
 
+        // Reclaim stale update installers from the external cache. On a fresh cold start there is
+        // never a legitimate in-flight download, so clearing here is safe; it also recovers space
+        // left by pre-prune builds (their update never cleaned up) and sweeps OS-killed partials.
+        // Off the main thread; a failure here must never block start.
+        try {
+            Thread {
+                try { com.winlator.star.core.UpdateManager.pruneUpdateCacheAtStartup(this) }
+                catch (t: Throwable) { Log.w("BannerlatorApp", "update-cache prune failed", t) }
+            }.start()
+        } catch (t: Throwable) {
+            Log.w("BannerlatorApp", "update-cache prune not scheduled", t)
+        }
+
         try {
             // Restore-if-dirty + root probe + crash/shutdown safety nets, BEFORE anything touches a node.
             RootManager.onAppStartup(this)

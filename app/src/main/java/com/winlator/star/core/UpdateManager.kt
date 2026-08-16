@@ -267,6 +267,24 @@ object UpdateManager {
     }
 
     /**
+     * Clear the update cache at cold process start. Complements the download-time
+     * prune: under normal use the folder is empty here, but this reclaims space
+     * left by a build shipped BEFORE the download-time prune existed (whose own
+     * update never cleaned up), and sweeps any partial APK from a download the OS
+     * killed mid-flight. Safe against the bg/fg race by construction — this runs
+     * only from [Application.onCreate], which fires on cold start, never on a
+     * background→foreground bounce, so it can never collide with an in-session
+     * download. Cheap even in the worst case: deletion is unlink, not proportional
+     * to file size. Callers should invoke this off the main thread.
+     */
+    fun pruneUpdateCacheAtStartup(ctx: Context) {
+        try {
+            val dir = File(ctx.externalCacheDir, "update")
+            if (dir.isDirectory) pruneUpdateDir(dir)
+        } catch (_: Exception) { }
+    }
+
+    /**
      * Delete every file left in the update cache dir. Called just before a fresh
      * download so stale installers from earlier versions don't pile up — the app
      * loses control once the installer intent fires, so pruning up-front (rather
