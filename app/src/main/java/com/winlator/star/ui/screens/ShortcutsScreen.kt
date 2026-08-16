@@ -5613,10 +5613,20 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
     // The 9 power-user perf toggles live in a collapsed "Performance" section to keep this dialog short.
     var perfExpanded by rememberSaveable { mutableStateOf(false) }
 
-    // Audio driver
+    // Audio driver. DirectAudio only loads on the four supported arm64ec Proton builds; a shortcut
+    // can't override the Wine version (container-only), so support is fixed by the container's layer.
+    // Grey the option out off those layers and coerce a stale saved pick back to the default so the
+    // dropdown never shows an unselectable value as selected.
     val audioDriverEntries = remember { res.getStringArray(R.array.audio_driver_entries).toList() }
+    val directAudioSupported = remember {
+        com.winlator.star.core.DirectAudioSupport.isSupported(shortcut.container.wineVersion)
+    }
+    val directAudioEntry = remember {
+        audioDriverEntries.firstOrNull { StringUtils.parseIdentifier(it) == "directaudio" }
+    }
     var selectedAudioDriver by remember {
-        val id = shortcut.getExtra("audioDriver", shortcut.container.audioDriver)
+        var id = shortcut.getExtra("audioDriver", shortcut.container.audioDriver)
+        if (id == "directaudio" && !directAudioSupported) id = Container.DEFAULT_AUDIO_DRIVER
         mutableStateOf(audioDriverEntries.firstOrNull { StringUtils.parseIdentifier(it) == id }
             ?: audioDriverEntries.firstOrNull() ?: id)
     }
@@ -5952,7 +5962,11 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                 putExtra(rk, perfExtraOrNull(rootOverrides[rk] ?: false, com.winlator.star.perf.PerformanceSettings.rootDefaultValue(rk)))
             putExtra("dxwrapper", StringUtils.parseIdentifier(selectedDxWrapper))
             putExtra("dxwrapperConfig", dxWrapperConfig)
-            putExtra("audioDriver", StringUtils.parseIdentifier(selectedAudioDriver))
+            // Belt-and-suspenders: never persist Audio=directaudio for a layer that can't load it (the
+            // grey-out blocks a fresh pick; this catches an already-set one edited without touching it).
+            putExtra("audioDriver", StringUtils.parseIdentifier(selectedAudioDriver).let {
+                if (it == "directaudio" && !directAudioSupported) Container.DEFAULT_AUDIO_DRIVER else it
+            })
             putExtra("emulator", StringUtils.parseIdentifier(selectedEmulator))
             putExtra("midiSoundFont", midiVal.ifEmpty { null })
             putExtra("lc_all", lcAll)
@@ -6480,6 +6494,7 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                             label = stringResource(R.string.audio_driver),
                             options = audioDriverEntries,
                             selected = selectedAudioDriver,
+                            disabledOptions = if (!directAudioSupported && directAudioEntry != null) setOf(directAudioEntry) else emptySet(),
                             onSelect = {
                                 selectedAudioDriver = it
                                 // DirectAudio is experimental — warn on select (reuses the HelpDialog surface).
@@ -6496,6 +6511,14 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                         IconButton(onClick = { helpRes = R.string.help_audio_driver }) {
                             Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
                         }
+                    }
+                    if (!directAudioSupported && directAudioEntry != null) {
+                        Text(
+                            "DirectAudio requires Proton ${com.winlator.star.core.DirectAudioSupport.SUPPORTED_LABEL}",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 11.5.sp,
+                            modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+                        )
                     }
                     if (showScAudioSettings) {
                         AudioSettingsDialog(

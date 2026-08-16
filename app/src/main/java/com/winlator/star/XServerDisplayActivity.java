@@ -82,6 +82,7 @@ import com.winlator.star.core.PreloaderDialog;
 import com.winlator.star.core.ProcessHelper;
 import com.winlator.star.core.StringUtils;
 import com.winlator.star.core.TarCompressorUtils;
+import com.winlator.star.core.DirectAudioSupport;
 import com.winlator.star.core.WineInfo;
 import com.winlator.star.core.WineRegistryEditor;
 import com.winlator.star.core.WineRequestHandler;
@@ -1672,6 +1673,15 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 vkbasaltConfig = "effects=" + sharpnessEffect.toLowerCase() + ";" + "casSharpness=" + sharpnessLevel / 100 + ";" + "dlsSharpness=" + sharpnessLevel / 100  + ";" + "dlsDenoise=" + sharpnessDenoise / 100 + ";" + "enableOnLaunch=True";
             }
             Log.d("XServerDisplayActivity", "XInput Disabled from Shortcut: " + xinputDisabledFromShortcut);
+        }
+
+        // DirectAudio's winedirectaudio.drv only loads on the four supported arm64ec Proton builds; on
+        // any other layer it does nothing / breaks audio. The editors grey it out and coerce it on save,
+        // but a container/shortcut written before this gate (or whose layer was swapped elsewhere) can
+        // still arrive here as "directaudio" — the last place it could be applied to the guest registry.
+        // Fall back to the default driver so an unsupported layer never gets Audio=directaudio.
+        if ("directaudio".equals(audioDriver) && !DirectAudioSupport.isSupported(wineVersion)) {
+            audioDriver = Container.DEFAULT_AUDIO_DRIVER;
         }
 
         // Gyro (motion aim) — resolve the whole config ONCE here and push it into WinHandler in a

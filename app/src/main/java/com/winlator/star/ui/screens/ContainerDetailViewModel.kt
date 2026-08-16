@@ -491,6 +491,9 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
 
         // Audio driver (load as display name). Emulator is arch-dependent → seedArchDependentDefaults.
         selectedAudioDriver = identifierToDisplay(seed?.audioDriver ?: Container.DEFAULT_AUDIO_DRIVER, audioDriverEntries)
+        // A container saved with DirectAudio but on (or later moved to) an unsupported layer self-heals
+        // to the default here, so the greyed dropdown never shows an unselectable value as "selected".
+        coerceAudioDriverForWine()
 
         // MIDI
         val midiVal = seed?.getMIDISoundFont() ?: ""
@@ -730,9 +733,24 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             ?: entries.firstOrNull()
             ?: id
 
+    /**
+     * DirectAudio only loads on the four supported arm64ec Proton builds; on any other layer it does
+     * nothing / breaks audio. So it must never survive as the chosen driver on an unsupported layer:
+     * if the currently-selected driver is DirectAudio but [selectedWineVersion] isn't one of those
+     * builds, fall back to the app default (PulseAudio). Called on load, on a Wine-version change, and
+     * again at save — the UI grey-out stops a fresh pick, this stops an already-set one from persisting.
+     */
+    private fun coerceAudioDriverForWine() {
+        if (StringUtils.parseIdentifier(selectedAudioDriver) == "directaudio" &&
+            !com.winlator.star.core.DirectAudioSupport.isSupported(selectedWineVersion)) {
+            selectedAudioDriver = identifierToDisplay(Container.DEFAULT_AUDIO_DRIVER, audioDriverEntries)
+        }
+    }
+
     fun onWineVersionChanged(version: String) {
         val wasArm64 = isArm64EC
         selectedWineVersion = version
+        coerceAudioDriverForWine()      // a switch to an unsupported layer drops a stale DirectAudio pick
         refreshWineDependent(version)   // updates isArm64EC + swaps the box64/wowbox64 list
 
         // CREATE mode only: a wine change can FLIP the architecture. applyArch() swapped the box64 list
@@ -855,6 +873,11 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         colorAsString: String,
         onComplete: () -> Unit
     ) {
+        // Belt-and-suspenders: never write Audio=directaudio for a layer that can't load it. The UI
+        // grey-out already blocks a fresh pick, but a container loaded already-set (or edited without
+        // touching the audio row) reaches here — drop it back to the default first.
+        coerceAudioDriverForWine()
+
         // Finalize graphics driver config (ensure version is set)
         var finalGDConfig = gdConfig
         try {
