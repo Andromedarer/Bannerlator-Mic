@@ -940,11 +940,22 @@ private fun TopLevelFields(
         Spacer(Modifier.height(8.dp))
 
         // Audio Driver
+        // DirectAudio only loads on the four arm64ec Proton builds its .drv is built for; off those
+        // layers it does nothing / breaks audio. Grey the option out (keyed on the selected layer so it
+        // re-evaluates when the Wine version changes) and never let it be picked there. The ViewModel
+        // also coerces it back to the default on save / layer-change, so the two can't drift.
+        val directAudioSupported = remember(viewModel.selectedWineVersion) {
+            com.winlator.star.core.DirectAudioSupport.isSupported(viewModel.selectedWineVersion)
+        }
+        val directAudioEntry = remember(viewModel.audioDriverEntries) {
+            viewModel.audioDriverEntries.firstOrNull { StringUtils.parseIdentifier(it) == "directaudio" }
+        }
         Row(verticalAlignment = Alignment.CenterVertically) {
             LabeledDropdown(
                 label = stringResource(R.string.audio_driver),
                 options = viewModel.audioDriverEntries,
                 selectedOption = viewModel.selectedAudioDriver,
+                disabledOptions = if (!directAudioSupported && directAudioEntry != null) setOf(directAudioEntry) else emptySet(),
                 onSelect = {
                     viewModel.selectedAudioDriver = it
                     // DirectAudio is experimental — warn on select (reuses the HelpDialog surface).
@@ -963,6 +974,14 @@ private fun TopLevelFields(
             IconButton(onClick = { helpRes = R.string.help_audio_driver }) {
                 Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
             }
+        }
+        if (!directAudioSupported && directAudioEntry != null) {
+            Text(
+                "DirectAudio requires Proton ${com.winlator.star.core.DirectAudioSupport.SUPPORTED_LABEL}",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 11.5.sp,
+                modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+            )
         }
         if (showAudioSettings) {
             AudioSettingsDialog(
