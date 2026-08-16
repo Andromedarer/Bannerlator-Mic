@@ -2522,10 +2522,12 @@ internal fun GraphicsDriverConfigDialog(
         }
         allExtensions = exts
         driverFellBack = GPUInformation.driverLoadedFellBack()
-        // Show the "extensions load in-game" note ONLY on a genuine 0/0 result from a clean
-        // probe (a proprietary driver that realises at game launch). A guarded fault instead
-        // surfaces the distinct "couldn't load / needs a patched build" message above.
-        isCustomDriver = exts.isEmpty() && !driverFellBack
+        // Any 0/0 result — a clean probe with no device extensions OR a probe the native guard
+        // caught faulting — shows the reassuring "extensions load in-game" note, NOT an error.
+        // The extension list is a config-UI probe only; the driver is loaded independently at
+        // game launch (adrenotools at exec), so 0/0 here never means the driver won't run — a
+        // user with a proprietary Adreno blob confirms it in-game via the HUD. Never scare them.
+        isCustomDriver = exts.isEmpty()
         if (version != cfg["version"]) blacklisted = emptySet()
     }
 
@@ -2576,14 +2578,6 @@ internal fun GraphicsDriverConfigDialog(
                     IconButton(onClick = { helpRes = R.string.help_graphics_driver_version }) {
                         Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
                     }
-                }
-                if (driverFellBack) {
-                    Text(
-                        text = "This driver couldn't load on your GPU — using the system driver instead. It may need a build patched for this chipset.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.padding(top = 4.dp, start = 4.dp)
-                    )
                 }
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
