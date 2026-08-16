@@ -112,7 +112,6 @@ fun AppDrawerContent(
         DrawerSectionHeader("Library")
         DrawerItem(Screen.Games,         currentRoute, onNavigate)
         DrawerItem(Screen.Containers,    currentRoute, onNavigate)
-        DrawerItem(Screen.Contents,      currentRoute, onNavigate)
         DrawerItem(Screen.FileManager,   currentRoute, onNavigate)
         DrawerItem(Screen.SaveManager,   currentRoute, onNavigate)
 
@@ -120,7 +119,7 @@ fun AppDrawerContent(
         DrawerItem(Screen.Settings,      currentRoute, onNavigate)
         DrawerItem(Screen.Appearance,    currentRoute, onNavigate)
         DrawerItem(Screen.InputControls, currentRoute, onNavigate)
-        DrawerItem(Screen.AdrenoTools,   currentRoute, onNavigate)
+        DrawerItem(Screen.Contents,      currentRoute, onNavigate)
 
         // Hideable from Appearance — the whole section, header included, so turning it off
         // leaves no orphaned divider behind.
