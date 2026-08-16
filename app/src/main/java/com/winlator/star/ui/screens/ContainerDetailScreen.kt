@@ -2506,37 +2506,27 @@ internal fun GraphicsDriverConfigDialog(
     }
 
     LaunchedEffect(version) {
-        // Is the selected version an installed *proprietary Qualcomm* driver? Only those are
-        // unsafe to probe (their in-app instantiation SIGSEGVs in the Adreno app-profile HAL).
-        // A self-contained Mesa Turnip driver is safe to probe and SHOULD list its extensions,
-        // so classify by driver fingerprint (vendor tag / proprietary shim libs), not merely by
-        // "is it an installed custom driver". Query the filesystem directly so this is race-free.
-        val isProprietaryDriver = version.isNotEmpty() && withContext(Dispatchers.IO) {
-            val mgr = AdrenotoolsManager(context)
-            mgr.enumarateInstalledDrivers().any { it.equals(version, ignoreCase = true) } &&
-                mgr.isProprietaryQualcommDriver(version)
-        }
-        isCustomDriver = isProprietaryDriver
         if (version.isEmpty()) {
-            driverFellBack = false
-        } else if (isProprietaryDriver) {
-            // Proprietary Qualcomm blob: skip the native extension probe entirely — it
-            // instantiates the proprietary blob in-app and can SIGSEGV inside the vendor Adreno
-            // app-profile HAL. The driver is realized at game launch instead (GameNative's
-            // approach). No extension blacklist offered here.
             allExtensions = emptyList()
             driverFellBack = false
-            if (version != cfg["version"]) blacklisted = emptySet()
-        } else {
-            // Turnip / wrapper / system driver: safe to probe -> enumerate and list its real
-            // extensions (a caught native fault degrades to empty + driverFellBack, below).
-            val exts = GPUInformation.enumerateExtensions(version, context)?.toList() ?: emptyList()
-            allExtensions = exts
-            // If a real installed Adrenotools driver couldn't load on this GPU, the native
-            // probe now falls back to the system ICD instead of crashing — reflect that.
-            driverFellBack = GPUInformation.driverLoadedFellBack()
-            if (version != cfg["version"]) blacklisted = emptySet()
+            isCustomDriver = false
+            return@LaunchedEffect
         }
+        // Soft-probe EVERY driver and let the actual result decide what we show. The native
+        // probe is wrapped in a SIGSEGV/SIGBUS guard (vulkan.c), so a driver whose in-app
+        // instantiation faults — e.g. a proprietary Adreno blob tripping the vendor app-profile
+        // HAL on some chipsets — degrades to an empty list + driverFellBack instead of crashing.
+        // This lets Turnip AND well-behaved proprietary drivers list their real extensions.
+        val exts = withContext(Dispatchers.IO) {
+            GPUInformation.enumerateExtensions(version, context)?.toList() ?: emptyList()
+        }
+        allExtensions = exts
+        driverFellBack = GPUInformation.driverLoadedFellBack()
+        // Show the "extensions load in-game" note ONLY on a genuine 0/0 result from a clean
+        // probe (a proprietary driver that realises at game launch). A guarded fault instead
+        // surfaces the distinct "couldn't load / needs a patched build" message above.
+        isCustomDriver = exts.isEmpty() && !driverFellBack
+        if (version != cfg["version"]) blacklisted = emptySet()
     }
 
     if (showExtPicker) {
@@ -2611,7 +2601,7 @@ internal fun GraphicsDriverConfigDialog(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(start = 4.dp, end = 4.dp)
                     )
-                } else {
+                } else if (allExtensions.isNotEmpty()) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         OutlinedButton(
                             onClick = { showExtPicker = true },
