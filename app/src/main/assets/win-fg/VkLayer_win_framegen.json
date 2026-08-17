@@ -3,7 +3,7 @@
     "layer": {
         "name": "VK_LAYER_WIN_framegen",
         "type": "GLOBAL",
-        "library_path": "./libwin_fg.so",
+        "library_path": "../../../lib/libwin_fg.so",
         "api_version": "1.1.0",
         "implementation_version": "1",
         "description": "win-fg v0.1 — clean-room frame generation (FSR3 optical flow + own synthesis)",
