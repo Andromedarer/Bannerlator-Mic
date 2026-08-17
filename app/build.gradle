@@ -65,12 +65,14 @@ android {
     defaultConfig {
         minSdkVersion 26
         targetSdkVersion 28
-        // Version code stays FROZEN across dev/pre builds — it only bumps on a STABLE cut. Reinstalling
-        // the same build number over-the-top works, so pre-build installs are unaffected.
+        // Version code bumps on ANY cut delivered through the in-app updater — a STABLE cut OR an
+        // opt-in pre-release — because the updater only offers a build whose number is higher than
+        // installed. It stays frozen only across manually-sideloaded dev/nightly builds (reinstalling
+        // the same number over-the-top works, so those sideload installs are unaffected).
         // NB: do NOT write the camel-case build-code token in these comments — release.yml greps
         //     for it and takes head -1; a comment match feeds jq an empty value and the job dies.
-        versionCode 71
-        versionName "2.9.9"
+        versionCode 72
+        versionName "3.0.0-pre1"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
         externalNativeBuild {
