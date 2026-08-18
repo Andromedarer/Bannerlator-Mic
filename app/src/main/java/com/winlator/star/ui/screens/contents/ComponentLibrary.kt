@@ -74,6 +74,9 @@ class ComponentLibrary(context: Context) {
 
     fun appPrivateBasePath(): String = File(appContext.getExternalFilesDir(null), "bannerlator").absolutePath
 
+    /** Absolute path of the active File base, or null when a legacy SAF tree base is active. */
+    fun currentFileBasePath(): String? = if (treeUri() != null) null else fileBase().absolutePath
+
     fun defaultBasePath(): String =
         File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "bannerlator").absolutePath
 

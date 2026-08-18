@@ -798,6 +798,23 @@ internal fun EosBadge() {
     }
 }
 
+/**
+ * Small dark-grey "EPIC" pill marking a game whose store source is the Epic Games Store.
+ * Deliberately neutral/grey so it stays visually distinct from the blue EOS pill when the
+ * two sit side by side (an Epic game that also uses EOS shows both).
+ */
+@Composable
+internal fun EpicBadge() {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(Color(0xFF2A2A2A))
+            .padding(horizontal = 5.dp, vertical = 1.dp),
+    ) {
+        Text("EPIC", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color.White)
+    }
+}
+
 @Composable
 private fun GameListCard(
     game: EpicGame,
@@ -855,8 +872,11 @@ private fun GameListCard(
                         if (downloadState.installed) {
                             Text(" \u2713", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50)) // semantic installed-green
                         }
+                        // Every game in the Epic library is Epic-sourced \u2014 badge unconditionally.
+                        Spacer(Modifier.width(6.dp))
+                        EpicBadge()
                         if (downloadState.installed && EpicEosDetector.isEosCached(LocalContext.current, game.appName)) {
-                            Spacer(Modifier.width(6.dp))
+                            Spacer(Modifier.width(4.dp))
                             EosBadge()
                         }
                     }
@@ -1001,6 +1021,9 @@ private fun GameGridTile(
                 if (downloadState.installed) {
                     Text(" \u2713", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF66BB6A)) // semantic installed-green
                 }
+                // Every game in the Epic library is Epic-sourced \u2014 badge unconditionally.
+                Spacer(Modifier.width(4.dp))
+                EpicBadge()
                 if (downloadState.installed && EpicEosDetector.isEosCached(LocalContext.current, game.appName)) {
                     Spacer(Modifier.width(4.dp))
                     EosBadge()

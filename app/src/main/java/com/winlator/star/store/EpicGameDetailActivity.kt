@@ -777,6 +777,7 @@ private fun EpicGameDetailScreen(
                 if (appName.isNotEmpty()) InfoChip("App: $appName")
                 val releaseDate = prefs.getString("epic_release_$appName", null)
                 if (!releaseDate.isNullOrEmpty()) InfoChip(formatDateStatic(releaseDate))
+                EpicBadge()
                 if (usesEos) EosBadge()
             }
             if (description.isNotEmpty()) {

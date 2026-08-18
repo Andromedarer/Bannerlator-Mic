@@ -1162,15 +1162,15 @@ private fun SettingsDialog(vm: ContentsHubViewModel, onDismiss: () -> Unit, onLo
 private fun LocationDialog(vm: ContentsHubViewModel, onDismiss: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val context = LocalContext.current
-    val treePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        if (uri != null) {
-            runCatching {
-                context.contentResolver.takePersistableUriPermission(uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-                val label = uri.lastPathSegment?.substringAfterLast(':') ?: "Custom folder"
-                vm.library.setTreeBase(uri, label)
+    // In-app file manager in directory-pick mode (issue #70) — returns an absolute path, stored the
+    // same way as the other two options (plain File base). No SAF, no persistable-permission dance:
+    // the app holds all-files access, so direct path writes work.
+    val dirPicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            InAppFilePicker.pickedPath(result.data)?.let { path ->
+                vm.library.setFileBase(path)
+                vm.refreshBase(); vm.refreshFolders(); onDismiss()
             }
-            vm.refreshBase(); vm.refreshFolders(); onDismiss()
         }
     }
     OutlinedAlertDialog(
@@ -1190,7 +1190,15 @@ private fun LocationDialog(vm: ContentsHubViewModel, onDismiss: () -> Unit) {
                     vm.library.setFileBase(vm.library.appPrivateBasePath()); vm.refreshBase(); vm.refreshFolders(); onDismiss()
                 }
                 MenuItemDivider()
-                MenuRow(Icons.Filled.FolderOpen, "Choose another folder…") { treePicker.launch(null) }
+                MenuRow(Icons.Filled.FolderOpen, "Choose another folder…") {
+                    dirPicker.launch(
+                        InAppFilePicker.buildDirIntent(
+                            context,
+                            title = "Select save folder",
+                            initialDir = vm.library.currentFileBasePath(),
+                        ),
+                    )
+                }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close", color = cs.primary) } },

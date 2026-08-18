@@ -4578,6 +4578,10 @@ private fun ShortcutItemLayoutL(
                     Spacer(Modifier.width(6.dp))
                     SdCardBadge()
                 }
+                if (remember(shortcut) { shortcut.getExtra("storeSource") == "epic" }) {
+                    Spacer(Modifier.width(6.dp))
+                    EpicBadge()
+                }
                 if (rememberEosBadge(shortcut)) {
                     Spacer(Modifier.width(6.dp))
                     EosBadge()
@@ -4826,6 +4830,10 @@ private fun ShortcutGridItem(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
+                }
+                if (remember(shortcut) { shortcut.getExtra("storeSource") == "epic" }) {
+                    Spacer(Modifier.height(3.dp))
+                    EpicBadge()
                 }
                 if (rememberEosBadge(shortcut)) {
                     Spacer(Modifier.height(3.dp))
@@ -7524,6 +7532,27 @@ private fun EosBadge(modifier: Modifier = Modifier) {
     ) {
         Text(
             "EOS",
+            color = Color.White,
+            style = MaterialTheme.typography.labelSmall,
+        )
+    }
+}
+
+/**
+ * Marks a shortcut whose store source is the Epic Games Store (storeSource=epic). Deliberately a
+ * neutral dark-grey pill so it reads as distinct from the blue EOS badge when both appear together.
+ */
+@Composable
+private fun EpicBadge(modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(Color(0xFF2A2A2A))
+            .padding(horizontal = 5.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "EPIC",
             color = Color.White,
             style = MaterialTheme.typography.labelSmall,
         )
