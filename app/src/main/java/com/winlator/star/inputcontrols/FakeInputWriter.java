@@ -69,7 +69,7 @@ public class FakeInputWriter {
     private static final int MAX_FAKE_INPUT_SLOTS = 4;
 
     // Ring layout — MUST match FakeInputRingHeader in fakeinput.cpp.
-    private static final int RING_CAPACITY_EVENTS = 512;
+    private static final int RING_CAPACITY_EVENTS = 4096;
     private static final int RING_HEADER_SIZE = 64;
     private static final int RING_SIZE = RING_HEADER_SIZE + (RING_CAPACITY_EVENTS * EVENT_SIZE);
     private static final int RING_MAGIC = 0x46494252; // FIBR
