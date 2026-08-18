@@ -882,6 +882,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
         dxApiThread = new Thread(() -> {
             String lastApi = null;
             while (!Thread.currentThread().isInterrupted()) {
+                // HUD off -> don't do the /proc/maps API scan or push a label; idle-sleep and re-check.
+                // Keeps the thread alive so the label resumes when "Show HUD" is turned back on, and
+                // matches driveHudFrameTick's hudCounterEnabled gate so NOTHING HUD-related runs while off.
+                if (!hudCounterEnabled) {
+                    try { Thread.sleep(2000); } catch (InterruptedException e) { return; }
+                    continue;
+                }
                 // App-declared override wins ONLY while fresh: a guest app can publish its true active
                 // API into the shared tmp (see readAppDeclaredApi). Otherwise fall back to the
                 // /proc/maps present-path detection, so normal games (which never write the file) are
