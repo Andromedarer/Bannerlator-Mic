@@ -1091,6 +1091,36 @@ public class WinHandler {
 
     }
 
+    // Menu owns the controller while the drawer is open; zero tracked pad state and
+    // push it once through the ring so nothing (held stick, pressed button, latched
+    // trigger) stays applied in the guest while the user isn't looking. Preserves
+    // our slot pinning and per-slot rumble tuning (rumble state lives outside
+    // GamepadState and is not touched here).
+    //
+    // Ported from WinNative-Emu/WinNative PR #603.
+    public void neutralizeControllers() {
+        for (ExternalController controller : this.controllers.values()) {
+            if (controller == null) continue;
+            clearGamepadState(controller.state);
+            clearGamepadState(controller.remappedState);
+            int slot = assignSlot(controller.getDeviceId());
+            if (slot >= 0 && slot < MAX_CONTROLLERS && this.writers[slot] != null) {
+                this.writers[slot].writeGamepadState(controller.state);
+            }
+        }
+    }
+
+    private static void clearGamepadState(GamepadState state) {
+        state.thumbLX = 0;
+        state.thumbLY = 0;
+        state.thumbRX = 0;
+        state.thumbRY = 0;
+        state.triggerL = 0;
+        state.triggerR = 0;
+        state.buttons = 0;
+        state.dpad[0] = state.dpad[1] = state.dpad[2] = state.dpad[3] = false;
+    }
+
     public void sendGamepadState(ExternalController controller) {
         if (controller == null)
             return;

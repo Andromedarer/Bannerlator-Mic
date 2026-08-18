@@ -458,9 +458,12 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
 
         try {
             if (fakeinputSrc.exists()) {
+                // Refresh every launch so the guest reader can never skew from the
+                // app-side ring writer (a same-size rebuild defeats length checks).
+                // Do NOT reintroduce a `!fakeinputDest.exists()` guard here.
                 FileUtils.copy(fakeinputSrc, fakeinputDest);
                 Log.d("GuestLauncher", "Copied libfakeinput.so to imagefs");
-            } else {
+            } else if (!fakeinputDest.exists()) {
                 Log.e("GuestLauncher", "libfakeinput.so NOT FOUND in APK: " + fakeinputSrc.getAbsolutePath());
             }
         } catch (Exception e) {

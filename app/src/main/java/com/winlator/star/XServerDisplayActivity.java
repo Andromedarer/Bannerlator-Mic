@@ -1100,6 +1100,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 // Hide the on-handheld "playing on external display" badge while the menu is open so
                 // it doesn't overlap the drawer content.
                 XServerDialogState.INSTANCE.setMenuOpen(true);
+                // Menu owns the controller while open — flush a neutral state
+                // once so a held stick / pressed button / latched trigger from
+                // the last frame doesn't stay applied in the guest.
+                if (winHandler != null) {
+                    winHandler.neutralizeControllers();
+                }
             }
             @Override public void onDrawerClosed(@NonNull View drawerView) {
                 XServerDialogState.INSTANCE.setMenuOpen(false);
