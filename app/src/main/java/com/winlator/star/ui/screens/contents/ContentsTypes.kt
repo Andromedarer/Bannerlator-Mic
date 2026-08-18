@@ -16,7 +16,7 @@ object ContentsTypes {
 
     /** Display order for chips / folders. */
     val ALL: List<String> = listOf(
-        "DXVK", "VKD3D", "Box64", "WOWBox64", "FEXCore", "Wine", "Proton", GPU_DRIVERS,
+        "DXVK", "D7VK", "VKD3D", "Box64", "WOWBox64", "FEXCore", "Wine", "Proton", GPU_DRIVERS,
     )
 
     fun isDriver(type: String): Boolean = type.equals(GPU_DRIVERS, ignoreCase = true)

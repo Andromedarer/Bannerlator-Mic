@@ -256,7 +256,7 @@ class RemoteSourceRepository(private val context: Context) {
             format = SourceFormat.PACK_JSON,
             supportedTypes = listOf("dxvk", "vkd3d", "box64", "fex", "fexcore", "wine", "proton")
         ),
-        RemoteSource("Nightlies by The412Banner", "https://raw.githubusercontent.com/The412Banner/Nightlies/refs/heads/main/nightlies_components.json", SourceFormat.PACK_JSON, listOf("DXVK", "VKD3D", "FEXCore", "Box64", "WOWBox64")),
+        RemoteSource("Nightlies by The412Banner", "https://raw.githubusercontent.com/The412Banner/Nightlies/refs/heads/main/nightlies_components.json", SourceFormat.PACK_JSON, listOf("DXVK", "D7VK", "VKD3D", "FEXCore", "Box64", "WOWBox64")),
     )
 
     fun getAllSources(): List<RemoteSource> {
