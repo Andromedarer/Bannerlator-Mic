@@ -866,6 +866,64 @@ public class XServerDisplayActivity extends AppCompatActivity {
     }
 
     /**
+     * Build the in-game perf HUD for the resolved config's style, seeding orientation, the master toggle,
+     * and the renderer label, then kick off live D3D-API detection. Idempotent: a no-op once any HUD view
+     * exists. Called both at launch (behind {@code container.isShowFPS()}) and live from the in-game drawer
+     * when the user turns "Show HUD" on with FPS previously off — one place so the two paths can't drift.
+     */
+    private void ensureHudBuilt() {
+        if (perfHud != null || gameNativeHud != null || fusionHud != null
+                || frameRating != null || frameRatingHorizontal != null) return;   // already built
+
+        String fpsConfigString = resolvedFPSCounterConfig();
+        com.winlator.star.core.KeyValueSet fpsConfig = new com.winlator.star.core.KeyValueSet(fpsConfigString);
+        fpsHudHorizontal = fpsConfig.get("hudMode", "vertical").equals("horizontal");
+        // Master toggle: the HUD is still BUILT (so it can be revealed live), but stays GONE while off.
+        hudCounterEnabled = fpsConfig.get("hudEnabled", "1").equals("1");
+        String hudStyle = fpsConfig.get("hudStyle", "fusion");
+
+        String resolvedR = resolvedRenderer();
+        String rendererMode = "vulkan".equals(resolvedR) ? "Vulkan"
+            : "surfaceflinger".equals(resolvedR) ? "SurfaceFlinger" : "OpenGL";
+        String dxName = dxwrapper.contains("dxvk") ? "DXVK" : dxwrapper.contains("vegas") ? "VEGAS" : "WineD3D";
+        hudRendererLabel = rendererMode + " | " + dxName;
+        hudEngineShort = dxName;
+
+        // Build whichever HUD the config selected. The other styles are created on demand if the user
+        // swaps hudStyle in the in-game drawer (see buildPerfHud/buildClassicHud/buildGameNativeHud).
+        if (hudStyle.equals("gamehub")) buildPerfHud(fpsConfigString);
+        else if (hudStyle.equals("gamenative")) buildGameNativeHud(fpsConfigString);
+        else if (hudStyle.equals("fusion")) buildFusionHud(fpsConfigString);
+        else buildClassicHud(fpsConfigString);
+
+        // The label above is the configured D3D9/10/11 wrapper; probe what the game actually loads and
+        // upgrade it to the real API — "D3D12 · VKD3D" for D3D12 titles, "D3D11 · DXVK" etc. for the
+        // wrapped path, or "Vulkan"/"Zink"/"OpenGL" for native-API games.
+        startDxApiDetection(rendererMode, dxName);
+    }
+
+    /**
+     * When the HUD is built LIVE (user flipped "Show HUD" on mid-game after launching with FPS off), the
+     * game's {@code _MESA_DRV} property already fired while no HUD existed, so changeFrameRatingVisibility
+     * dropped it (it early-returns when every HUD view is null) and {@code frameRatingWindowId} is still -1
+     * — driveHudFrameTick would never count and the HUD would sit at 0 fps. Bind to the currently focused
+     * game window so counting starts immediately; the normal _MESA_DRV bind/upgrade path in
+     * changeFrameRatingVisibility takes over on the next real render-window event. Mirrors the focused-
+     * application-window logic driveHudFrameTick already uses. frameRatingWindowId is a plain cross-thread
+     * field by existing design; we write it on the UI thread like the rest of onFpsConfigApply.
+     */
+    private void ensureHudBoundToGameWindow() {
+        if (frameRatingWindowId != -1) return;   // already bound (e.g. HUD was built at launch)
+        try {
+            Window focused = xServer.windowManager.getFocusedWindow();
+            if (focused != null && focused.isApplicationWindow() && !focused.isDesktopWindow()) {
+                frameRatingWindowId = focused.id;
+                Log.d("XServerDisplayActivity", "Live HUD build: binding FPS counter to focused game window " + focused.id);
+            }
+        } catch (Exception ignore) {}
+    }
+
+    /**
      * Continuously track the active graphics API and keep EVERY HUD's label live, like the other
      * metrics. Runs on a background thread at a ~2s cadence (off the render path, so it never stalls a
      * frame). We only push to the HUDs when the API actually CHANGES — the label is near-static — and
@@ -1392,6 +1450,27 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     : gameNativeHud != null ? "gamenative"
                     : fusionHud != null ? "fusion"
                     : (frameRating != null || frameRatingHorizontal != null) ? "classic" : null;
+                // Lazy build (container-wide scope): the user flipped "Show HUD" on but no HUD exists —
+                // FPS was off for this launch so nothing was built at onCreate. Enable the container-wide
+                // FPS gate (so ContainerDetailScreen's "Show FPS" reflects it next open) and build the HUD
+                // now so it appears this instant, no relaunch, no trip to container settings. Fires only on
+                // the OFF->build transition (haveStyle == null); turning OFF never flips the gate back.
+                if (hudCounterEnabled && haveStyle == null) {
+                    if (container != null && !container.isShowFPS()) {
+                        container.setShowFPS(true);
+                        container.saveData();
+                    }
+                    ensureHudBuilt();               // builds the configured style (idempotent)
+                    ensureHudBoundToGameWindow();   // bind to the presenting game window so FPS counts, not 0
+                    // ensureHudBuilt() re-seeds hudCounterEnabled from the *persisted* (pre-toggle) config,
+                    // which still reads hudEnabled=0 here (persist runs after this UI block). Re-assert the
+                    // live ON state before the visibility push below.
+                    hudCounterEnabled = true;
+                    haveStyle = perfHud != null ? "gamehub"
+                        : gameNativeHud != null ? "gamenative"
+                        : fusionHud != null ? "fusion"
+                        : (frameRating != null || frameRatingHorizontal != null) ? "classic" : null;
+                }
                 // Live style swap: build the requested HUD and tear down the others, but only if a
                 // HUD is already on screen (FPS was enabled for this launch). View mutation is safe
                 // here — this callback runs on the UI thread.
@@ -4643,33 +4722,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // container (and the live overlay below) are configured for the GameHub HUD.
         if (container != null) XServerDrawerState.INSTANCE.setFpsConfig(resolvedFPSCounterConfig());
 
+        // Container-gated launch build. The live in-game "Show HUD" toggle can also drive this later
+        // (see onFpsConfigApply -> ensureHudBuilt), so the build body lives in one idempotent method.
         if (container != null && container.isShowFPS()) {
-            String fpsConfigString = resolvedFPSCounterConfig();
-            com.winlator.star.core.KeyValueSet fpsConfig = new com.winlator.star.core.KeyValueSet(fpsConfigString);
-            fpsHudHorizontal = fpsConfig.get("hudMode", "vertical").equals("horizontal");
-            // Master toggle: the HUD is still BUILT (so it can be revealed live), but stays GONE while off.
-            hudCounterEnabled = fpsConfig.get("hudEnabled", "1").equals("1");
-            String hudStyle = fpsConfig.get("hudStyle", "fusion");
-
-            String resolvedR = resolvedRenderer();
-            String rendererMode = "vulkan".equals(resolvedR) ? "Vulkan"
-                : "surfaceflinger".equals(resolvedR) ? "SurfaceFlinger" : "OpenGL";
-            String dxName = dxwrapper.contains("dxvk") ? "DXVK" : dxwrapper.contains("vegas") ? "VEGAS" : "WineD3D";
-            hudRendererLabel = rendererMode + " | " + dxName;
-            hudEngineShort = dxName;
-
-            // Build whichever HUD the container selected. The other styles are created on demand
-            // if the user swaps hudStyle in the in-game drawer (see buildPerfHud/buildClassicHud/
-            // buildGameNativeHud).
-            if (hudStyle.equals("gamehub")) buildPerfHud(fpsConfigString);
-            else if (hudStyle.equals("gamenative")) buildGameNativeHud(fpsConfigString);
-            else if (hudStyle.equals("fusion")) buildFusionHud(fpsConfigString);
-            else buildClassicHud(fpsConfigString);
-
-            // The label above is the configured D3D9/10/11 wrapper; probe what the game actually
-            // loads and upgrade it to the real API — "D3D12 · VKD3D" for D3D12 titles, "D3D11 · DXVK"
-            // etc. for the wrapped path, or "Vulkan"/"Zink"/"OpenGL" for native-API games.
-            startDxApiDetection(rendererMode, dxName);
+            ensureHudBuilt();
         }
 
         // Resolve the fullscreen aspect-ratio mode (#71): a per-game shortcut override wins, else the
