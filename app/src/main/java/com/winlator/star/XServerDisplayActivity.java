@@ -6635,6 +6635,17 @@ return true;
                 args += "\"wfm.exe\"";
             }
         }
+        // Epic Online Services (EOS) Phase 1: for Epic-origin shortcuts with EOS auth
+        // enabled, append the real-Epic launch args (-EpicPortal + fresh exchange code).
+        // This runs on the background launch worker, so the synchronous exchange-code
+        // fetch is ANR-safe. buildArgString silent-no-ops (returns "") on any failure.
+        if (shortcut != null
+                && "epic".equals(shortcut.getExtra("storeSource"))
+                && !"0".equals(shortcut.getExtra("epicEos"))) {
+            String epicArgs = com.winlator.star.store.EpicLaunchArgs.buildArgString(this, shortcut);
+            if (epicArgs != null && !epicArgs.isEmpty()) args += " " + epicArgs;
+        }
+
         // Construct the final command
         String command = "winhandler.exe " + args;
 

@@ -153,6 +153,7 @@ class EpicGamesActivity : ComponentActivity() {
                             StarLaunchBridge.addToLauncher(
                                 this@EpicGamesActivity, game.title, exe,
                                 if (game.artCover.isNotEmpty()) game.artCover else game.artSquare,
+                                StarLaunchBridge.EpicMeta(game.appName, game.namespace, game.catalogItemId),
                             )
                         }
                     },
@@ -481,6 +482,8 @@ class EpicGamesActivity : ComponentActivity() {
                 // mirrors the Amazon/GOG fix (a dialog on a stopped Activity wedged the card at 100%).
                 val path = exeFiles[0].absolutePath
                 prefs!!.edit().putString("epic_exe_${game.appName}", path).apply()
+                // Detect EOS SDK presence so the library can show an "EOS" badge.
+                EpicEosDetector.scanAsync(appCtx, game.appName, installDir, null)
                 StoreDownloadHooks.markInstalled(
                     store = Store.EPIC,
                     id = appName,
@@ -778,6 +781,22 @@ private fun EmptyState(query: String) {
 }
 
 @Composable
+/**
+ * Small blue "EOS" pill shown on installed games detected as using Epic Online Services.
+ * Identification only — see EpicLaunchArgs for the actual auth injection.
+ */
+@Composable
+internal fun EosBadge() {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(Color(0xFF1A73E8))
+            .padding(horizontal = 5.dp, vertical = 1.dp),
+    ) {
+        Text("EOS", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color.White)
+    }
+}
+
 private fun GameListCard(
     game: EpicGame,
     downloadState: EpicGamesActivity.GameDownloadState,
@@ -833,6 +852,10 @@ private fun GameListCard(
                         )
                         if (downloadState.installed) {
                             Text(" \u2713", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50)) // semantic installed-green
+                        }
+                        if (downloadState.installed && EpicEosDetector.isEosCached(LocalContext.current, game.appName)) {
+                            Spacer(Modifier.width(6.dp))
+                            EosBadge()
                         }
                     }
                     if (game.developer.isNotEmpty()) {

@@ -60,6 +60,22 @@ import java.util.ArrayList;
 public final class StarLaunchBridge {
 
     private static final String TAG = "BH_BRIDGE";
+
+    /**
+     * Optional per-game Epic metadata stamped into a shortcut's [Extra Data] block at
+     * creation. Drives the EOS Phase-1 launch-arg injection (see EpicLaunchArgs). Null for
+     * non-Epic shortcuts.
+     */
+    public static final class EpicMeta {
+        public final String appName;
+        public final String namespace;
+        public final String catalogItemId;
+        public EpicMeta(String appName, String namespace, String catalogItemId) {
+            this.appName       = appName       != null ? appName       : "";
+            this.namespace     = namespace     != null ? namespace     : "";
+            this.catalogItemId = catalogItemId != null ? catalogItemId : "";
+        }
+    }
     private static final String SGDB_KEY = "cf89227f12c773bb1117b6b109ae1659";
 
     private StarLaunchBridge() {}
@@ -108,6 +124,19 @@ public final class StarLaunchBridge {
                                      String gameName,
                                      String exePath,
                                      String coverArtUrl) {
+        addToLauncher(activity, gameName, exePath, coverArtUrl, null);
+    }
+
+    /**
+     * As above, but stamps Epic per-game metadata (storeSource=epic, epicAppName,
+     * epicSandboxId, epicCatalogId, epicEos=1) into the shortcut so EOS Phase-1 launch-arg
+     * injection can scope to this game. Pass {@code epic == null} for non-Epic stores.
+     */
+    public static void addToLauncher(Activity activity,
+                                     String gameName,
+                                     String exePath,
+                                     String coverArtUrl,
+                                     EpicMeta epic) {
         Handler h = new Handler(Looper.getMainLooper());
         new Thread(() -> {
             try {
@@ -131,7 +160,7 @@ public final class StarLaunchBridge {
                         .setTitle("Add \"" + gameName + "\" to…")
                         .setItems(names, (dialog, which) ->
                                 writeShortcut(activity, finalContainers.get(which),
-                                        gameName, exePath, coverArtUrl))
+                                        gameName, exePath, coverArtUrl, epic))
                         .setNegativeButton("Cancel", null)
                         .show());
 
@@ -179,6 +208,22 @@ public final class StarLaunchBridge {
                                           String exePath,
                                           String coverArtUrl,
                                           int steamAppId,
+                                          ResultCallback cb) {
+        writeShortcutAsync(activity, container, gameName, exePath, coverArtUrl, steamAppId, null, cb);
+    }
+
+    /**
+     * As above, but also stamps Epic per-game metadata into the [Extra Data] block when
+     * {@code epic != null} (mutually exclusive with a Steam tag). Enables EOS Phase-1
+     * launch-arg injection scoped to this game.
+     */
+    public static void writeShortcutAsync(Activity activity,
+                                          Container container,
+                                          String gameName,
+                                          String exePath,
+                                          String coverArtUrl,
+                                          int steamAppId,
+                                          EpicMeta epic,
                                           ResultCallback cb) {
         Handler h = new Handler(Looper.getMainLooper());
         new Thread(() -> {
@@ -229,6 +274,22 @@ public final class StarLaunchBridge {
                 if (steamAppId > 0) {
                     content += "storeSource=steam\n"
                             + "steamAppId=" + steamAppId + "\n";
+                } else if (epic != null && !epic.appName.isEmpty()) {
+                    // EOS Phase 1: tag Epic-origin shortcuts so EpicLaunchArgs can scope the
+                    // real-Epic auth args to this game. epicEos=1 default (non-EOS games ignore
+                    // the args harmlessly); user can toggle it off in the shortcut settings.
+                    content += "storeSource=epic\n"
+                            + "epicAppName=" + epic.appName + "\n"
+                            + "epicSandboxId=" + epic.namespace + "\n"
+                            + "epicCatalogId=" + epic.catalogItemId + "\n"
+                            + "epicEos=1\n";
+                    // Seed the unified "eos" identification extra from the post-install detector
+                    // result, but ONLY if it has actually run — otherwise leave it unset so the
+                    // ShortcutsScreen background scan computes it (writing a premature "0" would
+                    // make that scan skip and cache a false negative).
+                    if (EpicEosDetector.hasBeenScanned(activity, epic.appName)) {
+                        content += "eos=" + (EpicEosDetector.isEosCached(activity, epic.appName) ? "1" : "0") + "\n";
+                    }
                 }
 
                 try (FileWriter fw = new FileWriter(shortcutFile)) {
@@ -271,7 +332,16 @@ public final class StarLaunchBridge {
                                       String gameName,
                                       String exePath,
                                       String coverArtUrl) {
-        writeShortcutAsync(activity, container, gameName, exePath, coverArtUrl,
+        writeShortcut(activity, container, gameName, exePath, coverArtUrl, null);
+    }
+
+    private static void writeShortcut(Activity activity,
+                                      Container container,
+                                      String gameName,
+                                      String exePath,
+                                      String coverArtUrl,
+                                      EpicMeta epic) {
+        writeShortcutAsync(activity, container, gameName, exePath, coverArtUrl, 0, epic,
                 (success, message) -> showToast(activity, message));
     }
 

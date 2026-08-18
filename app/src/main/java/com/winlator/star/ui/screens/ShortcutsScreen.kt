@@ -4578,6 +4578,10 @@ private fun ShortcutItemLayoutL(
                     Spacer(Modifier.width(6.dp))
                     SdCardBadge()
                 }
+                if (rememberEosBadge(shortcut)) {
+                    Spacer(Modifier.width(6.dp))
+                    EosBadge()
+                }
             }
             // Component specs: bright primary chips (renderer · DXVK · frame-gen) then a
             // muted secondary dot-line (driver · VKD3D · backend). Shared with Containers.
@@ -4822,6 +4826,10 @@ private fun ShortcutGridItem(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
+                }
+                if (rememberEosBadge(shortcut)) {
+                    Spacer(Modifier.height(3.dp))
+                    EosBadge()
                 }
             }
         }
@@ -5430,6 +5438,10 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
     // Controller / D-pad state for this editor (see the SettingsDpad model above).
     val dp = remember { SettingsDpad() }
 
+    // Epic Online Services (EOS) auth — only relevant for Epic-origin shortcuts. Default ON.
+    val isEpicShortcut = remember { shortcut.getExtra("storeSource") == "epic" }
+    var epicEosEnabled by remember { mutableStateOf(shortcut.getExtra("epicEos", "1") != "0") }
+
     // Async-loaded state
     var isArm64EC by remember { mutableStateOf(false) }
     var box64Versions by remember { mutableStateOf(listOf<String>()) }
@@ -5928,6 +5940,7 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
 
         with(shortcut) {
             putExtra("execArgs", execArgs.ifEmpty { null })
+            if (isEpicShortcut) putExtra("epicEos", if (epicEosEnabled) "1" else "0")
             putExtra("screenSize", screenSize)
             putExtra("graphicsDriver", StringUtils.parseIdentifier(selectedGfxDriver))
             putExtra("graphicsDriverConfig", graphicsDriverConfig)
@@ -6093,6 +6106,28 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                         label = stringResource(R.string.exec_arguments),
                         modifier = Modifier.fillMaxWidth()
                     )
+
+                    // Epic Online Services (EOS) auth toggle — only for Epic-origin shortcuts.
+                    // When ON, the launcher injects real-Epic auth args (-EpicPortal + a fresh
+                    // exchange code) so EOS-requiring titles authenticate against the user's
+                    // logged-in Epic account. Harmless for non-EOS Epic games.
+                    if (isEpicShortcut) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Epic Online Services (EOS) auth", fontSize = 14.sp)
+                                Text(
+                                    "Sign EOS games in with your Epic account",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            Switch(checked = epicEosEnabled, onCheckedChange = { epicEosEnabled = it })
+                        }
+                    }
 
                     // Screen size
                     DpDrop(
@@ -7478,6 +7513,42 @@ private fun exportShortcut(context: Context, shortcut: Shortcut) {
  * Worth surfacing because it explains behaviour the user would otherwise have to guess at: a game
  * on a card is slower to load, and it disappears entirely if the card is removed.
  */
+@Composable
+private fun EosBadge(modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(Color(0xFF1A73E8))
+            .padding(horizontal = 5.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "EOS",
+            color = Color.White,
+            style = MaterialTheme.typography.labelSmall,
+        )
+    }
+}
+
+/**
+ * Reads the cached {@code eos} identification extra for a shortcut and, if it has never
+ * been computed, kicks a bounded background filesystem scan (off the render path) that
+ * caches the result on the shortcut. Returns the current badge state, which flips to
+ * true once a scan finds EOS markers. Source-agnostic: works for any store origin.
+ */
+@Composable
+private fun rememberEosBadge(shortcut: Shortcut): Boolean {
+    var eos by remember(shortcut.path) { mutableStateOf(shortcut.getExtra("eos") == "1") }
+    LaunchedEffect(shortcut.path) {
+        if (!shortcut.hasExtra("eos")) {
+            com.winlator.star.store.EpicEosDetector.scanShortcutIfNeeded(shortcut) {
+                eos = shortcut.getExtra("eos") == "1"
+            }
+        }
+    }
+    return eos
+}
+
 @Composable
 private fun SdCardBadge(modifier: Modifier = Modifier) {
     Row(

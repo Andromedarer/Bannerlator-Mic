@@ -90,6 +90,7 @@ class EpicGameDetailActivity : ComponentActivity() {
     private var installBtnVisible by mutableStateOf(true)
     private var setExeBtnVisible by mutableStateOf(false)
     private var uninstallBtnVisible by mutableStateOf(false)
+    private var usesEos by mutableStateOf(false)
     private var progressVisible by mutableStateOf(false)
     private var progressValue by mutableIntStateOf(0)
     private var progressLabelText by mutableStateOf("")
@@ -157,6 +158,7 @@ class EpicGameDetailActivity : ComponentActivity() {
                     installBtnVisible = installBtnVisible,
                     setExeBtnVisible = setExeBtnVisible,
                     uninstallBtnVisible = uninstallBtnVisible,
+                    usesEos = usesEos,
                     progressVisible = progressVisible,
                     progressValue = progressValue,
                     progressLabelText = progressLabelText,
@@ -275,6 +277,20 @@ class EpicGameDetailActivity : ComponentActivity() {
         uninstallBtnVisible = dir != null
 
         if (!installed) installBtnText = "Install"
+
+        // EOS badge: reflect cached flag now; lazily scan (upgraders / pre-feature installs) and
+        // refresh the state when the background walk finishes. Never scans on the render path.
+        val an = appName
+        if (an != null && installed) {
+            val ctx = applicationContext
+            usesEos = EpicEosDetector.isEosCached(ctx, an)
+            val scanRoot = dir?.let { File(it) }
+            EpicEosDetector.scanIfNeeded(ctx, an, scanRoot) {
+                runOnUiThread { usesEos = EpicEosDetector.isEosCached(ctx, an) }
+            }
+        } else {
+            usesEos = false
+        }
     }
 
     private fun onInstallClicked() {
@@ -373,6 +389,8 @@ class EpicGameDetailActivity : ComponentActivity() {
                 // 100%-stuck card when the user wasn't on the detail page. Exe choice stays
                 // available via "Set .exe\u2026".
                 prefs!!.edit().putString("epic_exe_$an", exeFiles[0].absolutePath).apply()
+                // Detect EOS SDK presence so the library can show an "EOS" badge.
+                EpicEosDetector.scanAsync(appCtx, an, installDir, null)
                 onInstallComplete()
             } catch (e: Exception) {
                 if (!cancelled.get()) onInstallError(e.message ?: "Unknown error")
@@ -461,7 +479,10 @@ class EpicGameDetailActivity : ComponentActivity() {
         // Mirror the Epic games-list Launch (StarLaunchBridge container picker). The old hardcoded
         // LandscapeLauncherMainActivity component doesn't exist in this app (com.winlator.banner)
         // and crashed with ActivityNotFoundException — identical to the Amazon detail bug.
-        StarLaunchBridge.addToLauncher(this, title ?: appName ?: "Game", exe, artCover ?: "")
+        StarLaunchBridge.addToLauncher(
+            this, title ?: appName ?: "Game", exe, artCover ?: "",
+            StarLaunchBridge.EpicMeta(appName ?: "", namespace ?: "", catalogItemId ?: ""),
+        )
     }
 
     private fun onSetExeClicked() {
@@ -680,6 +701,7 @@ private fun EpicGameDetailScreen(
     installBtnVisible: Boolean,
     setExeBtnVisible: Boolean,
     uninstallBtnVisible: Boolean,
+    usesEos: Boolean,
     progressVisible: Boolean,
     progressValue: Int,
     progressLabelText: String,
@@ -755,6 +777,7 @@ private fun EpicGameDetailScreen(
                 if (appName.isNotEmpty()) InfoChip("App: $appName")
                 val releaseDate = prefs.getString("epic_release_$appName", null)
                 if (!releaseDate.isNullOrEmpty()) InfoChip(formatDateStatic(releaseDate))
+                if (usesEos) EosBadge()
             }
             if (description.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
