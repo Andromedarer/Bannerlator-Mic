@@ -3363,6 +3363,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // graceful termination isn't stuck waiting on a suspended process (any pending pulse aside).
         reshadePulseInProgress = false;
         ProcessHelper.resumeAllWineProcesses();
+        // Epic EOS Phase 2: remove this game's short-lived Denuvo ownership token (.ovt)
+        // from the wine prefix now that the session is ending. No-op for non-Epic games.
+        try {
+            if (shortcut != null) com.winlator.star.store.EpicLaunchArgs.cleanupOwnershipToken(this, shortcut);
+        } catch (Throwable ignored) {}
         installerWatchHandler.removeCallbacks(installerWatchRunnable);
         gameExitWatchHandler.removeCallbacks(gameExitWatchRunnable);
         affinityReapplyHandler.removeCallbacks(affinityReapplyRunnable);

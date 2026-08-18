@@ -8,11 +8,17 @@
  * plus the -AUTH_LOGIN / -AUTH_PASSWORD / -AUTH_TYPE exchange-code triple.
  * Massive thanks to utkarshdalal and the GameNative contributors.
  *
- * This file ships Phase 1 (online auth handshake). Phase 2 (ownership token
- * -epicovt) and Phase 3 (in-game EOS overlay UI for friends / notifications /
- * achievements) are still pending.
+ * This file ships Phase 1 (online auth handshake) and Phase 2 (ownership token
+ * -epicovt, gated by Denuvo detection). Phase 3 (in-game EOS overlay UI for
+ * friends / notifications / achievements) is still pending.
+ *
+ * Phase 2 is a Java port of GameNative's EpicGameLauncher ownership-token flow
+ * (saveOwnershipTokenToFile / -epicovt / -epicapp / -epicenv) + EpicAuthManager /
+ * EpicAuthClient.getOwnershipToken. Licensed under GPL-3.0, matching the
+ * GameNative-derived Epic sources.
  *
  * Reference: https://github.com/utkarshdalal/GameNative/commit/cbea7f70be46e6f4a99a7e92db13c9b96add9c1c
+ * Reference: https://github.com/utkarshdalal/GameNative — service/epic/EpicGameLauncher.kt
  */
 package com.winlator.star.store;
 
@@ -20,6 +26,11 @@ import android.content.Context;
 import android.util.Log;
 
 import com.winlator.star.container.Shortcut;
+import com.winlator.star.xenvironment.ImageFs;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.util.Locale;
 
 /**
  * Builds the Epic Online Services launch-argument string that is appended to the
@@ -108,6 +119,14 @@ public final class EpicLaunchArgs {
                 sb.append(" -AUTH_TYPE=exchangecode");
             }
 
+            // ── Phase 2: Denuvo ownership token (-epicovt) ──────────────────────
+            // Additive and Denuvo-gated: EOS games wrapped in Denuvo reject the
+            // exchange-code auth above unless the game is also handed a signed
+            // ownership-verification token proving the launching Epic account owns
+            // it. Non-Denuvo EOS games take none of this path — their launch string
+            // is exactly the Phase 1 output above (device-proven, unchanged).
+            appendOwnershipTokenArgs(ctx, shortcut, appName, namespace, catalogId, accountId, sb);
+
             Log.i(TAG, "built Epic launch args for " + appName
                     + " (deploymentId=" + (deploymentId.isEmpty() ? "<none>" : deploymentId)
                     + ", exchangeCode=" + (exchangeCode == null || exchangeCode.isEmpty() ? "<missing>" : "<present>")
@@ -128,5 +147,94 @@ public final class EpicLaunchArgs {
     private static String sanitize(String s) {
         if (s == null) return "";
         return s.replace("\n", "").replace("\r", "").replace("\0", "");
+    }
+
+    /** Directory (inside the wine prefix) that holds ownership-token .ovt files. */
+    private static final String EPIC_TOKENS_SUBDIR = "drive_c/users/Public/Documents/EpicTokens";
+    /** Windows-side path to the same directory (dosdevices C: → drive_c). */
+    private static final String EPIC_TOKENS_WIN = "C:\\users\\Public\\Documents\\EpicTokens\\";
+
+    /**
+     * Denuvo-gated Phase 2. When (and only when) {@code shortcut} is Denuvo-protected,
+     * mint a fresh signed ownership token, drop it into the container's wine prefix at
+     * {@code drive_c/users/Public/Documents/EpicTokens/<appName>.ovt}, and append
+     * {@code -epicovt=<winPath> -epicapp=<appName> -epicenv=Prod} to {@code sb}.
+     *
+     * Non-Denuvo games (or any failure: no token, unwritable prefix) leave {@code sb}
+     * untouched — the Phase 1 launch string is emitted verbatim.
+     *
+     * Runs on the background launch worker (network fetch + a one-time binary scan on
+     * first launch), so blocking here is ANR-safe.
+     */
+    private static void appendOwnershipTokenArgs(Context ctx, Shortcut shortcut, String appName,
+                                                 String namespace, String catalogId,
+                                                 String accountId, StringBuilder sb) {
+        try {
+            // Compute-once Denuvo flag (sync scan on first launch; cached read after).
+            boolean denuvo = DenuvoDetector.scanIfNeededSync(ctx, shortcut);
+            if (!denuvo) return; // non-Denuvo EOS game → Phase 1 only, unchanged.
+
+            if (catalogId == null || catalogId.isEmpty()) {
+                Log.w(TAG, "Denuvo game " + appName + " missing epicCatalogId; skipping ownership token");
+                return;
+            }
+
+            byte[] tokenBytes = EpicSidecar.fetchOwnershipTokenSync(ctx, accountId, namespace, catalogId);
+            if (tokenBytes == null || tokenBytes.length == 0) {
+                Log.w(TAG, "ownership token fetch returned nothing for " + appName + "; launching without -epicovt");
+                return;
+            }
+
+            String fileName = sanitizeFilename(appName) + ".ovt";
+            File tokenDir = new File(ImageFs.find(ctx).wineprefix, EPIC_TOKENS_SUBDIR);
+            if (!tokenDir.exists() && !tokenDir.mkdirs()) {
+                Log.w(TAG, "failed to create EpicTokens dir at " + tokenDir.getAbsolutePath());
+                return;
+            }
+            File tokenFile = new File(tokenDir, fileName);
+            // Overwrite fresh every launch — the token is short-lived and re-minted each time.
+            try (FileOutputStream fos = new FileOutputStream(tokenFile, false)) {
+                fos.write(tokenBytes);
+            }
+
+            String winPath = EPIC_TOKENS_WIN + fileName;
+            sb.append(" -epicovt=").append(winPath);
+            sb.append(" -epicapp=").append(sanitize(appName));
+            sb.append(" -epicenv=Prod");
+            Log.i(TAG, "Denuvo ownership token written for " + appName + " → " + tokenFile.getAbsolutePath()
+                    + " (wine: " + winPath + ")");
+        } catch (Throwable t) {
+            // Never let the Denuvo path break a launch — fall back to Phase 1 args.
+            Log.w(TAG, "appendOwnershipTokenArgs failed for " + appName, t);
+        }
+    }
+
+    /**
+     * Delete this game's ownership-token .ovt from the wine prefix on session exit.
+     * The token is sensitive + short-lived; the prefix lives in app-private storage,
+     * but we still remove the artifact once the game has stopped. No-op when the file
+     * is absent or the shortcut isn't an EOS Epic game. Best-effort; never throws.
+     */
+    public static void cleanupOwnershipToken(Context ctx, Shortcut shortcut) {
+        if (ctx == null || shortcut == null) return;
+        try {
+            if (!"epic".equals(shortcut.getExtra("storeSource"))) return;
+            String appName = shortcut.getExtra("epicAppName", "");
+            if (appName.isEmpty()) return;
+            File tokenFile = new File(new File(ImageFs.find(ctx).wineprefix, EPIC_TOKENS_SUBDIR),
+                    sanitizeFilename(appName) + ".ovt");
+            if (tokenFile.exists() && tokenFile.delete()) {
+                Log.i(TAG, "deleted ownership token for " + appName);
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "cleanupOwnershipToken failed", t);
+        }
+    }
+
+    /** Replace filesystem-unsafe characters so an appName is a safe .ovt basename. */
+    private static String sanitizeFilename(String s) {
+        if (s == null || s.isEmpty()) return "epicgame";
+        String cleaned = s.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9._-]", "_");
+        return cleaned.isEmpty() ? "epicgame" : cleaned;
     }
 }

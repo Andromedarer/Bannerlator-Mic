@@ -22,9 +22,14 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 
 /**
  * Fetches and caches the EOS deployment ID for an Epic game. The deployment ID is
@@ -142,6 +147,93 @@ public final class EpicSidecar {
             return exchangeCode;
         } catch (Exception e) {
             Log.w(TAG, "fetchExchangeCode failed", e);
+            return null;
+        } finally {
+            if (conn != null) try { conn.disconnect(); } catch (Exception ignored) {}
+        }
+    }
+
+    /**
+     * Epic ecommerce host for ownership-verification tokens (Denuvo / EOS Phase 2).
+     * Confirmed against GameNative's {@code EpicConstants.ECOMMERCE_HOST}.
+     */
+    private static final String ECOMMERCE_HOST =
+            "ecommerceintegration-public-service-ecomprod02.ol.epicgames.com";
+
+    /**
+     * Synchronously mint a signed ownership-verification token for a Denuvo-protected
+     * EOS game (Epic EOS Phase 2). The title validates this token to confirm the
+     * launching Epic account genuinely owns the game before its Denuvo anti-tamper
+     * will run — this is real-Epic ownership, NOT a DRM bypass.
+     *
+     * Endpoint (confirmed from GameNative {@code EpicAuthClient.getOwnershipToken}):
+     *   POST https://{ECOMMERCE_HOST}/ecommerceintegration/api/public/platforms/EPIC/
+     *        identities/&lt;accountId&gt;/ownershipToken
+     *   Header:  {@code Authorization: Bearer <accessToken>}
+     *   Body:    form-urlencoded {@code nsCatalogItemId=<namespace>:<catalogItemId>}
+     *   Response body IS the token — Epic returns the raw signed-token bytes directly
+     *   (no JSON envelope; GameNative reads {@code response.body.bytes()}). Those exact
+     *   bytes are what must land in the {@code .ovt} file passed via {@code -epicovt}.
+     *
+     * ~8s timeout. Returns the raw token bytes on success, or null on any failure
+     * (caller then skips the ownership-token args — the launch is unchanged).
+     */
+    public static byte[] fetchOwnershipTokenSync(Context ctx, String accountId,
+                                                 String namespace, String catalogItemId) {
+        if (accountId == null || accountId.isEmpty()
+                || namespace == null || namespace.isEmpty()
+                || catalogItemId == null || catalogItemId.isEmpty()) {
+            Log.w(TAG, "fetchOwnershipToken: missing accountId/namespace/catalogItemId");
+            return null;
+        }
+        String token = EpicCredentialStore.getValidAccessToken(ctx);
+        if (token == null) {
+            Log.w(TAG, "fetchOwnershipToken: no Epic access token");
+            return null;
+        }
+        HttpURLConnection conn = null;
+        try {
+            String url = "https://" + ECOMMERCE_HOST
+                    + "/ecommerceintegration/api/public/platforms/EPIC/identities/"
+                    + accountId + "/ownershipToken";
+            String form = "nsCatalogItemId="
+                    + URLEncoder.encode(namespace + ":" + catalogItemId, "UTF-8");
+            byte[] formBytes = form.getBytes(StandardCharsets.UTF_8);
+
+            conn = (HttpURLConnection) new URL(url).openConnection();
+            conn.setRequestMethod("POST");
+            conn.setDoOutput(true);
+            conn.setRequestProperty("Authorization", "Bearer " + token);
+            conn.setRequestProperty("User-Agent", UA);
+            conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+            conn.setRequestProperty("Content-Length", Integer.toString(formBytes.length));
+            conn.setConnectTimeout(8000);
+            conn.setReadTimeout(8000);
+            try (OutputStream os = conn.getOutputStream()) {
+                os.write(formBytes);
+            }
+
+            int code = conn.getResponseCode();
+            if (code < 200 || code >= 300) {
+                Log.w(TAG, "fetchOwnershipToken: HTTP " + code);
+                return null;
+            }
+
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            try (InputStream is = conn.getInputStream()) {
+                byte[] chunk = new byte[8192];
+                int n;
+                while ((n = is.read(chunk)) >= 0) bos.write(chunk, 0, n);
+            }
+            byte[] tokenBytes = bos.toByteArray();
+            if (tokenBytes.length == 0) {
+                Log.w(TAG, "fetchOwnershipToken: empty token response");
+                return null;
+            }
+            Log.i(TAG, "fetchOwnershipToken: OK (" + tokenBytes.length + " bytes)");
+            return tokenBytes;
+        } catch (Exception e) {
+            Log.w(TAG, "fetchOwnershipToken failed", e);
             return null;
         } finally {
             if (conn != null) try { conn.disconnect(); } catch (Exception ignored) {}
