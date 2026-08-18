@@ -780,7 +780,6 @@ private fun EmptyState(query: String) {
     )
 }
 
-@Composable
 /**
  * Small blue "EOS" pill shown on installed games detected as using Epic Online Services.
  * Identification only — see EpicLaunchArgs for the actual auth injection.
@@ -797,6 +796,7 @@ internal fun EosBadge() {
     }
 }
 
+@Composable
 private fun GameListCard(
     game: EpicGame,
     downloadState: EpicGamesActivity.GameDownloadState,
