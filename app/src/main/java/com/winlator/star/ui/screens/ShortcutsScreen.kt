@@ -4553,22 +4553,26 @@ private fun ShortcutItemLayoutL(
                     modifier = Modifier.size(22.dp),
                 )
             }
-            // Store badges overlaid top-left on the cover: EPIC (storeSource==epic) then EOS.
-            ShortcutBadgeOverlay(
-                showEpic = remember(shortcut) { shortcut.getExtra("storeSource") == "epic" },
-                showEos = rememberEosBadge(shortcut),
-                modifier = Modifier.align(Alignment.TopStart).padding(3.dp),
-            )
         }
         Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = shortcut.name,
-                style = MaterialTheme.typography.bodyLarge,
-                color = OnSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            // Store badges beside the name (thumbnail too small to overlay): EPIC (storeSource==epic)
+            // then EOS.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = shortcut.name,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = OnSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                ShortcutBadgeOverlay(
+                    showEpic = remember(shortcut) { shortcut.getExtra("storeSource") == "epic" },
+                    showEos = rememberEosBadge(shortcut),
+                    modifier = Modifier.padding(start = 6.dp),
+                )
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (subtitle.isNotEmpty()) {
                     Text(

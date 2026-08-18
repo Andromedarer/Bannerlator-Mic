@@ -869,13 +869,6 @@ private fun GameListCard(
                             contentScale = ContentScale.Crop,
                         )
                     }
-                    // Store badges overlaid top-left on the thumbnail.
-                    StoreBadgeOverlay(
-                        showEpic = true,
-                        showEos = downloadState.installed &&
-                            EpicEosDetector.isEosCached(LocalContext.current, game.appName),
-                        modifier = Modifier.align(Alignment.TopStart).padding(3.dp),
-                    )
                 }
                 Spacer(Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
@@ -892,6 +885,14 @@ private fun GameListCard(
                         if (downloadState.installed) {
                             Text(" \u2713", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50)) // semantic installed-green
                         }
+                        // Badges next to the name (thumbnail too small to overlay). Whole library is
+                        // Epic \u2192 EPIC unconditional; EOS only when detected on an installed game.
+                        Spacer(Modifier.width(6.dp))
+                        StoreBadgeOverlay(
+                            showEpic = true,
+                            showEos = downloadState.installed &&
+                                EpicEosDetector.isEosCached(LocalContext.current, game.appName),
+                        )
                     }
                     if (game.developer.isNotEmpty()) {
                         Text(
