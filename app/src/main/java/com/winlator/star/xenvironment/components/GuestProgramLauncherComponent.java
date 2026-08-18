@@ -54,6 +54,10 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
     private String[] bindingPaths;
     private EnvVars envVars;
     private WineInfo wineInfo;
+    // Default cap (MB) for the guest Wine VA reservation, exported as WINEVMEMMAXSIZE. Mirrors
+    // Winlator-cmod's DXMD.exe box64rc value. Keeps heavy AAA titles from reserving hundreds of GB
+    // of address space and OOM-killing the X server; generous enough not to starve light games.
+    private static final String DEFAULT_WINE_VMEM_MAX_SIZE_MB = "16384";
     private String box64Preset = Box64Preset.COMPATIBILITY;
     private String fexcorePreset = FEXCorePreset.INTERMEDIATE;
     private Callback<Integer> terminationCallback;
@@ -506,6 +510,25 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         if (this.envVars.has("MANGOHUD_CONFIG")) {
             this.envVars.remove("MANGOHUD_CONFIG");
         }
+
+        // Heavy AAA titles (e.g. Deus Ex: Mankind Divided on EOS) ask Wine's allocator to RESERVE an
+        // absurd slice of virtual address space up-front (observed ~489 GB: err:virtual:
+        // allocate_virtual_memory out of memory for allocation, base 0x0 size 71f6ea0000), which
+        // exhausts the guest VA and takes the X server down before the game ever draws. Winlator-cmod
+        // caps this with the Wine env var WINEVMEMMAXSIZE (MB) — it does it per-exe for DXMD.exe via
+        // BOX64_ENV in default.box64rc, which only reaches the box64 (x86-64) path. On our arm64ec /
+        // WOWBox64 + FEX path there is no .box64rc in the loop (wine is exec'd directly, WOWBox64/FEX
+        // ride inside it as HODLL), so we inject the cap straight into the guest process environment
+        // here. Because wine — and, on the box64 path, box64 — inherits this env array verbatim, one
+        // injection covers BOTH translators. Default-on at 16384 MB (cmod's value); it is set BEFORE
+        // the external-env merge below so a user's explicit shortcut/container envVars WINEVMEMMAXSIZE
+        // (including a different cap, or removing it) always wins.
+        //
+        // NOTE: this is the app-side plumbing. It only takes effect if the Wine/Proton-GE (arm64ec)
+        // build actually READS WINEVMEMMAXSIZE and clamps its reservation (a coffincolors ntdll
+        // patch, not present in stock Wine). If the current build lacks that patch this var is inert
+        // (harmless); honouring it requires a Wine-layer patch + rebuild — a separate follow-up.
+        envVars.put("WINEVMEMMAXSIZE", DEFAULT_WINE_VMEM_MAX_SIZE_MB);
 
         // Merge any additional environment variables from external sources
         if (this.envVars != null) {

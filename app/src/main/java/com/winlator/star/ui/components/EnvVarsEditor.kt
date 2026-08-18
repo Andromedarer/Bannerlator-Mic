@@ -183,6 +183,10 @@ internal object KnownEnvVars {
         KnownEnvVar("WRAPPER_NO_PATCH_OPCONSTCOMP", EnvVarType.CHECKBOX, listOf("0", "1")),
         KnownEnvVar("WRAPPER_DRIVER_ID", EnvVarType.NUMBER),
         KnownEnvVar("WRAPPER_VMEM_MAX_SIZE", EnvVarType.NUMBER),
+        // Wine guest VA-reservation cap in MB (default 16384). Caps heavy AAA titles that reserve
+        // hundreds of GB of address space and OOM the X server. NOTE: only honoured by a Wine build
+        // patched to read WINEVMEMMAXSIZE.
+        KnownEnvVar("WINEVMEMMAXSIZE", EnvVarType.NUMBER),
         KnownEnvVar("WRAPPER_VK_VERSION", EnvVarType.TEXT),
         KnownEnvVar("WRAPPER_EXTENSION_BLACKLIST", EnvVarType.TEXT),
         KnownEnvVar("WRAPPER_DEVICE_NAME", EnvVarType.TEXT),
