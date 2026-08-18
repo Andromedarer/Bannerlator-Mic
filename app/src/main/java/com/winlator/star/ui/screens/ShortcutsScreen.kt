@@ -5452,6 +5452,9 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
     // Epic Online Services (EOS) auth — only relevant for Epic-origin shortcuts. Default ON.
     val isEpicShortcut = remember { shortcut.getExtra("storeSource") == "epic" }
     var epicEosEnabled by remember { mutableStateOf(shortcut.getExtra("epicEos", "1") != "0") }
+    // Manual override: force the -epicovt ownership-token path even when the auto
+    // DenuvoDetector misses an obfuscated Denuvo exe. Default OFF.
+    var epicOvtForce by remember { mutableStateOf(shortcut.getExtra("epicOvtForce", "0") == "1") }
 
     // Async-loaded state
     var isArm64EC by remember { mutableStateOf(false) }
@@ -5952,6 +5955,7 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
         with(shortcut) {
             putExtra("execArgs", execArgs.ifEmpty { null })
             if (isEpicShortcut) putExtra("epicEos", if (epicEosEnabled) "1" else "0")
+            if (isEpicShortcut) putExtra("epicOvtForce", if (epicOvtForce) "1" else "0")
             putExtra("screenSize", screenSize)
             putExtra("graphicsDriver", StringUtils.parseIdentifier(selectedGfxDriver))
             putExtra("graphicsDriverConfig", graphicsDriverConfig)
@@ -6137,6 +6141,23 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                             }
                             Spacer(Modifier.width(8.dp))
                             Switch(checked = epicEosEnabled, onCheckedChange = { epicEosEnabled = it })
+                        }
+                        // Force the ownership-token (-epicovt) path for Denuvo EOS games
+                        // the auto-detector misses (obfuscated exes). Default OFF.
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Force Denuvo ownership token", fontSize = 14.sp)
+                                Text(
+                                    "For Denuvo EOS games the auto-detector misses",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            Switch(checked = epicOvtForce, onCheckedChange = { epicOvtForce = it })
                         }
                     }
 

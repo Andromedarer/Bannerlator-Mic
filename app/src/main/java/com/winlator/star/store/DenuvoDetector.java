@@ -69,6 +69,22 @@ public final class DenuvoDetector {
 
     private static final int READ_CHUNK = 1 << 16; // 64 KiB
 
+    /**
+     * Secondary heuristic: Denuvo's anti-tamper wrapper bloats the main shipping
+     * executable far past a normal game exe. A single {@code .exe} above this size
+     * (any {@code *Shipping.exe}, or the largest {@code .exe} in the tree) is treated
+     * as Denuvo even when the literal-"Denuvo"-string MARKER scan misses — obfuscated
+     * builds strip/obscure the marker (confirmed on LEGO 2K Drive, ~170 MB exe, which
+     * the string scan reported {@code denuvo=0}). This is a stat-only check (file
+     * length, no content read), so it is effectively free.
+     */
+    private static final long DENUVO_EXE_SIZE_BYTES = 120L * 1024 * 1024;
+
+    /** Case-insensitive suffix of a Unreal/typical main shipping executable. */
+    private static final String SHIPPING_EXE_SUFFIX = "shipping.exe";
+
+    private static final String EXE_EXT = ".exe";
+
     private DenuvoDetector() {}
 
     /**
@@ -125,7 +141,18 @@ public final class DenuvoDetector {
             File installDir = resolveInstallDir(ctx, shortcut);
             if (installDir != null) {
                 int[] budget = {MAX_BINARIES_SCANNED};
-                isDenuvo = walk(installDir, budget, SCAN_DEPTH);
+                // largestExe[0] = biggest .exe seen (stat only); oversizeShipping[0] =
+                // a *Shipping.exe over threshold was seen. Either → size signal.
+                long[] largestExe = {0L};
+                boolean[] oversizeShipping = {false};
+                boolean markerHit = walk(installDir, budget, SCAN_DEPTH, largestExe, oversizeShipping);
+                boolean sizeHit = oversizeShipping[0] || largestExe[0] > DENUVO_EXE_SIZE_BYTES;
+                if (sizeHit && !markerHit) {
+                    Log.i(TAG, "size heuristic marked Denuvo (largestExe=" + largestExe[0]
+                            + "B, oversizeShipping=" + oversizeShipping[0]
+                            + ", threshold=" + DENUVO_EXE_SIZE_BYTES + "B) for " + shortcut.path);
+                }
+                isDenuvo = markerHit || sizeHit;
             }
         } catch (Throwable t) {
             Log.w(TAG, "scanSync walk failed for " + shortcut.path, t);
@@ -182,19 +209,46 @@ public final class DenuvoDetector {
         }, "bh-denuvo-scan").start();
     }
 
-    private static boolean walk(File dir, int[] budget, int depth) {
+    /**
+     * Recursive install-dir walk. Returns true on the first literal-"Denuvo"-string
+     * MARKER hit. As a side effect it records the largest {@code .exe} size into
+     * {@code largestExe[0]} and flips {@code oversizeShipping[0]} when any
+     * {@code *Shipping.exe} exceeds {@link #DENUVO_EXE_SIZE_BYTES} — these drive the
+     * secondary size heuristic evaluated by the caller. Sizes are stat-only
+     * ({@link File#length()}), no content read.
+     */
+    private static boolean walk(File dir, int[] budget, int depth,
+                                long[] largestExe, boolean[] oversizeShipping) {
         File[] entries = dir.listFiles();
         if (entries == null) return false;
         for (File f : entries) {
-            if (budget[0] <= 0) return false;
             if (f.isDirectory()) {
-                if (depth > 0 && walk(f, budget, depth - 1)) return true;
-            } else if (isBinary(f.getName())) {
+                if (depth > 0 && walk(f, budget, depth - 1, largestExe, oversizeShipping)) return true;
+                continue;
+            }
+            String name = f.getName();
+            // Size heuristic (stat only): track the largest exe + flag an oversized
+            // shipping exe. Runs regardless of the marker-scan budget so a bloated
+            // exe is never missed once the budget is spent on other binaries.
+            if (isExe(name)) {
+                long len = f.length();
+                if (len > largestExe[0]) largestExe[0] = len;
+                if (len > DENUVO_EXE_SIZE_BYTES
+                        && name.toLowerCase(java.util.Locale.ROOT).endsWith(SHIPPING_EXE_SUFFIX)) {
+                    oversizeShipping[0] = true;
+                }
+            }
+            // Marker scan, bounded by the binary budget.
+            if (budget[0] > 0 && isBinary(name)) {
                 budget[0]--;
                 if (fileContainsMarker(f)) return true;
             }
         }
         return false;
+    }
+
+    private static boolean isExe(String name) {
+        return name.toLowerCase(java.util.Locale.ROOT).endsWith(EXE_EXT);
     }
 
     private static boolean isBinary(String name) {

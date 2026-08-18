@@ -171,8 +171,12 @@ public final class EpicLaunchArgs {
                                                  String accountId, StringBuilder sb) {
         try {
             // Compute-once Denuvo flag (sync scan on first launch; cached read after).
+            // A per-shortcut manual override (epicOvtForce=1) forces the ownership-token
+            // path regardless of the auto-detector — for obfuscated Denuvo exes the
+            // literal-"Denuvo"-string scan misses (e.g. LEGO 2K Drive).
             boolean denuvo = DenuvoDetector.scanIfNeededSync(ctx, shortcut);
-            if (!denuvo) return; // non-Denuvo EOS game → Phase 1 only, unchanged.
+            boolean forced = "1".equals(shortcut.getExtra("epicOvtForce"));
+            if (!denuvo && !forced) return; // non-Denuvo EOS game, override off → Phase 1 only, unchanged.
 
             if (catalogId == null || catalogId.isEmpty()) {
                 Log.w(TAG, "Denuvo game " + appName + " missing epicCatalogId; skipping ownership token");
