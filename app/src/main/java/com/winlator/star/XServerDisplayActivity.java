@@ -840,7 +840,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
      * or {@code mesaDrvWindowIds} here (those are owned by the WM thread) — the volatile int is enough.
      */
     private void driveHudFrameTick(int wid) {
-        if (frameRatingWindowId == -1) return;                 // HUD inactive -> never count
+        if (frameRatingWindowId == -1 || !hudCounterEnabled) return;   // HUD inactive or toggled off -> never count
         if (wid != frameRatingWindowId && wid != glZinkHealedWindowId) {
             if (!guestGlIsZink()) return;                      // only the GL/Zink present topology
             // Device-observed (Stronghold Crusader / Zink): the window the game actually presents to is
