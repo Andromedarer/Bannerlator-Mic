@@ -815,6 +815,19 @@ internal fun EpicBadge() {
     }
 }
 
+/**
+ * EPIC + EOS pills clustered for the top-left corner of a game's cover art. Caller aligns/insets
+ * this (Alignment.TopStart, ~4dp). The pill backgrounds carry their own contrast over artwork.
+ */
+@Composable
+internal fun StoreBadgeOverlay(showEpic: Boolean, showEos: Boolean, modifier: Modifier = Modifier) {
+    if (!showEpic && !showEos) return
+    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (showEpic) EpicBadge()
+        if (showEos) EosBadge()
+    }
+}
+
 @Composable
 private fun GameListCard(
     game: EpicGame,
@@ -856,6 +869,13 @@ private fun GameListCard(
                             contentScale = ContentScale.Crop,
                         )
                     }
+                    // Store badges overlaid top-left on the thumbnail.
+                    StoreBadgeOverlay(
+                        showEpic = true,
+                        showEos = downloadState.installed &&
+                            EpicEosDetector.isEosCached(LocalContext.current, game.appName),
+                        modifier = Modifier.align(Alignment.TopStart).padding(3.dp),
+                    )
                 }
                 Spacer(Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
@@ -871,13 +891,6 @@ private fun GameListCard(
                         )
                         if (downloadState.installed) {
                             Text(" \u2713", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50)) // semantic installed-green
-                        }
-                        // Every game in the Epic library is Epic-sourced \u2014 badge unconditionally.
-                        Spacer(Modifier.width(6.dp))
-                        EpicBadge()
-                        if (downloadState.installed && EpicEosDetector.isEosCached(LocalContext.current, game.appName)) {
-                            Spacer(Modifier.width(4.dp))
-                            EosBadge()
                         }
                     }
                     if (game.developer.isNotEmpty()) {
@@ -996,6 +1009,14 @@ private fun GameGridTile(
                         contentScale = ContentScale.Crop,
                     )
                 }
+                // Store badges overlaid top-left on the cover. EPIC unconditional (whole library
+                // is Epic); EOS only when detected on an installed game.
+                StoreBadgeOverlay(
+                    showEpic = true,
+                    showEos = downloadState.installed &&
+                        EpicEosDetector.isEosCached(LocalContext.current, game.appName),
+                    modifier = Modifier.align(Alignment.TopStart).padding(4.dp),
+                )
             }
             Row(
                 modifier = Modifier
@@ -1020,13 +1041,6 @@ private fun GameGridTile(
                 )
                 if (downloadState.installed) {
                     Text(" \u2713", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF66BB6A)) // semantic installed-green
-                }
-                // Every game in the Epic library is Epic-sourced \u2014 badge unconditionally.
-                Spacer(Modifier.width(4.dp))
-                EpicBadge()
-                if (downloadState.installed && EpicEosDetector.isEosCached(LocalContext.current, game.appName)) {
-                    Spacer(Modifier.width(4.dp))
-                    EosBadge()
                 }
             }
         }

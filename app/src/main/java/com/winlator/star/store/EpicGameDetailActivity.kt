@@ -759,6 +759,13 @@ private fun EpicGameDetailScreen(
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                 )
             }
+            // Store badges overlaid top-left on the hero. EPIC unconditional (Epic store detail);
+            // EOS only when the game uses Epic Online Services.
+            StoreBadgeOverlay(
+                showEpic = true,
+                showEos = usesEos,
+                modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
+            )
         }
 
         // Info section — name + metadata chips + description + install status.
@@ -777,8 +784,6 @@ private fun EpicGameDetailScreen(
                 if (appName.isNotEmpty()) InfoChip("App: $appName")
                 val releaseDate = prefs.getString("epic_release_$appName", null)
                 if (!releaseDate.isNullOrEmpty()) InfoChip(formatDateStatic(releaseDate))
-                EpicBadge()
-                if (usesEos) EosBadge()
             }
             if (description.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))

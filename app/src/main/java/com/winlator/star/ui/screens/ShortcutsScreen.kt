@@ -4553,6 +4553,12 @@ private fun ShortcutItemLayoutL(
                     modifier = Modifier.size(22.dp),
                 )
             }
+            // Store badges overlaid top-left on the cover: EPIC (storeSource==epic) then EOS.
+            ShortcutBadgeOverlay(
+                showEpic = remember(shortcut) { shortcut.getExtra("storeSource") == "epic" },
+                showEos = rememberEosBadge(shortcut),
+                modifier = Modifier.align(Alignment.TopStart).padding(3.dp),
+            )
         }
         Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
@@ -4577,14 +4583,6 @@ private fun ShortcutItemLayoutL(
                 if (remember(shortcut) { WinePath.isOnRemovableStorage(shortcut.container, shortcut.path) }) {
                     Spacer(Modifier.width(6.dp))
                     SdCardBadge()
-                }
-                if (remember(shortcut) { shortcut.getExtra("storeSource") == "epic" }) {
-                    Spacer(Modifier.width(6.dp))
-                    EpicBadge()
-                }
-                if (rememberEosBadge(shortcut)) {
-                    Spacer(Modifier.width(6.dp))
-                    EosBadge()
                 }
             }
             // Component specs: bright primary chips (renderer · DXVK · frame-gen) then a
@@ -4801,6 +4799,15 @@ private fun ShortcutGridItem(
             )
         }
 
+        // Store badges overlaid top-left on the cover: EPIC (storeSource==epic) then EOS.
+        ShortcutBadgeOverlay(
+            showEpic = remember(shortcut) { shortcut.getExtra("storeSource") == "epic" },
+            showEos = rememberEosBadge(shortcut),
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(6.dp),
+        )
+
         // Gradient scrim + name/container at the bottom
         Box(
             modifier = Modifier
@@ -4830,14 +4837,6 @@ private fun ShortcutGridItem(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                }
-                if (remember(shortcut) { shortcut.getExtra("storeSource") == "epic" }) {
-                    Spacer(Modifier.height(3.dp))
-                    EpicBadge()
-                }
-                if (rememberEosBadge(shortcut)) {
-                    Spacer(Modifier.height(3.dp))
-                    EosBadge()
                 }
             }
         }
@@ -7556,6 +7555,19 @@ private fun EpicBadge(modifier: Modifier = Modifier) {
             color = Color.White,
             style = MaterialTheme.typography.labelSmall,
         )
+    }
+}
+
+/**
+ * EPIC + EOS pills clustered for the top-left corner of a shortcut's cover art. Caller aligns and
+ * insets this (Alignment.TopStart, ~6dp); each pill keeps its own opaque background for contrast.
+ */
+@Composable
+private fun ShortcutBadgeOverlay(showEpic: Boolean, showEos: Boolean, modifier: Modifier = Modifier) {
+    if (!showEpic && !showEos) return
+    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (showEpic) EpicBadge()
+        if (showEos) EosBadge()
     }
 }
 
