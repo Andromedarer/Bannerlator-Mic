@@ -313,7 +313,7 @@ class EpicGamesActivity : ComponentActivity() {
     private fun showInstallConfirmDialog(game: EpicGame) {
         var freeBytes = -1L
         try {
-            val base = File(File(filesDir, "epic_games"), "_check")
+            val base = File(File(filesDir, "imagefs/epic_games"), "_check")
             val parent = base.parentFile
             parent?.mkdirs()
             val sf = android.os.StatFs((parent ?: cacheDir).absolutePath)

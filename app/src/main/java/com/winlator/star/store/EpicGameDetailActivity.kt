@@ -344,7 +344,7 @@ class EpicGameDetailActivity : ComponentActivity() {
 
                 var sanitized = (title ?: "").replace(Regex("[^a-zA-Z0-9 \\-_]"), "").trim()
                 if (sanitized.isEmpty()) sanitized = "epic_${an.hashCode()}"
-                val installDir = File(File(filesDir, "epic_games"), sanitized)
+                val installDir = File(File(filesDir, "imagefs/epic_games"), sanitized)
                 prefs!!.edit().putString("epic_dir_$an", installDir.absolutePath).apply()
 
                 val ok = EpicDownloadManager.install(
@@ -592,7 +592,7 @@ class EpicGameDetailActivity : ComponentActivity() {
 
                 var sanitized = dlcTitle.replace(Regex("[^a-zA-Z0-9 \\-_]"), "").trim()
                 if (sanitized.isEmpty()) sanitized = "dlc_${dlcApp.hashCode()}"
-                val installDir = File(File(filesDir, "epic_games"), sanitized)
+                val installDir = File(File(filesDir, "imagefs/epic_games"), sanitized)
                 prefs!!.edit().putString("epic_dir_$dlcApp", installDir.absolutePath).apply()
 
                 val ok = EpicDownloadManager.install(
