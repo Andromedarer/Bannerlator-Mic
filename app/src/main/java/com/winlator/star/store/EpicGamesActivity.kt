@@ -702,7 +702,8 @@ private fun EpicGamesScreen(
                 }
                 "grid" -> {
                     LazyVerticalGrid(
-                        columns = GridCells.Fixed(5),
+                        // 4 cols: the compact square tiles were cramped at 5 on a portrait phone.
+                        columns = GridCells.Fixed(4),
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(4.dp),
                         horizontalArrangement = Arrangement.spacedBy(3.dp),
@@ -734,7 +735,8 @@ private fun EpicGamesScreen(
                 }
                 "poster" -> {
                     LazyVerticalGrid(
-                        columns = GridCells.Fixed(5),
+                        // 3 cols: the tall portrait cover-art tiles were far too narrow at 5.
+                        columns = GridCells.Fixed(3),
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(4.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -998,6 +1000,10 @@ private fun GameGridTile(
                 )
                 if (downloadState.installed) {
                     Text(" \u2713", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF66BB6A)) // semantic installed-green
+                }
+                if (downloadState.installed && EpicEosDetector.isEosCached(LocalContext.current, game.appName)) {
+                    Spacer(Modifier.width(4.dp))
+                    EosBadge()
                 }
             }
         }

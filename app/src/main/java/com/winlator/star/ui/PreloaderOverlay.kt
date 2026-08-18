@@ -177,6 +177,7 @@ fun PreloaderOverlay() {
                         driverLabel = spec.driverLabel,
                         vkd3dVersion = spec.vkd3dVersion,
                         backendLabel = spec.backendLabel,
+                        eosEnabled = spec.eosEnabled,
                     )
                 }
                 Spacer(Modifier.height(18.dp))
