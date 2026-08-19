@@ -301,7 +301,21 @@ class EpicGameDetailActivity : ComponentActivity() {
 
     private fun onInstallClicked() {
         if (installBtnText == "Cancel") {
-            cancelDownload?.run(); cancelDownload = null
+            // Ask what to do with the partial download before cancelling.
+            AlertDialog.Builder(this)
+                .setTitle("Cancel download?")
+                .setMessage("Keep the partial download so you can resume later, or delete all " +
+                        "downloaded files for this game?")
+                .setPositiveButton("Keep files") { _, _ ->
+                    appName?.let { EpicCancelPolicy.setDeleteOnCancel(it, false) }
+                    cancelDownload?.run(); cancelDownload = null
+                }
+                .setNegativeButton("Delete files") { _, _ ->
+                    appName?.let { EpicCancelPolicy.setDeleteOnCancel(it, true) }
+                    cancelDownload?.run(); cancelDownload = null
+                }
+                .setNeutralButton("Keep downloading", null)
+                .show()
             return
         }
         startInstallInternal()
@@ -309,6 +323,7 @@ class EpicGameDetailActivity : ComponentActivity() {
 
     private fun startInstallInternal() {
         val an = appName ?: return
+        EpicCancelPolicy.clear(an)   // fresh download → default to keep-on-cancel until the dialog says otherwise
         installBtnText = "Cancel"
             installBtnColor = 0xFFCC3333.toInt()
         progressVisible = true
@@ -376,7 +391,13 @@ class EpicGameDetailActivity : ComponentActivity() {
                     }
                 }
 
-                if (cancelled.get()) { onInstallCancelled(); return@launch }
+                if (cancelled.get()) {
+                    // Delete the partial download if the user chose "Delete files" on any Cancel dialog.
+                    if (EpicCancelPolicy.consumeDeleteOnCancel(an)) {
+                        try { deleteDir(installDir) } catch (_: Exception) {}
+                    }
+                    onInstallCancelled(); return@launch
+                }
                 if (!ok) { onInstallError("Download failed"); return@launch }
 
                 try {

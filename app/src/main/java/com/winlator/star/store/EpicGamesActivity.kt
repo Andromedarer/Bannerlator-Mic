@@ -143,9 +143,26 @@ class EpicGamesActivity : ComponentActivity() {
                     onGameClick = { game -> openDetailScreen(game) },
                     onInstallGame = { game -> showInstallConfirmDialog(game) },
                     onCancelDownload = { appName ->
-                        cancelRunnables[appName]?.run()
-                        cancelRunnables.remove(appName)
-                        downloadStates[appName] = GameDownloadState()
+                        // Same keep/delete dialog as the detail page + Download Manager (synced via
+                        // EpicCancelPolicy) — the running download coroutine acts on the choice.
+                        AlertDialog.Builder(this@EpicGamesActivity)
+                            .setTitle("Cancel download?")
+                            .setMessage("Keep the partial download so you can resume later, or delete " +
+                                    "all downloaded files for this game?")
+                            .setPositiveButton("Keep files") { _, _ ->
+                                EpicCancelPolicy.setDeleteOnCancel(appName, false)
+                                cancelRunnables[appName]?.run()
+                                cancelRunnables.remove(appName)
+                                downloadStates[appName] = GameDownloadState()
+                            }
+                            .setNegativeButton("Delete files") { _, _ ->
+                                EpicCancelPolicy.setDeleteOnCancel(appName, true)
+                                cancelRunnables[appName]?.run()
+                                cancelRunnables.remove(appName)
+                                downloadStates[appName] = GameDownloadState()
+                            }
+                            .setNeutralButton("Keep downloading", null)
+                            .show()
                     },
                     onAddToLauncher = { game ->
                         val exe = prefs!!.getString("epic_exe_${game.appName}", null)
@@ -378,8 +395,9 @@ class EpicGamesActivity : ComponentActivity() {
         val appName = game.appName
         downloadStates[appName] = GameDownloadState(isActive = true, showProgress = true)
 
-        // WEAK CANCEL (Epic-only): install() has no cancel checker, so this flag only takes effect
-        // AFTER install() returns (the finished download is then discarded). Best-effort.
+        // CANCEL: install() polls this flag across manifest/verify/chunk/assemble, so cancel stops
+        // the download promptly. Keep/delete of the partial is decided via EpicCancelPolicy below.
+        EpicCancelPolicy.clear(appName)   // fresh download → keep-on-cancel until a dialog says otherwise
         val cancelled = AtomicBoolean(false)
         cancelRunnables[appName] = Runnable { cancelled.set(true) }
 
@@ -448,6 +466,10 @@ class EpicGamesActivity : ComponentActivity() {
                 }
 
                 if (cancelled.get()) {
+                    // Delete the partial if the user chose "Delete files" on any Cancel dialog.
+                    if (EpicCancelPolicy.consumeDeleteOnCancel(appName)) {
+                        try { EpicDownloadManager.deleteDir(installDir) } catch (_: Exception) {}
+                    }
                     StoreDownloadHooks.markCancelled(Store.EPIC, appName)
                     withContext(Dispatchers.Main) {
                         cancelRunnables.remove(appName)
