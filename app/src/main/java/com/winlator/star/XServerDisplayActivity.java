@@ -851,10 +851,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
 
             final String SEP = " · ";
-            // 1) D3D12 on VKD3D — highest rank. Require a real vkd3d run (a "Program name" header line),
-            //    which also skips empty/aborted stubs. The Unity D3D12-probe-then-D3D11 case is already
-            //    handled upstream by the Player.log resolver (P2), which runs before this.
-            if (isFreshWrapperLog(vkd3d) && logHasHeaderLine(vkd3d, "program name")) {
+            // 1) D3D12 on VKD3D — highest rank, but ONLY when vkd3d actually RENDERED (a swapchain /
+            //    command queue), not merely PROBED D3D12 support at startup. Dual-API titles (e.g. Deus
+            //    Ex: Mankind Divided) run on D3D11 yet still create a throwaway D3D12 device to query
+            //    support — that probe log has instance/device/pipeline-cache lines but no swapchain, so it
+            //    must NOT win over the game's real D3D11 (its large DXVK _d3d11.log, matched below).
+            if (isFreshWrapperLog(vkd3d) && vkd3dLogShowsRendering(vkd3d)) {
                 return cacheWrapperResult(vkd3d, "D3D12" + SEP + "VKD3D");
             }
             // 2) DXVK per-API files (D3D11/10/9) — the file exists only when DXVK created that device.
@@ -883,6 +885,24 @@ public class XServerDisplayActivity extends AppCompatActivity {
             int n = 0;
             while ((line = r.readLine()) != null && n++ < 60) {
                 if (line.toLowerCase().indexOf(needle) >= 0) return true;
+            }
+        } catch (Exception ignore) {}
+        return false;
+    }
+
+    /** Whether a vkd3d-proton.log shows the game ACTUALLY rendered D3D12 — created a swapchain / command
+     *  queue / submitted command lists — versus merely PROBING D3D12 support at startup (a throwaway
+     *  device: instance + device-caps + pipeline-cache lines, but never a swapchain). Dual-API titles
+     *  (Deus Ex: Mankind Divided, many engines) run on D3D11 yet emit such a probe log, so this gate is
+     *  what stops them being mislabelled "D3D12 · VKD3D". Scans the whole (small, KB-sized) log. */
+    private boolean vkd3dLogShowsRendering(File log) {
+        try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(log))) {
+            String line;
+            int n = 0;
+            while ((line = r.readLine()) != null && n++ < 4000) {
+                String l = line.toLowerCase();
+                if (l.indexOf("swapchain") >= 0 || l.indexOf("command_queue") >= 0
+                        || l.indexOf("executecommandlists") >= 0) return true;
             }
         } catch (Exception ignore) {}
         return false;
