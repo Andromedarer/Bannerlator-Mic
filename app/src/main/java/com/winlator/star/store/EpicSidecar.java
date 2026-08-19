@@ -51,10 +51,19 @@ public final class EpicSidecar {
 
     private static final String TAG = "BH_EPIC_SIDECAR";
     private static final long   TTL_MS = 30L * 24 * 60 * 60 * 1000;
+    /**
+     * Ownership-token cache TTL. Epic ownership tokens are valid ~30 minutes and the mint endpoint
+     * is rate-limited per game; re-use a cached token comfortably inside its validity window so
+     * repeat launches of a Denuvo title don't burn the quota.
+     */
+    private static final long   OVT_TTL_MS = 25L * 60 * 1000;
     private static final String UA =
             "EpicGamesLauncher/14.4.1-22989849+++Portal+Release-Live Windows/10.0.19041.1.256.64bit";
     private static final String LAUNCHER_API_BASE =
             "https://launcher-public-service-prod06.ol.epicgames.com";
+    /** Epic catalog host — source of a game's customAttributes (e.g. AdditionalCommandLine). */
+    private static final String CATALOG_API_BASE =
+            "https://catalog-public-service-prod06.ol.epicgames.com/catalog/api";
 
     private EpicSidecar() {}
 
@@ -97,6 +106,153 @@ public final class EpicSidecar {
                 Log.w(TAG, "refresh failed for " + appName, e);
             }
         }, "bh-epic-deployment-" + appName).start();
+    }
+
+    // ── Ownership-token hex cache (Denuvo -epicovt, Feature #10) ────────────────────────────────
+    // Mirrors the deployment-id cache shape, keyed per appName, in bh_epic_prefs:
+    //   epic_ovt_<appName>     = ownership-token hex string
+    //   epic_ovt_at_<appName>  = ms timestamp of the cache write
+    // TTL = 25 min (see OVT_TTL_MS). The token is app-private and short-lived; caching it here
+    // avoids re-minting (and hitting the rate limit) on every relaunch of a Denuvo game.
+
+    /**
+     * Returns a cached ownership-token hex string, or null when unset or older than {@link #OVT_TTL_MS}.
+     */
+    public static String getCachedOwnershipTokenHex(Context ctx, String appName) {
+        if (ctx == null || appName == null || appName.isEmpty()) return null;
+        SharedPreferences sp = ctx.getSharedPreferences("bh_epic_prefs", 0);
+        long writtenAt = sp.getLong("epic_ovt_at_" + appName, 0L);
+        if (writtenAt <= 0) return null;
+        if (System.currentTimeMillis() - writtenAt > OVT_TTL_MS) return null; // expired → caller re-mints
+        String hex = sp.getString("epic_ovt_" + appName, "");
+        return (hex == null || hex.isEmpty()) ? null : hex;
+    }
+
+    /** Persist a freshly-minted ownership token (hex) + write timestamp for {@code appName}. */
+    public static void saveOwnershipTokenHex(Context ctx, String appName, String hex) {
+        if (ctx == null || appName == null || appName.isEmpty() || hex == null || hex.isEmpty()) return;
+        ctx.getSharedPreferences("bh_epic_prefs", 0).edit()
+                .putString("epic_ovt_" + appName, hex)
+                .putLong("epic_ovt_at_" + appName, System.currentTimeMillis())
+                .apply();
+    }
+
+    /** Lower-case hex encoding of {@code bytes} (no sign extension). */
+    public static String bytesToHex(byte[] bytes) {
+        if (bytes == null) return "";
+        StringBuilder sb = new StringBuilder(bytes.length * 2);
+        for (byte b : bytes) {
+            int v = b & 0xFF;
+            sb.append(Character.forDigit(v >>> 4, 16)).append(Character.forDigit(v & 0x0F, 16));
+        }
+        return sb.toString();
+    }
+
+    /** Decode an even-length hex string to bytes, or null if malformed. */
+    public static byte[] hexToBytes(String hex) {
+        if (hex == null || hex.isEmpty() || (hex.length() & 1) != 0) return null;
+        byte[] out = new byte[hex.length() / 2];
+        try {
+            for (int i = 0; i < out.length; i++) {
+                out[i] = (byte) Integer.parseInt(hex.substring(i * 2, i * 2 + 2), 16);
+            }
+        } catch (NumberFormatException e) {
+            return null;
+        }
+        return out;
+    }
+
+    // ── AdditionalCommandLine catalog-attribute cache (Feature #6) ───────────────────────────────
+    // Some titles ship extra launch flags under customAttributes.AdditionalCommandLine on the Epic
+    // catalog item (mirrors Legendary's additional_command_line). Cached per appName in bh_epic_prefs
+    // with the same 30-day shape as the deployment id:
+    //   epic_addcmd_<appName>     = the command-line fragment ("" for a negative result)
+    //   epic_addcmd_at_<appName>  = ms timestamp of the cache write
+
+    /**
+     * Cached AdditionalCommandLine fragment. Returns the stored string (which may be "" for a
+     * cached negative result) when a FRESH cache entry exists, or null when unset/expired so the
+     * caller knows to fire {@link #refreshAdditionalCommandLineAsync}.
+     */
+    public static String getCachedAdditionalCommandLine(Context ctx, String appName) {
+        if (ctx == null || appName == null || appName.isEmpty()) return null;
+        SharedPreferences sp = ctx.getSharedPreferences("bh_epic_prefs", 0);
+        long writtenAt = sp.getLong("epic_addcmd_at_" + appName, 0L);
+        if (writtenAt <= 0) return null;
+        if (System.currentTimeMillis() - writtenAt > TTL_MS) return null; // stale → refresh
+        return sp.getString("epic_addcmd_" + appName, "");
+    }
+
+    /**
+     * Fire-and-forget refresh of the AdditionalCommandLine attribute. Writes the result (positive or
+     * negative) to {@code bh_epic_prefs} so the NEXT launch reads it from cache.
+     */
+    public static void refreshAdditionalCommandLineAsync(Context ctx, String namespace,
+                                                         String catalogItemId, String appName) {
+        if (namespace == null || namespace.isEmpty()
+                || catalogItemId == null || catalogItemId.isEmpty()
+                || appName == null || appName.isEmpty()) return;
+        new Thread(() -> {
+            try {
+                String token = EpicCredentialStore.getValidAccessToken(ctx);
+                if (token == null) {
+                    Log.w(TAG, "addcmd refresh: no Epic access token, skipping");
+                    return;
+                }
+                String cmd = fetchAdditionalCommandLine(token, namespace, catalogItemId);
+                ctx.getSharedPreferences("bh_epic_prefs", 0).edit()
+                        .putString("epic_addcmd_" + appName, cmd != null ? cmd : "")
+                        .putLong("epic_addcmd_at_" + appName, System.currentTimeMillis())
+                        .apply();
+                Log.i(TAG, "addcmd refresh(" + appName + ") = "
+                        + (cmd == null || cmd.isEmpty() ? "<none>" : cmd));
+            } catch (Exception e) {
+                Log.w(TAG, "addcmd refresh failed for " + appName, e);
+            }
+        }, "bh-epic-addcmd-" + appName).start();
+    }
+
+    /**
+     * Synchronously read {@code customAttributes.AdditionalCommandLine.value} from the Epic catalog
+     * item. Returns the fragment, "" when the game has no such attribute, or null on network failure.
+     * Endpoint: GET {CATALOG_API_BASE}/shared/namespace/&lt;ns&gt;/bulk/items?id=&lt;id&gt;&country=US
+     */
+    private static String fetchAdditionalCommandLine(String accessToken, String namespace,
+                                                     String catalogItemId) throws Exception {
+        String url = CATALOG_API_BASE + "/shared/namespace/" + namespace
+                + "/bulk/items?id=" + URLEncoder.encode(catalogItemId, "UTF-8") + "&country=US";
+        HttpURLConnection conn = null;
+        try {
+            conn = (HttpURLConnection) new URL(url).openConnection();
+            conn.setRequestMethod("GET");
+            conn.setRequestProperty("Authorization", "Bearer " + accessToken);
+            conn.setRequestProperty("User-Agent", UA);
+            conn.setConnectTimeout(8000);
+            conn.setReadTimeout(8000);
+
+            int code = conn.getResponseCode();
+            if (code < 200 || code >= 300) {
+                Log.w(TAG, "catalog API " + code + " for " + catalogItemId);
+                return null;
+            }
+
+            StringBuilder body = new StringBuilder();
+            try (BufferedReader r = new BufferedReader(new InputStreamReader(conn.getInputStream()))) {
+                String line;
+                while ((line = r.readLine()) != null) body.append(line);
+            }
+
+            // Response: { "<catalogItemId>": { ..., "customAttributes": { "AdditionalCommandLine": { "type":..,"value":".." } } } }
+            JSONObject item = new JSONObject(body.toString()).optJSONObject(catalogItemId);
+            if (item == null) return "";
+            JSONObject attrs = item.optJSONObject("customAttributes");
+            if (attrs == null) return "";
+            JSONObject attr = attrs.optJSONObject("AdditionalCommandLine");
+            if (attr == null) return ""; // negative result — most games
+            return attr.optString("value", "");
+        } finally {
+            if (conn != null) try { conn.disconnect(); } catch (Exception ignored) {}
+        }
     }
 
     /**

@@ -155,4 +155,46 @@ object EpicInstallTags {
         val country = loc.country
         return if (country.isNotEmpty()) "${loc.language}_$country" else loc.language
     }
+
+    /**
+     * The 2-letter ISO-639 language code to hand Epic as {@code -epiclocale} for a launch, derived
+     * the same way as [tagsForCurrentContainer]:
+     *   1. First Wine container with a non-empty lc_all → its language part.
+     *   2. Android device default locale language.
+     *   3. "en" (never empty).
+     * Only recognized languages (see [keyForLangRegion]) are accepted; anything else falls through.
+     * Runs a light disk walk (ContainerManager) — call it off the main thread.
+     */
+    fun localeCodeForCurrentContainer(context: Context): String {
+        try {
+            for (c in ContainerManager(context).containers) {
+                val code = localeCodeForLcAll(c.getLC_ALL())
+                if (code != null) {
+                    Log.i(TAG, "Epic launch locale from container ${c.id} -> $code")
+                    return code
+                }
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "Could not read container lc_all for locale: ${t.message}")
+        }
+        localeCodeForLcAll(deviceLocaleTag())?.let {
+            Log.i(TAG, "Epic launch locale from device locale -> $it")
+            return it
+        }
+        Log.i(TAG, "Epic launch locale falling back to en")
+        return "en"
+    }
+
+    /**
+     * Extract a recognized 2-letter language code from an lc_all / locale string (e.g. "de_DE" ->
+     * "de", "en_US.UTF-8" -> "en"). Returns null when blank, malformed, or an unrecognized language.
+     */
+    private fun localeCodeForLcAll(lcAll: String?): String? {
+        if (lcAll.isNullOrBlank()) return null
+        val base = lcAll.substringBefore('.').trim()
+        val lang = base.split('_', '-').getOrNull(0)?.lowercase(Locale.ROOT)
+            ?.takeIf { it.length == 2 } ?: return null
+        // Validate against the languages we actually know (region irrelevant for the 2-letter code).
+        return if (keyForLangRegion(lang, "") != null) lang else null
+    }
 }

@@ -98,25 +98,43 @@ public final class EpicLaunchArgs {
                 EpicSidecar.refreshAsync(ctx, namespace, catalogId, appName);
             }
 
+            // Locale (Feature #11): derive the 2-letter code from the container/shortcut language
+            // (lc_all) → device locale → "en", instead of a hardcoded "en".
+            String locale = EpicInstallTags.localeCodeForCurrentContainer(ctx);
+            if (locale == null || locale.isEmpty()) locale = "en";
+
             StringBuilder sb = new StringBuilder();
             sb.append("-EpicPortal");
             // -epicusername may contain spaces → quote it. Other IDs are ASCII-safe.
             sb.append(" -epicusername=\"").append(sanitize(displayName)).append("\"");
             sb.append(" -epicuserid=").append(sanitize(accountId));
             sb.append(" -epicsandboxid=").append(sanitize(namespace));
-            sb.append(" -epiclocale=en");
+            sb.append(" -epiclocale=").append(sanitize(locale));
+            // -epicapp / -epicenv are identity/portal args every EOS title expects — emit them on
+            // EVERY Epic launch (Feature #11), not just the Denuvo ownership-token path.
+            sb.append(" -epicapp=").append(sanitize(appName));
+            sb.append(" -epicenv=Prod");
             if (!deploymentId.isEmpty()) {
                 sb.append(" -epicdeploymentid=").append(sanitize(deploymentId));
             }
 
-            // Fetch a FRESH exchange code (expires ~5min) and append the AUTH triple.
-            // Without this, modern EOS-integrated games show "No exchange code was
-            // found, please launch from the Epic Games Launcher".
-            String exchangeCode = EpicSidecar.fetchExchangeCodeSync(ctx);
-            if (exchangeCode != null && !exchangeCode.isEmpty()) {
+            // ── Auth mode (Feature #5: offline launch) ──────────────────────────
+            // Online: fetch a FRESH exchange code (expires ~5min) and emit the AUTH triple. Without
+            // it, modern EOS titles show "No exchange code was found, please launch from the Epic
+            // Games Launcher". Offline: when the shortcut forces it (epicOffline=1) OR no exchange
+            // code is available (no/expired token, fetch failed), skip the AUTH triple entirely and
+            // emit a clean identity/portal-only arg set rather than empty/garbage AUTH values.
+            boolean forceOffline = "1".equals(shortcut.getExtra("epicOffline"));
+            String exchangeCode = forceOffline ? null : EpicSidecar.fetchExchangeCodeSync(ctx);
+            boolean offline = forceOffline || exchangeCode == null || exchangeCode.isEmpty();
+            if (!offline) {
                 sb.append(" -AUTH_LOGIN=unused");
                 sb.append(" -AUTH_PASSWORD=").append(sanitize(exchangeCode));
                 sb.append(" -AUTH_TYPE=exchangecode");
+                Log.i(TAG, "Epic launch mode ONLINE for " + appName);
+            } else {
+                Log.i(TAG, "Epic launch mode OFFLINE for " + appName
+                        + (forceOffline ? " (forced via epicOffline)" : " (no exchange code available)"));
             }
 
             // ── Phase 2: Denuvo ownership token (-epicovt) ──────────────────────
@@ -127,16 +145,61 @@ public final class EpicLaunchArgs {
             // is exactly the Phase 1 output above (device-proven, unchanged).
             appendOwnershipTokenArgs(ctx, shortcut, appName, namespace, catalogId, accountId, sb);
 
+            // ── Feature #6: AdditionalCommandLine catalog args ──────────────────
+            // Append any extra launch flags Epic ships for this title (verbatim, after our args).
+            // Read from cache; on a miss/stale entry fire an async refresh (affects NEXT launch) —
+            // same lazy pattern as the deployment id. Control chars are stripped defensively.
+            appendAdditionalCommandLine(ctx, appName, namespace, catalogId, sb);
+
             Log.i(TAG, "built Epic launch args for " + appName
                     + " (deploymentId=" + (deploymentId.isEmpty() ? "<none>" : deploymentId)
-                    + ", exchangeCode=" + (exchangeCode == null || exchangeCode.isEmpty() ? "<missing>" : "<present>")
-                    + ")");
+                    + ", mode=" + (offline ? "offline" : "online") + ")");
             return sb.toString();
         } catch (Throwable t) {
             // Defensive: never let a bug here break game launches.
             Log.w(TAG, "buildArgString failed", t);
             return "";
         }
+    }
+
+    /**
+     * Feature #6: append the game's Epic-provided AdditionalCommandLine flags verbatim (after our
+     * own args). Read from cache; on a miss/stale entry fire an async refresh so the NEXT launch
+     * has it. Control characters are stripped (the value is Epic-provided but we don't trust it
+     * blindly on the Wine command line); an empty value is skipped.
+     */
+    private static void appendAdditionalCommandLine(Context ctx, String appName, String namespace,
+                                                    String catalogId, StringBuilder sb) {
+        try {
+            String cached = EpicSidecar.getCachedAdditionalCommandLine(ctx, appName);
+            if (cached == null) {
+                // Unset/stale — refresh in the background for next time; nothing to append now.
+                EpicSidecar.refreshAdditionalCommandLineAsync(ctx, namespace, catalogId, appName);
+                return;
+            }
+            String extra = sanitizeCommandLine(cached);
+            if (!extra.isEmpty()) {
+                sb.append(' ').append(extra);
+                Log.i(TAG, "appended AdditionalCommandLine for " + appName + ": " + extra);
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "appendAdditionalCommandLine failed for " + appName, t);
+        }
+    }
+
+    /**
+     * Strip control characters (newlines, tabs, NULs, and other C0/DEL bytes) from an Epic-provided
+     * command-line fragment and trim surrounding whitespace, leaving inner spacing between flags
+     * intact. Guards against a malformed/hostile catalog value corrupting the Wine command line.
+     */
+    private static String sanitizeCommandLine(String s) {
+        if (s == null) return "";
+        StringBuilder out = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c >= 0x20 && c != 0x7F) out.append(c); // drop C0 controls + DEL
+        }
+        return out.toString().trim();
     }
 
     /**
@@ -183,10 +246,23 @@ public final class EpicLaunchArgs {
                 return;
             }
 
-            byte[] tokenBytes = EpicSidecar.fetchOwnershipTokenSync(ctx, accountId, namespace, catalogId);
-            if (tokenBytes == null || tokenBytes.length == 0) {
-                Log.w(TAG, "ownership token fetch returned nothing for " + appName + "; launching without -epicovt");
-                return;
+            // Feature #10: read the cached ownership-token hex first (25-min TTL); only mint a fresh
+            // token over the network when the cache is missing/expired. Avoids burning the per-game
+            // rate limit on repeat Denuvo launches. (-epicapp/-epicenv are emitted unconditionally in
+            // the main builder now, so this path only appends -epicovt.)
+            byte[] tokenBytes;
+            String cachedHex = EpicSidecar.getCachedOwnershipTokenHex(ctx, appName);
+            byte[] cachedBytes = (cachedHex != null) ? EpicSidecar.hexToBytes(cachedHex) : null;
+            if (cachedBytes != null && cachedBytes.length > 0) {
+                tokenBytes = cachedBytes;
+                Log.i(TAG, "using cached ownership token for " + appName + " (" + tokenBytes.length + " bytes)");
+            } else {
+                tokenBytes = EpicSidecar.fetchOwnershipTokenSync(ctx, accountId, namespace, catalogId);
+                if (tokenBytes == null || tokenBytes.length == 0) {
+                    Log.w(TAG, "ownership token fetch returned nothing for " + appName + "; launching without -epicovt");
+                    return;
+                }
+                EpicSidecar.saveOwnershipTokenHex(ctx, appName, EpicSidecar.bytesToHex(tokenBytes));
             }
 
             String fileName = sanitizeFilename(appName) + ".ovt";
@@ -196,15 +272,13 @@ public final class EpicLaunchArgs {
                 return;
             }
             File tokenFile = new File(tokenDir, fileName);
-            // Overwrite fresh every launch — the token is short-lived and re-minted each time.
+            // Write the token file each launch (from cache or fresh mint) — token is short-lived.
             try (FileOutputStream fos = new FileOutputStream(tokenFile, false)) {
                 fos.write(tokenBytes);
             }
 
             String winPath = EPIC_TOKENS_WIN + fileName;
             sb.append(" -epicovt=").append(winPath);
-            sb.append(" -epicapp=").append(sanitize(appName));
-            sb.append(" -epicenv=Prod");
             Log.i(TAG, "Denuvo ownership token written for " + appName + " → " + tokenFile.getAbsolutePath()
                     + " (wine: " + winPath + ")");
         } catch (Throwable t) {

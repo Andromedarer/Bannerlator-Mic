@@ -4150,6 +4150,17 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
             if (shortcut != null) envVars.putAll(shortcut.getExtra("envVars"));
 
+            // Epic per-game launch fixes (Feature #7). Runs on the background launch setup thread.
+            //  • applyEnv: merge required WINEDLLOVERRIDES (Kingdom Hearts III) into the launch env,
+            //    after the shortcut env so a user override still wins.
+            //  • applyPreLaunch: write the Bethesda "Installed Path" registry value + wipe the
+            //    Hogwarts Legacy ProgramData cache folder before the guest process starts.
+            // Both no-op for non-Epic shortcuts and Epic games without a registered fix.
+            if (shortcut != null) {
+                com.winlator.star.store.EpicGameFixes.applyEnv(this, shortcut, envVars);
+                com.winlator.star.store.EpicGameFixes.applyPreLaunch(this, shortcut);
+            }
+
             if (!envVars.has("WINEESYNC")) {
                 envVars.put("WINEESYNC", "1");
             }
