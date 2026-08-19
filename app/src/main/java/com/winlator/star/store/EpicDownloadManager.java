@@ -222,6 +222,19 @@ public class EpicDownloadManager {
      * in-flight chunks are interrupted, partial files stay on disk for a later #3 delta-resume).
      * {@code null} = never cancel.
      */
+    /** True if a cancel has been requested. Null flag = never cancel (legacy/DLC path). */
+    private static boolean isCancelled(AtomicBoolean cancelFlag) {
+        return cancelFlag != null && cancelFlag.get();
+    }
+
+    /** Log the cancel point, flush debug, and return false — the common cancel exit. */
+    private static boolean cancelOut(android.content.Context ctx, StringBuilder dbg, String where) {
+        dbg.append("CANCELLED ").append(where).append("\n");
+        writeDebug(ctx, dbg);
+        Log.i(TAG, "Epic install cancelled (" + where + ")");
+        return false;
+    }
+
     public static boolean install(
             android.content.Context ctx,
             String manifestApiJson,
@@ -234,6 +247,7 @@ public class EpicDownloadManager {
         dbg.append("=== BH Epic Debug ===\n");
         dbg.append("installDirPath=").append(installDirPath).append("\n");
         try {
+            if (isCancelled(cancelFlag)) return cancelOut(ctx, dbg, "before start");
             progress(progressCallback, "Parsing CDN URLs...", 0);
 
             List<CdnUrl> cdnUrls = parseCdnUrls(manifestApiJson);
@@ -250,6 +264,7 @@ public class EpicDownloadManager {
                 Log.i(TAG, "  CDN: " + c.baseUrl + "  auth: " + (c.authParams.isEmpty() ? "(none)" : "YES"));
             }
 
+            if (isCancelled(cancelFlag)) return cancelOut(ctx, dbg, "after CDN parse");
             progress(progressCallback, "Downloading manifest...", 0);
             byte[] manifestBytes = downloadManifest(manifestApiJson, cdnUrls);
             if (manifestBytes == null) {
@@ -261,6 +276,7 @@ public class EpicDownloadManager {
             dbg.append("manifestBytes=").append(manifestBytes.length).append("\n");
             Log.i(TAG, "Manifest bytes: " + manifestBytes.length);
 
+            if (isCancelled(cancelFlag)) return cancelOut(ctx, dbg, "after manifest download");
             progress(progressCallback, "Parsing manifest...", 0);
             EpicManifest.ParsedManifest manifest = parseManifest(manifestBytes);
             if (manifest == null) {
