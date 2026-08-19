@@ -85,6 +85,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -108,6 +109,8 @@ import com.winlator.star.contents.ContentsManager
 import com.winlator.star.store.download.ContentDownloadPhase
 import com.winlator.star.store.download.ContentDownloadRegistry
 import com.winlator.star.store.download.ContentDownloadState
+import com.winlator.star.store.download.InstallProgressDialog
+import kotlinx.coroutines.delay
 import com.winlator.star.ui.screens.adrenodownload.DriverFeed
 import com.winlator.star.ui.screens.adrenodownload.DriverSourceStore
 import com.winlator.star.ui.screens.MenuItemDivider
@@ -120,8 +123,8 @@ private val SavedBlue = Color(0xFF3D9BFF)
 
 private enum class HubTab(val label: String, val railLabel: String) {
     DOWNLOAD("Download Components", "Download"),
-    MY_FILES("My Files", "My Files"),
     INSTALLED("Installed", "Installed"),
+    MY_FILES("My Files", "My Files"),
 }
 
 private fun tabIcon(t: HubTab): ImageVector = when (t) {
@@ -182,6 +185,38 @@ fun ContentsHubScreen(vm: ContentsHubViewModel = viewModel()) {
                 // internal lists scroll within it (never clipped, incl. large interface scale).
                 Box(modifier = Modifier.weight(1f).fillMaxWidth()) { HubTabContent(vm, tab, wide = false) }
             }
+        }
+    }
+
+    // ── Shared install-progress popup ──────────────────────────────────────────────
+    // The SAME composable + SAME cancel path the container-create sheet uses. It picks up any active
+    // Contents install straight off the process-lifetime registry (keys are "contents::…" — see
+    // ContentsInstaller.keyFor), so a download OR a from-file install both surface a live popup —
+    // crucially the file-install path, which otherwise had no on-screen feedback at all.
+    val registry by ContentDownloadRegistry.states.collectAsState()
+    var hubDialogKey by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(registry.keys) {
+        val current = hubDialogKey
+        if (current == null || current !in registry) {
+            hubDialogKey = registry.entries
+                .firstOrNull { it.key.startsWith("contents::") && !it.value.terminal }?.key
+        }
+    }
+    val hubState: ContentDownloadState? = hubDialogKey?.let { registry[it] }
+    if (hubState != null) {
+        InstallProgressDialog(
+            state = hubState,
+            onCancel = { ContentDownloadRegistry.requestCancel(hubState.key) },
+            onDismiss = { ContentDownloadRegistry.remove(hubState.key); hubDialogKey = null },
+        )
+    }
+    // Auto-dismiss shortly after a successful install (parity with the sheet); the tabs' own status
+    // refreshes are driven by each install's onDone/onChanged callback, so nothing else is needed here.
+    LaunchedEffect(hubState?.phase) {
+        if (hubState != null && hubState.phase == ContentDownloadPhase.DONE) {
+            delay(900)
+            ContentDownloadRegistry.remove(hubState.key)
+            hubDialogKey = null
         }
     }
 }
@@ -767,17 +802,18 @@ private fun InstalledTab(vm: ContentsHubViewModel) {
         }
     }
 
-    var confirmInstall by remember { mutableStateOf(false) }
     var confirmRemoveDriver by remember { mutableStateOf<String?>(null) }
     var confirmRemoveProfile by remember { mutableStateOf<ContentProfile?>(null) }
     val expanded = remember { mutableStateOf(setOf<String>()) }
 
-    // GPU-driver .zip picker — always the in-app file manager (InAppFilePicker.DRIVER), no system SAF.
+    // Install-from-file — mirrors the My Files tab: the in-app file manager (no system SAF), route by
+    // extension (.wcp/.tzst → component pipeline, anything else e.g. a driver .zip → GPU driver).
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
             InAppFilePicker.pickedUri(result.data)?.let { uri ->
-                val id = manager.installDriver(uri)
-                if (id.isNotEmpty()) { refreshKey++; vm.refreshStatus() }
+                val name = uri.lastPathSegment?.substringAfterLast('/') ?: "file"
+                val type = if (name.endsWith(".wcp", true) || name.endsWith(".tzst", true)) "" else ContentsTypes.GPU_DRIVERS
+                ContentsInstaller.installFromFile(context.applicationContext, type, name, uri) { refreshKey++; vm.refreshStatus() }
             }
         }
     }
@@ -785,9 +821,9 @@ private fun InstalledTab(vm: ContentsHubViewModel) {
     Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(14.dp)) {
         InstalledSectionHeader("GPU Drivers", Icons.Filled.ViewInAr)
         Spacer(Modifier.height(10.dp))
-        PrimaryButton("Install GPU driver from file…", Icons.Filled.FolderOpen, enabled = true,
+        PrimaryButton("Install content from file…", Icons.Filled.FolderOpen, enabled = true,
             container = cs.onSurface.copy(alpha = 0.06f), content = cs.onSurface, modifier = Modifier.fillMaxWidth()) {
-            confirmInstall = true
+            filePicker.launch(InAppFilePicker.buildIntent(context, InAppFilePicker.WCP, "Select content pack"))
         }
         Spacer(Modifier.height(12.dp))
         if (drivers.isEmpty()) {
@@ -817,27 +853,6 @@ private fun InstalledTab(vm: ContentsHubViewModel) {
                 Spacer(Modifier.height(10.dp))
             }
         }
-    }
-
-    // Confirm: install GPU driver (install_drivers warning) → in-app file manager only, no system SAF.
-    if (confirmInstall) {
-        OutlinedAlertDialog(
-            onDismissRequest = { confirmInstall = false },
-            containerColor = cs.surfaceContainerHigh,
-            title = { Text(context.getString(R.string.install_drivers_message), color = cs.onSurface) },
-            text = { Text(context.getString(R.string.install_drivers_warning), color = cs.onSurface) },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmInstall = false
-                    filePicker.launch(InAppFilePicker.buildIntent(context, InAppFilePicker.DRIVER, "Select GPU driver"))
-                }) { Text("Browse files", color = cs.primary) }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmInstall = false }) {
-                    Text(context.getString(android.R.string.cancel), color = cs.primary)
-                }
-            },
-        )
     }
 
     // Confirm: remove driver (same manager.removeDriver path as AdrenoToolsScreen).

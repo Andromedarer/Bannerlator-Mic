@@ -34,8 +34,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.winlator.star.contents.ContentProfile
 import com.winlator.star.contents.ContentsManager
 import com.winlator.star.contents.Downloader
@@ -43,6 +41,7 @@ import com.winlator.star.core.TarCompressorUtils
 import com.winlator.star.store.download.ContentDownloadPhase
 import com.winlator.star.store.download.ContentDownloadRegistry
 import com.winlator.star.store.download.ContentDownloadState
+import com.winlator.star.store.download.InstallProgressDialog
 import com.winlator.star.store.download.formatEta
 import com.winlator.star.store.download.startContentDownload
 import com.winlator.star.ui.findActivity
@@ -88,8 +87,9 @@ fun ContentDownloadSheet(
         }
     }
     // The content-card install dialog for LOCAL-FILE import (catalog downloads render from the
-    // registry via dialogKey instead) — null when idle.
-    var installDialog by remember { mutableStateOf<InstallCardState?>(null) }
+    // registry via dialogKey instead) — null when idle. Uses the SAME shared popup + the SAME
+    // ContentDownloadState model as the catalog path, so both look identical.
+    var installDialog by remember { mutableStateOf<ContentDownloadState?>(null) }
     var showInfoProfile by remember { mutableStateOf<ContentProfile?>(null) }
     var confirmRemoveProfile by remember { mutableStateOf<ContentProfile?>(null) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
@@ -151,21 +151,23 @@ fun ContentDownloadSheet(
             // Version/desc aren't known until the archive is parsed — seed the card with the filename +
             // (single-type screens) the content type, then let the % bar carry the rest.
             val fname = uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotEmpty() } ?: "Content file"
-            installDialog = InstallCardState(
+            installDialog = ContentDownloadState(
+                key = "localfile",
                 title = fname,
                 type = contentTypes.singleOrNull()?.toString(),
-                phase = InstallCardPhase.INSTALLING,
+                verName = fname,
+                phase = ContentDownloadPhase.INSTALLING,
             )
             installContent(context, cm, uri, onProgress = { f, _ ->
-                installDialog = installDialog?.copy(fraction = f, phase = InstallCardPhase.INSTALLING)
+                installDialog = installDialog?.copy(fraction = f, phase = ContentDownloadPhase.INSTALLING)
             }) { ok ->
                 if (ok) {
-                    installDialog = installDialog?.copy(fraction = 1f, phase = InstallCardPhase.DONE)
+                    installDialog = installDialog?.copy(fraction = 1f, phase = ContentDownloadPhase.DONE)
                     loadProfiles(cm, contentTypes) { profiles = it }
                     refreshKey++
                     onContentChanged()
                 } else {
-                    installDialog = installDialog?.copy(phase = InstallCardPhase.ERROR, error = "Install failed.")
+                    installDialog = installDialog?.copy(phase = ContentDownloadPhase.ERROR, error = "Install failed.")
                 }
             }
         }
@@ -231,16 +233,29 @@ fun ContentDownloadSheet(
     // import dialog only shows when no catalog card is active.
     val catalogState = dialogKey?.let { contentStates[it] }
     if (catalogState != null) {
-        InstallProgressDialog(catalogState.toInstallCardState(), onClose = {
-            ContentDownloadRegistry.remove(catalogState.key)
-            dialogKey = null
-        })
+        InstallProgressDialog(
+            state = catalogState,
+            // Shared cancel path — same as the Contents hub.
+            onCancel = { ContentDownloadRegistry.requestCancel(catalogState.key) },
+            onDismiss = {
+                ContentDownloadRegistry.remove(catalogState.key)
+                dialogKey = null
+            },
+        )
     } else {
-        installDialog?.let { st -> InstallProgressDialog(st, onClose = { installDialog = null }) }
+        installDialog?.let { st ->
+            InstallProgressDialog(
+                state = st,
+                // The local-file import runs on an Activity-bound executor (not the registry), so there's
+                // no job to cancel — dismiss is the best we can do here.
+                onCancel = { installDialog = null },
+                onDismiss = { installDialog = null },
+            )
+        }
     }
     // Local-file import DONE auto-close (unchanged).
     LaunchedEffect(installDialog?.phase) {
-        if (installDialog?.phase == InstallCardPhase.DONE) {
+        if (installDialog?.phase == ContentDownloadPhase.DONE) {
             delay(900)
             installDialog = null
         }
@@ -572,108 +587,6 @@ private fun InfoField(label: String, value: String) {
     Row(modifier = Modifier.padding(vertical = 2.dp)) {
         Text("$label: ", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         Text(value, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodySmall)
-    }
-}
-
-// ── Install dialog (content-card styled) ──────────────────────────────────────
-private enum class InstallCardPhase { DOWNLOADING, INSTALLING, DONE, ERROR }
-
-// Snapshot the install-card dialog renders. Catalog installs seed every field up front; local-file
-// imports seed title/type only and fill the % bar as extraction runs.
-private data class InstallCardState(
-    val title: String,
-    val type: String? = null,
-    val verName: String? = null,
-    val verCode: String? = null,
-    val desc: String? = null,
-    val fraction: Float = 0f,
-    val phase: InstallCardPhase = InstallCardPhase.INSTALLING,
-    val error: String? = null,
-)
-
-// Map a process-lifetime registry snapshot onto the sheet's install-card model, so a catalog
-// download rendered from ContentDownloadRegistry reuses the exact same card UI as before.
-private fun ContentDownloadState.toInstallCardState() = InstallCardState(
-    title = title,
-    type = type,
-    verName = verName,
-    verCode = verCode,
-    desc = desc,
-    fraction = fraction,
-    phase = when (phase) {
-        ContentDownloadPhase.DOWNLOADING -> InstallCardPhase.DOWNLOADING
-        ContentDownloadPhase.INSTALLING -> InstallCardPhase.INSTALLING
-        ContentDownloadPhase.DONE -> InstallCardPhase.DONE
-        ContentDownloadPhase.ERROR -> InstallCardPhase.ERROR
-    },
-    error = error,
-)
-
-// The same outlined-card look as the content rows, carrying the Content-Info fields plus a live bar.
-// Dismiss is blocked until the install reaches a terminal (DONE / ERROR) state.
-@Composable
-private fun InstallProgressDialog(state: InstallCardState, onClose: () -> Unit) {
-    val cs = MaterialTheme.colorScheme
-    val terminal = state.phase == InstallCardPhase.DONE || state.phase == InstallCardPhase.ERROR
-    Dialog(
-        onDismissRequest = { if (terminal) onClose() },
-        // usePlatformDefaultWidth=false lets the card use the wider padding below so long .wcp names
-        // (e.g. proton-10.0-2-arm64ec-controllerfix-unixlib.wcp) get the room to wrap tidily.
-        properties = DialogProperties(
-            dismissOnBackPress = terminal,
-            dismissOnClickOutside = terminal,
-            usePlatformDefaultWidth = false,
-        ),
-    ) {
-        Card(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
-            shape = RoundedCornerShape(10.dp),
-            colors = CardDefaults.cardColors(containerColor = cs.surfaceContainer),
-            border = BorderStroke(1.dp, cs.outline),
-        ) {
-            Column(Modifier.fillMaxWidth().padding(20.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Filled.Memory, contentDescription = null, tint = cs.primary, modifier = Modifier.size(24.dp))
-                    Spacer(Modifier.width(10.dp))
-                    // weight(1f) => the title takes the full remaining width before wrapping; capped at
-                    // 2 lines with an end-ellipsis so a long name never orphans a single trailing char.
-                    Text(state.title, style = MaterialTheme.typography.titleSmall, color = cs.onSurface,
-                        maxLines = 2, overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f))
-                }
-                Spacer(Modifier.height(12.dp))
-                state.type?.let { InfoField("Type", it) }
-                state.verName?.let { InfoField("Version", it) }
-                state.verCode?.let { InfoField("Code", it) }
-                if (!state.desc.isNullOrEmpty()) {
-                    Spacer(Modifier.height(6.dp))
-                    Text(state.desc, color = cs.onSurface, style = MaterialTheme.typography.bodySmall)
-                }
-                Spacer(Modifier.height(16.dp))
-                if (state.phase == InstallCardPhase.ERROR) {
-                    Text(state.error ?: "Install failed.", color = cs.error, style = MaterialTheme.typography.bodyMedium)
-                    Spacer(Modifier.height(8.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        TextButton(onClick = onClose) { Text("Close", color = cs.primary) }
-                    }
-                } else {
-                    val frac = state.fraction.coerceIn(0f, 1f)
-                    val label = when (state.phase) {
-                        InstallCardPhase.DOWNLOADING -> "Downloading"
-                        InstallCardPhase.DONE -> "Done"
-                        else -> "Installing"
-                    }
-                    val barColor = if (state.phase == InstallCardPhase.DONE) Color(0xFF4CAF50) else cs.primary
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(label, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
-                        Text("${(frac * 100).toInt()}%", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
-                    }
-                    Spacer(Modifier.height(4.dp))
-                    LinearProgressIndicator(progress = frac, modifier = Modifier.fillMaxWidth().height(6.dp),
-                        color = barColor, trackColor = cs.surfaceContainerHighest)
-                }
-            }
-        }
     }
 }
 

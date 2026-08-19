@@ -13,9 +13,12 @@ import com.winlator.star.store.download.ContentDownloadState
 import com.winlator.star.store.download.DownloadForegroundService
 import com.winlator.star.store.download.DownloadScope
 import com.winlator.star.util.ImportEtaTracker
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import java.io.File
 import kotlin.coroutines.resume
 
@@ -69,7 +72,7 @@ object ContentsInstaller {
         DownloadForegroundService.start(ctx)
         DownloadForegroundService.setProgress(key, "$versionName — Downloading 0%")
 
-        DownloadScope.io.launch {
+        val job = DownloadScope.io.launch {
             val repo = RemoteSourceRepository(ctx)
             val library = ComponentLibrary(ctx)
             var temp: File? = null
@@ -112,20 +115,28 @@ object ContentsInstaller {
                     else it.copy(phase = ContentDownloadPhase.ERROR, error = "Install failed.")
                 }
                 if (ok) runCatching { onChanged() }
+            } catch (c: CancellationException) {
+                throw c // user Cancel — requestCancel already set the cancelled-terminal state; keep it.
             } catch (e: Exception) {
                 Log.w(TAG, "install failed for $key", e)
                 ContentDownloadRegistry.update(key) {
                     it.copy(phase = ContentDownloadPhase.ERROR, error = "Install failed.")
                 }
             } finally {
+                // Best-effort cancel still deletes the temp archive and closes the FGS bracket.
                 temp?.let { runCatching { it.delete() } }
                 DownloadForegroundService.finish(key)
-                val terminal = ContentDownloadRegistry.get(key)?.phase
-                val linger = if (terminal == ContentDownloadPhase.ERROR) 60_000L else 2_000L
-                delay(linger)
-                if (ContentDownloadRegistry.get(key)?.terminal == true) ContentDownloadRegistry.remove(key)
+                ContentDownloadRegistry.clearJob(key)
+                val st = ContentDownloadRegistry.get(key)
+                val linger = if (st?.phase == ContentDownloadPhase.ERROR && !st.cancelled) 60_000L else 2_000L
+                // NonCancellable so the linger + cleanup still run when we're here due to cancellation.
+                withContext(NonCancellable) {
+                    delay(linger)
+                    if (ContentDownloadRegistry.get(key)?.terminal == true) ContentDownloadRegistry.remove(key)
+                }
             }
         }
+        ContentDownloadRegistry.attachJob(key, job)
     }
 
     /** Installs an already-local archive (My Files "install offline" / install-from-file). */
@@ -150,32 +161,59 @@ object ContentsInstaller {
         DownloadForegroundService.start(ctx)
         DownloadForegroundService.setProgress(key, "$displayName — Installing")
 
-        DownloadScope.io.launch {
+        val job = DownloadScope.io.launch {
             var ok = false
             try {
                 ok = if (isDriver) {
+                    // GPU drivers carry no profile.json and install non-incrementally — the popup shows
+                    // the passed type + filename and an indeterminate bar until this flips to Installed.
                     installDriverBlocking(ctx, source)
                 } else {
-                    installComponentBlocking(ctx, source) { frac ->
+                    installComponentBlocking(
+                        ctx, source,
+                        // The archive's parsed profile.json is delivered here at phase 0 (before the file
+                        // list is committed): surface its real type/version/code/desc into the popup live,
+                        // since a raw local file's key/name carried none of that up front.
+                        onProfile = { p ->
+                            ContentDownloadRegistry.update(key) {
+                                it.copy(
+                                    type = p.type?.toString() ?: it.type,
+                                    verName = p.verName ?: it.verName,
+                                    verCode = p.verCode.toString(),
+                                    desc = p.desc ?: it.desc,
+                                )
+                            }
+                        },
+                    ) { frac ->
                         ContentDownloadRegistry.update(key) {
                             it.copy(phase = ContentDownloadPhase.INSTALLING, fraction = maxOf(it.fraction, frac))
                         }
+                        // Mirror the catalog path so the shade shows a live "… — Installing N%" feed too.
+                        val nm = ContentDownloadRegistry.get(key)?.verName ?: displayName
+                        DownloadForegroundService.setProgress(key, "$nm — Installing ${(frac * 100).toInt()}%")
                     }
                 }
                 ContentDownloadRegistry.update(key) {
                     if (ok) it.copy(phase = ContentDownloadPhase.DONE, fraction = 1f)
                     else it.copy(phase = ContentDownloadPhase.ERROR, error = "Install failed.")
                 }
+            } catch (c: CancellationException) {
+                throw c // user Cancel — requestCancel already set the cancelled-terminal state; keep it.
             } catch (e: Exception) {
                 Log.w(TAG, "install-from-file failed for $key", e)
                 ContentDownloadRegistry.update(key) { it.copy(phase = ContentDownloadPhase.ERROR, error = "Install failed.") }
             } finally {
                 runCatching { onDone(ok) }
                 DownloadForegroundService.finish(key)
-                delay(2_000L)
-                if (ContentDownloadRegistry.get(key)?.terminal == true) ContentDownloadRegistry.remove(key)
+                ContentDownloadRegistry.clearJob(key)
+                // NonCancellable so the linger + cleanup still run when we're here due to cancellation.
+                withContext(NonCancellable) {
+                    delay(2_000L)
+                    if (ContentDownloadRegistry.get(key)?.terminal == true) ContentDownloadRegistry.remove(key)
+                }
             }
         }
+        ContentDownloadRegistry.attachJob(key, job)
     }
 
     // ── Blocking installers (Activity-free; never touch runOnUiThread) ──────────
@@ -186,6 +224,9 @@ object ContentsInstaller {
     private suspend fun installComponentBlocking(
         context: Context,
         uri: Uri,
+        // Invoked once, at phase 0, with the archive's parsed profile.json (type/version/code/desc are
+        // all known here) — lets a local-file install fill in metadata the raw file never carried.
+        onProfile: (ContentProfile) -> Unit = {},
         onProgress: (Float) -> Unit,
     ): Boolean = suspendCancellableCoroutine { cont ->
         val cm = ContentsManager(context)
@@ -213,6 +254,7 @@ object ContentsInstaller {
                     try {
                         if (phase == 0) {
                             phase = 1
+                            onProfile(profile)
                             cm.finishInstallContent(profile, this)
                         } else {
                             cm.syncContents()
