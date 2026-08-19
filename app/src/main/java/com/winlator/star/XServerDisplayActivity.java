@@ -595,6 +595,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     new java.io.FileReader(new java.io.File(p, "maps")))) {
                 String line;
                 while ((line = r.readLine()) != null) {
+                    line = line.toLowerCase();   // module names can differ in case; match case-insensitively
                     if (line.indexOf(".dll") < 0) continue;
                     // NOTE: do NOT break on the d3d12 hit — a dual-API build maps d3d12core.dll for a
                     // startup probe yet renders on d3d11 (both resident), so we must keep scanning this
@@ -652,6 +653,30 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private long lastEngineLogMtime = -1;
     private long lastEngineLogLen = -1;
     private String lastEngineLogApi = null;
+
+    // ---- P3 (arm64ec-proof wrapper-log API resolver) state ---------------------------------------
+    // Where DXVK/VKD3D write their startup logs THIS launch: the user's log dir when the "DXVK & VKD3D"
+    // logging switch is ON, else a tiny PRIVATE hudapi dir we keep alive purely so the HUD always has
+    // ground truth. Needed because on arm64ec Proton the DX wrappers (d3d11/d3d12/dxgi) are PE-only —
+    // they never appear in /proc/<pid>/maps, so detectActiveDxApi is structurally blind to the DX API;
+    // the wrapper logs are the only host-visible signal. Set in dxvkLogDir(); read by
+    // resolveApiFromWrapperLogs(). May stay null (e.g. a WineD3D container), in which case P3 is inert.
+    private File wrapperLogDir;
+    // Wall-clock at launch (set in onCreate) — the freshness gate for P3.
+    private long sessionStartMs;
+    // Cache for resolveApiFromWrapperLogs, mirroring resolveDualApiFromEngineLog's (file,mtime,len)
+    // shortcut so the 2s poll doesn't re-parse a static log. Only one game runs per activity, so a
+    // cached winner can never point at a different title.
+    private String lastWrapperLogPath = null;
+    private long lastWrapperLogMtime = -1;
+    private long lastWrapperLogLen = -1;
+    private String lastWrapperLogApi = null;
+
+    // Wine spins up a fixed set of system .exes alongside the game; never mistake one for the game exe.
+    private static final java.util.Set<String> WINE_SYSTEM_EXES = new java.util.HashSet<>(java.util.Arrays.asList(
+            "services.exe", "winedevice.exe", "plugplay.exe", "explorer.exe", "svchost.exe", "rpcss.exe",
+            "wineboot.exe", "conhost.exe", "start.exe", "cmd.exe", "rundll32.exe", "tabtip.exe",
+            "winedbg.exe", "wineconsole.exe", "regsvr32.exe", "msiexec.exe", "wscript.exe", "cscript.exe"));
 
     /**
      * Disambiguate a dual-API build (BOTH d3d11 and d3d12 mapped) by asking the game engine which
@@ -762,6 +787,170 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
         } catch (Exception ignore) {}
         return false;
+    }
+
+    /**
+     * P2: ask the running game's ENGINE log which graphics device it actually created, at TOP LEVEL —
+     * not only inside {@link #detectActiveDxApi}'s dual-API branch, which never fires on arm64ec Proton
+     * (the DX DLLs aren't file-backed in /proc/maps, so the "both d3d11 and d3d12 mapped" trigger is
+     * unreachable). Finds the running game pid and delegates to the existing Unity {@code Player.log}
+     * resolver, which self-gates to Unity titles (correlating by install-dir token) and returns null for
+     * everything else. Runs BEFORE the wrapper-log resolver (P3) so a Unity {@code -force-d3d11} title
+     * that ALSO leaves a vkd3d capability-probe log is still pinned to D3D11 by its own engine log.
+     * Never throws; any miss returns null and falls through.
+     */
+    private String resolveApiFromEngineLogTopLevel(String wrapper) {
+        try {
+            String pid = findRunningGamePid();
+            if (pid == null) return null;
+            return resolveDualApiFromEngineLog(wrapper, pid);
+        } catch (Exception ignore) { return null; }
+    }
+
+    /**
+     * P3: the arm64ec-proof ground truth. On arm64ec Proton the DX wrappers (d3d11/d3d12/dxgi) are
+     * PE-only — no unix {@code .so} half — so they NEVER show up in /proc/&lt;pid&gt;/maps and the module
+     * scan can't see the DX API. But the wrappers still WRITE their startup logs, and we force those logs
+     * to always exist this launch (see {@link #dxvkLogDir()} + {@code DXVKConfigDialog.setEnvVars}). Read
+     * them from {@link #wrapperLogDir}, gated by IDENTITY (the log must belong to the running game's exe)
+     * and FRESHNESS ({@code lastModified() >= sessionStartMs}), and report the real API. Never throws; any
+     * miss returns null and falls through to {@link #detectActiveDxApi}.
+     *
+     * <p>vkd3d-proton.log has a FIXED name shared across games, so its identity is proven strictly by its
+     * header ({@code Program name: "<exe>"}). DXVK writes per-API files named after the exe
+     * ({@code <stem>_d3d11.log} etc.), so matching that filename to the running exe IS the identity check.
+     */
+    private String resolveApiFromWrapperLogs(String wrapper) {
+        try {
+            File dir = wrapperLogDir;
+            if (dir == null || !dir.isDirectory()) return null;
+
+            // Fast path: the previously-resolved log is unchanged (static startup log) — reuse it. Safe
+            // because exactly one game runs per activity, so the cached winner can't be another title.
+            if (lastWrapperLogPath != null) {
+                File prev = new File(lastWrapperLogPath);
+                if (prev.isFile() && prev.lastModified() == lastWrapperLogMtime
+                        && prev.length() == lastWrapperLogLen) return lastWrapperLogApi;
+            }
+
+            String pid = findRunningGamePid();
+            if (pid == null) return null;
+            String exe = readArgv0Exe(pid);                       // normalized (fwd-slash, lowercase) path
+            if (exe == null) return null;
+            String exeBase = exe.substring(exe.lastIndexOf('/') + 1);       // e.g. "gta5_enhanced.exe"
+            String stem = exeBase.substring(0, exeBase.length() - 4);        // strip ".exe" -> "gta5_enhanced"
+
+            // Locate the candidate logs case-insensitively (the imagefs is case-sensitive on the host,
+            // while DXVK/VKD3D preserve the exe's original case in filenames/headers).
+            File[] files = dir.listFiles();
+            if (files == null) return null;
+            File vkd3d = null, dxvk11 = null, dxvk10 = null, dxvk9 = null;
+            for (File f : files) {
+                if (!f.isFile()) continue;
+                String n = f.getName().toLowerCase();
+                if (n.equals("vkd3d-proton.log")) vkd3d = f;
+                else if (n.equals(stem + "_d3d11.log")) dxvk11 = f;
+                else if (n.equals(stem + "_d3d10.log")) dxvk10 = f;
+                else if (n.equals(stem + "_d3d9.log"))  dxvk9  = f;
+            }
+
+            final String SEP = " · ";
+            // 1) D3D12 on VKD3D — highest rank. Fixed filename => require the header to name THIS exe.
+            if (isFreshWrapperLog(vkd3d) && logHeaderNamesExe(vkd3d, "program name", exeBase)) {
+                return cacheWrapperResult(vkd3d, "D3D12" + SEP + "VKD3D");
+            }
+            // 2) DXVK per-API files (D3D11/10/9). The filename already encodes the exe identity.
+            if (isFreshWrapperLog(dxvk11)) return cacheWrapperResult(dxvk11, "D3D11" + SEP + wrapper);
+            if (isFreshWrapperLog(dxvk10)) return cacheWrapperResult(dxvk10, "D3D10" + SEP + wrapper);
+            if (isFreshWrapperLog(dxvk9))  return cacheWrapperResult(dxvk9,  "D3D9"  + SEP + wrapper);
+            // dxgi-only / nothing identifying => fall through.
+            return null;
+        } catch (Exception ignore) { return null; }
+    }
+
+    /** A wrapper log is trusted only when it exists, has real content, and was written THIS session. */
+    private boolean isFreshWrapperLog(File f) {
+        return f != null && f.isFile() && f.length() > 0 && f.lastModified() >= sessionStartMs;
+    }
+
+    /** Remember the winning log's (path,mtime,len) so the next poll can skip re-parsing a static log. */
+    private String cacheWrapperResult(File f, String result) {
+        lastWrapperLogPath = f.getPath();
+        lastWrapperLogMtime = f.lastModified();
+        lastWrapperLogLen = f.length();
+        lastWrapperLogApi = result;
+        return result;
+    }
+
+    /** Whether {@code log}'s header (first ~60 lines) has a line containing {@code needle} that also names
+     *  {@code exeBase} — the identity gate for the fixed-name vkd3d-proton.log. Both compared lowercase. */
+    private boolean logHeaderNamesExe(File log, String needle, String exeBase) {
+        try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(log))) {
+            String line;
+            int n = 0;
+            while ((line = r.readLine()) != null && n++ < 60) {
+                String l = line.toLowerCase();
+                if (l.indexOf(needle) >= 0 && l.indexOf(exeBase) >= 0) return true;
+            }
+        } catch (Exception ignore) {}
+        return false;
+    }
+
+    /**
+     * PID of the running GAME process — the wine process whose argv[0] is the game's own {@code .exe},
+     * as opposed to a wine system service (services.exe, explorer.exe, winedevice.exe, …) or a
+     * C:\windows\system32 helper. Prefers the process whose exe basename matches the launched shortcut;
+     * otherwise returns the first plausible game exe found. Null when none is running yet (caller keeps
+     * polling). Never throws.
+     */
+    private String findRunningGamePid() {
+        java.io.File[] pids = new java.io.File("/proc").listFiles();
+        if (pids == null) return null;
+        String wanted = shortcutExeBasename();     // preferred match; may be null
+        String fallbackPid = null;
+        for (java.io.File p : pids) {
+            if (!p.isDirectory() || !android.text.TextUtils.isDigitsOnly(p.getName())) continue;
+            String exe = readArgv0Exe(p.getName());
+            if (exe == null) continue;
+            String base = exe.substring(exe.lastIndexOf('/') + 1);
+            if (wanted != null && wanted.equals(base)) return p.getName();       // exact shortcut match wins
+            if (fallbackPid == null && looksLikeGameExe(exe, base)) fallbackPid = p.getName();
+        }
+        return fallbackPid;
+    }
+
+    /** argv[0] of /proc/&lt;pid&gt; as a normalized (forward-slash, lowercase) Windows path ending in
+     *  {@code .exe}, or null if the process has no cmdline or isn't a wine {@code .exe}. */
+    private String readArgv0Exe(String pid) {
+        try (java.io.FileReader fr = new java.io.FileReader(new java.io.File("/proc/" + pid + "/cmdline"))) {
+            StringBuilder sb = new StringBuilder();
+            int c;
+            while ((c = fr.read()) != -1 && c != 0) sb.append((char) c);   // argv[0] only (stop at first NUL)
+            String norm = sb.toString().trim().replace('\\', '/').toLowerCase();
+            return norm.endsWith(".exe") ? norm : null;
+        } catch (Exception ignore) { return null; }
+    }
+
+    /** Whether {@code normPath}/{@code base} looks like a GAME exe rather than a wine system exe: it must
+     *  sit on a DOS drive path ({@code <letter>:/…}) and be neither under a C:\windows dir nor a known
+     *  wine-service basename. */
+    private boolean looksLikeGameExe(String normPath, String base) {
+        if (normPath.indexOf(":/") != 1) return false;                 // "c:/…" — drive letter, then ":/"
+        if (normPath.indexOf("/windows/") >= 0) return false;          // system32/syswow64/etc. helpers
+        return !WINE_SYSTEM_EXES.contains(base);
+    }
+
+    /** Basename (lowercased, with extension) of the launched shortcut's exe, or null. A preference hint
+     *  for {@link #findRunningGamePid}; null just means "no preferred match", never an error. */
+    private String shortcutExeBasename() {
+        try {
+            if (shortcut == null || shortcut.path == null) return null;
+            String norm = shortcut.path.trim().replace('\\', '/').toLowerCase();
+            int e = norm.indexOf(".exe");                 // shortcut.path may carry launch args after the exe
+            if (e < 0) return null;
+            String full = norm.substring(0, e + 4);
+            return full.substring(full.lastIndexOf('/') + 1);
+        } catch (Exception ignore) { return null; }
     }
 
     /**
@@ -952,8 +1141,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 // /proc/maps present-path detection, so normal games (which never write the file) are
                 // unaffected. When the declaration goes stale the label reverts naturally on the next
                 // poll, because the detected api then differs from lastApi and re-pushes.
-                String api = readAppDeclaredApi();
-                if (api == null) api = detectActiveDxApi(fallback);
+                // Layered resolver, highest-confidence signal first (each returns null to fall through):
+                //   P1 guest self-report (AIO Graphics Test) · P2 engine log (Unity Player.log) ·
+                //   P3 wrapper logs (arm64ec-proof DXVK/VKD3D ground truth) · P4 /proc/maps module scan.
+                String api = readAppDeclaredApi();                                  // P1
+                if (api == null) api = resolveApiFromEngineLogTopLevel(fallback);   // P2
+                if (api == null) api = resolveApiFromWrapperLogs(fallback);         // P3
+                if (api == null) api = detectActiveDxApi(fallback);                 // P4
                 if (api != null && !api.equals(lastApi)) {
                     lastApi = api;
                     // Classic FrameRating renderer line = "<host renderer> | <api>". Skip the prefix
@@ -1076,6 +1270,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // Stamp the launch time up front: the HUD wrapper-log resolver (P3) only trusts a DXVK/VKD3D
+        // log written THIS session, so a previous game's stale log in a shared dir can never leak in.
+        sessionStartMs = System.currentTimeMillis();
         AppUtils.hideSystemUI(this);
         AppUtils.keepScreenOn(this);
                
@@ -3626,16 +3823,32 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 || preferences.getBoolean("enable_box64_logs", false);
     }
 
-    // Where DXVK/VKD3D should write, or null when the Log Manager's "DXVK & VKD3D" switch is off.
-    // Deliberately returns null instead of resolving a path the callee will then ignore: resolving
-    // CREATES the folder, so the old unconditional call left an empty per-game folder behind on
-    // every launch even with logging fully switched off. DXVKConfigDialog silences DXVK explicitly
-    // when the switch is off, so a null here loses nothing.
+    // Where DXVK/VKD3D write their logs this launch. When the Log Manager's "DXVK & VKD3D" switch is ON
+    // that's the user's (per-game) log dir — visible, co-located with wine_debug.log, unchanged. When it
+    // is OFF we no longer silence the wrappers: we point them at a tiny PRIVATE hudapi dir at a minimal
+    // level (see DXVKConfigDialog.setEnvVars) so the in-game HUD API resolver (P3) always has ground
+    // truth — critical on arm64ec, where the DX DLLs are invisible to /proc/maps. Either way the chosen
+    // dir is cached in wrapperLogDir for P3 to read. The user-facing log toggle still governs VISIBLE logs.
     private File dxvkLogDir() {
         boolean dxvkLogs = preferences.getBoolean("enable_dxvk_logs", true);
-        return dxvkLogs
+        File dir = dxvkLogs
                 ? com.winlator.star.core.LogLocation.resolveGameLogDir(this, currentLogGameName())
-                : null;
+                : hudApiLogDir();
+        wrapperLogDir = dir;
+        return dir;
+    }
+
+    // Tiny PRIVATE wrapper-log dir the HUD API resolver (P3) always has, even with the user's "DXVK &
+    // VKD3D" logging switch OFF. Lives under the container's shared tmp (host-readable at
+    // imageFs.getTmpDir()). setupXEnvironment clears that whole tmp per launch (so this is emptied for
+    // free); we re-create it AFTER that clear (see setupXEnvironment) so the guest can write into it.
+    // Startup-level logs only — no per-frame spam. Null on failure => P3 falls through to /proc/maps.
+    private File hudApiLogDir() {
+        try {
+            File dir = new File(imageFs.getTmpDir(), "hudapi");
+            if (!dir.exists()) dir.mkdirs();
+            return dir.isDirectory() && dir.canWrite() ? dir : null;
+        } catch (Exception ignore) { return null; }
     }
 
     // Arm/cancel the two "not-frozen" reassurance timers.
@@ -4066,6 +4279,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // Clear any temporary directory
         String rootPath = imageFs.getRootDir().getPath();
         FileUtils.clear(imageFs.getTmpDir());
+
+        // The tmp clear above just wiped the private hudapi wrapper-log dir (a subdir of tmp) if the
+        // "DXVK & VKD3D" switch is off. Re-create it now, before the guest starts, so DXVK/VKD3D can
+        // write their startup logs there for the HUD API resolver (P3). No-op when logging is on
+        // (wrapperLogDir then points at the user's log dir, outside tmp) or on a WineD3D container (null).
+        if (wrapperLogDir != null) wrapperLogDir.mkdirs();
 
 
         guestProgramLauncherComponent = new GuestProgramLauncherComponent(
