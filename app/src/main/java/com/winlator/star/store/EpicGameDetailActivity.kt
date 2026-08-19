@@ -102,6 +102,9 @@ class EpicGameDetailActivity : ComponentActivity() {
     private var checkUpdatesEnabled by mutableStateOf(true)
     private var updateBtnVisible by mutableStateOf(false)
 
+    private var verifyStatusText by mutableStateOf("")
+    private var verifyEnabled by mutableStateOf(true)
+
     private var dlcJson by mutableStateOf<String?>(null)
 
     private var cloudSaveDirText by mutableStateOf("No save folder set")
@@ -167,6 +170,8 @@ class EpicGameDetailActivity : ComponentActivity() {
                     updateStatusText = updateStatusText,
                     checkUpdatesEnabled = checkUpdatesEnabled,
                     updateBtnVisible = updateBtnVisible,
+                    verifyStatusText = verifyStatusText,
+                    verifyEnabled = verifyEnabled,
                     dlcJson = dlcJson,
                     cloudSaveDirText = cloudSaveDirText,
                     cloudSaveStatusText = cloudSaveStatusText,
@@ -183,6 +188,7 @@ class EpicGameDetailActivity : ComponentActivity() {
                         updateStatusText = "Updating\u2026"
                         startInstallInternal()
                     },
+                    onVerifyRepair = { doVerifyRepair() },
                     onDlcInstall = { dlcApp, dlcNs, dlcCat, dlcTitle ->
                         dlcInstall(dlcApp, dlcNs, dlcCat, dlcTitle)
                     },
@@ -347,11 +353,15 @@ class EpicGameDetailActivity : ComponentActivity() {
                 val installDir = File(File(filesDir, "imagefs/epic_games"), sanitized)
                 prefs!!.edit().putString("epic_dir_$an", installDir.absolutePath).apply()
 
+                // Feature #2 — download required(base) + the container language's files only.
+                val installTags = EpicInstallTags.tagsForCurrentContainer(appCtx)
+
                 val ok = EpicDownloadManager.install(
                     appCtx,
                     manifestJson,
                     token,
                     installDir.absolutePath,
+                    installTags,
                 ) { _, pct ->
                     // Freeze the card/label the moment the user hits Cancel (the download itself
                     // can't be stopped \u2014 see WEAK CANCEL above).
@@ -516,8 +526,11 @@ class EpicGameDetailActivity : ComponentActivity() {
         }
         lifecycleScope.launch(Dispatchers.IO) {
             val token = EpicCredentialStore.getValidAccessToken(this@EpicGameDetailActivity)
+            // Size reflects the language-filtered download set (Feature #2), so it matches what
+            // actually installs.
+            val installTags = EpicInstallTags.tagsForCurrentContainer(applicationContext)
             val size = if (token != null)
-                EpicDownloadManager.fetchInstallSizeBytes(token, namespace, catalogItemId, appName)
+                EpicDownloadManager.fetchInstallSizeBytes(token, namespace, catalogItemId, appName, installTags)
             else -1L
             if (size > 0) prefs!!.edit().putLong("epic_size_$appName", size).apply()
             val finalSize = size
@@ -571,6 +584,61 @@ class EpicGameDetailActivity : ComponentActivity() {
                     checkUpdatesEnabled = true
                     updateStatusText = "Check failed: ${e.message}"
                 }
+            }
+        }
+    }
+
+    /**
+     * Feature #3 — verify installed files against the latest manifest and repair damage. Re-hashes
+     * every language-selected file on disk; if any are missing or corrupt, re-runs the install,
+     * whose delta path re-downloads exactly those files (chunk-level SHA-1 verified). Runs on
+     * DownloadScope.io so it survives the Activity being backgrounded, like the install.
+     */
+    private fun doVerifyRepair() {
+        val an = appName ?: return
+        val dir = prefs!!.getString("epic_dir_$an", null)
+        if (dir == null) { resultBarMsg = "Not installed"; return }
+        verifyEnabled = false
+        verifyStatusText = "Verifying…"
+        val appCtx = applicationContext
+        DownloadScope.io.launch {
+            try {
+                val token = EpicCredentialStore.getValidAccessToken(appCtx)
+                if (token == null) {
+                    runOnUiThread { verifyEnabled = true; verifyStatusText = "Login required." }
+                    return@launch
+                }
+                val manifestJson = EpicApiClient.getManifestApiJson(token, namespace, catalogItemId, an)
+                if (manifestJson == null) {
+                    runOnUiThread { verifyEnabled = true; verifyStatusText = "Could not fetch manifest." }
+                    return@launch
+                }
+                val installTags = EpicInstallTags.tagsForCurrentContainer(appCtx)
+                val result = EpicDownloadManager.verifyInstall(manifestJson, token, dir, installTags) { msg, _ ->
+                    if (!isDestroyed && !isFinishing) runOnUiThread { verifyStatusText = msg }
+                }
+                if (result == null) {
+                    runOnUiThread { verifyEnabled = true; verifyStatusText = "Verify failed." }
+                    return@launch
+                }
+                if (!result.needsRepair()) {
+                    runOnUiThread {
+                        verifyEnabled = true
+                        verifyStatusText = "All ${result.ok}/${result.checked} files verified ✓"
+                    }
+                    return@launch
+                }
+                val damaged = result.corrupt + result.missing
+                runOnUiThread { verifyStatusText = "Repairing $damaged file(s)…" }
+                val ok = EpicDownloadManager.install(appCtx, manifestJson, token, dir, installTags) { _, pct ->
+                    if (!isDestroyed && !isFinishing) runOnUiThread { verifyStatusText = "Repairing… $pct%" }
+                }
+                runOnUiThread {
+                    verifyEnabled = true
+                    verifyStatusText = if (ok) "Repaired $damaged file(s) ✓" else "Repair failed."
+                }
+            } catch (e: Exception) {
+                runOnUiThread { verifyEnabled = true; verifyStatusText = "Verify error: ${e.message}" }
             }
         }
     }
@@ -710,6 +778,8 @@ private fun EpicGameDetailScreen(
     updateStatusText: String,
     checkUpdatesEnabled: Boolean,
     updateBtnVisible: Boolean,
+    verifyStatusText: String,
+    verifyEnabled: Boolean,
     dlcJson: String?,
     cloudSaveDirText: String,
     cloudSaveStatusText: String,
@@ -722,6 +792,7 @@ private fun EpicGameDetailScreen(
     onUninstallClick: () -> Unit,
     onCheckUpdates: () -> Unit,
     onUpdateClick: () -> Unit,
+    onVerifyRepair: () -> Unit,
     onDlcInstall: (String, String, String, String) -> Unit,
     onCloudBrowse: () -> Unit,
     onCloudUpload: () -> Unit,
@@ -870,6 +941,19 @@ private fun EpicGameDetailScreen(
                     onClick = onCheckUpdates,
                     modifier = Modifier.fillMaxWidth(),
                     enabled = checkUpdatesEnabled,
+                )
+                // Verify / Repair: re-hash installed files against the manifest and re-download any
+                // missing/corrupt ones (chunk-level SHA-1). Also resumes an interrupted install.
+                Spacer(Modifier.height(8.dp))
+                if (verifyStatusText.isNotEmpty()) {
+                    StoreStatusText(verifyStatusText)
+                    Spacer(Modifier.height(8.dp))
+                }
+                StoreActionButton(
+                    text = "Verify / Repair Files",
+                    onClick = onVerifyRepair,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = verifyEnabled,
                 )
             }
         }

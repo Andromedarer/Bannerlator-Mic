@@ -429,11 +429,15 @@ class EpicGamesActivity : ComponentActivity() {
                 val installDir = File(File(filesDir, "imagefs/epic_games"), sanitized)
                 prefs!!.edit().putString("epic_dir_${game.appName}", installDir.absolutePath).apply()
 
+                // Feature #2 — download required(base) + the container language's files only.
+                val installTags = EpicInstallTags.tagsForCurrentContainer(appCtx)
+
                 val ok = EpicDownloadManager.install(
                     appCtx,
                     manifestJson,
                     token,
                     installDir.absolutePath,
+                    installTags,
                 ) { msg, pct ->
                     if (!cancelled.get()) {
                         StoreDownloadHooks.tick(Store.EPIC, appName, pct)
