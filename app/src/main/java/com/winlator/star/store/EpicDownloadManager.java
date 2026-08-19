@@ -1020,6 +1020,12 @@ public class EpicDownloadManager {
     private static boolean downloadChunkStreaming(ChunkInfo chunk, String chunkDir,
                                                    List<CdnUrl> cdnUrls, File outFile) {
         String chunkPath = chunk.getPath(chunkDir);
+        // Write to a .part temp and only rename into the final cache name AFTER the SHA-1 check
+        // passes. A cached chunk therefore exists in its final name ONLY if it fully downloaded and
+        // verified — so a cancel/crash mid-write leaves an inert .part (never reused), and resume can
+        // never assemble a truncated chunk. Atomic rename (same dir → same filesystem).
+        File tmp = new File(outFile.getPath() + ".part");
+        tmp.delete(); // clear any stale partial from a prior interrupted attempt
         for (CdnUrl cdn : cdnUrls) {
             String url = cdn.baseUrl + cdn.cloudDir + "/" + chunkPath;
             HttpURLConnection conn = null;
@@ -1041,7 +1047,7 @@ public class EpicDownloadManager {
                 }
 
                 try (InputStream in = conn.getInputStream();
-                     FileOutputStream fos = new FileOutputStream(outFile)) {
+                     FileOutputStream fos = new FileOutputStream(tmp)) {
 
                     // Read first 41 bytes: magic(4)+headerVersion(4)+headerSize(4)+
                     //   compressedSize(4)+GUID(16)+hash(8)+storedAs(1)
@@ -1103,7 +1109,15 @@ public class EpicDownloadManager {
 
                 if (sha != null && !MessageDigest.isEqual(sha.digest(), chunk.sha1)) {
                     Log.w(TAG, "Chunk SHA-1 mismatch (streaming) for " + chunk.guidStr() + ", trying next CDN");
-                    outFile.delete();
+                    tmp.delete();
+                    conn.disconnect();
+                    continue;
+                }
+                // Verified → publish atomically. If the rename can't happen, treat as a failure
+                // rather than leaving a bad/again-partial file under the final name.
+                if (!tmp.renameTo(outFile)) {
+                    Log.w(TAG, "Chunk rename failed for " + chunk.guidStr() + ", trying next CDN");
+                    tmp.delete();
                     conn.disconnect();
                     continue;
                 }
@@ -1112,9 +1126,11 @@ public class EpicDownloadManager {
             } catch (Exception e) {
                 Log.w(TAG, "CDN " + cdn.baseUrl + " streaming failed for "
                         + chunk.guidStr() + ": " + e.getMessage());
+                tmp.delete(); // never leave a partial under the .part name for the next CDN attempt
                 if (conn != null) conn.disconnect();
             }
         }
+        tmp.delete();
         Log.e(TAG, "All CDNs failed (streaming) for chunk " + chunk.guidStr());
         return false;
     }
