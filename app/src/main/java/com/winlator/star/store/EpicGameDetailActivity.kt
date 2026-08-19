@@ -395,6 +395,10 @@ class EpicGameDetailActivity : ComponentActivity() {
                     // Delete the partial download if the user chose "Delete files" on any Cancel dialog.
                     if (EpicCancelPolicy.consumeDeleteOnCancel(an)) {
                         try { deleteDir(installDir) } catch (_: Exception) {}
+                        // Also clear the install record (exe/dir/version/size prefs) so the action row
+                        // recomputes to "not installed" — otherwise a stale exe pref keeps Launch/Set
+                        // .exe/Uninstall showing after the files are gone.
+                        EpicInstallState.purge(applicationContext, an)
                     }
                     onInstallCancelled(); return@launch
                 }

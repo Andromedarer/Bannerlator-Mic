@@ -469,6 +469,8 @@ class EpicGamesActivity : ComponentActivity() {
                     // Delete the partial if the user chose "Delete files" on any Cancel dialog.
                     if (EpicCancelPolicy.consumeDeleteOnCancel(appName)) {
                         try { EpicDownloadManager.deleteDir(installDir) } catch (_: Exception) {}
+                        // Clear the install record so the list/detail recompute to "not installed".
+                        EpicInstallState.purge(applicationContext, appName)
                     }
                     StoreDownloadHooks.markCancelled(Store.EPIC, appName)
                     withContext(Dispatchers.Main) {
