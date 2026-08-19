@@ -463,10 +463,9 @@ class EpicGameDetailActivity : ComponentActivity() {
             if (isDestroyed || isFinishing) return@runOnUiThread
             progressVisible = false
             progressLabelVisible = false
-            installBtnText = "Install"
             installBtnColor = 0xFF1A73E8.toInt()
-            launchBtnVisible = true
-            setExeBtnVisible = true
+            // Reflect the true install state (a failed fresh download is NOT installed → Install-only).
+            refreshActionState()
             resultBarMsg = "Error: $msg"
         }
     }
@@ -478,10 +477,11 @@ class EpicGameDetailActivity : ComponentActivity() {
             if (isDestroyed || isFinishing) return@runOnUiThread
             progressVisible = false
             progressLabelVisible = false
-            installBtnText = "Install"
             installBtnColor = 0xFF1A73E8.toInt()
-            launchBtnVisible = true
-            setExeBtnVisible = true
+            // Recompute the action row from the true install state instead of hardcoding
+            // Launch/Set .exe visible: delete purged the record → Install-only; keep left it
+            // in place → whatever the game's real state is.
+            refreshActionState()
         }
     }
 
