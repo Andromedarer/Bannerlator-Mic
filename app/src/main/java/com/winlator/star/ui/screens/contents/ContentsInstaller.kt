@@ -19,6 +19,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import java.io.File
 import kotlin.coroutines.resume
 
@@ -67,6 +68,7 @@ object ContentsInstaller {
                 verName = versionName,
                 phase = ContentDownloadPhase.DOWNLOADING,
                 fraction = 0f,
+                hasDownload = true,
             ),
         )
         DownloadForegroundService.start(ctx)
@@ -164,6 +166,10 @@ object ContentsInstaller {
         val job = DownloadScope.io.launch {
             var ok = false
             try {
+                // Up-front best-effort read of the archive's profile.json so the popup shows the real
+                // type/version/desc from the START (one coherent popup), not just at completion. The
+                // end-of-extract onProfile update below still runs as a fallback (covers content:// uris).
+                prescanFileProfile(source, type, key)
                 ok = if (isDriver) {
                     // GPU drivers carry no profile.json and install non-incrementally — the popup shows
                     // the passed type + filename and an indeterminate bar until this flips to Installed.
@@ -214,6 +220,43 @@ object ContentsInstaller {
             }
         }
         ContentDownloadRegistry.attachJob(key, job)
+    }
+
+    /**
+     * Best-effort up-front read of the archive's `profile.json` (single entry, NO full extract) so the
+     * install popup carries the real type/version/code/desc from the start instead of only at the end.
+     * Mirrors [ContentsManager.readProfile]'s field parsing. Never throws; on any miss the end-of-extract
+     * [installComponentBlocking] `onProfile` update still fills these in.
+     *
+     * Guards: skipped for drivers (no profile.json) and for non-file uris — [TarCompressorUtils.readTextFile]
+     * needs a real local [File], so a content:// source (or anything that doesn't resolve to an existing
+     * file) falls through to the extract-time fallback.
+     */
+    private fun prescanFileProfile(source: Uri, type: String, key: String) {
+        if (ContentsTypes.isDriver(type)) return
+        runCatching {
+            val file = if (source.scheme == "file" || source.scheme == null) source.path?.let { File(it) } else null
+            if (file == null || !file.exists()) return
+            // Archives are XZ or ZSTD; try XZ first, fall back to ZSTD (matches the extract pipeline).
+            val json = TarCompressorUtils.readTextFile(TarCompressorUtils.Type.XZ, file, ContentsManager.PROFILE_NAME)
+                ?: TarCompressorUtils.readTextFile(TarCompressorUtils.Type.ZSTD, file, ContentsManager.PROFILE_NAME)
+                ?: return
+            val obj = JSONObject(json)
+            val typeName = obj.optString(ContentProfile.MARK_TYPE, "").takeIf { it.isNotBlank() }
+            // Prefer the canonical enum display name; fall back to the raw string for unknown types.
+            val display = typeName?.let { ContentProfile.ContentType.getTypeByName(it)?.toString() ?: it }
+            val verName = obj.optString(ContentProfile.MARK_VERSION_NAME, "").takeIf { it.isNotBlank() }
+            val verCode = if (obj.has(ContentProfile.MARK_VERSION_CODE)) obj.optInt(ContentProfile.MARK_VERSION_CODE).toString() else null
+            val desc = obj.optString(ContentProfile.MARK_DESC, "").takeIf { it.isNotBlank() }
+            ContentDownloadRegistry.update(key) {
+                it.copy(
+                    type = display ?: it.type,
+                    verName = verName ?: it.verName,
+                    verCode = verCode ?: it.verCode,
+                    desc = desc ?: it.desc,
+                )
+            }
+        }
     }
 
     // ── Blocking installers (Activity-free; never touch runOnUiThread) ──────────

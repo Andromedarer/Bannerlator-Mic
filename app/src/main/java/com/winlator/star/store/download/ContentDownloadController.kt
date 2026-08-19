@@ -67,6 +67,9 @@ data class ContentDownloadState(
     // ContentDownloadPhase value, which would break the exhaustive `when`s over the enum). The popup
     // styles it neutrally ("Cancelled") instead of the alarming failure red.
     val cancelled: Boolean = false,
+    // True for catalog items (download THEN install → two-pass overlay bar); false for local-file
+    // installs (install only → single pass). Drives the popup's progress bar rendering.
+    val hasDownload: Boolean = false,
 ) {
     val terminal: Boolean get() = phase == ContentDownloadPhase.DONE || phase == ContentDownloadPhase.ERROR
 }
@@ -139,6 +142,7 @@ fun startContentDownload(appContext: Context, profile: ContentProfile) {
             desc = profile.desc,
             phase = ContentDownloadPhase.DOWNLOADING,
             fraction = 0f,
+            hasDownload = true,
         )
     )
     // Bring up the shared FGS (keeps the process alive past the sheet/Activity) and post the

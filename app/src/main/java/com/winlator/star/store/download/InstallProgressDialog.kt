@@ -3,9 +3,11 @@ package com.winlator.star.store.download
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -17,7 +19,6 @@ import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -26,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -108,26 +110,48 @@ fun InstallProgressDialog(
                     state.phase == ContentDownloadPhase.DOWNLOADING -> "Downloading ${(frac * 100).toInt()}%"
                     else -> "Installing ${(frac * 100).toInt()}%"
                 }
-                // Cancelled reads as a neutral outcome (not the alarming error red).
-                val labelColor = if (state.phase == ContentDownloadPhase.ERROR && !state.cancelled) cs.error else cs.onSurfaceVariant
+                // Cancelled reads as a neutral outcome (not the alarming error red); a finished install
+                // reads in the theme accent (matched — no green).
+                val labelColor = when {
+                    state.phase == ContentDownloadPhase.ERROR && !state.cancelled -> cs.error
+                    state.phase == ContentDownloadPhase.DONE -> cs.primary
+                    else -> cs.onSurfaceVariant
+                }
                 Text(label, style = MaterialTheme.typography.bodySmall, color = labelColor)
 
-                if (!terminal) {
+                if (!terminal || state.phase == ContentDownloadPhase.DONE) {
                     Spacer(Modifier.height(4.dp))
-                    // Blue "Downloading", green "Installing"; indeterminate until the first real % arrives
-                    // (covers driver installs, which never report incremental progress).
-                    val barColor = if (state.phase == ContentDownloadPhase.DOWNLOADING) cs.primary else Color(0xFF4CAF50) // intentional: green = installing phase
-                    if (frac <= 0f) {
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(6.dp),
-                            color = barColor, trackColor = cs.surfaceContainerHighest)
-                    } else {
-                        LinearProgressIndicator(progress = frac, modifier = Modifier.fillMaxWidth().height(6.dp),
-                            color = barColor, trackColor = cs.surfaceContainerHighest)
+                    // Two-pass overlay bar, all in the theme accent (no green). First pass = DOWNLOAD in a
+                    // DARKER accent that fills the track; second pass = INSTALL in a LIGHTER accent sweeping
+                    // left→right over it. A finished install ends as a full lighter-accent bar (matched to
+                    // the theme). A local file (hasDownload=false) has no download pass — only the lighter
+                    // install bar shows, so it reads as a single bar.
+                    val darkPass = lerp(cs.primary, Color.Black, 0.40f) // download — first pass
+                    val litePass = lerp(cs.primary, Color.White, 0.12f) // install  — second pass
+                    val dlFrac = when {
+                        !state.hasDownload -> 0f
+                        state.phase == ContentDownloadPhase.DOWNLOADING -> frac
+                        else -> 1f
                     }
-                } else if (state.phase == ContentDownloadPhase.DONE) {
-                    Spacer(Modifier.height(4.dp))
-                    LinearProgressIndicator(progress = 1f, modifier = Modifier.fillMaxWidth().height(6.dp),
-                        color = Color(0xFF4CAF50), trackColor = cs.surfaceContainerHighest) // intentional: green = done
+                    val instFrac = if (state.phase == ContentDownloadPhase.DOWNLOADING) 0f else frac
+                    Box(
+                        Modifier.fillMaxWidth().height(6.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(cs.surfaceContainerHighest),
+                    ) {
+                        if (dlFrac > 0f) {
+                            Box(
+                                Modifier.fillMaxWidth(dlFrac).fillMaxHeight()
+                                    .clip(RoundedCornerShape(3.dp)).background(darkPass),
+                            )
+                        }
+                        if (instFrac > 0f) {
+                            Box(
+                                Modifier.fillMaxWidth(instFrac).fillMaxHeight()
+                                    .clip(RoundedCornerShape(3.dp)).background(litePass),
+                            )
+                        }
+                    }
                 }
 
                 Spacer(Modifier.height(16.dp))

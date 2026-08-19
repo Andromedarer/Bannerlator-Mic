@@ -110,7 +110,6 @@ import com.winlator.star.store.download.ContentDownloadPhase
 import com.winlator.star.store.download.ContentDownloadRegistry
 import com.winlator.star.store.download.ContentDownloadState
 import com.winlator.star.store.download.InstallProgressDialog
-import kotlinx.coroutines.delay
 import com.winlator.star.ui.screens.adrenodownload.DriverFeed
 import com.winlator.star.ui.screens.adrenodownload.DriverSourceStore
 import com.winlator.star.ui.screens.MenuItemDivider
@@ -193,31 +192,39 @@ fun ContentsHubScreen(vm: ContentsHubViewModel = viewModel()) {
     // Contents install straight off the process-lifetime registry (keys are "contents::…" — see
     // ContentsInstaller.keyFor), so a download OR a from-file install both surface a live popup —
     // crucially the file-install path, which otherwise had no on-screen feedback at all.
+    //
+    // The popup holds its OWN snapshot rather than reading the registry live: while the registry entry
+    // exists we keep [shown] synced to it (live progress + the terminal flip); once the launcher's
+    // finally removes the entry (~2s after done) we KEEP the last snapshot so the finished popup — real
+    // name, type chip, description, "Version … • build N" — stays up until the user taps Done/Close.
     val registry by ContentDownloadRegistry.states.collectAsState()
-    var hubDialogKey by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(registry.keys) {
-        val current = hubDialogKey
-        if (current == null || current !in registry) {
-            hubDialogKey = registry.entries
-                .firstOrNull { it.key.startsWith("contents::") && !it.value.terminal }?.key
+    var shownKey by remember { mutableStateOf<String?>(null) }
+    var shown by remember { mutableStateOf<ContentDownloadState?>(null) }
+    LaunchedEffect(registry) {
+        val k = shownKey
+        if (k == null) {
+            // Attach to the next active Contents install once nothing is being shown.
+            registry.entries.firstOrNull { it.key.startsWith("contents::") && !it.value.terminal }?.let {
+                shownKey = it.key
+                shown = it.value
+            }
+        } else {
+            // Sync while the entry lives; after removal keep the last snapshot (don't null it out).
+            registry[k]?.let { shown = it }
         }
     }
-    val hubState: ContentDownloadState? = hubDialogKey?.let { registry[it] }
-    if (hubState != null) {
+    shown?.let { st ->
         InstallProgressDialog(
-            state = hubState,
-            onCancel = { ContentDownloadRegistry.requestCancel(hubState.key) },
-            onDismiss = { ContentDownloadRegistry.remove(hubState.key); hubDialogKey = null },
+            state = st,
+            onCancel = { ContentDownloadRegistry.requestCancel(st.key) },
+            onDismiss = {
+                // Explicit close: drop the registry entry (frees the host to attach to the next
+                // install) and clear the held snapshot.
+                ContentDownloadRegistry.remove(st.key)
+                shown = null
+                shownKey = null
+            },
         )
-    }
-    // Auto-dismiss shortly after a successful install (parity with the sheet); the tabs' own status
-    // refreshes are driven by each install's onDone/onChanged callback, so nothing else is needed here.
-    LaunchedEffect(hubState?.phase) {
-        if (hubState != null && hubState.phase == ContentDownloadPhase.DONE) {
-            delay(900)
-            ContentDownloadRegistry.remove(hubState.key)
-            hubDialogKey = null
-        }
     }
 }
 

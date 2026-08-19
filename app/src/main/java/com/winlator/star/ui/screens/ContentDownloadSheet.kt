@@ -50,7 +50,6 @@ import kotlin.math.absoluteValue
 import com.winlator.star.util.ImportEtaTracker
 import com.winlator.star.util.InAppFilePicker
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.Executors
@@ -77,17 +76,26 @@ fun ContentDownloadSheet(
     // ContentDownloadController) rather than composition-scoped state, so it keeps advancing while
     // the app is backgrounded and the sheet re-attaches to an in-flight download on reopen.
     val contentStates by ContentDownloadRegistry.states.collectAsState()
-    // Which in-flight catalog download the progress card is showing. Seeded on tap; re-attached to
-    // any still-running download when the sheet (re)enters composition (see LaunchedEffect below).
-    var dialogKey by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(contentStates.keys) {
-        val current = dialogKey
-        if (current == null || current !in contentStates) {
-            dialogKey = contentStates.entries.firstOrNull { !it.value.terminal }?.key
+    // The catalog progress popup holds its OWN snapshot (not a live registry read): while the registry
+    // entry lives we keep [catalogShown] synced to it (live progress + the terminal flip); once the
+    // launcher's finally removes the entry (~2s after done) we KEEP the last snapshot so the finished
+    // popup stays up until the user taps Done/Close. Seeded on tap; re-attaches to any still-running
+    // download when the sheet (re)enters composition.
+    var catalogKey by remember { mutableStateOf<String?>(null) }
+    var catalogShown by remember { mutableStateOf<ContentDownloadState?>(null) }
+    LaunchedEffect(contentStates) {
+        val k = catalogKey
+        if (k == null) {
+            contentStates.entries.firstOrNull { !it.value.terminal }?.let {
+                catalogKey = it.key
+                catalogShown = it.value
+            }
+        } else {
+            contentStates[k]?.let { catalogShown = it }
         }
     }
     // The content-card install dialog for LOCAL-FILE import (catalog downloads render from the
-    // registry via dialogKey instead) — null when idle. Uses the SAME shared popup + the SAME
+    // the held catalog snapshot instead) — null when idle. Uses the SAME shared popup + the SAME
     // ContentDownloadState model as the catalog path, so both look identical.
     var installDialog by remember { mutableStateOf<ContentDownloadState?>(null) }
     var showInfoProfile by remember { mutableStateOf<ContentProfile?>(null) }
@@ -227,11 +235,11 @@ fun ContentDownloadSheet(
     }
 
     // Content-card install dialog (shows Content-Info fields + a live 0..100% bar). Blocks dismiss
-    // while the install is running; auto-closes shortly after it finishes.
-    // Catalog download → render its progress card straight from the process-lifetime registry, so it
-    // reflects live phase+percent even after backgrounding and re-attaches on reopen. The local-file
-    // import dialog only shows when no catalog card is active.
-    val catalogState = dialogKey?.let { contentStates[it] }
+    // while the install is running; the finished popup STAYS UP until the user taps Done/Close.
+    // Catalog download → render from the held snapshot (see catalogShown above) so it reflects live
+    // phase+percent even after backgrounding, re-attaches on reopen, and persists past the registry's
+    // linger-removal. The local-file import dialog only shows when no catalog card is active.
+    val catalogState = catalogShown
     if (catalogState != null) {
         InstallProgressDialog(
             state = catalogState,
@@ -239,7 +247,8 @@ fun ContentDownloadSheet(
             onCancel = { ContentDownloadRegistry.requestCancel(catalogState.key) },
             onDismiss = {
                 ContentDownloadRegistry.remove(catalogState.key)
-                dialogKey = null
+                catalogShown = null
+                catalogKey = null
             },
         )
     } else {
@@ -253,24 +262,13 @@ fun ContentDownloadSheet(
             )
         }
     }
-    // Local-file import DONE auto-close (unchanged).
-    LaunchedEffect(installDialog?.phase) {
-        if (installDialog?.phase == ContentDownloadPhase.DONE) {
-            delay(900)
-            installDialog = null
-        }
-    }
-    // Catalog DONE: refresh the profile list + notify the parent, then auto-close the card. Fires
-    // once per transition to DONE (keyed on the phase); on reopen after completion the sheet's
-    // initial loadProfiles already reflects the installed component.
+    // Catalog DONE: refresh the profile list + notify the parent. Fires once per transition to DONE
+    // (keyed on the phase); the popup itself stays up until the user closes it (no auto-dismiss).
     LaunchedEffect(catalogState?.phase) {
         if (catalogState?.phase == ContentDownloadPhase.DONE) {
             loadProfiles(cm, contentTypes) { profiles = it }
             refreshKey++
             onContentChanged()
-            delay(900)
-            ContentDownloadRegistry.remove(catalogState.key)
-            dialogKey = null
         }
     }
 
@@ -433,7 +431,8 @@ fun ContentDownloadSheet(
                                                 // Same process-lifetime pipeline for official + community;
                                                 // community installs from the bridged profile's remoteUrl.
                                                 startContentDownload(context.applicationContext, profile)
-                                                dialogKey = key
+                                                catalogKey = key
+                                                catalogShown = ContentDownloadRegistry.get(key)
                                             },
                                             onInfo = { showInfoProfile = profile },
                                             onRemove = { confirmRemoveProfile = profile },
