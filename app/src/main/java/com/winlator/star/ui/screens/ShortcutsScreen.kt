@@ -6160,7 +6160,9 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                                 )
                             }
                             Spacer(Modifier.width(8.dp))
-                            Switch(checked = epicOvtForce, onCheckedChange = { epicOvtForce = it })
+                            // Sub-option of EOS auth: only meaningful when EOS auth is on.
+                            Switch(checked = epicOvtForce, onCheckedChange = { epicOvtForce = it },
+                                   enabled = epicEosEnabled)
                         }
                         // Launch offline: skip the online EOS auth exchange (drops the -AUTH_* args)
                         // but keep the game's Epic identity/portal args. Default OFF.
@@ -6177,7 +6179,9 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                                 )
                             }
                             Spacer(Modifier.width(8.dp))
-                            Switch(checked = epicOffline, onCheckedChange = { epicOffline = it })
+                            // Sub-option of EOS auth: offline has nothing to skip when EOS auth is off.
+                            Switch(checked = epicOffline, onCheckedChange = { epicOffline = it },
+                                   enabled = epicEosEnabled)
                         }
                     }
 
