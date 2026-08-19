@@ -28,6 +28,7 @@ import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.zip.Inflater;
@@ -211,6 +212,24 @@ public class EpicDownloadManager {
             String installDirPath,
             List<String> installTags,
             ProgressCallback progressCallback) {
+        // No cancel flag → best-effort, never-cancelled (legacy / DLC path).
+        return install(ctx, manifestApiJson, accessToken, installDirPath, installTags, null, progressCallback);
+    }
+
+    /**
+     * Cancel-aware install. {@code cancelFlag} is polled inside the parallel chunk pool and the
+     * assemble loop; flipping it to {@code true} stops the download promptly (no new chunk starts,
+     * in-flight chunks are interrupted, partial files stay on disk for a later #3 delta-resume).
+     * {@code null} = never cancel.
+     */
+    public static boolean install(
+            android.content.Context ctx,
+            String manifestApiJson,
+            String accessToken,
+            String installDirPath,
+            List<String> installTags,
+            AtomicBoolean cancelFlag,
+            ProgressCallback progressCallback) {
         StringBuilder dbg = new StringBuilder();
         dbg.append("=== BH Epic Debug ===\n");
         dbg.append("installDirPath=").append(installDirPath).append("\n");
@@ -324,6 +343,8 @@ public class EpicDownloadManager {
             for (ChunkInfo chunk : neededChunks) {
                 final ChunkInfo fc = chunk;
                 pool.submit(() -> {
+                    // Cancel: don't start new chunk work once the user has cancelled.
+                    if (cancelFlag != null && cancelFlag.get()) return;
                     File cachedFile = new File(chunkCacheDir, fc.guidStr());
                     if (!cachedFile.exists()) {
                         if (!downloadChunkStreaming(fc, manifest.chunkDir, cdnUrls, cachedFile)) {
@@ -355,11 +376,33 @@ public class EpicDownloadManager {
             }
             pool.shutdown();
             try {
-                pool.awaitTermination(Long.MAX_VALUE, TimeUnit.MILLISECONDS);
+                // Poll instead of a single infinite await so a cancel is honored within ~250ms:
+                // in-flight chunks are interrupted, queued ones never start (closure guard above).
+                while (!pool.awaitTermination(250, TimeUnit.MILLISECONDS)) {
+                    if (cancelFlag != null && cancelFlag.get()) {
+                        pool.shutdownNow();
+                        pool.awaitTermination(5, TimeUnit.SECONDS);
+                        dbg.append("CANCELLED during chunk download ")
+                           .append("(").append(completedCount.get()).append("/").append(totalChunks)
+                           .append(" chunks)\n");
+                        writeDebug(ctx, dbg);
+                        Log.i(TAG, "Epic install cancelled during chunk download");
+                        return false;
+                    }
+                }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
+                pool.shutdownNow();
                 dbg.append("ERROR: chunk pool interrupted\n");
                 writeDebug(ctx, dbg);
+                return false;
+            }
+
+            // Cancel could also have landed on the last poll boundary, after the pool drained.
+            if (cancelFlag != null && cancelFlag.get()) {
+                dbg.append("CANCELLED after chunk download\n");
+                writeDebug(ctx, dbg);
+                Log.i(TAG, "Epic install cancelled after chunk download");
                 return false;
             }
 
@@ -379,6 +422,13 @@ public class EpicDownloadManager {
             int doneFiles  = 0;
             dbg.append("assembling ").append(totalFiles).append(" files\n");
             for (FileInfo file : pendingFiles) {
+                if (cancelFlag != null && cancelFlag.get()) {
+                    dbg.append("CANCELLED during assembly (").append(doneFiles).append("/")
+                       .append(totalFiles).append(" files)\n");
+                    writeDebug(ctx, dbg);
+                    Log.i(TAG, "Epic install cancelled during assembly");
+                    return false;
+                }
                 String relPath = file.filename.replace("\\", "/");
                 File outFile   = new File(installDir, relPath);
                 File parent    = outFile.getParentFile();

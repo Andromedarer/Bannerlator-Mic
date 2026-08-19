@@ -317,9 +317,9 @@ class EpicGameDetailActivity : ComponentActivity() {
         setExeBtnVisible = false
         progressLabelText = ""
 
-        // WEAK CANCEL (Epic-only): install() takes no cancel checker, so flipping this flag can't
-        // abort mid-download \u2014 it's only read AFTER install() returns, at which point the finished
-        // download is discarded. The registry row/notification clear then. Honest, best-effort.
+        // CANCEL: install() now polls this flag inside its parallel chunk pool + assemble loop, so
+        // flipping it stops the download promptly (no new chunk starts, in-flight chunks are
+        // interrupted). Partial files stay on disk and resume cleanly via the #3 delta on retry.
         val cancelled = AtomicBoolean(false)
         cancelDownload = Runnable { cancelled.set(true) }
 
@@ -362,9 +362,10 @@ class EpicGameDetailActivity : ComponentActivity() {
                     token,
                     installDir.absolutePath,
                     installTags,
+                    cancelled,
                 ) { _, pct ->
-                    // Freeze the card/label the moment the user hits Cancel (the download itself
-                    // can't be stopped \u2014 see WEAK CANCEL above).
+                    // Freeze the card/label the moment the user hits Cancel; install() also polls
+                    // `cancelled` internally and returns false promptly.
                     if (!cancelled.get()) {
                         StoreDownloadHooks.tick(Store.EPIC, an, pct)
                         if (!isDestroyed && !isFinishing) runOnUiThread {

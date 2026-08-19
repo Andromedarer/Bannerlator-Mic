@@ -438,6 +438,7 @@ class EpicGamesActivity : ComponentActivity() {
                     token,
                     installDir.absolutePath,
                     installTags,
+                    cancelled,
                 ) { msg, pct ->
                     if (!cancelled.get()) {
                         StoreDownloadHooks.tick(Store.EPIC, appName, pct)
