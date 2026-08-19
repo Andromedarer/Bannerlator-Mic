@@ -6154,7 +6154,7 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                             Column(modifier = Modifier.weight(1f)) {
                                 Text("Force Denuvo ownership token", fontSize = 14.sp)
                                 Text(
-                                    "For Denuvo EOS games the auto-detector misses",
+                                    "Force the ownership token for Denuvo games we don't auto-detect",
                                     fontSize = 11.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
