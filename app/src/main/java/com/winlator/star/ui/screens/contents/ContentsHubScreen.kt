@@ -660,8 +660,6 @@ private fun MyFilesTab(vm: ContentsHubViewModel) {
     val cs = MaterialTheme.colorScheme
     val context = LocalContext.current
     val folders by vm.savedFolders.collectAsState()
-    val baseDisplay by vm.baseDisplay.collectAsState()
-    var showLocation by remember { mutableStateOf(false) }
     val expanded = remember { mutableStateOf(setOf<String>()) }
 
     val installPicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -685,22 +683,7 @@ private fun MyFilesTab(vm: ContentsHubViewModel) {
                 style = MaterialTheme.typography.bodySmall, color = cs.primary)
         }
         Spacer(Modifier.height(12.dp))
-        // Path bar
-        Row(verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth()
-                .border(1.dp, cs.outline, RoundedCornerShape(14.dp))
-                .background(cs.surface, RoundedCornerShape(14.dp))
-                .clickable { showLocation = true }
-                .padding(12.dp)) {
-            Icon(Icons.Filled.FolderSpecial, null, tint = cs.primary, modifier = Modifier.size(22.dp))
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text("SAVE LOCATION", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant, fontWeight = FontWeight.Bold)
-                Text(baseDisplay, style = MaterialTheme.typography.bodySmall, color = cs.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            TextButton(onClick = { showLocation = true }) { Text("Change", color = cs.onSurface) }
-        }
-        Spacer(Modifier.height(12.dp))
+        // Save location lives once in Contents settings (the cog) — no duplicate bar here.
         PrimaryButton("Install content from file…", Icons.Filled.FolderOpen, enabled = true,
             container = cs.onSurface.copy(alpha = 0.06f), content = cs.onSurface, modifier = Modifier.fillMaxWidth()) {
             installPicker.launch(InAppFilePicker.buildIntent(context, InAppFilePicker.WCP, "Select content pack"))
@@ -725,7 +708,6 @@ private fun MyFilesTab(vm: ContentsHubViewModel) {
             }
         }
     }
-    if (showLocation) LocationDialog(vm, onDismiss = { showLocation = false })
 }
 
 @Composable
