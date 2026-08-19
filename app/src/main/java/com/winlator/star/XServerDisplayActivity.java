@@ -833,15 +833,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
                         && prev.length() == lastWrapperLogLen) return lastWrapperLogApi;
             }
 
-            String pid = findRunningGamePid();
-            if (pid == null) return null;
-            String exe = readArgv0Exe(pid);                       // normalized (fwd-slash, lowercase) path
-            if (exe == null) return null;
-            String exeBase = exe.substring(exe.lastIndexOf('/') + 1);       // e.g. "gta5_enhanced.exe"
-            String stem = exeBase.substring(0, exeBase.length() - 4);        // strip ".exe" -> "gta5_enhanced"
-
-            // Locate the candidate logs case-insensitively (the imagefs is case-sensitive on the host,
-            // while DXVK/VKD3D preserve the exe's original case in filenames/headers).
+            // wrapperLogDir is THIS game's per-launch log folder (its LogLocation dir, or the private
+            // hudapi dir), so a log written THIS session already belongs to the running game — NO exe-name
+            // gate. That gate broke two-process titles: the launcher exe found running (e.g. PlayGTAV.exe)
+            // is NOT the renderer the wrapper logs are named after (e.g. GTA5_Enhanced.exe). Identity =
+            // per-game folder + freshness. DXVK per-API files are matched by suffix (any renderer stem).
             File[] files = dir.listFiles();
             if (files == null) return null;
             File vkd3d = null, dxvk11 = null, dxvk10 = null, dxvk9 = null;
@@ -849,23 +845,47 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 if (!f.isFile()) continue;
                 String n = f.getName().toLowerCase();
                 if (n.equals("vkd3d-proton.log")) vkd3d = f;
-                else if (n.equals(stem + "_d3d11.log")) dxvk11 = f;
-                else if (n.equals(stem + "_d3d10.log")) dxvk10 = f;
-                else if (n.equals(stem + "_d3d9.log"))  dxvk9  = f;
+                else if (n.endsWith("_d3d11.log")) dxvk11 = newerLog(dxvk11, f);
+                else if (n.endsWith("_d3d10.log")) dxvk10 = newerLog(dxvk10, f);
+                else if (n.endsWith("_d3d9.log"))  dxvk9  = newerLog(dxvk9, f);
             }
 
             final String SEP = " · ";
-            // 1) D3D12 on VKD3D — highest rank. Fixed filename => require the header to name THIS exe.
-            if (isFreshWrapperLog(vkd3d) && logHeaderNamesExe(vkd3d, "program name", exeBase)) {
+            // 1) D3D12 on VKD3D — highest rank. Require a real vkd3d run (a "Program name" header line),
+            //    which also skips empty/aborted stubs. The Unity D3D12-probe-then-D3D11 case is already
+            //    handled upstream by the Player.log resolver (P2), which runs before this.
+            if (isFreshWrapperLog(vkd3d) && logHasHeaderLine(vkd3d, "program name")) {
                 return cacheWrapperResult(vkd3d, "D3D12" + SEP + "VKD3D");
             }
-            // 2) DXVK per-API files (D3D11/10/9). The filename already encodes the exe identity.
+            // 2) DXVK per-API files (D3D11/10/9) — the file exists only when DXVK created that device.
             if (isFreshWrapperLog(dxvk11)) return cacheWrapperResult(dxvk11, "D3D11" + SEP + wrapper);
             if (isFreshWrapperLog(dxvk10)) return cacheWrapperResult(dxvk10, "D3D10" + SEP + wrapper);
             if (isFreshWrapperLog(dxvk9))  return cacheWrapperResult(dxvk9,  "D3D9"  + SEP + wrapper);
             // dxgi-only / nothing identifying => fall through.
             return null;
         } catch (Exception ignore) { return null; }
+    }
+
+    /** The newer of two candidate logs (either may be null) — used when several DXVK per-API files match. */
+    private File newerLog(File a, File b) {
+        if (a == null) return b;
+        if (b == null) return a;
+        return b.lastModified() >= a.lastModified() ? b : a;
+    }
+
+    /** Whether {@code log}'s header (first ~60 lines) has a line containing {@code needle} (lowercased).
+     *  Confirms a fresh vkd3d-proton.log is a REAL run (has a "Program name" line) rather than an empty/
+     *  aborted stub — without requiring it to name any specific exe (two-process games log the renderer,
+     *  not the launcher we find running). */
+    private boolean logHasHeaderLine(File log, String needle) {
+        try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(log))) {
+            String line;
+            int n = 0;
+            while ((line = r.readLine()) != null && n++ < 60) {
+                if (line.toLowerCase().indexOf(needle) >= 0) return true;
+            }
+        } catch (Exception ignore) {}
+        return false;
     }
 
     /** A wrapper log is trusted only when it exists, has real content, and was written THIS session. */
