@@ -299,10 +299,26 @@ public class EpicDownloadManager {
             progress(progressCallback, "Verifying existing files…", 0);
             List<FileInfo> pendingFiles = new ArrayList<>(selectedFiles.size());
             int alreadyGood = 0;
+            int checked = 0;
+            final int selCount = selectedFiles.size();
             for (FileInfo f : selectedFiles) {
+                // Cancel: hashing an already-installed game can take minutes — honor cancel here too,
+                // not just in the chunk pool. This is the "Verifying…"/0% phase the UI shows.
+                if (cancelFlag != null && cancelFlag.get()) {
+                    dbg.append("CANCELLED during verify (").append(checked).append("/")
+                       .append(selCount).append(" files hashed)\n");
+                    writeDebug(ctx, dbg);
+                    Log.i(TAG, "Epic install cancelled during verify phase");
+                    return false;
+                }
                 File out = new File(installDir, f.filename.replace("\\", "/"));
                 if (fileExistsWithCorrectHash(out, f.fileSize(), f.sha1)) alreadyGood++;
                 else pendingFiles.add(f);
+                checked++;
+                // Report verify progress every 64 files so the phase is visible and responsive.
+                if ((checked & 63) == 0) {
+                    progress(progressCallback, "Verifying existing files… (" + checked + "/" + selCount + ")", 0);
+                }
             }
             dbg.append("delta: ").append(alreadyGood).append(" up-to-date, ")
                .append(pendingFiles.size()).append(" to download\n");
