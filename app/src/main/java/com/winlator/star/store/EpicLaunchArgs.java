@@ -100,7 +100,7 @@ public final class EpicLaunchArgs {
 
             // Locale (Feature #11): derive the 2-letter code from the container/shortcut language
             // (lc_all) → device locale → "en", instead of a hardcoded "en".
-            String locale = EpicInstallTags.localeCodeForCurrentContainer(ctx);
+            String locale = EpicInstallTags.INSTANCE.localeCodeForCurrentContainer(ctx);
             if (locale == null || locale.isEmpty()) locale = "en";
 
             StringBuilder sb = new StringBuilder();
