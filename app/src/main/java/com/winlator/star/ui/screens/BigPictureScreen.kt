@@ -304,7 +304,7 @@ fun BigPictureScreen(navController: NavController) {
     val selected = shortcuts.getOrNull(selectedIndex)
     val heroCover = selected?.let { coverCache[it.name] }
 
-    val onLaunch: () -> Unit = { selected?.let { runShortcut(activity, it) } }
+    val onLaunch: () -> Unit = { selected?.let { launchShortcut(activity, it) } }
 
     Box(
         modifier = Modifier
@@ -1527,7 +1527,7 @@ internal fun loadCover(s: Shortcut): ImageBitmap? {
 }
 
 // `internal` so the Games-wall screen launches games through the identical entry point.
-internal fun runShortcut(activity: Activity, shortcut: Shortcut) {
+internal fun launchShortcut(activity: Activity, shortcut: Shortcut) {
     if (!XrActivity.isEnabled(activity)) {
         val intent = Intent(activity, XServerDisplayActivity::class.java).apply {
             putExtra("container_id", shortcut.container.id)

@@ -121,7 +121,7 @@ import java.util.Locale
 // launcher that mirrors the approved mockup: a rail header (brand + search + status), a left nav rail,
 // a centre-highlighted 2:3 cover wall (LazyRow), and a footer launch bar. Data + launch reuse the
 // existing plumbing — ContainerManager.loadShortcuts(), loadCover() (local → SteamGridDB → monogram
-// fallback), and runShortcut() — so nothing about how games are stored or launched changes.
+// fallback), and launchShortcut() — so nothing about how games are stored or launched changes.
 //
 // Accent follows the user's chosen app theme (MaterialTheme.colorScheme.primary), read inside each
 // composable — the wall never pins its own accent. Fully controller-first with a single root focus
@@ -243,7 +243,7 @@ fun GamesWallScreen(navController: NavController) {
         }
     }
 
-    val onLaunch: () -> Unit = { selected?.let { runShortcut(activity, it) } }
+    val onLaunch: () -> Unit = { selected?.let { launchShortcut(activity, it) } }
 
     val applyPick: (CommunityPick) -> Unit = { pick ->
         val target = selected
