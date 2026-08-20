@@ -59,6 +59,7 @@ import com.winlator.star.container.Container;
 import com.winlator.star.container.ContainerManager;
 import com.winlator.star.container.Shortcut;
 import com.winlator.star.core.CustomSaveVault;
+import com.winlator.star.store.EpicOverlayManager;
 import com.winlator.star.store.SteamCloudSaveManager;
 import com.winlator.star.store.SteamDatabase;
 import com.winlator.star.store.SteamRepository;
@@ -2252,6 +2253,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     extractGraphicsDriverFiles();
                     changeWineAudioDriver();
                     applyGameRefreshRateUnlock();
+                    provisionEpicOverlay();
                     stage[0] = "Building environment";
                     setupXEnvironment();
                 } catch (Exception e) {
@@ -4174,6 +4176,21 @@ public class XServerDisplayActivity extends AppCompatActivity {
         else {
             startupSelection = String.valueOf(container.getStartupSelection());
             startupServices = container.getStartupServices();
+        }
+
+        // Epic Friends Overlay (Phase 3) needs full Wine services alive: the EOS SDK spins the overlay
+        // up through services.exe (RpcSs + BITS). An AGGRESSIVE startup kills services.exe, so the
+        // overlay can't render. When the per-shortcut overlay toggle is ON, bump an aggressive selection
+        // to NORMAL for THIS launch (in-memory; it flows through changeServicesStatus below). Only the
+        // aggressive case is touched — ESSENTIAL/NORMAL already keep services running.
+        if (isEpicOverlayEnabledForLaunch()) {
+            try {
+                if (Byte.parseByte(startupSelection) == Container.STARTUP_SELECTION_AGGRESSIVE) {
+                    Log.i("XServerDisplayActivity", "Epic overlay ON: overriding AGGRESSIVE startup -> NORMAL "
+                            + "so Wine services (RpcSs/BITS) survive for the EOS overlay");
+                    startupSelection = String.valueOf(Container.STARTUP_SELECTION_NORMAL);
+                }
+            } catch (NumberFormatException ignored) {}
         }
 
         // Cache signature: for the three presets it's just the selection (unchanged behaviour — the
@@ -7942,6 +7959,48 @@ return true;
     // + per-layer cache lives in WineRandrSupport (shared with the container editor's warning hint).
     private boolean isSelectedLayerXrandrCapable() {
         return com.winlator.star.core.WineRandrSupport.isXrandrCapable(wineInfo);
+    }
+
+    // ── Epic Friends Overlay (Phase 3) ────────────────────────────────────────────────────────
+    // Provision-only: we drop Epic's REAL overlay component into the prefix and write ONE HKCU
+    // pointer; the game's own bundled EOS SDK loads it and owns the hotkey (Shift+F3). We render
+    // nothing. Gated per-shortcut by storeSource=epic + epicOverlay=1.
+
+    /** True when the launching shortcut is an Epic game with the Friends-Overlay toggle on. */
+    private boolean isEpicOverlayEnabledForLaunch() {
+        return shortcut != null
+                && "epic".equals(shortcut.getExtra("storeSource"))
+                && "1".equals(shortcut.getExtra("epicOverlay"));
+    }
+
+    // Install the overlay component (idempotent CDN download) and write the OverlayPath pointer when
+    // the toggle is on; strip the pointer when it's off so a disabled overlay leaves no stale key.
+    // Runs on the background launch worker (sync file/reg/network I/O is ANR-safe there). Never throws.
+    private void provisionEpicOverlay() {
+        if (shortcut == null || !"epic".equals(shortcut.getExtra("storeSource"))) return;
+        File prefixDir = new File(ImageFs.find(this).wineprefix);
+        try {
+            if (!isEpicOverlayEnabledForLaunch()) {
+                EpicOverlayManager.stripRegistry(prefixDir);
+                return;
+            }
+            boolean ok = EpicOverlayManager.ensureOverlayInstalled(this, prefixDir);
+            if (ok) {
+                EpicOverlayManager.writeRegistry(prefixDir);
+                // DXVK guarantee note: the EOS overlay renders through the guest's D3D/DXVK path; a
+                // software (no3d) wrapper yields a grey overlay. We don't force-rewrite the user's
+                // wrapper (that could break the game), but warn when it isn't a DXVK-based one.
+                if (this.dxwrapper == null || !this.dxwrapper.contains("dxvk")) {
+                    Log.w("XServerDisplayActivity", "Epic overlay ON but dxwrapper is not DXVK-based ("
+                            + this.dxwrapper + ") — overlay may render grey; DXVK is recommended");
+                }
+                Log.i("XServerDisplayActivity", "Epic overlay provisioned for launch");
+            } else {
+                Log.w("XServerDisplayActivity", "Epic overlay provisioning failed; leaving registry untouched");
+            }
+        } catch (Throwable t) {
+            Log.w("XServerDisplayActivity", "provisionEpicOverlay failed", t);
+        }
     }
 
     private void applyGeneralPatches(Container container) {
