@@ -4674,16 +4674,21 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // Supersampling: when the launch resolution was scaled above display res (see onCreate),
             // run the compositor's quality Lanczos downscale. No-op when render scale is Off.
             vkRenderer.setHqDownscale(hqDownscale);
-            // Composable CAS / fake-HDR + real upscaler sharpness — drawer-only / session-live,
-            // default off (sharpness defaults to the legacy 0.25 RCAS stops == slider 75). Seed
-            // the renderer and mirror the defaults into the drawer state.
-            vkRenderer.setUpscaleSharpness(75);
-            vkRenderer.setCas(false, 60);
-            vkRenderer.setHdr(false);
-            XServerDialogState.INSTANCE.setUpscaleSharpness(75);
-            XServerDialogState.INSTANCE.setCasEnabled(false);
-            XServerDialogState.INSTANCE.setCasSharpness(60);
-            XServerDialogState.INSTANCE.setHdrVkEnabled(false);
+            // Composable CAS / fake-HDR + real upscaler sharpness — remembered PER GAME (shortcut
+            // override, else container) so an in-game change survives relaunch (#382). Defaults match
+            // the legacy seed (sharpness 75 == 0.25 RCAS stops, CAS off @60, HDR off), so first launch
+            // with no saved value is byte-identical. Seed the renderer AND mirror into the drawer state.
+            int vkUpscaleSharpness = resolveExtraInt("upscaleSharpness", 75);
+            boolean vkCasEnabled = resolveExtraBool("casEnabled", false);
+            int vkCasSharpness = resolveExtraInt("casSharpness", 60);
+            boolean vkHdrEnabled = resolveExtraBool("hdrEnabled", false);
+            vkRenderer.setUpscaleSharpness(vkUpscaleSharpness);
+            vkRenderer.setCas(vkCasEnabled, vkCasSharpness);
+            vkRenderer.setHdr(vkHdrEnabled);
+            XServerDialogState.INSTANCE.setUpscaleSharpness(vkUpscaleSharpness);
+            XServerDialogState.INSTANCE.setCasEnabled(vkCasEnabled);
+            XServerDialogState.INSTANCE.setCasSharpness(vkCasSharpness);
+            XServerDialogState.INSTANCE.setHdrVkEnabled(vkHdrEnabled);
             // Phase 2 screen effects (GL parity) — drawer-only / session-live, default
             // off / neutral grade. Seed the renderer and mirror into the drawer state.
             vkRenderer.setScreenEffects(0f, 0f, 1.0f, false, false, false, false);
@@ -5084,6 +5089,48 @@ public class XServerDisplayActivity extends AppCompatActivity {
         return container != null && container.getRendererFilterMode() == 2 ? 2 : 1;
     }
 
+    // --- Generic drawer graphics quick-settings persistence (per game) -------------------------
+    // The upscale/CAS/HDR sharpness sliders + SGSR/deband toggles mirror a live renderer config, so
+    // an in-game change must stick per game the same way the scaling-mode picker does (#scaling-persist).
+    // These follow persistScalingMode/resolveScalingMode exactly: write to the shortcut if launched from
+    // one, else the container, then saveData(); read the shortcut override first, else the container,
+    // else the supplied default. Booleans persist as "1"/"0" and parse either "1" or "true" on read.
+    private void persistExtraInt(String key, int value) {
+        if (shortcut != null) {
+            shortcut.putExtra(key, String.valueOf(value));
+            shortcut.saveData();
+        } else if (container != null) {
+            container.putExtra(key, String.valueOf(value));
+            container.saveData();
+        }
+    }
+
+    private void persistExtraBool(String key, boolean value) {
+        if (shortcut != null) {
+            shortcut.putExtra(key, value ? "1" : "0");
+            shortcut.saveData();
+        } else if (container != null) {
+            container.putExtra(key, value ? "1" : "0");
+            container.saveData();
+        }
+    }
+
+    private int resolveExtraInt(String key, int def) {
+        String v = shortcut != null ? shortcut.getExtra(key) : null;
+        if ((v == null || v.isEmpty()) && container != null) v = container.getExtra(key);
+        if (v != null && !v.isEmpty()) {
+            try { return Integer.parseInt(v); } catch (NumberFormatException ignored) {}
+        }
+        return def;
+    }
+
+    private boolean resolveExtraBool(String key, boolean def) {
+        String v = shortcut != null ? shortcut.getExtra(key) : null;
+        if ((v == null || v.isEmpty()) && container != null) v = container.getExtra(key);
+        if (v != null && !v.isEmpty()) return v.equals("1") || v.equalsIgnoreCase("true");
+        return def;
+    }
+
     // --- FPS / perf HUD position persistence (per game) ----------------------------------------
     // Each overlay remembers its own dragged spot across relaunch. The classic vertical/horizontal
     // orientations and the GameHub HUD use distinct keys, so flipping orientation or switching HUD
@@ -5261,20 +5308,32 @@ public class XServerDisplayActivity extends AppCompatActivity {
             ds.onCasApply = (enabled, sharpness) -> {
                 if (enabled) disableNativeRenderingForPreset();
                 vkr.setCas(enabled, sharpness);
+                persistExtraBool("casEnabled", enabled);   // remember per game (#382)
+                persistExtraInt("casSharpness", sharpness);
             };
             ds.onHdrApply = (enabled) -> {
                 if (enabled) disableNativeRenderingForPreset();
                 vkr.setHdr(enabled);
+                persistExtraBool("hdrEnabled", enabled);    // remember per game (#382)
             };
             // Terminal debanding (TPDF dither) — runs in the compositor post pass, so enabling
-            // it (like CAS/HDR) turns Native Rendering off. Default off; seed the drawer state.
-            ds.setDebandEnabled(false);
-            ds.setDebandStrength(100);
+            // it (like CAS/HDR) turns Native Rendering off. Remembered per game (#382); defaults
+            // off @100 so first launch is unchanged. Seed the renderer too so a saved value applies.
+            boolean vkDebandEnabled = resolveExtraBool("debandEnabled", false);
+            int vkDebandStrength = resolveExtraInt("debandStrength", 100);
+            ds.setDebandEnabled(vkDebandEnabled);
+            ds.setDebandStrength(vkDebandStrength);
+            if (vkDebandEnabled) vkr.setDeband(true, vkDebandStrength);
             ds.onDebandApply = (enabled, strength) -> {
                 if (enabled) disableNativeRenderingForPreset();
                 vkr.setDeband(enabled, strength);
+                persistExtraBool("debandEnabled", enabled); // remember per game (#382)
+                persistExtraInt("debandStrength", strength);
             };
-            ds.onUpscaleSharpnessApply = (sharpness) -> vkr.setUpscaleSharpness(sharpness);
+            ds.onUpscaleSharpnessApply = (sharpness) -> {
+                vkr.setUpscaleSharpness(sharpness);
+                persistExtraInt("upscaleSharpness", sharpness); // remember per game (#382)
+            };
             ds.onVulkanScreenEffectsApply = (brightness, contrast, gamma, fxaa, toon, crt, ntsc) -> {
                 // color grade neutral = brightness 0 / contrast 0 / gamma 1.0
                 if (fxaa || toon || crt || ntsc || brightness != 0f || contrast != 0f || gamma != 1.0f)
@@ -5589,14 +5648,20 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         ds.onInitGraphicsTab = () -> {};
 
-        // SGSR state
+        // SGSR state — the CAS-sharpen toggle + sharpness are remembered per game (#382); defaults
+        // (off @50) keep first launch unchanged. HDR presence stays derived from the live composer
+        // (GL HDR is not in this persistence pass — see follow-up note).
         HDREffect hdr = (HDREffect) glRenderer.getEffectComposer().getEffect(HDREffect.class);
-        ds.setSgsrEnabled(false);
-        ds.setSgsrSharpness(50);
+        boolean glSgsrEnabled = resolveExtraBool("sgsrEnabled", false);
+        int glSgsrSharpness = resolveExtraInt("sgsrSharpness", 50);
+        ds.setSgsrEnabled(glSgsrEnabled);
+        ds.setSgsrSharpness(glSgsrSharpness);
         ds.setHdrEnabled(hdr != null);
 
         ds.onSgsrUpdate = (enabled, sharpness, hdrEn) -> {
             if (glRenderer == null) return;
+            persistExtraBool("sgsrEnabled", enabled);   // remember per game (#382)
+            persistExtraInt("sgsrSharpness", sharpness);
             // Direction A: CAS sharpen / HDR are EffectComposer post passes that GL native bypasses.
             if (enabled || hdrEn) disableNativeRenderingForPreset();
             com.winlator.star.renderer.effects.FSREffect cur = (com.winlator.star.renderer.effects.FSREffect) glRenderer.getEffectComposer().getEffect(com.winlator.star.renderer.effects.FSREffect.class);
@@ -5619,6 +5684,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 glRenderer.getEffectComposer().addEffect(newHdr);
             }
         };
+        // Restore a persisted CAS-sharpen pass on relaunch (#382): replay the apply with the seeded
+        // values so the effect is actually live, not just shown in the drawer. hdrEn stays at the
+        // live composer state so this never toggles HDR. No-op when nothing was saved (default off).
+        if (glSgsrEnabled && ds.onSgsrUpdate != null)
+            ds.onSgsrUpdate.invoke(true, glSgsrSharpness, hdr != null);
 
         // GL "Scaling mode" (real SGSR / FSR1 spatial upscalers) — parity with the Vulkan
         // picker; drawer-only / session-live, default None. Seed the drawer state + a default
@@ -5629,9 +5699,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // Restore the per-game scaling mode (0-7) into the drawer picker + composer so an in-game
         // SGSR/FSR/etc. choice survives relaunch (not just the Linear/Nearest base filter).
         int glSeedMode = resolveScalingMode();
+        int glUpscaleSharpness = resolveExtraInt("glUpscaleSharpness", 75); // remembered per game (#382)
         ds.setGlUpscalerMode(glSeedMode);
-        ds.setGlUpscaleSharpness(75);
-        glRenderer.getEffectComposer().setUpscaler(glSeedMode, 0.75f);
+        ds.setGlUpscaleSharpness(glUpscaleSharpness);
+        glRenderer.getEffectComposer().setUpscaler(glSeedMode, glUpscaleSharpness / 100.0f);
         ds.onGlUpscalerApply = (mode) -> {
             if (glRenderer == null) return;
             // Direction A: a spatial scaling mode lives in the EffectComposer low-res stage, which
@@ -5647,16 +5718,23 @@ public class XServerDisplayActivity extends AppCompatActivity {
         ds.onGlUpscaleSharpnessApply = (sharpness) -> {
             if (glRenderer == null) return;
             glRenderer.getEffectComposer().setUpscaleSharpness(sharpness / 100.0f);
+            persistExtraInt("glUpscaleSharpness", sharpness); // remember per game (#382)
         };
 
-        // GL terminal debanding (TPDF dither) — drawer-only / session-live, default off.
-        ds.setDebandEnabled(false);
-        ds.setDebandStrength(100);
+        // GL terminal debanding (TPDF dither) — remembered per game (#382); defaults off @100 so
+        // first launch is unchanged. Seed the composer too so a saved value applies on relaunch.
+        boolean glDebandEnabled = resolveExtraBool("debandEnabled", false);
+        int glDebandStrength = resolveExtraInt("debandStrength", 100);
+        ds.setDebandEnabled(glDebandEnabled);
+        ds.setDebandStrength(glDebandStrength);
+        if (glDebandEnabled) glRenderer.getEffectComposer().setDeband(true, glDebandStrength);
         ds.onDebandApply = (enabled, strength) -> {
             if (glRenderer == null) return;
             // Direction A: terminal debanding is a final EffectComposer pass that GL native bypasses.
             if (enabled) disableNativeRenderingForPreset();
             glRenderer.getEffectComposer().setDeband(enabled, strength);
+            persistExtraBool("debandEnabled", enabled); // remember per game (#382)
+            persistExtraInt("debandStrength", strength);
         };
 
         // NOTE: setupTmCallbacks() is intentionally called earlier (before the GL-only early
