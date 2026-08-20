@@ -649,12 +649,38 @@ object SteamDepotDownloader {
                     // True size known → authoritative 90% check. 313830 → 130/130 passes; a real skip
                     // (HL2 405 MB of 10.66 GB) still fails.
                     if (finalInstall < (realExpected * 90L / 100L)) {
-                        dlog("INCOMPLETE: only ${fmtSize(finalInstall)} of ${fmtSize(realExpected)} " +
-                                "(manifest-true) on disk (<90%) — refusing to mark installed")
-                        emitFailed(appId, "Download incomplete (${fmtSize(finalInstall)}/${fmtSize(realExpected)}) — please retry")
-                        return
+                        // Shortfall vs the SUMMED manifest-true size. Two very different causes:
+                        //   (a) genuine truncation — a dominant depot was skipped (stale .DepotDownloader
+                        //       state), its files never landing on disk (HL2: 405 MB of an 8.4 GB depot).
+                        //   (b) OVERLAPPING DEPOTS — the app ships two+ depots with identical files, so
+                        //       the engine de-dupes and downloads each unique file ONCE (Lossless Scaling
+                        //       993090: depots 993091 ≈ 993092, so 993091 downloads 0 files / fires no
+                        //       onFileCompleted). sum(realSize) then DOUBLE-COUNTS the shared content and
+                        //       a fully complete install can never reach 90% of that inflated total (also
+                        //       why its progress bar caps ~87%).
+                        // Size totals alone can't tell (a) from (b). Decide on the ACTUAL on-disk
+                        // footprint: overlapping depots collapse to ~one copy on disk, so the install
+                        // still reaches ~the LARGEST single kept depot; a dominant-depot skip leaves it
+                        // far below even that. Require no zero-byte files too — a pre-allocated-but-
+                        // unfilled file is the fingerprint of a real skip, never of clean de-duplication.
+                        val onDisk = dirSizeBytes(installDir)
+                        val largestKept = keptRows.maxOfOrNull { it.realSizeBytes } ?: 0L
+                        val hasEmpty = hasZeroByteFile(installDir)
+                        val overlapComplete = !hasEmpty && largestKept > 0L &&
+                                onDisk >= (largestKept * 90L / 100L)
+                        if (!overlapComplete) {
+                            dlog("INCOMPLETE: ${fmtSize(finalInstall)} of ${fmtSize(realExpected)} manifest-true " +
+                                    "(<90%); on-disk ${fmtSize(onDisk)} vs largest depot ${fmtSize(largestKept)}, " +
+                                    "emptyFiles=$hasEmpty — depot content missing, refusing to mark installed")
+                            emitFailed(appId, "Download incomplete (${fmtSize(finalInstall)}/${fmtSize(realExpected)}) — please retry")
+                            return
+                        }
+                        dlog("Complete: ${fmtSize(finalInstall)} < 90% of summed manifest-true ${fmtSize(realExpected)}, " +
+                                "but on-disk ${fmtSize(onDisk)} ≥ 90% of largest depot ${fmtSize(largestKept)} with no empty " +
+                                "files — overlapping/de-duplicated depots, trusting completion")
+                    } else {
+                        dlog("Complete: ${fmtSize(finalInstall)} of ${fmtSize(realExpected)} manifest-true (≥90%)")
                     }
-                    dlog("Complete: ${fmtSize(finalInstall)} of ${fmtSize(realExpected)} manifest-true (≥90%)")
                 } else {
                     // Real size unresolved → PICS guard, RELAXED (never stricter): a genuine truncation
                     // skips a whole depot, showing up as a KEPT depot with zero bytes delivered. If every
@@ -709,6 +735,14 @@ object SteamDepotDownloader {
             }
         })
 
+        // Beta-branch selector: the branch the user chose on the detail page (default "public") plus
+        // the verified access code for a password-protected branch (null for public / unlocked-none).
+        // Ported from GameNative (GPL-3.0): SteamService AppItem(branch, branchPassword) wiring.
+        val selectedBranch = try { SteamPrefs.getSelectedBranch(appId) } catch (_: Throwable) { "public" }
+        val branchPassword: String? = if (selectedBranch != "public") {
+            try { db.getUnlockedBranchPassword(appId, selectedBranch) } catch (_: Throwable) { null }
+        } else null
+
         // DLC picker: DLC the user opted out of (appId == depot id). When non-empty we hand the
         // engine an EXPLICIT depot list (our filtered selection minus the excluded DLC) instead of
         // letting it auto-resolve — so the unchecked DLC simply isn't downloaded. Default (nothing
@@ -716,7 +750,11 @@ object SteamDepotDownloader {
         val excludedDlc = try { SteamPrefs.getExcludedDlc(appId) } catch (_: Throwable) { emptySet() }
         val explicitDepots: List<Int>
         val explicitManifests: List<Long>
-        if (excludedDlc.isNotEmpty()) {
+        // The explicit manifest gids come from our PUBLIC-branch DB rows, so they only apply to the
+        // public branch. For any other branch, hand the engine EMPTY lists so it resolves that
+        // branch's own manifests (given AppItem.branch/branchPassword). The DLC opt-out therefore
+        // only takes effect on the public branch — matching where its manifest data is valid.
+        if (excludedDlc.isNotEmpty() && selectedBranch == "public") {
             val kept = try { db.getDepotManifests(appId).filter { it.depotId !in excludedDlc && it.manifestId != 0L } }
                        catch (_: Throwable) { emptyList() }
             explicitDepots   = kept.map { it.depotId }
@@ -730,7 +768,8 @@ object SteamDepotDownloader {
         val item = AppItem(
             appId = appId,
             installDirectory = installDir.absolutePath,
-            branch = "public",
+            branch = selectedBranch,
+            branchPassword = branchPassword,
             // Explicitly request Windows depots — don't let Util.getSteamOS() guess,
             // since androidEmulation only works if IS_OS_ANDROID is true at runtime.
             os = "windows",
@@ -741,7 +780,9 @@ object SteamDepotDownloader {
             depot = explicitDepots,
             manifest = explicitManifests,
         )
-        dlog("Adding AppItem: appId=${item.appId} branch=${item.branch} dir=${item.installDirectory}" +
+        dlog("Adding AppItem: appId=${item.appId} branch=${item.branch}" +
+             (if (branchPassword != null) " (pwd-protected)" else "") +
+             " dir=${item.installDirectory}" +
              if (explicitDepots.isNotEmpty()) " depots=${explicitDepots.size}(explicit)" else "")
         downloader.add(item)
         downloader.finishAdding()
@@ -881,4 +922,19 @@ object SteamDepotDownloader {
         bytes >= 1_048_576L     -> "%.1f MB".format(bytes / 1_048_576.0)
         else                    -> "%.0f KB".format(bytes / 1024.0)
     }
+
+    /** Recursive on-disk byte total for a completed install (real footprint, dedup already applied
+     *  by the filesystem — used by the false-complete guard's overlapping-depot branch). */
+    private fun dirSizeBytes(f: File): Long =
+        when {
+            !f.exists() -> 0L
+            f.isFile    -> f.length()
+            else        -> f.listFiles()?.sumOf { dirSizeBytes(it) } ?: 0L
+        }
+
+    /** True if any regular file under [root] is zero-length — the signature of a pre-allocated but
+     *  unfilled file left by a genuinely-skipped/truncated depot (distinguishes a real skip from a
+     *  legitimately de-duplicated overlapping depot, whose files are all present and non-empty). */
+    private fun hasZeroByteFile(root: File): Boolean =
+        root.walkTopDown().any { it.isFile && it.length() == 0L }
 }
