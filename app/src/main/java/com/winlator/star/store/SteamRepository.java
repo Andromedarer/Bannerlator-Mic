@@ -73,6 +73,21 @@ public final class SteamRepository {
     private static final String PREFS_NAME = "steam_prefs";
 
     // -------------------------------------------------------------------------
+    // Library type-filter exceptions
+    // -------------------------------------------------------------------------
+    // Steam apps are normally shown only when their PICS common.type == "game"
+    // (see the sync-time blocklist in processApps() and the display filter in
+    // SteamGamesActivity.loadGames()). A few non-"game" apps are still worth
+    // surfacing — e.g. utilities the user genuinely wants to run in a container.
+    // Any appId in this set bypasses BOTH filters: it is ingested even if its
+    // type is normally skipped (tool/hardware/etc.) AND shown in the library
+    // list even though its type isn't "game". Add specific appIds here.
+    //   993090 = Lossless Scaling
+    public static final java.util.Set<Integer> LIBRARY_ALLOWLIST =
+        java.util.Collections.unmodifiableSet(new java.util.HashSet<>(
+            java.util.Arrays.asList(993090)));
+
+    // -------------------------------------------------------------------------
     // Singleton
     // -------------------------------------------------------------------------
 
@@ -965,13 +980,16 @@ public final class SteamRepository {
                         KeyValue common = root.get("common");
                         // "type" is absent on some entries (tools, hardware, etc.) — skip those
                         String type = kvStr(common.get("type")).toLowerCase();
+                        // Allowlisted appIds bypass the type filter entirely (see LIBRARY_ALLOWLIST).
+                        boolean allowlisted = LIBRARY_ALLOWLIST.contains(app.getId());
                         // Skip non-playable app types
-                        if ("tool".equals(type) || "hardware".equals(type)
+                        if (!allowlisted
+                                && ("tool".equals(type) || "hardware".equals(type)
                                 || "music".equals(type) || "video".equals(type)
-                                || "advertising".equals(type)) continue;
+                                || "advertising".equals(type))) continue;
                         // Accept "game", "dlc", "application", "demo", "beta", ""
                         // Empty type means PICS didn't return common section — skip
-                        if (type.isEmpty()) continue;
+                        if (type.isEmpty() && !allowlisted) continue;
 
                         String name       = kvStr(common.get("name"));
                         String icon       = kvStr(common.get("icon"));
