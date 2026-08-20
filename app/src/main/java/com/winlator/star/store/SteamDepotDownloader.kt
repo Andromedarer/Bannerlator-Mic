@@ -649,12 +649,28 @@ object SteamDepotDownloader {
                     // True size known → authoritative 90% check. 313830 → 130/130 passes; a real skip
                     // (HL2 405 MB of 10.66 GB) still fails.
                     if (finalInstall < (realExpected * 90L / 100L)) {
-                        dlog("INCOMPLETE: only ${fmtSize(finalInstall)} of ${fmtSize(realExpected)} " +
-                                "(manifest-true) on disk (<90%) — refusing to mark installed")
-                        emitFailed(appId, "Download incomplete (${fmtSize(finalInstall)}/${fmtSize(realExpected)}) — please retry")
-                        return
+                        // Shortfall vs manifest-true size. This is a genuine truncation ONLY if a whole
+                        // kept depot was SKIPPED (the HL2 405MB-of-8.4GB case: the main depot delivers
+                        // nothing). If every kept depot delivered bytes, the gap is a size-accounting
+                        // over-count — the manifest's logical uncompressed total counts chunk-deduped /
+                        // shared files at full size while only unique chunks land on disk (proven:
+                        // Lossless Scaling 993090 = 303.7 MB real / 458 files, 0 zero-byte, vs 348.6 MB
+                        // manifest-true; all 3 depots delivered). Mirror the PICS branch's relaxation:
+                        // trust the engine's completion rather than false-fail a complete install.
+                        val selectedDepots: List<Int> = keptRows.map { it.depotId }
+                        val everyDepotDelivered = selectedDepots.isNotEmpty() &&
+                                selectedDepots.all { (installByDepot[it] ?: 0L) > 0L }
+                        if (!everyDepotDelivered) {
+                            dlog("INCOMPLETE: only ${fmtSize(finalInstall)} of ${fmtSize(realExpected)} " +
+                                    "(manifest-true) on disk (<90%) and a kept depot delivered nothing — refusing to mark installed")
+                            emitFailed(appId, "Download incomplete (${fmtSize(finalInstall)}/${fmtSize(realExpected)}) — please retry")
+                            return
+                        }
+                        dlog("Complete: ${fmtSize(finalInstall)} < 90% of manifest-true ${fmtSize(realExpected)} but all " +
+                                "${selectedDepots.size} kept depot(s) delivered — trusting completion (size over-count / chunk dedup)")
+                    } else {
+                        dlog("Complete: ${fmtSize(finalInstall)} of ${fmtSize(realExpected)} manifest-true (≥90%)")
                     }
-                    dlog("Complete: ${fmtSize(finalInstall)} of ${fmtSize(realExpected)} manifest-true (≥90%)")
                 } else {
                     // Real size unresolved → PICS guard, RELAXED (never stricter): a genuine truncation
                     // skips a whole depot, showing up as a KEPT depot with zero bytes delivered. If every
