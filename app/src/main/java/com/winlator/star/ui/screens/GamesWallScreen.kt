@@ -11,7 +11,12 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -58,6 +63,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -107,6 +113,8 @@ import com.winlator.star.container.Shortcut
 import com.winlator.star.core.AppOrientation
 import com.winlator.star.communityconfigs.CommunityConfigApply
 import com.winlator.star.store.DownloadManagerActivity
+import com.winlator.star.ui.AccountAvatar
+import com.winlator.star.ui.AccountUiBus
 import com.winlator.star.ui.Screen
 import com.winlator.star.ui.findActivity
 import kotlinx.coroutines.Dispatchers
@@ -162,6 +170,14 @@ fun GamesWallScreen(navController: NavController) {
     val vm: ShortcutsViewModel = viewModel()
     var showCommunity by remember { mutableStateOf(false) }
     var showAccount by remember { mutableStateOf(false) }
+
+    // Optional community account — the brand in the header shows the user's avatar + username when signed
+    // in (tap → the same MyAccountDialog the phone library uses), and the app logo + "Bannerlator" when
+    // logged out. AccountUiBus mirrors AccountManager as Compose state and MyAccountDialog refreshes it on
+    // every login/logout/avatar change, so the header swaps live. Refresh once on entry to pick up an
+    // existing session.
+    LaunchedEffect(Unit) { AccountUiBus.refresh(context) }
+    val account = AccountUiBus.account
     var applyResult by remember { mutableStateOf<CommunityConfigApply.ConfigApplyResult?>(null) }
 
     // Decoded covers keyed by shortcut name; a plain in-flight set stops duplicate fetches. A name that
@@ -379,6 +395,9 @@ fun GamesWallScreen(navController: NavController) {
                 searchFocusRequester = searchFocus,
                 onSearchFocusChanged = { searchFocused = it },
                 onSearchBack = { keyboard?.hide(); grabFocus() },
+                avatarUrl = account?.displayAvatarUrl,
+                username = account?.username,
+                onBrandClick = { showAccount = true },
             )
 
             Row(modifier = Modifier.fillMaxWidth().weight(1f)) {
@@ -495,7 +514,7 @@ fun GamesWallScreen(navController: NavController) {
         )
     }
     if (showAccount) {
-        MyAccountDialog(vm = vm, onDismiss = { showAccount = false }, onOpenMyUploads = { showAccount = false }, onLoggedIn = {})
+        MyAccountDialog(vm = vm, onDismiss = { showAccount = false; AccountUiBus.refresh(context) }, onOpenMyUploads = { showAccount = false }, onLoggedIn = { AccountUiBus.refresh(context) })
     }
     applyResult?.let { res ->
         AlertDialog(
@@ -518,6 +537,9 @@ private fun WallHeader(
     searchFocusRequester: FocusRequester,
     onSearchFocusChanged: (Boolean) -> Unit,
     onSearchBack: () -> Unit,
+    avatarUrl: String?,
+    username: String?,
+    onBrandClick: () -> Unit,
 ) {
     val accent = MaterialTheme.colorScheme.primary
     Row(
@@ -528,13 +550,34 @@ private fun WallHeader(
             .padding(horizontal = 26.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Brand: orange bolt square + wordmark.
-        Box(
-            modifier = Modifier.size(30.dp).clip(RoundedCornerShape(8.dp)).background(accent),
-            contentAlignment = Alignment.Center,
-        ) { Icon(Icons.Filled.Bolt, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp)) }
-        Spacer(Modifier.width(12.dp))
-        Text("Bannerlator", color = TXT, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold)
+        // Brand doubles as the account entry point: the user's avatar + username when signed in, the app
+        // logo (bolt) + "Bannerlator" when logged out. Tapping either opens the My-account sheet (login /
+        // create / logout / profile).
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .clickable(onClick = onBrandClick)
+                .padding(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (!avatarUrl.isNullOrBlank()) {
+                AccountAvatar(avatarUrl = avatarUrl, size = 30.dp)
+            } else {
+                Box(
+                    modifier = Modifier.size(30.dp).clip(RoundedCornerShape(8.dp)).background(accent),
+                    contentAlignment = Alignment.Center,
+                ) { Icon(Icons.Filled.Bolt, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp)) }
+            }
+            Spacer(Modifier.width(12.dp))
+            Text(
+                username?.takeIf { it.isNotBlank() } ?: "Bannerlator",
+                color = TXT,
+                fontSize = 19.sp,
+                fontWeight = FontWeight.ExtraBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
 
         Spacer(Modifier.width(26.dp))
         // Search pill.
@@ -809,15 +852,32 @@ private fun GlyphHint(glyph: String, bg: Color, fg: Color, label: String) {
 
 private data class WallSheetRow(val icon: androidx.compose.ui.graphics.vector.ImageVector, val label: String, val onClick: () -> Unit)
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun WallSheetScaffold(title: String, rows: List<WallSheetRow>, onDismiss: () -> Unit) {
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+    val cs = MaterialTheme.colorScheme
+    val sheetShape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = cs.surfaceContainer,
+        shape = sheetShape,
+    ) {
         var focusIndex by remember { mutableStateOf(0) }
         val fr = remember { FocusRequester() }
         LaunchedEffect(Unit) { runCatching { fr.requestFocus() } }
+        // The sheet is a plain Column, so on a short landscape screen the lower rows fell below the fold
+        // with no way to reach them (no touch scroll, and D-pad focus walked off-screen). verticalScroll
+        // restores touch scrolling; the BringIntoViewRequester keeps the D-pad-focused row on-screen.
+        val scrollState = rememberScrollState()
+        val bringers = remember(rows.size) { List(rows.size) { BringIntoViewRequester() } }
+        LaunchedEffect(focusIndex) { runCatching { bringers.getOrNull(focusIndex)?.bringIntoView() } }
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                // App-menu outline — matches Modifier.outlinedMenuCard() / OutlinedAlertDialog (1dp outline).
+                .border(1.dp, cs.outline, sheetShape)
+                .verticalScroll(scrollState)
                 .padding(bottom = 24.dp)
                 .focusRequester(fr)
                 .focusable()
@@ -832,19 +892,23 @@ private fun WallSheetScaffold(title: String, rows: List<WallSheetRow>, onDismiss
                     }
                 },
         ) {
-            Text(title, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp))
+            Text(title, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = cs.onSurface, modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp))
+            HorizontalDivider(color = cs.outline, thickness = 1.dp)
             rows.forEachIndexed { i, r ->
+                // Thin grey line between options, matching the app's menus.
+                if (i > 0) HorizontalDivider(color = cs.outline, thickness = 1.dp)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .then(if (i == focusIndex) Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)) else Modifier)
+                        .bringIntoViewRequester(bringers[i])
+                        .then(if (i == focusIndex) Modifier.background(cs.primary.copy(alpha = 0.18f)) else Modifier)
                         .clickable(onClick = r.onClick)
                         .padding(horizontal = 24.dp, vertical = 16.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(r.icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Icon(r.icon, contentDescription = null, tint = cs.primary)
                     Spacer(Modifier.width(16.dp))
-                    Text(r.label, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
+                    Text(r.label, fontSize = 16.sp, color = cs.onSurface)
                 }
             }
         }
