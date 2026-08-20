@@ -34,6 +34,7 @@ import in.dragonbra.javasteam.steam.handlers.steamapps.License;
 import in.dragonbra.javasteam.steam.handlers.steamapps.PICSProductInfo;
 import in.dragonbra.javasteam.steam.handlers.steamapps.PICSRequest;
 import in.dragonbra.javasteam.steam.handlers.steamapps.SteamApps;
+import in.dragonbra.javasteam.steam.handlers.steamapps.callback.CheckAppBetaPasswordCallback;
 import in.dragonbra.javasteam.steam.handlers.steamapps.callback.DepotKeyCallback;
 import in.dragonbra.javasteam.steam.handlers.steamapps.callback.LicenseListCallback;
 import in.dragonbra.javasteam.steam.handlers.steamapps.callback.PICSProductInfoCallback;
@@ -1138,6 +1139,28 @@ public final class SteamRepository {
                             }
                         }
 
+                        // Beta branches — depots/branches/* (skipped by the numeric-name depot loop
+                        // above). Each child is a branch: name = branch id ("public", "beta", …) with
+                        // sub-keys pwdrequired (0/1), buildid, timeupdated, description. Clear the app's
+                        // prior rows first, then upsert each so removed branches don't linger. Drives
+                        // the detail-page branch selector.
+                        db.clearBranches(app.getId());
+                        List<KeyValue> branchChildren = depotsKv.get("branches").getChildren();
+                        if (branchChildren != null) {
+                            for (KeyValue b : branchChildren) {
+                                String branchName = b.getName();
+                                if (branchName == null || branchName.isEmpty()) continue;
+                                boolean pwdReq = "1".equals(kvStr(b.get("pwdrequired")).trim());
+                                long buildId = 0L, timeUpdated = 0L;
+                                try { buildId = Long.parseLong(kvStr(b.get("buildid")).trim()); }
+                                catch (NumberFormatException ignored) {}
+                                try { timeUpdated = Long.parseLong(kvStr(b.get("timeupdated")).trim()); }
+                                catch (NumberFormatException ignored) {}
+                                db.upsertBranch(app.getId(), branchName, pwdReq, buildId, timeUpdated,
+                                        kvStr(b.get("description")));
+                            }
+                        }
+
                         // Stash the compressed (network) total in memory for the dual-color
                         // download/install progress bar. Not persisted (avoids a schema change);
                         // a cache miss on a later session falls back to an estimate.
@@ -1423,6 +1446,62 @@ public final class SteamRepository {
     public SteamDatabase getDatabase() {
         if (appContext != null) return SteamDatabase.getInstance(appContext);
         return SteamDatabase.getInstance();
+    }
+
+    // -------------------------------------------------------------------------
+    // Beta-branch selector
+    // -------------------------------------------------------------------------
+
+    /** All known beta branches for an app (public-first). Empty = no branch data parsed yet. */
+    public List<SteamDatabase.BranchRow> getBranches(int appId) {
+        return getDatabase().getBranches(appId);
+    }
+
+    /**
+     * Branches the user can actually select right now: every public (no-password) branch plus any
+     * password-protected branch already unlocked via {@link #checkBranchPassword}. "public" is
+     * always present in Steam's branch list, so it is included as the default.
+     */
+    public List<SteamDatabase.BranchRow> getSelectableBranches(int appId) {
+        SteamDatabase db = getDatabase();
+        List<String> unlocked = db.getUnlockedBranchNames(appId);
+        List<SteamDatabase.BranchRow> out = new java.util.ArrayList<>();
+        for (SteamDatabase.BranchRow b : db.getBranches(appId)) {
+            if (!b.pwdRequired || unlocked.contains(b.branchName)) out.add(b);
+        }
+        return out;
+    }
+
+    /**
+     * Verify a beta access code against Steam and persist every branch it unlocks. BLOCKS on a CM
+     * round-trip (JavaSteam SteamApps.checkAppBetaPassword) — call OFF the main thread (e.g. via
+     * {@link #submitLibraryWork} or a background coroutine). Returns true when at least one branch
+     * was unlocked. Steam returns every beta password valid for the app in one response, so a single
+     * correct code can unlock multiple branches at once.
+     *
+     * Ported from GameNative (GPL-3.0): app/gamenative/service/SteamService.checkPrivateBranchPassword.
+     */
+    public boolean checkBranchPassword(int appId, String password) {
+        SteamApps sa = steamApps;
+        if (sa == null || password == null || password.isEmpty()) return false;
+        try {
+            CheckAppBetaPasswordCallback cb = sa.checkAppBetaPassword(appId, password)
+                    .toFuture().get(30, java.util.concurrent.TimeUnit.SECONDS);
+            if (cb != null && cb.getResult() == EResult.OK && !cb.getBetaPasswords().isEmpty()) {
+                SteamDatabase db = getDatabase();
+                for (String branchName : cb.getBetaPasswords().keySet()) {
+                    db.insertUnlockedBranch(appId, branchName, password);
+                }
+                Log.i(TAG, "checkBranchPassword: app " + appId + " unlocked "
+                        + cb.getBetaPasswords().keySet());
+                return true;
+            }
+            Log.i(TAG, "checkBranchPassword: app " + appId + " rejected (result="
+                    + (cb != null ? cb.getResult() : "null") + ")");
+        } catch (Exception e) {
+            Log.w(TAG, "checkBranchPassword failed for app " + appId + ": " + e.getMessage());
+        }
+        return false;
     }
 
     public String getUsername()     { return pGet("username", ""); }

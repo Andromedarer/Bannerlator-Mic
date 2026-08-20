@@ -735,6 +735,14 @@ object SteamDepotDownloader {
             }
         })
 
+        // Beta-branch selector: the branch the user chose on the detail page (default "public") plus
+        // the verified access code for a password-protected branch (null for public / unlocked-none).
+        // Ported from GameNative (GPL-3.0): SteamService AppItem(branch, branchPassword) wiring.
+        val selectedBranch = try { SteamPrefs.getSelectedBranch(appId) } catch (_: Throwable) { "public" }
+        val branchPassword: String? = if (selectedBranch != "public") {
+            try { db.getUnlockedBranchPassword(appId, selectedBranch) } catch (_: Throwable) { null }
+        } else null
+
         // DLC picker: DLC the user opted out of (appId == depot id). When non-empty we hand the
         // engine an EXPLICIT depot list (our filtered selection minus the excluded DLC) instead of
         // letting it auto-resolve — so the unchecked DLC simply isn't downloaded. Default (nothing
@@ -742,7 +750,11 @@ object SteamDepotDownloader {
         val excludedDlc = try { SteamPrefs.getExcludedDlc(appId) } catch (_: Throwable) { emptySet() }
         val explicitDepots: List<Int>
         val explicitManifests: List<Long>
-        if (excludedDlc.isNotEmpty()) {
+        // The explicit manifest gids come from our PUBLIC-branch DB rows, so they only apply to the
+        // public branch. For any other branch, hand the engine EMPTY lists so it resolves that
+        // branch's own manifests (given AppItem.branch/branchPassword). The DLC opt-out therefore
+        // only takes effect on the public branch — matching where its manifest data is valid.
+        if (excludedDlc.isNotEmpty() && selectedBranch == "public") {
             val kept = try { db.getDepotManifests(appId).filter { it.depotId !in excludedDlc && it.manifestId != 0L } }
                        catch (_: Throwable) { emptyList() }
             explicitDepots   = kept.map { it.depotId }
@@ -756,7 +768,8 @@ object SteamDepotDownloader {
         val item = AppItem(
             appId = appId,
             installDirectory = installDir.absolutePath,
-            branch = "public",
+            branch = selectedBranch,
+            branchPassword = branchPassword,
             // Explicitly request Windows depots — don't let Util.getSteamOS() guess,
             // since androidEmulation only works if IS_OS_ANDROID is true at runtime.
             os = "windows",
@@ -767,7 +780,9 @@ object SteamDepotDownloader {
             depot = explicitDepots,
             manifest = explicitManifests,
         )
-        dlog("Adding AppItem: appId=${item.appId} branch=${item.branch} dir=${item.installDirectory}" +
+        dlog("Adding AppItem: appId=${item.appId} branch=${item.branch}" +
+             (if (branchPassword != null) " (pwd-protected)" else "") +
+             " dir=${item.installDirectory}" +
              if (explicitDepots.isNotEmpty()) " depots=${explicitDepots.size}(explicit)" else "")
         downloader.add(item)
         downloader.finishAdding()
