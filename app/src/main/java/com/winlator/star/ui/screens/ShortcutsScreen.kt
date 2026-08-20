@@ -5,6 +5,7 @@ package com.winlator.star.ui.screens
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.content.SharedPreferences
 import android.content.pm.ShortcutInfo
 import android.content.pm.ShortcutManager
@@ -85,6 +86,10 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.SportsEsports
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Help
@@ -173,6 +178,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -253,6 +259,12 @@ import com.winlator.star.ui.components.AudioSettingsDialog
 import com.winlator.star.ui.components.audioConfigFromEnv
 import com.winlator.star.ui.components.audioConfigToEnv
 import com.winlator.star.ui.components.PlayerSlotsEditor
+import com.winlator.star.ui.components.CollapsibleRail
+import com.winlator.star.ui.components.RailItem
+import com.winlator.star.ui.components.RailLink
+import com.winlator.star.ui.components.RailSection
+import com.winlator.star.ui.components.RailTopTabs
+import com.winlator.star.ui.components.rememberRailState
 import com.winlator.star.winhandler.WinHandler
 import android.net.Uri
 import android.os.Build
@@ -5837,7 +5849,9 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
 
     // Tab
     var selectedTab by remember { mutableIntStateOf(0) }
-    val tabTitles = listOf("Win Components", "Env Vars", "Advanced")
+    // Tab positions: General(0), Win Components(1), Env Vars(2), Advanced(3), Controller(4). The old
+    // top "general" scrolling block became the General tab; its controller half became Controller.
+    val tabTitles = listOf("General", "Win Components", "Env Vars", "Advanced", "Controller")
 
     // Icon picker
     fun applyIconFromUri(uri: Uri) {
@@ -6049,31 +6063,41 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
 
     // The ORDERED, currently-visible focusable ids (mirrors the render conditionals below). Rebuilt each
     // recomposition so conditional rows (custom W/H, SF/Vulkan blocks, refresh, MIDI, gyro block) drop in
-    // and out of the D-pad order automatically. Tab content is touch-navigable (see report) — the tab ROW
-    // itself is here so Left/Right switches tabs and the whole top form + OK/Cancel are controller-driven.
+    // and out of the D-pad order automatically. Now that each tab is its own screen, only the SELECTED
+    // tab's controls are in the order — the tab selector ("tabs", Left/Right switches tabs) plus the
+    // title-close and OK/Cancel are always present. Tab content on Win/Env/Advanced is touch-navigable.
     val dpadIds = buildList {
-        add("titleX"); add("name"); add("execArgs"); add("screenSize")
-        if (selectedScreenSize == "Custom") { add("customW"); add("customH") }
-        add("selectIcon"); add("gfxDriver"); add("gfxWrapper"); add("gfxConfig")
-        add("dxWrapper"); add("dxConfig"); add("renderer")
-        if (selectedRenderer == "SurfaceFlinger") add("sfCompat")
-        if (selectedRenderer == "Vulkan") { add("vkNative"); add("vkColors"); add("vkPresent") }
-        add("renderScale")
-        if (panelRates.isNotEmpty()) add("refresh")
-        add("frameGen"); add("fpsLimiter"); add("audio"); add("emulator")
-        if (midiList.isNotEmpty()) add("midi")
-        add("lcAll"); add("fullscreen"); add("autoClose")
-        add("enableXInput"); add("enableDInput"); add("exclusiveXInput"); add("disableXInput"); add("simTouch"); add("numControllers")
-        add("gyroEnabled")
-        if (gyroEnabled) {
-            add("gyroMode"); add("gyroTarget"); add("gyroActivator")
-            if (gyroActivator != Container.GYRO_ACTIVATOR_ALWAYS) add("gyroActivationMode")
-            add("gyroSensitivity"); add("gyroInvertX"); add("gyroInvertY")
+        add("titleX")
+        when (selectedTab) {
+            0 -> { // General
+                add("name"); add("execArgs"); add("screenSize")
+                if (selectedScreenSize == "Custom") { add("customW"); add("customH") }
+                add("selectIcon"); add("gfxDriver"); add("gfxWrapper"); add("gfxConfig")
+                add("dxWrapper"); add("dxConfig"); add("renderer")
+                if (selectedRenderer == "SurfaceFlinger") add("sfCompat")
+                if (selectedRenderer == "Vulkan") { add("vkNative"); add("vkColors"); add("vkPresent") }
+                add("renderScale")
+                if (panelRates.isNotEmpty()) add("refresh")
+                add("frameGen"); add("fpsLimiter"); add("audio"); add("emulator")
+                if (midiList.isNotEmpty()) add("midi")
+                add("lcAll"); add("fullscreen"); add("autoClose")
+            }
+            4 -> { // Controller
+                add("enableXInput"); add("enableDInput"); add("exclusiveXInput"); add("disableXInput"); add("simTouch"); add("numControllers")
+                add("gyroEnabled")
+                if (gyroEnabled) {
+                    add("gyroMode"); add("gyroTarget"); add("gyroActivator")
+                    if (gyroActivator != Container.GYRO_ACTIVATOR_ALWAYS) add("gyroActivationMode")
+                    add("gyroSensitivity"); add("gyroInvertX"); add("gyroInvertY")
+                }
+            }
         }
         add("tabs"); add("cancel"); add("ok")
     }
     // Seed the root focus so the editor receives D-pad from the first frame (it's its own Dialog window).
     LaunchedEffect(Unit) { runCatching { dp.rootFocus.requestFocus() } }
+
+    val isPortrait = LocalConfiguration.current.orientation == Configuration.ORIENTATION_PORTRAIT
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -6101,11 +6125,20 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                 }
                 Divider(color = DividerColor)
 
-                // Scrollable content
-                Column(
-                    modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
+                // Scrollable tab content — ONE region shared by both orientations (portrait pins the
+                // tab strip above it; landscape puts the rail beside it). Scrolls internally so the
+                // Cancel/OK footer stays pinned. Branch labels are tab indices: General(0),
+                // Win Components(1), Env Vars(2), Advanced(3), Controller(4). General and Controller are
+                // authored next to each other because both came from the old single top form; the
+                // Controller TAB sits last (index 4).
+                val contentScroll = rememberScrollState()
+                val mainContent: @Composable () -> Unit = {
+                    Column(
+                        modifier = Modifier.fillMaxSize().verticalScroll(contentScroll).padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        when (selectedTab) {
+                            0 -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     // Name
                     DpField(
                         dp, "name",
@@ -6689,7 +6722,8 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                         DpCheck(dp, "autoClose", checked = autoCloseOnExit, onCheckedChange = { autoCloseOnExit = it })
                         Text("Close when game exits")
                     }
-
+                            }
+                            4 -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     // Input section
                     SectionBox(title = "Input") {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -6928,24 +6962,8 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                         }
                     }
 
-                    // Tabs — the tab ROW is one focusable node; Left/Right (while it's focused) switches
-                    // tabs. Tab CONTENT below is touch-navigable (deferred — see report).
-                    DpTabs(dp, "tabs", selected = selectedTab, count = tabTitles.size, onSelect = { selectedTab = it }) {
-                        TabRow(selectedTabIndex = selectedTab) {
-                            tabTitles.forEachIndexed { index, title ->
-                                Tab(
-                                    selected = selectedTab == index,
-                                    onClick = { selectedTab = index },
-                                    text = { Text(title) }
-                                )
                             }
-                        }
-                    }
-                    Spacer(Modifier.height(4.dp))
-
-                    // Tab content
-                    when (selectedTab) {
-                        0 -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            1 -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             RecommendedComponentsSection(
                                 container = shortcut.container,
                                 exeFile = gameExe,
@@ -6954,8 +6972,8 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                             )
                             ScWinComponentsTab(winComponents)
                         }
-                        1 -> ScEnvVarsTab(envVarsStr, { envVarsStr = it }, gameDir)
-         2 -> ScAdvancedTab(
+                            2 -> ScEnvVarsTab(envVarsStr, { envVarsStr = it }, gameDir)
+                            3 -> ScAdvancedTab(
             isArm64EC = isArm64EC,
             box64Versions = box64Versions,
             selectedBox64Version = selectedBox64Version,
@@ -7000,6 +7018,41 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
             onShowBox64DownloadSheet = { showBox64DownloadSheet = true },
             onShowFexCoreDownloadSheet = { showFexCoreDownloadSheet = true }
         )
+                        }
+                    }
+                }
+
+                // ── Responsive tab layout ────────────────────────────────────────────────────────
+                // Portrait: the tab strip is pinned across the TOP (mirrors the container editor's
+                // top tab bar via the shared RailTopTabs). Landscape: the shared collapsible left rail
+                // beside the content. Left/Right on the focused "tabs" node still switches tabs for
+                // D-pad/controller users in both orientations.
+                val railState = rememberRailState("shortcut")
+                val railItems = tabTitles.mapIndexed { index, tab ->
+                    RailItem(tab, shortcutTabIcon(tab), index == selectedTab) { selectedTab = index }
+                }
+                // Same "What is all this?" glossary link the container editor surfaces on its rail.
+                val railLinks = listOf(RailLink("What is all this?", Icons.Filled.Help) { glossaryQuery = "" })
+                if (isPortrait) {
+                    Column(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                        DpTabs(dp, "tabs", selected = selectedTab, count = tabTitles.size, onSelect = { selectedTab = it }) {
+                            RailTopTabs(items = railItems, links = railLinks)
+                        }
+                        // Weighted so the internally-scrolling content takes exactly the space left
+                        // between the pinned tab strip and the pinned footer (never overflows it).
+                        Box(modifier = Modifier.weight(1f).fillMaxWidth()) { mainContent() }
+                    }
+                } else {
+                    Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                        DpTabs(dp, "tabs", selected = selectedTab, count = tabTitles.size, onSelect = { selectedTab = it }) {
+                            CollapsibleRail(
+                                state = railState,
+                                title = shortcut.name,
+                                links = railLinks,
+                                sections = listOf(RailSection(header = null, items = railItems)),
+                            )
+                        }
+                        Column(modifier = Modifier.weight(1f).fillMaxHeight()) { mainContent() }
                     }
                 }
 
@@ -7102,6 +7155,17 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
         )
     }
     } // settings Dialog
+}
+
+/** The Material icon for each shortcut-settings tab (mirrors the container editor's tabIcon glyphs;
+ *  Controller gets a gamepad). Used by both the portrait top bar and the landscape rail. */
+private fun shortcutTabIcon(title: String): ImageVector = when (title) {
+    "General" -> Icons.Filled.Settings
+    "Win Components" -> Icons.Filled.Widgets
+    "Env Vars" -> Icons.Filled.Extension
+    "Advanced" -> Icons.Filled.Tune
+    "Controller" -> Icons.Filled.SportsEsports
+    else -> Icons.Filled.Settings
 }
 
 @Composable
