@@ -6104,7 +6104,13 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Surface(
-            modifier = Modifier.fillMaxWidth(0.95f).fillMaxHeight(0.92f)
+            // A DEFINITE height (not fillMaxHeight fraction): inside a Dialog the window height is
+            // effectively unbounded, so fillMaxHeight(fraction) silently no-ops and the Surface
+            // wrapped its content — which left a dead band under the footer and kept the weighted
+            // content from expanding. A concrete dp height propagates bounded constraints, so the
+            // inner Column fills it and the footer pins flush to the bottom, mirroring the top bar.
+            modifier = Modifier.fillMaxWidth(0.95f)
+                .height((LocalConfiguration.current.screenHeightDp * 0.92f).dp)
                 .settingsDpad(dp, { dpadIds }, onDismiss),
             shape = MaterialTheme.shapes.large,
             color = MaterialTheme.colorScheme.surface,
