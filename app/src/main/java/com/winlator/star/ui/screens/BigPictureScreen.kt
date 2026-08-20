@@ -1499,7 +1499,9 @@ private fun playtimeStats(context: Context, name: String): Pair<Int, String> {
 }
 
 // Resolve a cover: existing custom art first, then a SteamGridDB grid (persisted as the custom cover).
-private fun loadCover(s: Shortcut): ImageBitmap? {
+// `internal` (not `private`) so the Games-wall screen (GamesWallScreen.kt) reuses the exact same
+// local-first → SteamGridDB resolution instead of forking a second copy.
+internal fun loadCover(s: Shortcut): ImageBitmap? {
     val custom = s.customCoverArtPath
     if (!custom.isNullOrEmpty()) {
         val f = File(custom)
@@ -1524,7 +1526,8 @@ private fun loadCover(s: Shortcut): ImageBitmap? {
     }
 }
 
-private fun runShortcut(activity: Activity, shortcut: Shortcut) {
+// `internal` so the Games-wall screen launches games through the identical entry point.
+internal fun runShortcut(activity: Activity, shortcut: Shortcut) {
     if (!XrActivity.isEnabled(activity)) {
         val intent = Intent(activity, XServerDisplayActivity::class.java).apply {
             putExtra("container_id", shortcut.container.id)

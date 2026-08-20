@@ -21,8 +21,8 @@ import com.winlator.star.ui.screens.FileManagerScreen
 import com.winlator.star.ui.screens.FragmentScreen
 import com.winlator.star.ui.screens.SavesScreen
 import com.winlator.star.ui.screens.InputControlsScreen
+import com.winlator.star.ui.screens.GamesWallScreen
 import com.winlator.star.ui.screens.SettingsScreen
-import com.winlator.star.ui.screens.ShortcutsScreen
 import com.winlator.star.ui.screens.WrapperManagerScreen
 import com.winlator.star.store.SaveManagerScreen
 
@@ -67,7 +67,10 @@ fun AppNavGraph(
         }
 
         composable(Screen.Games.route) {
-            ShortcutsScreen()
+            // The main library is now the landscape-locked couch "games wall" (GamesWallScreen). The old
+            // phone-grid ShortcutsScreen is kept in the module — its dialogs/sheets are reused by both
+            // Big Picture screens and the games wall — but is no longer the Games destination.
+            GamesWallScreen(navController = navController)
         }
 
         composable(Screen.Contents.route) {
