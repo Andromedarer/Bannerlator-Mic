@@ -359,14 +359,18 @@ internal object DllOverrides {
         dlls.fold(overrides) { acc, dll -> disable(acc, baseline, dll) }
 
     /**
-     * The value to restore to when the toggle is switched off later in this session.
-     * If the option is already on when the editor opens, a previous session wrote those
-     * signature entries, so they are stripped from the baseline — otherwise the toggle
-     * could never be switched back off. (A hand-written override that happens to be
-     * byte-identical to our signature is indistinguishable from ours and shares that fate.)
+     * The user-authored value a toggle restores to when switched off: everything the editor
+     * found EXCEPT our own signature entries. Those markers — written by a previous session
+     * or earlier in this one — are ours, not user intent, and are ALWAYS stripped. The old
+     * code only stripped them when the whole safe-list was on, so a lone `version=n,b` (the
+     * common single-proxy case) stayed in the baseline and switching it off just restored it,
+     * leaving the toggle stuck on. Now toggling a DLL off deletes its entry outright (master
+     * off deletes every entry it added), while a hand-written builtin-first or grouped entry
+     * is preserved and comes back intact. A hand-written override byte-identical to our
+     * signature is indistinguishable from ours and shares their fate.
      */
     fun baselineOf(overrides: String): String =
-        if (isEnabled(overrides)) render(parse(overrides).filterNot { isSignature(it) }) else overrides
+        render(parse(overrides).filterNot { isSignature(it) })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
