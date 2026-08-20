@@ -7078,16 +7078,22 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                     DpButton(dp, "cancel", onActivate = onDismiss, onRightId = "ok") {
                         TextButton(
                             onClick = onDismiss,
-                            modifier = Modifier.heightIn(min = 32.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                            // Definite height overrides TextButton's internal 40dp defaultMinSize
+                            // floor (which heightIn(min=…) can't lower), so the footer bar is genuinely
+                            // short — roughly matching the slim title bar at the top.
+                            modifier = Modifier.height(30.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
                         ) { Text(stringResource(android.R.string.cancel)) }
                     }
                     Spacer(Modifier.width(8.dp))
                     DpButton(dp, "ok", onActivate = { save(); onDismiss() }, onLeftId = "cancel") {
                         TextButton(
                             onClick = { save(); onDismiss() },
-                            modifier = Modifier.heightIn(min = 32.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                            // Definite height overrides TextButton's internal 40dp defaultMinSize
+                            // floor (which heightIn(min=…) can't lower), so the footer bar is genuinely
+                            // short — roughly matching the slim title bar at the top.
+                            modifier = Modifier.height(30.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
                         ) { Text(stringResource(android.R.string.ok)) }
                     }
                 }
