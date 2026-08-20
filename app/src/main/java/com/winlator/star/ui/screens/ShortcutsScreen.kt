@@ -6111,14 +6111,16 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
             tonalElevation = 6.dp
         ) {
             Column {
-                // Title bar
+                // Title bar — compact: minimal vertical padding + a shrunk close button so the
+                // header (and its footer twin below) don't eat vertical space, most noticeable in
+                // landscape where height is scarce.
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 3.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(shortcut.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                     DpButton(dp, "titleX", onActivate = onDismiss) {
-                        IconButton(onClick = onDismiss) {
+                        IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
                             Icon(Icons.Default.Close, contentDescription = "Close")
                         }
                     }
@@ -7057,16 +7059,27 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                 }
 
                 Divider(color = DividerColor)
+                // Compact footer — reduced padding + shrunk button height so the OK/Cancel bar
+                // matches the slimmed title bar above and frees vertical room for content.
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(8.dp),
-                    horizontalArrangement = Arrangement.End
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     DpButton(dp, "cancel", onActivate = onDismiss, onRightId = "ok") {
-                        TextButton(onClick = onDismiss) { Text(stringResource(android.R.string.cancel)) }
+                        TextButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.heightIn(min = 32.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                        ) { Text(stringResource(android.R.string.cancel)) }
                     }
                     Spacer(Modifier.width(8.dp))
                     DpButton(dp, "ok", onActivate = { save(); onDismiss() }, onLeftId = "cancel") {
-                        TextButton(onClick = { save(); onDismiss() }) { Text(stringResource(android.R.string.ok)) }
+                        TextButton(
+                            onClick = { save(); onDismiss() },
+                            modifier = Modifier.heightIn(min = 32.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                        ) { Text(stringResource(android.R.string.ok)) }
                     }
                 }
             }
