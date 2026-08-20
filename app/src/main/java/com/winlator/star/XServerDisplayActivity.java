@@ -108,6 +108,7 @@ import com.winlator.star.renderer.effects.FXAAEffect;
 import com.winlator.star.renderer.effects.NTSCCombinedEffect;
 import com.winlator.star.renderer.effects.ToonEffect;
 import com.winlator.star.renderer.effects.HDREffect;
+import com.winlator.star.widget.EpicOverlayPill;
 import com.winlator.star.widget.FpsCounter;
 import com.winlator.star.widget.FrameRating;
 import com.winlator.star.widget.FrameRatingHorizontal;
@@ -138,6 +139,7 @@ import com.winlator.star.xserver.ScreenInfo;
 import com.winlator.star.xserver.extensions.RandrExtension;
 import com.winlator.star.xserver.Window;
 import com.winlator.star.xserver.WindowManager;
+import com.winlator.star.xserver.XKeycode;
 import com.winlator.star.xserver.XServer;
 
 import org.json.JSONArray;
@@ -5059,6 +5061,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         // Initialize inline tab states (Graphics, Controls, HUD)
         initInlineTabStates(renderer);
+
+        // Epic Friends Overlay pill — added last so it sits above the HUD/controls (only for an Epic
+        // shortcut with the overlay toggle on).
+        attachEpicOverlayPill();
     }
 
     // Apply a fullscreen aspect-ratio mode (#71) live and remember it PER GAME: the per-game shortcut
@@ -8001,6 +8007,46 @@ return true;
         } catch (Throwable t) {
             Log.w("XServerDisplayActivity", "provisionEpicOverlay failed", t);
         }
+    }
+
+    // Synthesise the EOS overlay hotkey (Shift+F3) into the guest — four ordered X calls, mirroring a
+    // real keyboard chord. UI-thread only (that's where the OSC injects too). The overlay is ALSO
+    // summonable by a physical Shift+F3 independently — this is just a touch-friendly synthesiser.
+    private void injectEpicOverlayHotkey() {
+        if (xServer == null) return;
+        if (XKeycode.KEY_SHIFT_L.id == 0 || XKeycode.KEY_F3.id == 0) return; // guard KEY_NONE/id 0
+        try {
+            xServer.injectKeyPress(XKeycode.KEY_SHIFT_L);
+            xServer.injectKeyPress(XKeycode.KEY_F3);
+            xServer.injectKeyRelease(XKeycode.KEY_F3);
+            xServer.injectKeyRelease(XKeycode.KEY_SHIFT_L);
+        } catch (Throwable t) {
+            Log.w("XServerDisplayActivity", "injectEpicOverlayHotkey failed", t);
+        }
+    }
+
+    // Add the draggable edge-snap Epic pill over the game, only for an Epic shortcut with the overlay
+    // toggle on. The pill just synthesises Shift+F3 — it is never a prerequisite for the overlay
+    // rendering (a hardware keyboard works regardless). Position is persisted per game.
+    private void attachEpicOverlayPill() {
+        if (!isEpicOverlayEnabledForLaunch()) return;
+        FrameLayout rootView = findViewById(R.id.FLXServerDisplay);
+        if (rootView == null) return;
+        float density = getResources().getDisplayMetrics().density;
+        EpicOverlayPill pill = new EpicOverlayPill(this);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            android.view.Gravity.TOP | android.view.Gravity.START
+        );
+        lp.leftMargin = Math.round(8 * density);
+        lp.topMargin  = Math.round(120 * density);
+        pill.setLayoutParams(lp);
+        pill.setOnTapListener(this::injectEpicOverlayHotkey);
+        pill.setOnMovedListener((x, y) -> persistHudPosition("epicPillPos", x, y));
+        restoreHudPosition(pill, "epicPillPos");
+        rootView.addView(pill);
+        pill.bringToFront();
     }
 
     private void applyGeneralPatches(Container container) {
