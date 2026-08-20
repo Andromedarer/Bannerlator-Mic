@@ -13,7 +13,7 @@ import androidx.navigation.navArgument
 
 import com.winlator.star.ui.screens.AdrenoToolsScreen
 import com.winlator.star.ui.screens.AppearanceScreen
-import com.winlator.star.ui.screens.BigPictureScreen
+import com.winlator.star.ui.screens.ShortcutsScreen
 import com.winlator.star.ui.screens.ContainerDetailScreen
 import com.winlator.star.ui.screens.ContainersScreen
 import com.winlator.star.ui.screens.contents.ContentsHubScreen
@@ -67,10 +67,9 @@ fun AppNavGraph(
         }
 
         composable(Screen.Games.route) {
-            // The main library is now the landscape-locked couch "games wall" (GamesWallScreen). The old
-            // phone-grid ShortcutsScreen is kept in the module — its dialogs/sheets are reused by both
-            // Big Picture screens and the games wall — but is no longer the Games destination.
-            GamesWallScreen(navController = navController)
+            // The main library is the phone-grid ShortcutsScreen again. The landscape couch "games wall"
+            // (GamesWallScreen) is opt-in behind enable_big_picture_mode and renders on the BigPicture route.
+            ShortcutsScreen()
         }
 
         composable(Screen.Contents.route) {
@@ -78,7 +77,9 @@ fun AppNavGraph(
         }
 
         composable(Screen.BigPicture.route) {
-            BigPictureScreen(navController = navController)
+            // Big Picture couch mode now renders the games wall. The old BigPictureScreen composable is
+            // retired (no longer routed); GamesWallScreen still reuses its loadCover/launchShortcut helpers.
+            GamesWallScreen(navController = navController)
         }
 
         composable(Screen.InputControls.route) {

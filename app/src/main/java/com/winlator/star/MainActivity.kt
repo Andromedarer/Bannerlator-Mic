@@ -340,11 +340,11 @@ private fun AppShell(
 
     // Big Picture is a full-bleed couch/TV launcher: no top bar, no drawer gestures, no scaffold
     // content padding (it draws its own immersive layout).
+    // Big Picture now renders the landscape "games wall", which draws its OWN rail header + nav rail +
+    // footer, so it gets the chrome-free full-bleed treatment. The Games route is the normal phone-grid
+    // library again (top bar + drawer), so it is NOT full-bleed.
     val isBigPicture = currentRoute == Screen.BigPicture.route
-    // The main library (Games) now renders as the landscape "games wall", which draws its OWN rail
-    // header + nav rail + footer, so it gets the same chrome-free full-bleed treatment as Big Picture.
-    // (Its Tools/Power rail exposes the destinations the app drawer used to reach.)
-    val isFullBleed = isBigPicture || currentRoute == Screen.Games.route
+    val isFullBleed = isBigPicture
 
     // In-app update banner: only when a newer stable exists, notify is on, and
     // this version wasn't skipped.
