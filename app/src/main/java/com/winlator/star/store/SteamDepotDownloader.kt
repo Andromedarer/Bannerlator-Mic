@@ -649,25 +649,35 @@ object SteamDepotDownloader {
                     // True size known → authoritative 90% check. 313830 → 130/130 passes; a real skip
                     // (HL2 405 MB of 10.66 GB) still fails.
                     if (finalInstall < (realExpected * 90L / 100L)) {
-                        // Shortfall vs manifest-true size. This is a genuine truncation ONLY if a whole
-                        // kept depot was SKIPPED (the HL2 405MB-of-8.4GB case: the main depot delivers
-                        // nothing). If every kept depot delivered bytes, the gap is a size-accounting
-                        // over-count — the manifest's logical uncompressed total counts chunk-deduped /
-                        // shared files at full size while only unique chunks land on disk (proven:
-                        // Lossless Scaling 993090 = 303.7 MB real / 458 files, 0 zero-byte, vs 348.6 MB
-                        // manifest-true; all 3 depots delivered). Mirror the PICS branch's relaxation:
-                        // trust the engine's completion rather than false-fail a complete install.
-                        val selectedDepots: List<Int> = keptRows.map { it.depotId }
-                        val everyDepotDelivered = selectedDepots.isNotEmpty() &&
-                                selectedDepots.all { (installByDepot[it] ?: 0L) > 0L }
-                        if (!everyDepotDelivered) {
-                            dlog("INCOMPLETE: only ${fmtSize(finalInstall)} of ${fmtSize(realExpected)} " +
-                                    "(manifest-true) on disk (<90%) and a kept depot delivered nothing — refusing to mark installed")
+                        // Shortfall vs the SUMMED manifest-true size. Two very different causes:
+                        //   (a) genuine truncation — a dominant depot was skipped (stale .DepotDownloader
+                        //       state), its files never landing on disk (HL2: 405 MB of an 8.4 GB depot).
+                        //   (b) OVERLAPPING DEPOTS — the app ships two+ depots with identical files, so
+                        //       the engine de-dupes and downloads each unique file ONCE (Lossless Scaling
+                        //       993090: depots 993091 ≈ 993092, so 993091 downloads 0 files / fires no
+                        //       onFileCompleted). sum(realSize) then DOUBLE-COUNTS the shared content and
+                        //       a fully complete install can never reach 90% of that inflated total (also
+                        //       why its progress bar caps ~87%).
+                        // Size totals alone can't tell (a) from (b). Decide on the ACTUAL on-disk
+                        // footprint: overlapping depots collapse to ~one copy on disk, so the install
+                        // still reaches ~the LARGEST single kept depot; a dominant-depot skip leaves it
+                        // far below even that. Require no zero-byte files too — a pre-allocated-but-
+                        // unfilled file is the fingerprint of a real skip, never of clean de-duplication.
+                        val onDisk = dirSizeBytes(installDir)
+                        val largestKept = keptRows.maxOfOrNull { it.realSizeBytes } ?: 0L
+                        val hasEmpty = hasZeroByteFile(installDir)
+                        val overlapComplete = !hasEmpty && largestKept > 0L &&
+                                onDisk >= (largestKept * 90L / 100L)
+                        if (!overlapComplete) {
+                            dlog("INCOMPLETE: ${fmtSize(finalInstall)} of ${fmtSize(realExpected)} manifest-true " +
+                                    "(<90%); on-disk ${fmtSize(onDisk)} vs largest depot ${fmtSize(largestKept)}, " +
+                                    "emptyFiles=$hasEmpty — depot content missing, refusing to mark installed")
                             emitFailed(appId, "Download incomplete (${fmtSize(finalInstall)}/${fmtSize(realExpected)}) — please retry")
                             return
                         }
-                        dlog("Complete: ${fmtSize(finalInstall)} < 90% of manifest-true ${fmtSize(realExpected)} but all " +
-                                "${selectedDepots.size} kept depot(s) delivered — trusting completion (size over-count / chunk dedup)")
+                        dlog("Complete: ${fmtSize(finalInstall)} < 90% of summed manifest-true ${fmtSize(realExpected)}, " +
+                                "but on-disk ${fmtSize(onDisk)} ≥ 90% of largest depot ${fmtSize(largestKept)} with no empty " +
+                                "files — overlapping/de-duplicated depots, trusting completion")
                     } else {
                         dlog("Complete: ${fmtSize(finalInstall)} of ${fmtSize(realExpected)} manifest-true (≥90%)")
                     }
@@ -897,4 +907,19 @@ object SteamDepotDownloader {
         bytes >= 1_048_576L     -> "%.1f MB".format(bytes / 1_048_576.0)
         else                    -> "%.0f KB".format(bytes / 1024.0)
     }
+
+    /** Recursive on-disk byte total for a completed install (real footprint, dedup already applied
+     *  by the filesystem — used by the false-complete guard's overlapping-depot branch). */
+    private fun dirSizeBytes(f: File): Long =
+        when {
+            !f.exists() -> 0L
+            f.isFile    -> f.length()
+            else        -> f.listFiles()?.sumOf { dirSizeBytes(it) } ?: 0L
+        }
+
+    /** True if any regular file under [root] is zero-length — the signature of a pre-allocated but
+     *  unfilled file left by a genuinely-skipped/truncated depot (distinguishes a real skip from a
+     *  legitimately de-duplicated overlapping depot, whose files are all present and non-empty). */
+    private fun hasZeroByteFile(root: File): Boolean =
+        root.walkTopDown().any { it.isFile && it.length() == 0L }
 }
