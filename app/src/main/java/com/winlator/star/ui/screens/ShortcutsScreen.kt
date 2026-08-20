@@ -6110,7 +6110,10 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 6.dp
         ) {
-            Column {
+            // Fill the fixed-height Surface so the weighted content region actually expands and the
+            // footer pins to the real bottom edge. Without this the Column wrapped its content and
+            // floated near the top, leaving a large dead band under the OK/Cancel bar.
+            Column(modifier = Modifier.fillMaxSize()) {
                 // Title bar — compact: minimal vertical padding + a shrunk close button so the
                 // header (and its footer twin below) don't eat vertical space, most noticeable in
                 // landscape where height is scarce.
