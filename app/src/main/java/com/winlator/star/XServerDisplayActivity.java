@@ -4644,10 +4644,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // active (>=3 lives in the compositor pass ASR bypasses), Colors=RGBA (swapRB) is off (the
         // FLIP path's swapRB fallback is preserved as-is for now), and ASR is available (API 29+). If
         // ASR is unsupported we fall through to the old Vulkan FLIP native path (nativeOn) below.
+        // The user-facing "Native backend" pref gates the reroute: "auto"/"asr" reroute (as above),
+        // while "flip" opts out and keeps the leaner Vulkan FLIP direct-scanout path.
         if ("vulkan".equalsIgnoreCase(rendererType)
                 && resolvedRendererNative()
                 && resolveScalingMode() < 3
                 && !resolvedRendererSwapRB()
+                && !"flip".equalsIgnoreCase(resolvedNativeBackend())
                 && com.winlator.star.renderer.ASurfaceRenderer.isSupported()) {
             rendererType = "surfaceflinger";
         }
@@ -7184,6 +7187,15 @@ return true;
         return shortcut != null
                 ? shortcut.getExtra("swapRB", container.getRendererSwapRB() ? "true" : "false").equals("true")
                 : container.getRendererSwapRB();
+    }
+    // Native backend pref: "auto"/"asr" -> hardened SurfaceFlinger (ASR) reroute when eligible;
+    // "flip" -> force the leaner inline Vulkan FLIP direct-scanout (opt out of the reroute). Same
+    // read-only shortcut-extra-then-container discipline as the siblings above.
+    private String resolvedNativeBackend() {
+        if (container == null) return "auto";
+        String def = container.getRendererNativeBackend();
+        if (def == null || def.isEmpty()) def = "auto";
+        return shortcut != null ? shortcut.getExtra("nativeBackend", def) : def;
     }
     private String resolvedRendererPresentMode() {
         if (container == null) return "fifo";

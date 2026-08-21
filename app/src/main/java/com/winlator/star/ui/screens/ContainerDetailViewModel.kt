@@ -125,6 +125,9 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     // Advanced Vulkan present options — backed by the container's dedicated renderer* fields
     // (NOT graphicsDriverConfig, whose KeyValueSet/semicolon mismatch made these never apply).
     var rendererNative      by mutableStateOf(false)
+    // Native backend for Native Rendering: "auto"/"asr" -> hardened SurfaceFlinger (ASR) reroute;
+    // "flip" -> force the leaner Vulkan FLIP direct-scanout. Default "auto" = unchanged behaviour.
+    var rendererNativeBackend by mutableStateOf("auto")
     var rendererPresentMode by mutableStateOf("fifo")
     var rendererDriverId    by mutableStateOf("system")
     var rendererFilterMode  by mutableStateOf(0)
@@ -479,6 +482,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         selectedGraphicsDriver   = identifierToDisplay(seed?.graphicsDriver ?: defaultGraphicsDriverForNewContainer(), graphicsDriverEntries)
         graphicsDriverConfig     = seed?.graphicsDriverConfig ?: Container.DEFAULT_GRAPHICSDRIVERCONFIG
         rendererNative           = seed?.isRendererNative() ?: false
+        rendererNativeBackend    = seed?.getRendererNativeBackend() ?: "auto"
         rendererPresentMode      = seed?.getRendererPresentMode() ?: "fifo"
         rendererDriverId         = seed?.getRendererDriverId() ?: "system"
         rendererFilterMode       = seed?.getRendererFilterMode() ?: 0
@@ -955,6 +959,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             c.setGyroInvertY(gyroInvertY)
             c.setRenderer(StringUtils.parseIdentifier(selectedRenderer))
             c.setRendererNative(rendererNative)
+            c.setRendererNativeBackend(rendererNativeBackend)
             c.setRendererPresentMode(rendererPresentMode)
             c.setRendererDriverId(rendererDriverId)
             c.setRendererFilterMode(rendererFilterMode)
@@ -1080,6 +1085,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         put("exclusiveXInput", exclusiveXInput)
         put("renderer", StringUtils.parseIdentifier(selectedRenderer))
         put("rendererNative", rendererNative)
+        put("rendererNativeBackend", rendererNativeBackend)
         put("rendererPresentMode", rendererPresentMode)
         put("rendererDriverId", rendererDriverId)
         put("rendererFilterMode", rendererFilterMode)

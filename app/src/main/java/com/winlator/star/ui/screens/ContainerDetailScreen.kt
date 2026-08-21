@@ -358,7 +358,8 @@ fun ContainerDetailScreen(
                 ";driverId=${viewModel.rendererDriverId}" +
                 ";filterMode=${viewModel.rendererFilterMode}" +
                 ";swapRB=${viewModel.rendererSwapRB}" +
-                ";sfCompatMode=${viewModel.rendererSfCompatMode}",
+                ";sfCompatMode=${viewModel.rendererSfCompatMode}" +
+                ";nativeBackend=${viewModel.rendererNativeBackend}",
             onConfirm = { newConfig ->
                 val m = parseVulkanConfig(newConfig)
                 viewModel.rendererNative      = m["native"] == "true"
@@ -368,6 +369,8 @@ fun ContainerDetailScreen(
                 viewModel.rendererSwapRB      = m["swapRB"] == "true"
                 // Default ON: absent token (old config) resolves to true (correct colours).
                 viewModel.rendererSfCompatMode = m["sfCompatMode"] != "false"
+                // Default "auto": absent token (old config) preserves the current reroute behaviour.
+                viewModel.rendererNativeBackend = m["nativeBackend"] ?: "auto"
                 showVulkanConfig = false
             },
             onDismiss = { showVulkanConfig = false },
@@ -587,6 +590,10 @@ internal fun VulkanSettingsDialog(
     // SurfaceFlinger (ASR) BGRA->RGBA colour correction (GN #1620). Default ON — an absent token
     // (old config) resolves to true. ASR-only; independent of swapRB (Vulkan/GL).
     var sfCompatMode by remember { mutableStateOf(cfg["sfCompatMode"] != "false") }
+    // Native backend for Native Rendering: "auto"/"asr" -> hardened SurfaceFlinger (ASR) reroute;
+    // "flip" -> force the leaner Vulkan FLIP direct-scanout. Default "auto" — an absent token (old
+    // config) resolves to auto (unchanged behaviour). Only meaningful while Native Rendering is on.
+    var nativeBackend by remember { mutableStateOf(cfg["nativeBackend"] ?: "auto") }
 
     // Per-field "?" help — this dialog is its own composable, so it carries its own helpRes.
     // HelpDialog renders as a Dialog on top of this AlertDialog (fine — same pattern as elsewhere).
@@ -614,6 +621,31 @@ internal fun VulkanSettingsDialog(
                         Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
                     }
                     Switch(checked = nativeRender, onCheckedChange = { nativeRender = it })
+                }
+
+                // Native backend picker — only meaningful while Native Rendering is on, so it's shown
+                // only then. "auto"/"asr" route to the hardened SurfaceFlinger (ASR) renderer when
+                // eligible; "flip" forces the leaner legacy Vulkan direct-scanout path.
+                if (nativeRender) {
+                    val nativeBackends = listOf("auto", "asr", "flip")
+                    val nativeBackendLabels = listOf(
+                        stringResource(R.string.renderer_native_backend_auto),
+                        stringResource(R.string.renderer_native_backend_asr),
+                        stringResource(R.string.renderer_native_backend_flip)
+                    )
+                    val selectedBackendIdx = nativeBackends.indexOf(nativeBackend).coerceAtLeast(0)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        LabeledDropdown(
+                            label = stringResource(R.string.renderer_native_backend),
+                            options = nativeBackendLabels,
+                            selectedOption = nativeBackendLabels[selectedBackendIdx],
+                            onSelect = { nativeBackend = nativeBackends[nativeBackendLabels.indexOf(it)] },
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(onClick = { helpRes = R.string.help_renderer_native_backend }) {
+                            Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                        }
+                    }
                 }
 
                 val presentModes = listOf("fifo", "mailbox", "immediate")
@@ -708,7 +740,7 @@ internal fun VulkanSettingsDialog(
         },
         confirmButton = {
             TextButton(onClick = {
-                val config = "native=$nativeRender;presentMode=$presentMode;driverId=$driverId;filterMode=$filterMode;swapRB=$swapRB;sfCompatMode=$sfCompatMode"
+                val config = "native=$nativeRender;presentMode=$presentMode;driverId=$driverId;filterMode=$filterMode;swapRB=$swapRB;sfCompatMode=$sfCompatMode;nativeBackend=$nativeBackend"
                 onConfirm(config)
             }) {
                 Text(stringResource(android.R.string.ok))
