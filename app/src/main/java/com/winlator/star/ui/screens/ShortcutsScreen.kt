@@ -5600,6 +5600,12 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
     var vkPresentMode by remember {
         mutableStateOf(shortcut.getExtra("presentMode", shortcut.container.getRendererPresentMode()))
     }
+    // Native backend (Auto / SurfaceFlinger / Vulkan direct-scanout) — per-game override, defaults to
+    // the container's value. Stored via the "nativeBackend" extra the launch resolver reads; only
+    // relevant when Native Rendering is on.
+    var vkNativeBackend by remember {
+        mutableStateOf(shortcut.getExtra("nativeBackend", shortcut.container.getRendererNativeBackend()))
+    }
 
     // Render scale (supersampling) — per-game override, defaults to the container's "renderScale"
     // extra. Stored via the shortcut "renderScale" extra. "1.0" = Off.
@@ -5997,6 +6003,7 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
             putExtra("native", if (vkNative) "true" else "false")
             putExtra("swapRB", if (vkSwapRB) "true" else "false")
             putExtra("presentMode", vkPresentMode)
+            putExtra("nativeBackend", vkNativeBackend)
             putExtra("renderScale", if (renderScale == "1.0") null else renderScale)
             // "In-game refresh rate" per-game override: both extras written together, "" = inherit the
             // container (store null so the extra is cleared, not left empty → keeps the shortcut default).
@@ -6081,7 +6088,7 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                 add("selectIcon"); add("gfxDriver"); add("gfxWrapper"); add("gfxConfig")
                 add("dxWrapper"); add("dxConfig"); add("renderer")
                 if (selectedRenderer == "SurfaceFlinger") add("sfCompat")
-                if (selectedRenderer == "Vulkan") { add("vkNative"); add("vkColors"); add("vkPresent") }
+                if (selectedRenderer == "Vulkan") { add("vkNative"); add("vkColors"); add("vkPresent"); if (vkNative) add("vkBackend") }
                 add("renderScale")
                 if (panelRates.isNotEmpty()) add("refresh")
                 add("frameGen"); add("fpsLimiter"); add("audio"); add("emulator")
@@ -6473,6 +6480,30 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                             )
                             IconButton(onClick = { helpRes = R.string.renderer_present_mode_help_content }) {
                                 Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                            }
+                        }
+                        // Native backend — which native path Native Rendering uses. Only meaningful when
+                        // Native Rendering is on (matches the container Vulkan cog), so gate on vkNative.
+                        if (vkNative) {
+                            val vkBackendValues = listOf("auto", "asr", "flip")
+                            val vkBackendLabels = listOf(
+                                stringResource(R.string.renderer_native_backend_auto),
+                                stringResource(R.string.renderer_native_backend_asr),
+                                stringResource(R.string.renderer_native_backend_flip)
+                            )
+                            val vkBackendIdx = vkBackendValues.indexOf(vkNativeBackend).coerceAtLeast(0)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                DpDrop(
+                                    dp, "vkBackend",
+                                    label = stringResource(R.string.renderer_native_backend),
+                                    options = vkBackendLabels,
+                                    selected = vkBackendLabels[vkBackendIdx],
+                                    onSelect = { vkNativeBackend = vkBackendValues[vkBackendLabels.indexOf(it)] },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                IconButton(onClick = { helpRes = R.string.help_renderer_native_backend }) {
+                                    Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                                }
                             }
                         }
                         // FG temporarily forces Mailbox; caption the field so FIFO-while-FG-selected isn't confusing.
