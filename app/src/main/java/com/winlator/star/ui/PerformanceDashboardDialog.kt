@@ -259,24 +259,40 @@ fun PerformanceDashboardDialog(state: XServerDrawerState, onDismiss: () -> Unit)
                     // Galaxy Performance (Samsung, no root) — only present on Samsung Galaxy devices
                     // with the Galaxy Performance SDK bundled; otherwise the whole block is hidden.
                     val galaxySupported = remember { GalaxyPerfManager.isSupported() }
+                    var galaxyEnabled by remember { mutableStateOf(GalaxyPerfManager.isEnabled()) }
                     var galaxyProfileName by remember {
                         mutableStateOf(GalaxyPerfManager.currentProfile?.name ?: GalaxyPowerProfile.DEFAULT.name)
                     }
                     if (galaxySupported) {
                         SectionHead("Galaxy Performance · Samsung")
-                        Text(
-                            "No-root CPU/GPU/RAM levels via Samsung's Galaxy Performance SDK. Saved per game.",
-                            color = cs.onSurfaceVariant, fontSize = 11.sp,
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
-                        )
+                        // Master switch — OFF by default; nothing touches the SoC until turned on.
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                         ) {
-                            GalaxyPowerProfile.PRESETS.forEach { preset ->
-                                Chip(preset.name, galaxyProfileName == preset.name, Modifier.weight(1f)) {
-                                    galaxyProfileName = preset.name
-                                    GalaxyPerfManager.setProfile(preset)
+                            Column(Modifier.weight(1f)) {
+                                Text("Enable Galaxy Performance", color = cs.onSurface, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    "No-root CPU/GPU/RAM control via Samsung's SDK. Off by default; saved per game.",
+                                    color = cs.onSurfaceVariant, fontSize = 11.sp,
+                                )
+                            }
+                            Switch(
+                                checked = galaxyEnabled,
+                                onCheckedChange = { galaxyEnabled = it; GalaxyPerfManager.setEnabled(it) },
+                            )
+                        }
+                        // Presets appear only once enabled.
+                        if (galaxyEnabled) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                            ) {
+                                GalaxyPowerProfile.PRESETS.forEach { preset ->
+                                    Chip(preset.name, galaxyProfileName == preset.name, Modifier.weight(1f)) {
+                                        galaxyProfileName = preset.name
+                                        GalaxyPerfManager.setProfile(preset)
+                                    }
                                 }
                             }
                         }

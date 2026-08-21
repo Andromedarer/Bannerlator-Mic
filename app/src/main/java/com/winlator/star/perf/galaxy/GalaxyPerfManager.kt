@@ -29,6 +29,8 @@ object GalaxyPerfManager {
 
     private const val TAG = "GalaxyPerf"
     private const val PROFILE_FILE_NAME = "galaxy_power.json"
+    private const val PREFS_NAME = "galaxy_perf"
+    private const val KEY_ENABLED = "enabled"
 
     private val worker = Executors.newSingleThreadExecutor { r ->
         Thread(r, "galaxy-perf").apply { isDaemon = true }
@@ -42,6 +44,13 @@ object GalaxyPerfManager {
 
     @Volatile
     private var containerDir: File? = null
+
+    /**
+     * User master switch (persisted, default OFF). Nothing is applied to the SoC until the user
+     * turns this on — matching the app's opt-in perf convention. Independent of [isSupported].
+     */
+    @Volatile
+    private var enabled: Boolean = false
 
     /** True from [start] until [stop]; guards [pause]/[resume] like the existing perf hooks. */
     @Volatile
@@ -62,6 +71,12 @@ object GalaxyPerfManager {
     fun initialize(context: Context) {
         if (driver != null) return
         appContext = context.applicationContext
+        enabled = try {
+            context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(KEY_ENABLED, false)
+        } catch (e: Exception) {
+            false
+        }
         worker.execute {
             if (driver != null) return@execute
             driver = if (SamsungSPerfDriver.isSamsungDevice()) {
@@ -89,6 +104,41 @@ object GalaxyPerfManager {
     @JvmStatic
     fun isSupported(): Boolean = driver?.isSupported == true
 
+    /** User master switch state (persisted, default OFF). */
+    @JvmStatic
+    fun isEnabled(): Boolean = enabled
+
+    /**
+     * Flip the master switch. Persists, then either applies the active profile (on, if a game is
+     * running) or releases the boost (off). Does nothing to the SoC when unsupported.
+     */
+    @JvmStatic
+    fun setEnabled(on: Boolean) {
+        enabled = on
+        val ctx = appContext
+        worker.execute {
+            if (ctx != null) {
+                try {
+                    ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                        .edit().putBoolean(KEY_ENABLED, on).apply()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to persist enabled flag: ${e.message}")
+                }
+            }
+            val d = driverOrNoOp()
+            if (!d.isSupported) return@execute
+            if (on) {
+                if (isGameStarted) {
+                    val p = currentProfile ?: GalaxyPowerProfile.DEFAULT
+                    d.start()
+                    d.apply(p)
+                }
+            } else {
+                d.stop()
+            }
+        }
+    }
+
     /**
      * Begin a session for [containerRootDir]. Loads that container's saved profile (or the
      * default) and applies it.
@@ -102,8 +152,12 @@ object GalaxyPerfManager {
             if (!d.isSupported) return@execute
             val profile = loadFromDir(containerRootDir)
             currentProfile = profile
-            d.start()
-            d.apply(profile)
+            // Load the profile regardless so a mid-session toggle-on can apply it, but only touch
+            // the SoC when the user has opted in.
+            if (enabled) {
+                d.start()
+                d.apply(profile)
+            }
         }
     }
 
@@ -135,7 +189,7 @@ object GalaxyPerfManager {
         worker.execute {
             val d = driverOrNoOp()
             val profile = currentProfile ?: return@execute
-            if (!d.isSupported) return@execute
+            if (!d.isSupported || !enabled) return@execute
             d.start()
             d.apply(profile)
         }
@@ -153,7 +207,8 @@ object GalaxyPerfManager {
         worker.execute {
             if (dir != null) writeToDir(dir, p)
             val d = driverOrNoOp()
-            if (isGameStarted && d.isSupported) d.apply(p)
+            // Persist the choice always; only push it to the SoC when enabled + in a session.
+            if (isGameStarted && enabled && d.isSupported) d.apply(p)
         }
     }
 
