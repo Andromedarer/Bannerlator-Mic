@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -25,6 +26,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -106,6 +108,7 @@ fun PerformanceDashboardDialog(state: XServerDrawerState, onDismiss: () -> Unit)
     var pendingDanger by remember { mutableStateOf<PendingDanger?>(null) }
     var showGrantGate by remember { mutableStateOf(false) }
     var info by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var showGalaxyOffPrompt by remember { mutableStateOf(false) }
     var profile by remember { mutableStateOf<String?>(null) }
 
     // Poll the cheap sysfs/HudMetrics readouts while the dialog is open (same cadence as before).
@@ -291,7 +294,12 @@ fun PerformanceDashboardDialog(state: XServerDrawerState, onDismiss: () -> Unit)
                             }
                             Switch(
                                 checked = galaxyEnabled,
-                                onCheckedChange = { galaxyEnabled = it; GalaxyPerfManager.setEnabled(it) },
+                                onCheckedChange = {
+                                    galaxyEnabled = it
+                                    GalaxyPerfManager.setEnabled(it)
+                                    // Recommend handing clocks to Galaxy alone, unless already Off.
+                                    if (it && profile != "Off") showGalaxyOffPrompt = true
+                                },
                             )
                         }
                         // Presets appear only once enabled.
@@ -490,6 +498,30 @@ fun PerformanceDashboardDialog(state: XServerDrawerState, onDismiss: () -> Unit)
         )
     }
     info?.let { (t, b) -> PerfInfoDialog(t, b) { info = null } }
+
+    if (showGalaxyOffPrompt) {
+        AlertDialog(
+            onDismissRequest = { showGalaxyOffPrompt = false },
+            title = { Text("Let Galaxy control performance?") },
+            text = {
+                Text(
+                    "Galaxy Performance and the Power profile above both drive the CPU/GPU clocks, " +
+                        "by different mechanisms (Samsung's SDK vs. the root perf tier). Running both at " +
+                        "once lets them fight, so clock behaviour can be inconsistent.\n\n" +
+                        "Recommended: set the Power profile to \"Off\" so the Samsung SDK alone manages " +
+                        "the clocks. Keep both only if you know what you're doing.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { applyProfile("Off"); showGalaxyOffPrompt = false }) {
+                    Text("Set Power profile to Off")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showGalaxyOffPrompt = false }) { Text("Keep both") }
+            },
+        )
+    }
 }
 
 /* ───────────────────────── local building blocks (file-scoped) ───────────────────────── */
