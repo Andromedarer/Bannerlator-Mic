@@ -76,6 +76,10 @@ public class Container {
     private String wineVersion = WineInfo.MAIN_WINE_VERSION.identifier();
     private boolean showFPS;
     private boolean rendererNative = false;
+    // Which native backend a Native-Rendering Vulkan container routes to: "auto"/"asr" -> hardened
+    // SurfaceFlinger (ASR) renderer when eligible (default reroute); "flip" -> force the leaner inline
+    // Vulkan FLIP direct-scanout (skip the reroute). Default "auto" preserves existing behaviour.
+    private String rendererNativeBackend = "auto";
     private String rendererPresentMode = "fifo";
     private String rendererDriverId = "system";
     private int rendererFilterMode = 0;
@@ -980,6 +984,8 @@ public class Container {
 
     public boolean isRendererNative() { return rendererNative; }
     public void setRendererNative(boolean v) { this.rendererNative = v; }
+    public String getRendererNativeBackend() { return (rendererNativeBackend == null || rendererNativeBackend.isEmpty()) ? "auto" : rendererNativeBackend; }
+    public void setRendererNativeBackend(String v) { this.rendererNativeBackend = (v == null || v.isEmpty()) ? "auto" : v; }
     public String getRendererPresentMode() { return rendererPresentMode; }
     public void setRendererPresentMode(String v) { this.rendererPresentMode = v != null ? v : "fifo"; }
     public String getRendererDriverId() { return rendererDriverId; }
@@ -1066,6 +1072,7 @@ public class Container {
             data.put("exclusiveXInput", exclusiveXInput);
             data.put("renderer", renderer);
             data.put("rendererNative", rendererNative);
+            data.put("rendererNativeBackend", rendererNativeBackend);
             data.put("rendererPresentMode", rendererPresentMode);
             if (!rendererDriverId.isEmpty()) data.put("rendererDriverId", rendererDriverId);
             if (rendererFilterMode != 0) data.put("rendererFilterMode", rendererFilterMode);
@@ -1194,6 +1201,9 @@ public class Container {
                     break;
                 case "rendererNative" :
                     rendererNative = data.getBoolean(key);
+                    break;
+                case "rendererNativeBackend" :
+                    rendererNativeBackend = data.getString(key);
                     break;
                 case "rendererPresentMode" :
                     rendererPresentMode = data.getString(key);
