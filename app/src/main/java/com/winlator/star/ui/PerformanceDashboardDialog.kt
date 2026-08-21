@@ -56,6 +56,8 @@ import com.winlator.star.perf.PerfRootApplier
 import com.winlator.star.perf.PerformanceSettings
 import com.winlator.star.perf.RootManager
 import com.winlator.star.perf.TempWatchdog
+import com.winlator.star.perf.galaxy.GalaxyPerfManager
+import com.winlator.star.perf.galaxy.GalaxyPowerProfile
 import com.winlator.star.ui.screens.PerfDisclaimerCopy
 import com.winlator.star.ui.screens.PerfDisclaimerDialog
 import com.winlator.star.ui.screens.PerfInfoDialog
@@ -251,6 +253,32 @@ fun PerformanceDashboardDialog(state: XServerDrawerState, onDismiss: () -> Unit)
                     ) {
                         listOf("Battery", "Balanced", "Performance", "Turbo").forEach { p ->
                             Chip(p, profile == p, Modifier.weight(1f)) { applyProfile(p) }
+                        }
+                    }
+
+                    // Galaxy Performance (Samsung, no root) — only present on Samsung Galaxy devices
+                    // with the Galaxy Performance SDK bundled; otherwise the whole block is hidden.
+                    val galaxySupported = remember { GalaxyPerfManager.isSupported() }
+                    var galaxyProfileName by remember {
+                        mutableStateOf(GalaxyPerfManager.currentProfile?.name ?: GalaxyPowerProfile.DEFAULT.name)
+                    }
+                    if (galaxySupported) {
+                        SectionHead("Galaxy Performance · Samsung")
+                        Text(
+                            "No-root CPU/GPU/RAM levels via Samsung's Galaxy Performance SDK. Saved per game.",
+                            color = cs.onSurfaceVariant, fontSize = 11.sp,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+                        )
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                        ) {
+                            GalaxyPowerProfile.PRESETS.forEach { preset ->
+                                Chip(preset.name, galaxyProfileName == preset.name, Modifier.weight(1f)) {
+                                    galaxyProfileName = preset.name
+                                    GalaxyPerfManager.setProfile(preset)
+                                }
+                            }
                         }
                     }
 
