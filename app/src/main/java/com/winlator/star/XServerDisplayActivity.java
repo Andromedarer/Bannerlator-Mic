@@ -3939,6 +3939,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         com.winlator.star.perf.PerfRevertRegistry.INSTANCE.revertAll();
         // Release the no-root Samsung Galaxy performance boost on game exit (no-op off Samsung).
         com.winlator.star.perf.galaxy.GalaxyPerfManager.stop();
+        // Clear the cross-vendor "game is running" signal.
+        com.winlator.star.perf.GameModeSignal.exitGameplay(this);
         unregisterGyroSensor();
         unregisterAudioRouteWatcher();
         stopDxApiDetection();
@@ -4654,6 +4656,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (container != null) {
             com.winlator.star.perf.galaxy.GalaxyPerfManager.start(container.getRootDir());
         }
+
+        // Cross-vendor "a game is running" signal -> lets each OEM's own game-mode booster engage
+        // (OnePlus/OPPO/Red Magic/Xiaomi/Pixel/...). No-op below Android 13. No jar, no root.
+        com.winlator.star.perf.GameModeSignal.enterGameplay(this);
 
         // Standalone FPS limiter (guest-side, via the X11 Present extension): apply the resolved
         // per-game/container value up front, independent of the frame-gen engine. The in-game toggle
