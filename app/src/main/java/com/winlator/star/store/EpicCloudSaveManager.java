@@ -59,19 +59,22 @@ public final class EpicCloudSaveManager {
                 cb.onStatus("Fetching cloud file list…");
                 List<CloudFile> cloudFiles = listCloudFiles(ctx, accountId, appName, token);
 
-                File[] localFiles = localFolder.listFiles();
-                if (localFiles == null || localFiles.length == 0) {
+                // Recursive walk: collect every file under localFolder as a '/'-joined RELATIVE path
+                // (the Epic savesync key is the relative path, so a nested save tree round-trips).
+                List<String> localRel = new ArrayList<>();
+                collectRelativeFiles(localFolder, "", localRel);
+                if (localRel.isEmpty()) {
                     cb.onDone("No local files to upload");
                     return;
                 }
 
-                // Determine which files need uploading
+                // Determine which files need uploading (newer than the cloud copy of the SAME rel path).
                 List<String> toUpload = new ArrayList<>();
-                for (File local : localFiles) {
-                    if (!local.isFile()) continue;
+                for (String rel : localRel) {
+                    File local = new File(localFolder, rel);
                     long localModMs = local.lastModified();
-                    long cloudModMs = getCloudModifiedMs(cloudFiles, local.getName());
-                    if (localModMs > cloudModMs) toUpload.add(local.getName());
+                    long cloudModMs = getCloudModifiedMs(cloudFiles, rel);
+                    if (localModMs > cloudModMs) toUpload.add(rel);
                 }
 
                 if (toUpload.isEmpty()) {
@@ -94,6 +97,7 @@ public final class EpicCloudSaveManager {
                     uploaded++;
                 }
 
+                markSynced(ctx, appName);
                 cb.onDone("Uploaded " + uploaded + " file" + (uploaded == 1 ? "" : "s"));
 
             } catch (Exception e) {
@@ -130,10 +134,15 @@ public final class EpicCloudSaveManager {
                     cb.onStatus("Downloading: " + cf.name);
                     byte[] data = getFromPresignedUrl(cf.readLink);
                     if (data == null) { cb.onError("Download failed for: " + cf.name); return; }
-                    writeFile(new File(localFolder, cf.name), data);
+                    // cf.name is a '/'-joined RELATIVE path — recreate the nested tree under localFolder.
+                    File dest = new File(localFolder, cf.name);
+                    File parent = dest.getParentFile();
+                    if (parent != null && !parent.exists()) parent.mkdirs();
+                    writeFile(dest, data);
                     downloaded++;
                 }
 
+                markSynced(ctx, appName);
                 cb.onDone("Downloaded " + downloaded + " file" + (downloaded == 1 ? "" : "s"));
 
             } catch (Exception e) {
@@ -292,6 +301,40 @@ public final class EpicCloudSaveManager {
         conn.setRequestProperty("User-Agent", "EpicGamesLauncher/15.17.1-22692490");
         conn.setRequestProperty("Authorization", "Bearer " + token);
         return conn;
+    }
+
+    /**
+     * Recursively collect every regular file under [dir] as a '/'-joined path relative to the walk
+     * root, accumulating into [out]. [prefix] is the relative path of [dir] itself ("" at the root).
+     */
+    private static void collectRelativeFiles(File dir, String prefix, List<String> out) {
+        File[] children = dir.listFiles();
+        if (children == null) return;
+        for (File child : children) {
+            String rel = prefix.isEmpty() ? child.getName() : prefix + "/" + child.getName();
+            if (child.isDirectory()) {
+                collectRelativeFiles(child, rel, out);
+            } else if (child.isFile()) {
+                out.add(rel);
+            }
+        }
+    }
+
+    /**
+     * Persist the last-successful-sync marker for [appName] to {@code bh_epic_prefs} as an ISO-8601
+     * UTC timestamp (lexically comparable). Stored now for later conflict detection (P2); the current
+     * MVP doesn't read it back. Best-effort — never throws into the sync path.
+     */
+    private static void markSynced(Context ctx, String appName) {
+        try {
+            SimpleDateFormat iso = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
+            iso.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+            ctx.getApplicationContext()
+                    .getSharedPreferences("bh_epic_prefs", Context.MODE_PRIVATE)
+                    .edit()
+                    .putString("epic_sync_timestamp_" + appName, iso.format(new Date()))
+                    .apply();
+        } catch (Exception ignored) {}
     }
 
     private static long getCloudModifiedMs(List<CloudFile> cloudFiles, String name) {
