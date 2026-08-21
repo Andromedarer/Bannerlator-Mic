@@ -130,6 +130,18 @@ fun PerformanceDashboardDialog(state: XServerDrawerState, onDismiss: () -> Unit)
     fun applyProfile(p: String) {
         profile = p
         when (p) {
+            "Off" -> {
+                // Neutralise the entire root perf tier -> stock DVFS. Use this alongside Galaxy
+                // Performance so the Samsung SDK is the ONLY thing touching CPU/GPU clocks (the two
+                // are independent controllers and their clock/DVFS writes otherwise fight).
+                setSustained(false); setPriority(false); setBig(false)
+                setRoot(PerfRootApplier.KEY_GPU_CLOCK_LOCK, false)
+                if (granted) {
+                    setRoot(PerfRootApplier.KEY_CPU_GOVERNOR, false)
+                    setRoot(PerfRootApplier.KEY_CPU_FREQ_LOCK, false)
+                    setRoot(PerfRootApplier.KEY_CORES_ONLINE, false)
+                }
+            }
             "Battery" -> {
                 setSustained(false); setPriority(false); setBig(false)
                 setRoot(PerfRootApplier.KEY_GPU_CLOCK_LOCK, false)
@@ -251,7 +263,7 @@ fun PerformanceDashboardDialog(state: XServerDrawerState, onDismiss: () -> Unit)
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                     ) {
-                        listOf("Battery", "Balanced", "Performance", "Turbo").forEach { p ->
+                        listOf("Off", "Battery", "Balanced", "Performance", "Turbo").forEach { p ->
                             Chip(p, profile == p, Modifier.weight(1f)) { applyProfile(p) }
                         }
                     }
@@ -295,6 +307,11 @@ fun PerformanceDashboardDialog(state: XServerDrawerState, onDismiss: () -> Unit)
                                     }
                                 }
                             }
+                            Text(
+                                "Tip: set the Power profile above to \"Off\" so Galaxy alone controls the clocks (they otherwise conflict).",
+                                color = cs.onSurfaceVariant, fontSize = 10.sp,
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 3.dp),
+                            )
                         }
                     }
 
@@ -734,6 +751,15 @@ fun PerformanceDashboardDialogPerGame(
     fun applyProfile(p: String) {
         profile = p
         when (p) {
+            "Off" -> {
+                // Neutralise the root perf tier -> stock DVFS, so Galaxy Performance (Samsung SDK)
+                // can own CPU/GPU clocks without the two controllers fighting.
+                onSustained(false); onPriority(false); onBigCores(false)
+                onRoot(PerfRootApplier.KEY_GPU_CLOCK_LOCK, false)
+                onRoot(PerfRootApplier.KEY_CPU_GOVERNOR, false)
+                onRoot(PerfRootApplier.KEY_CPU_FREQ_LOCK, false)
+                onRoot(PerfRootApplier.KEY_CORES_ONLINE, false)
+            }
             "Battery" -> {
                 onSustained(false); onPriority(false); onBigCores(false)
                 onRoot(PerfRootApplier.KEY_GPU_CLOCK_LOCK, false)
@@ -811,7 +837,7 @@ fun PerformanceDashboardDialogPerGame(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                     ) {
-                        listOf("Battery", "Balanced", "Performance", "Turbo").forEach { p ->
+                        listOf("Off", "Battery", "Balanced", "Performance", "Turbo").forEach { p ->
                             Chip(p, profile == p, Modifier.weight(1f)) { applyProfile(p) }
                         }
                     }
