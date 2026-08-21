@@ -5606,6 +5606,12 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
     var vkNativeBackend by remember {
         mutableStateOf(shortcut.getExtra("nativeBackend", shortcut.container.getRendererNativeBackend()))
     }
+    // Compositor (present-layer) Vulkan driver — per-game override, defaults to the container's value.
+    // This is the driver the present layer runs on (System or an installed Turnip), NOT the guest
+    // graphics driver above. Launch already resolves shortcut.getExtra("rendererDriverId", ...).
+    var vkRendererDriverId by remember {
+        mutableStateOf(shortcut.getExtra("rendererDriverId", shortcut.container.getRendererDriverId()))
+    }
 
     // Render scale (supersampling) — per-game override, defaults to the container's "renderScale"
     // extra. Stored via the shortcut "renderScale" extra. "1.0" = Off.
@@ -6004,6 +6010,7 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
             putExtra("swapRB", if (vkSwapRB) "true" else "false")
             putExtra("presentMode", vkPresentMode)
             putExtra("nativeBackend", vkNativeBackend)
+            putExtra("rendererDriverId", vkRendererDriverId)
             putExtra("renderScale", if (renderScale == "1.0") null else renderScale)
             // "In-game refresh rate" per-game override: both extras written together, "" = inherit the
             // container (store null so the extra is cleared, not left empty → keeps the shortcut default).
@@ -6088,7 +6095,7 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                 add("selectIcon"); add("gfxDriver"); add("gfxWrapper"); add("gfxConfig")
                 add("dxWrapper"); add("dxConfig"); add("renderer")
                 if (selectedRenderer == "SurfaceFlinger") add("sfCompat")
-                if (selectedRenderer == "Vulkan") { add("vkNative"); add("vkColors"); add("vkPresent"); if (vkNative) add("vkBackend") }
+                if (selectedRenderer == "Vulkan") { add("vkNative"); add("vkColors"); add("vkPresent"); if (vkNative) add("vkBackend"); add("vkDriver") }
                 add("renderScale")
                 if (panelRates.isNotEmpty()) add("refresh")
                 add("frameGen"); add("fpsLimiter"); add("audio"); add("emulator")
@@ -6504,6 +6511,27 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                                 IconButton(onClick = { helpRes = R.string.help_renderer_native_backend }) {
                                     Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
                                 }
+                            }
+                        }
+                        // Compositor (present-layer) Vulkan driver: System or an installed Turnip. Applies
+                        // regardless of native mode, so not gated on vkNative. Matches the container cog.
+                        val vkDriverOptions = remember {
+                            val installed = try {
+                                com.winlator.star.contents.AdrenotoolsManager(context).enumarateInstalledDrivers()
+                            } catch (e: Exception) { arrayListOf<String>() }
+                            (listOf("system") + installed).distinct()
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            DpDrop(
+                                dp, "vkDriver",
+                                label = stringResource(R.string.renderer_driver_id),
+                                options = vkDriverOptions,
+                                selected = if (vkDriverOptions.contains(vkRendererDriverId)) vkRendererDriverId else "system",
+                                onSelect = { vkRendererDriverId = it },
+                                modifier = Modifier.weight(1f)
+                            )
+                            IconButton(onClick = { helpRes = R.string.help_renderer_driver }) {
+                                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
                             }
                         }
                         // FG temporarily forces Mailbox; caption the field so FIFO-while-FG-selected isn't confusing.
