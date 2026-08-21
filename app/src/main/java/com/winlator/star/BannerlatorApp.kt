@@ -69,6 +69,8 @@ class BannerlatorApp : Application() {
             RootManager.onAppStartup(this)
             TempWatchdog.init(this)
             PerformanceSettings.init(this) // global defaults both perf surfaces bind to
+            // No-root Samsung Galaxy Performance SDK path (dormant off Samsung / without the SDK jar).
+            com.winlator.star.perf.galaxy.GalaxyPerfManager.initialize(this)
 
             // App-level background => revert privileged writes (a single game Activity stopping is
             // handled in XServerDisplayActivity; this catches process-wide backgrounding).

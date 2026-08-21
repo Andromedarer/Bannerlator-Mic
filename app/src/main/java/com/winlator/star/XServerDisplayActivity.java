@@ -2415,6 +2415,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (environment != null) {
             xServerView.onResume();
             environment.onResume();
+            // Re-assert the Samsung Galaxy performance profile (released while backgrounded).
+            com.winlator.star.perf.galaxy.GalaxyPerfManager.resume();
         }
         startTime = System.currentTimeMillis();
         handler.postDelayed(savePlaytimeRunnable, SAVE_INTERVAL_MS);
@@ -2462,6 +2464,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
             if (environment != null) {
                 environment.onPause();
                 xServerView.onPause();
+                // Drop the Samsung Galaxy boost while backgrounded (the guest is frozen anyway).
+                // Guarded by the same non-PiP check so PiP playback keeps its profile.
+                com.winlator.star.perf.galaxy.GalaxyPerfManager.pause();
             }
             // Backgrounding auto-pauses the guest; if the game is on the TV, show the pause pill there
             // so the external display reads as paused (not a frozen frame) while the user is away.
@@ -3932,6 +3937,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // exit (no-op unless a root toggle wrote something this session).
         com.winlator.star.perf.TempWatchdog.INSTANCE.stop();
         com.winlator.star.perf.PerfRevertRegistry.INSTANCE.revertAll();
+        // Release the no-root Samsung Galaxy performance boost on game exit (no-op off Samsung).
+        com.winlator.star.perf.galaxy.GalaxyPerfManager.stop();
         unregisterGyroSensor();
         unregisterAudioRouteWatcher();
         stopDxApiDetection();
@@ -4640,6 +4647,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (XServerDrawerState.INSTANCE.getPerfPriorityBoost().getValue()) {
             handler.postDelayed(
                 () -> com.winlator.star.perf.PerfPriority.INSTANCE.boost(GuestProgramLauncherComponent.getPid()), 5000);
+        }
+
+        // No-root Samsung Galaxy Performance SDK: load and apply this container's saved power
+        // profile for the session (dormant off Samsung / without the bundled SDK jar).
+        if (container != null) {
+            com.winlator.star.perf.galaxy.GalaxyPerfManager.start(container.getRootDir());
         }
 
         // Standalone FPS limiter (guest-side, via the X11 Present extension): apply the resolved

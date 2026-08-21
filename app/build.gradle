@@ -213,6 +213,16 @@ dependencies {
     implementation 'androidx.activity:activity-ktx:1.8.2'
     implementation 'androidx.fragment:fragment-ktx:1.6.2'
     implementation files('libs/MidiSynth/MidiSynth.jar')
+
+    // Samsung Galaxy Performance SDK (proprietary, not GPL) — picked up ONLY when the user has
+    // supplied the jar (see app/libs/GalaxyPerf/README.md). It is git-ignored and absent in CI;
+    // the app loads it by reflection, so this guard keeps builds green with or without it.
+    def perfSdkJar = file('libs/GalaxyPerf/perfsdk-v1.0.0.jar')
+    if (perfSdkJar.exists()) {
+        implementation files(perfSdkJar)
+        logger.lifecycle("Galaxy Performance SDK found; bundling ${perfSdkJar.name}")
+    }
+
     implementation 'in.dragonbra:javasteam:1.8.0'
     implementation 'in.dragonbra:javasteam-depotdownloader:1.8.0'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'

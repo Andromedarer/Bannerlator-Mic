@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -25,6 +26,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -56,6 +58,8 @@ import com.winlator.star.perf.PerfRootApplier
 import com.winlator.star.perf.PerformanceSettings
 import com.winlator.star.perf.RootManager
 import com.winlator.star.perf.TempWatchdog
+import com.winlator.star.perf.galaxy.GalaxyPerfManager
+import com.winlator.star.perf.galaxy.GalaxyPowerProfile
 import com.winlator.star.ui.screens.PerfDisclaimerCopy
 import com.winlator.star.ui.screens.PerfDisclaimerDialog
 import com.winlator.star.ui.screens.PerfInfoDialog
@@ -104,6 +108,7 @@ fun PerformanceDashboardDialog(state: XServerDrawerState, onDismiss: () -> Unit)
     var pendingDanger by remember { mutableStateOf<PendingDanger?>(null) }
     var showGrantGate by remember { mutableStateOf(false) }
     var info by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var showGalaxyOffPrompt by remember { mutableStateOf(false) }
     var profile by remember { mutableStateOf<String?>(null) }
 
     // Poll the cheap sysfs/HudMetrics readouts while the dialog is open (same cadence as before).
@@ -128,6 +133,18 @@ fun PerformanceDashboardDialog(state: XServerDrawerState, onDismiss: () -> Unit)
     fun applyProfile(p: String) {
         profile = p
         when (p) {
+            "Off" -> {
+                // Neutralise the entire root perf tier -> stock DVFS. Use this alongside Galaxy
+                // Performance so the Samsung SDK is the ONLY thing touching CPU/GPU clocks (the two
+                // are independent controllers and their clock/DVFS writes otherwise fight).
+                setSustained(false); setPriority(false); setBig(false)
+                setRoot(PerfRootApplier.KEY_GPU_CLOCK_LOCK, false)
+                if (granted) {
+                    setRoot(PerfRootApplier.KEY_CPU_GOVERNOR, false)
+                    setRoot(PerfRootApplier.KEY_CPU_FREQ_LOCK, false)
+                    setRoot(PerfRootApplier.KEY_CORES_ONLINE, false)
+                }
+            }
             "Battery" -> {
                 setSustained(false); setPriority(false); setBig(false)
                 setRoot(PerfRootApplier.KEY_GPU_CLOCK_LOCK, false)
@@ -249,8 +266,60 @@ fun PerformanceDashboardDialog(state: XServerDrawerState, onDismiss: () -> Unit)
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                     ) {
-                        listOf("Battery", "Balanced", "Performance", "Turbo").forEach { p ->
+                        listOf("Off", "Battery", "Balanced", "Performance", "Turbo").forEach { p ->
                             Chip(p, profile == p, Modifier.weight(1f)) { applyProfile(p) }
+                        }
+                    }
+
+                    // Galaxy Performance (Samsung, no root) — only present on Samsung Galaxy devices
+                    // with the Galaxy Performance SDK bundled; otherwise the whole block is hidden.
+                    val galaxySupported = remember { GalaxyPerfManager.isSupported() }
+                    var galaxyEnabled by remember { mutableStateOf(GalaxyPerfManager.isEnabled()) }
+                    var galaxyProfileName by remember {
+                        mutableStateOf(GalaxyPerfManager.currentProfile?.name ?: GalaxyPowerProfile.DEFAULT.name)
+                    }
+                    if (galaxySupported) {
+                        SectionHead("Galaxy Performance · Samsung")
+                        // Master switch — OFF by default; nothing touches the SoC until turned on.
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Enable Galaxy Performance", color = cs.onSurface, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    "No-root CPU/GPU/RAM control via Samsung's SDK. Off by default; saved per game.",
+                                    color = cs.onSurfaceVariant, fontSize = 11.sp,
+                                )
+                            }
+                            Switch(
+                                checked = galaxyEnabled,
+                                onCheckedChange = {
+                                    galaxyEnabled = it
+                                    GalaxyPerfManager.setEnabled(it)
+                                    // Recommend handing clocks to Galaxy alone, unless already Off.
+                                    if (it && profile != "Off") showGalaxyOffPrompt = true
+                                },
+                            )
+                        }
+                        // Presets appear only once enabled.
+                        if (galaxyEnabled) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                            ) {
+                                GalaxyPowerProfile.PRESETS.forEach { preset ->
+                                    Chip(preset.name, galaxyProfileName == preset.name, Modifier.weight(1f)) {
+                                        galaxyProfileName = preset.name
+                                        GalaxyPerfManager.setProfile(preset)
+                                    }
+                                }
+                            }
+                            Text(
+                                "Tip: set the Power profile above to \"Off\" so Galaxy alone controls the clocks (they otherwise conflict).",
+                                color = cs.onSurfaceVariant, fontSize = 10.sp,
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 3.dp),
+                            )
                         }
                     }
 
@@ -429,6 +498,30 @@ fun PerformanceDashboardDialog(state: XServerDrawerState, onDismiss: () -> Unit)
         )
     }
     info?.let { (t, b) -> PerfInfoDialog(t, b) { info = null } }
+
+    if (showGalaxyOffPrompt) {
+        AlertDialog(
+            onDismissRequest = { showGalaxyOffPrompt = false },
+            title = { Text("Let Galaxy control performance?") },
+            text = {
+                Text(
+                    "Galaxy Performance and the Power profile above both drive the CPU/GPU clocks, " +
+                        "by different mechanisms (Samsung's SDK vs. the root perf tier). Running both at " +
+                        "once lets them fight, so clock behaviour can be inconsistent.\n\n" +
+                        "Recommended: set the Power profile to \"Off\" so the Samsung SDK alone manages " +
+                        "the clocks. Keep both only if you know what you're doing.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { applyProfile("Off"); showGalaxyOffPrompt = false }) {
+                    Text("Set Power profile to Off")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showGalaxyOffPrompt = false }) { Text("Keep both") }
+            },
+        )
+    }
 }
 
 /* ───────────────────────── local building blocks (file-scoped) ───────────────────────── */
@@ -690,6 +783,15 @@ fun PerformanceDashboardDialogPerGame(
     fun applyProfile(p: String) {
         profile = p
         when (p) {
+            "Off" -> {
+                // Neutralise the root perf tier -> stock DVFS, so Galaxy Performance (Samsung SDK)
+                // can own CPU/GPU clocks without the two controllers fighting.
+                onSustained(false); onPriority(false); onBigCores(false)
+                onRoot(PerfRootApplier.KEY_GPU_CLOCK_LOCK, false)
+                onRoot(PerfRootApplier.KEY_CPU_GOVERNOR, false)
+                onRoot(PerfRootApplier.KEY_CPU_FREQ_LOCK, false)
+                onRoot(PerfRootApplier.KEY_CORES_ONLINE, false)
+            }
             "Battery" -> {
                 onSustained(false); onPriority(false); onBigCores(false)
                 onRoot(PerfRootApplier.KEY_GPU_CLOCK_LOCK, false)
@@ -767,7 +869,7 @@ fun PerformanceDashboardDialogPerGame(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                     ) {
-                        listOf("Battery", "Balanced", "Performance", "Turbo").forEach { p ->
+                        listOf("Off", "Battery", "Balanced", "Performance", "Turbo").forEach { p ->
                             Chip(p, profile == p, Modifier.weight(1f)) { applyProfile(p) }
                         }
                     }
