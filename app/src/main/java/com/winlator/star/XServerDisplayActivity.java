@@ -1467,6 +1467,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 showToast(this, "Native Rendering isn't available on the OpenGL renderer yet — use the Vulkan renderer");
                 return;
             }
+            // ASR (SurfaceFlinger renderer) is inherently native/passthrough and can't be live-switched to
+            // a compositor mode — keep the flag on and no-op the toggle (change it via the container setting).
+            if (xServerView.getRenderer() instanceof com.winlator.star.renderer.ASurfaceRenderer) {
+                XServerDrawerState.INSTANCE.setNativeRenderingEnabled(true);
+                showToast(this, "Native Rendering is always on under the SurfaceFlinger renderer");
+                return;
+            }
             boolean next = !XServerDrawerState.INSTANCE.getNativeRenderingEnabled();
             XServerDrawerState.INSTANCE.setNativeRenderingEnabled(next);
             // Native (direct scanout) puts one opaque game SurfaceControl on top; secondary guest
@@ -4629,6 +4636,21 @@ public class XServerDisplayActivity extends AppCompatActivity {
         FrameLayout rootView = findViewById(R.id.FLXServerDisplay);
         xServerView = new XServerView(this, xServer);
         String rendererType = container != null ? resolvedRenderer() : "vulkan";
+        // Native Rendering now routes to the hardened SurfaceFlinger (ASR) renderer instead of the
+        // leaner inline Vulkan FLIP scanout. ASR carries the full GN #1582/#1620 hardening the FLIP
+        // path lacks: acquire-fence wait + BGRA->RGBA colour correction + release-fence recycling
+        // (OnComplete) + ordered shutdown (anti-ANR) + reparent-to-null layer-leak guard. Reroute a
+        // Vulkan container to ASR when Native Rendering is on, no compositor-bound preset upscaler is
+        // active (>=3 lives in the compositor pass ASR bypasses), Colors=RGBA (swapRB) is off (the
+        // FLIP path's swapRB fallback is preserved as-is for now), and ASR is available (API 29+). If
+        // ASR is unsupported we fall through to the old Vulkan FLIP native path (nativeOn) below.
+        if ("vulkan".equalsIgnoreCase(rendererType)
+                && resolvedRendererNative()
+                && resolveScalingMode() < 3
+                && !resolvedRendererSwapRB()
+                && com.winlator.star.renderer.ASurfaceRenderer.isSupported()) {
+            rendererType = "surfaceflinger";
+        }
         // SurfaceFlinger (ASR) requires API 29+; fall back to Vulkan if unsupported.
         if ("surfaceflinger".equalsIgnoreCase(rendererType)
                 && !com.winlator.star.renderer.ASurfaceRenderer.isSupported()) {
@@ -4800,6 +4822,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // of swapRB. Default TRUE = correct colours.
             asr.setSfCompatMode(resolvedSfCompatMode());
             asr.setHudFrameTick(this::driveHudFrameTick);
+            // ASR IS the native/passthrough path (a per-window SurfaceControl SurfaceFlinger composites);
+            // there is no non-native mode to switch to, and the renderer can't be swapped mid-session. So
+            // reflect Native Rendering as ON and hide the in-game live toggle (turning it "off" would need
+            // a renderer re-init) — changing it is a container setting + relaunch, like any renderer choice.
+            XServerDrawerState.INSTANCE.setNativeRenderingEnabled(true);
+            XServerDrawerState.INSTANCE.setNativeRenderingSupported(false);
         }
 
         if (shortcut != null) {
@@ -5230,6 +5258,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
      *  repeated toast) when native is already off, since screen-effect sliders fire continuously. */
     private void disableNativeRenderingForPreset() {
         if (!XServerDrawerState.INSTANCE.getNativeRenderingEnabled()) return;
+        // ASR bypasses the compositor entirely and can't be switched to a preset mode live; leave it on.
+        if (xServerView.getRenderer() instanceof com.winlator.star.renderer.ASurfaceRenderer) return;
         HostRenderer r = xServerView.getRenderer();
         if (r instanceof com.winlator.star.renderer.vulkan.VulkanRenderer)
             ((com.winlator.star.renderer.vulkan.VulkanRenderer) r).setNativeMode(false);
