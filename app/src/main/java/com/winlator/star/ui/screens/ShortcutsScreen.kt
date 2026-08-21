@@ -6233,21 +6233,25 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                         }
                         // Epic Friends Overlay (Phase 3): provision Epic's real EOS overlay into the
                         // prefix; the game's own EOS SDK renders it on Shift+F3. Default OFF.
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Epic Friends Overlay", fontSize = 14.sp)
-                                Text(
-                                    "Experimental — in-game Epic overlay on Shift+F3 (a draggable pill " +
-                                            "can summon it too). Needs the container to allow full services.",
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                        // Dark-launched: hidden behind FeatureFlags.EPIC_OVERLAY_ENABLED so no shortcut
+                        // can be set to epicOverlay=1 through the UI until the DXVK wrapper lands.
+                        if (com.winlator.star.FeatureFlags.EPIC_OVERLAY_ENABLED) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Epic Friends Overlay", fontSize = 14.sp)
+                                    Text(
+                                        "Experimental — in-game Epic overlay on Shift+F3 (a draggable pill " +
+                                                "can summon it too). Needs the container to allow full services.",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Spacer(Modifier.width(8.dp))
+                                Switch(checked = epicOverlayEnabled, onCheckedChange = { epicOverlayEnabled = it })
                             }
-                            Spacer(Modifier.width(8.dp))
-                            Switch(checked = epicOverlayEnabled, onCheckedChange = { epicOverlayEnabled = it })
                         }
                     }
 

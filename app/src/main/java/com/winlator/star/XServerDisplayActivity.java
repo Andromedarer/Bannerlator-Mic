@@ -7972,9 +7972,16 @@ return true;
     // pointer; the game's own bundled EOS SDK loads it and owns the hotkey (Shift+F3). We render
     // nothing. Gated per-shortcut by storeSource=epic + epicOverlay=1.
 
-    /** True when the launching shortcut is an Epic game with the Friends-Overlay toggle on. */
+    /**
+     * True when the launching shortcut is an Epic game with the Friends-Overlay toggle on AND the
+     * feature is enabled at build time. This is the single authoritative predicate: it gates the
+     * pill attach, the AGGRESSIVE-startup override, and (via the strip branch below) provisioning.
+     * While {@link com.winlator.star.FeatureFlags#EPIC_OVERLAY_ENABLED} is false this always returns
+     * false, so every Epic launch takes the strip-and-do-nothing path — inert and self-cleaning.
+     */
     private boolean isEpicOverlayEnabledForLaunch() {
-        return shortcut != null
+        return com.winlator.star.FeatureFlags.EPIC_OVERLAY_ENABLED
+                && shortcut != null
                 && "epic".equals(shortcut.getExtra("storeSource"))
                 && "1".equals(shortcut.getExtra("epicOverlay"));
     }

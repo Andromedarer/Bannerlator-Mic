@@ -9,8 +9,10 @@
  * Massive thanks to utkarshdalal and the GameNative contributors.
  *
  * This file ships Phase 1 (online auth handshake) and Phase 2 (ownership token
- * -epicovt, gated by Denuvo detection). Phase 3 (in-game EOS overlay UI for
- * friends / notifications / achievements) is still pending.
+ * -epicovt, gated by Denuvo detection). Phase 3 (in-game EOS overlay for friends /
+ * notifications / achievements) now lives in-tree via {@link EpicOverlayManager},
+ * but is dark-launched behind {@code FeatureFlags.EPIC_OVERLAY_ENABLED} until the
+ * DXVK-based wrapper it renders through lands.
  *
  * Phase 2 is a Java port of GameNative's EpicGameLauncher ownership-token flow
  * (saveOwnershipTokenToFile / -epicovt / -epicapp / -epicenv) + EpicAuthManager /
