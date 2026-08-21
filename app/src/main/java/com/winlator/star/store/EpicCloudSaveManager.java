@@ -63,7 +63,9 @@ public final class EpicCloudSaveManager {
                 // (the Epic savesync key is the relative path, so a nested save tree round-trips).
                 List<String> localRel = new ArrayList<>();
                 collectRelativeFiles(localFolder, "", localRel);
+                debug(ctx, "upload localFolder=" + localFolder + " localFiles=" + localRel.size() + " cloudFiles=" + cloudFiles.size());
                 if (localRel.isEmpty()) {
+                    debug(ctx, "upload — no local files under resolved folder");
                     cb.onDone("No local files to upload");
                     return;
                 }
@@ -76,28 +78,33 @@ public final class EpicCloudSaveManager {
                     long cloudModMs = getCloudModifiedMs(cloudFiles, rel);
                     if (localModMs > cloudModMs) toUpload.add(rel);
                 }
+                debug(ctx, "upload toUpload=" + toUpload.size() + " of " + localRel.size() + " (newer-than-cloud) " + toUpload);
 
                 if (toUpload.isEmpty()) {
+                    debug(ctx, "upload — already up to date, nothing PUT");
                     cb.onDone("Already up to date");
                     return;
                 }
 
                 cb.onStatus("Requesting upload links for " + toUpload.size() + " file(s)…");
                 List<WriteLink> writeLinks = requestWriteLinks(accountId, appName, token, toUpload);
+                debug(ctx, "upload writeLinks granted=" + writeLinks.size() + " for requested=" + toUpload.size());
 
                 int uploaded = 0;
                 for (WriteLink wl : writeLinks) {
                     cb.onStatus("Uploading: " + wl.name);
                     File local = new File(localFolder, wl.name);
-                    if (!local.exists()) continue;
+                    if (!local.exists()) { debug(ctx, "upload PUT skip (missing local): " + wl.name); continue; }
                     byte[] data = readFile(local);
                     if (data == null) { cb.onError("Failed to read: " + wl.name); return; }
                     boolean ok = putToPresignedUrl(wl.url, data);
+                    debug(ctx, "upload PUT " + wl.name + " bytes=" + data.length + " -> " + (ok ? "ok" : "FAIL"));
                     if (!ok) { cb.onError("Upload failed for: " + wl.name); return; }
                     uploaded++;
                 }
 
                 markSynced(ctx, appName);
+                debug(ctx, "upload complete — uploaded=" + uploaded + " file(s)");
                 cb.onDone("Uploaded " + uploaded + " file" + (uploaded == 1 ? "" : "s"));
 
             } catch (Exception e) {
@@ -120,8 +127,10 @@ public final class EpicCloudSaveManager {
 
                 cb.onStatus("Fetching cloud file list…");
                 List<CloudFile> cloudFiles = listCloudFiles(ctx, accountId, appName, token);
+                debug(ctx, "download cloudFiles=" + cloudFiles.size() + " -> localFolder=" + localFolder);
 
                 if (cloudFiles.isEmpty()) {
+                    debug(ctx, "download — no cloud saves found");
                     cb.onDone("No cloud saves found");
                     return;
                 }
@@ -139,10 +148,12 @@ public final class EpicCloudSaveManager {
                     File parent = dest.getParentFile();
                     if (parent != null && !parent.exists()) parent.mkdirs();
                     writeFile(dest, data);
+                    debug(ctx, "download GET " + cf.name + " bytes=" + data.length + " -> " + dest);
                     downloaded++;
                 }
 
                 markSynced(ctx, appName);
+                debug(ctx, "download complete — downloaded=" + downloaded + " file(s)");
                 cb.onDone("Downloaded " + downloaded + " file" + (downloaded == 1 ? "" : "s"));
 
             } catch (Exception e) {
