@@ -31,8 +31,9 @@ import java.io.File
  * confirmed against Legendary rather than trusted blindly). Roaming AppData has its own explicit
  * `{roamingappdata}` token.
  *
- * SAFETY: every resolve rejects `..` escape and refuses any result that canonicalizes outside the
- * container's Wine prefix — mirrors [SteamCloudSavePaths.toContainerPath]. Returns null (⇒ caller
+ * SAFETY: `..` is allowed *within* the walk — Epic's own templates use it to reach the sibling
+ * AppData roots (`{AppData}/../Roaming/...`, `{AppData}/../LocalLow/...`) — but every resolve refuses
+ * any result that canonicalizes outside the container's user profile (install dir for `{installdir}`)— mirrors [SteamCloudSavePaths.toContainerPath]. Returns null (⇒ caller
  * skips / reports "can't resolve") rather than guessing.
  */
 object EpicCloudSavePaths {
@@ -118,6 +119,12 @@ object EpicCloudSavePaths {
         val containerLabel: String?,
         /** True when the catalog reported a CloudSaveFolder for this game (sync is meaningful). */
         val cloudSaveEnabled: Boolean,
+        /**
+         * True once we've fetched this game's cloud-save metadata at least once (via an Epic-store
+         * library refresh). Distinguishes "no cloud-save support" (checked, [cloudSaveEnabled] false)
+         * from "not refreshed yet" (never checked).
+         */
+        val metadataChecked: Boolean,
         /** Last successful sync (epoch millis) from `epic_sync_timestamp_`, or 0 if never. */
         val lastSyncMillis: Long,
     )
@@ -153,6 +160,8 @@ object EpicCloudSavePaths {
                     it.name?.takeIf { n -> n.isNotBlank() } ?: "Container ${it.id}"
                 },
                 cloudSaveEnabled = cloudSaveFolder(ctx, an) != null,
+                metadataChecked = prefs.getBoolean("epic_cloud_checked_$an", false) ||
+                    cloudSaveFolder(ctx, an) != null,
                 lastSyncMillis = parseIso8601Ms(prefs.getString("epic_sync_timestamp_$an", null)),
             )
         }.sortedWith(compareBy({ !it.cloudSaveEnabled }, { it.name.lowercase() }))
@@ -178,7 +187,7 @@ object EpicCloudSavePaths {
      * Resolve a game's CloudSaveFolder token string into the concrete directory to sync, inside
      * [container]'s Wine prefix. Requires the persisted `epic_save_folder_<appName>` string. Null if
      * that string is missing, the leading token is unknown/unsupported, the token needs a container
-     * we don't have, the remainder is unsafe (`..`), or the result would escape the prefix.
+     * we don't have, or the resolved result would escape the container's user profile.
      *
      * After resolving, descends into the first non-empty per-user subdirectory when the resolved
      * folder itself holds no files but wraps one or more populated sub-folders (some Epic titles nest
@@ -198,46 +207,62 @@ object EpicCloudSavePaths {
 
         val accountId = EpicCredentialStore.load(ctx)?.accountId ?: ""
 
-        // Leading token → base directory. Profile-relative tokens need a container.
-        val base: File = when (token) {
-            "installdir" -> installDir(ctx, appName) ?: run {
-                Log.w(TAG, "resolveSaveDirectory: {installdir} but no install dir for $appName"); return null
+        // Leading token → base directory + the containment boundary the resolved path may not escape.
+        // Epic templates legitimately hop between the sibling AppData roots with '..'
+        // ("{AppData}/../Roaming/...", "{AppData}/../LocalLow/..."), so for profile-relative tokens the
+        // boundary is the whole user profile — NOT the individual AppData sub-dir the token names.
+        val base: File
+        val boundary: File
+        when (token) {
+            "installdir" -> {
+                val inst = installDir(ctx, appName) ?: run {
+                    Log.w(TAG, "resolveSaveDirectory: {installdir} but no install dir for $appName"); return null
+                }
+                base = inst; boundary = inst
             }
-            "userprofile" -> profileOrNull(container) ?: return null
-            "userdir" -> profileOrNull(container)?.let { File(it, "Documents") } ?: return null
-            "usersavedgames" -> profileOrNull(container)?.let { File(it, "Saved Games") } ?: return null
+            "userprofile" -> { val p = profileOrNull(container) ?: return null; base = p; boundary = p }
+            "userdir" -> { val p = profileOrNull(container) ?: return null; base = File(p, "Documents"); boundary = p }
+            "usersavedgames" -> { val p = profileOrNull(container) ?: return null; base = File(p, "Saved Games"); boundary = p }
             // Epic's {appdata} == %LOCALAPPDATA% (verified against Legendary) → AppData/Local.
-            "appdata", "localappdata" -> profileOrNull(container)?.let { File(it, "AppData/Local") } ?: return null
-            "roamingappdata" -> profileOrNull(container)?.let { File(it, "AppData/Roaming") } ?: return null
+            "appdata", "localappdata" -> { val p = profileOrNull(container) ?: return null; base = File(p, "AppData/Local"); boundary = p }
+            "roamingappdata" -> { val p = profileOrNull(container) ?: return null; base = File(p, "AppData/Roaming"); boundary = p }
             else -> {
                 Log.w(TAG, "resolveSaveDirectory: unknown token '{$token}' in '$raw'"); return null
             }
         }
 
-        // Remainder after the leading token; expand inline {epicid}/{appname}, guard '..'.
+        // Remainder after the leading token; expand inline {epicid}/{appname}.
         var remainder = norm.substring(tokenMatch.value.length).trimStart('/')
         remainder = remainder
             .replace("{epicid}", accountId, ignoreCase = true)
             .replace("{appname}", appName, ignoreCase = true)
         val segments = remainder.split('/').filter { it.isNotEmpty() && it != "." }
-        if (segments.any { it == ".." }) {
-            Log.w(TAG, "resolveSaveDirectory: rejecting '..' in '$raw'"); return null
-        }
 
-        // Walk each segment case-insensitively against what's actually on disk (Windows apps write
-        // AppData/appdata/"Saved Games" with varying case onto our case-sensitive ext4 prefix), while
-        // still allowing a not-yet-created path to resolve to its literal name (download creates it).
+        // Walk each segment against what's actually on disk. A '..' climbs (Epic uses it to reach the
+        // sibling AppData roots); a normal segment matches case-insensitively, then — only when that
+        // fails AND the match is unambiguous — punctuation-insensitively, because a game's on-disk
+        // publisher folder can differ from Epic's catalog spelling by separators (AIR/Unity write
+        // "amanita-design.samorost3" where the catalog says "amanitadesign.samorost3"). Falls back to
+        // the literal name for a not-yet-created path (a download creates it). The escape guard below
+        // is the real safety net.
         var dir = base
         for (seg in segments) {
-            val existing = dir.listFiles()?.firstOrNull { it.name.equals(seg, ignoreCase = true) }
+            if (seg == "..") { dir = dir.parentFile ?: File(dir, ".."); continue }
+            val kids = dir.listFiles()
+            val existing = kids?.firstOrNull { it.name.equals(seg, ignoreCase = true) }
+                ?: kids?.let { k ->
+                    val target = normalizeFolderName(seg)
+                    if (target.isEmpty()) null
+                    else k.filter { normalizeFolderName(it.name) == target }.singleOrNull()
+                }
             dir = existing ?: File(dir, seg)
         }
 
-        // Escape guard: canonical dest must be the base or strictly under it.
-        val baseCanon = try { base.canonicalPath } catch (e: Exception) { return null }
+        // Escape guard: canonical dest must be the boundary or strictly under it.
+        val boundaryCanon = try { boundary.canonicalPath } catch (e: Exception) { return null }
         val destCanon = try { dir.canonicalPath } catch (e: Exception) { return null }
-        if (destCanon != baseCanon && !destCanon.startsWith(baseCanon + File.separator)) {
-            Log.w(TAG, "resolveSaveDirectory: path escapes base for '$raw'"); return null
+        if (destCanon != boundaryCanon && !destCanon.startsWith(boundaryCanon + File.separator)) {
+            Log.w(TAG, "resolveSaveDirectory: path escapes profile for '$raw'"); return null
         }
 
         return descendToUserSubdir(dir)
@@ -247,6 +272,15 @@ object EpicCloudSavePaths {
 
     private fun profileOrNull(container: Container?): File? =
         container?.let { SaveLocator.profileDir(it) }
+
+    /**
+     * Punctuation-insensitive folder-name key: lowercase, alphanumerics only. Used as a *fallback*
+     * match (only when an exact case-insensitive match fails and exactly one candidate normalizes to
+     * the same key) to bridge separator differences between Epic's catalog spelling and the folder a
+     * Wine-run engine actually wrote (e.g. "amanitadesign.samorost3" vs "amanita-design.samorost3").
+     */
+    private fun normalizeFolderName(s: String): String =
+        s.lowercase().filter { it.isLetterOrDigit() }
 
     /**
      * Some Epic titles nest their saves one level deeper, under an unnamed per-user / account-id

@@ -86,9 +86,9 @@ object CustomSaveVault {
     )
 
     /**
-     * Enumerate every CUSTOM (non-Steam) shortcut across all containers and build its local-vault
-     * status. Custom = NOT a genuine Steam game (mirrors ShortcutsScreen's isCustomShortcut):
-     * `storeSource != "steam"` AND the exec path is not under `steam_games`. Sorted no-backup-first,
+     * Enumerate every CUSTOM (non-store) shortcut across all containers and build its local-vault
+     * status. Custom = neither a Steam nor an Epic game (each has its own tab): `storeSource` is not
+     * "steam"/"epic" AND the exec path is not under `steam_games`/`epic_games`. Sorted no-backup-first,
      * then by name. BLOCKING (loads containers + scans desktop dirs) — call off the main thread.
      */
     fun listStatuses(context: Context): List<CustomGameStatus> {
@@ -112,11 +112,19 @@ object CustomSaveVault {
             .sortedWith(compareBy({ it.hasBackup }, { it.name.lowercase() }))
     }
 
-    /** Mirror of ShortcutsScreen's Steam-origin gate, inverted: true for custom (non-Steam) games. */
+    /**
+     * Mirror of ShortcutsScreen's store-origin gate, inverted: true only for genuinely custom games.
+     * Excludes BOTH storefronts — Steam and Epic each own a dedicated Save Manager tab, so a
+     * store-tagged shortcut (or one whose exec lives under `steam_games`/`epic_games`) must not also
+     * leak into the Custom tab.
+     */
     private fun isCustom(shortcut: Shortcut): Boolean {
-        if (shortcut.getExtra("storeSource") == "steam") return false
-        val p = shortcut.path
-        return p == null || !p.contains("steam_games", ignoreCase = true)
+        when (shortcut.getExtra("storeSource")) {
+            "steam", "epic" -> return false
+        }
+        val p = shortcut.path ?: return true
+        return !p.contains("steam_games", ignoreCase = true) &&
+            !p.contains("epic_games", ignoreCase = true)
     }
 
     /**

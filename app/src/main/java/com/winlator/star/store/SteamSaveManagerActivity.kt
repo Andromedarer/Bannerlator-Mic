@@ -33,6 +33,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Settings
@@ -1053,9 +1054,11 @@ private fun EpicSaveRow(
             )
             val statusLine = when {
                 !setUp -> "Add this game to a container first to sync."
-                !status.cloudSaveEnabled -> "Open the Epic store to load this game's cloud-save info."
-                status.lastSyncMillis > 0L -> "Synced ${relTime(status.lastSyncMillis)}"
-                else -> "Cloud saves ready — not synced yet"
+                status.cloudSaveEnabled && status.lastSyncMillis > 0L -> "Synced ${relTime(status.lastSyncMillis)}"
+                status.cloudSaveEnabled -> "Cloud saves ready — not synced yet"
+                // Metadata fetched, but Epic ships no CloudSaveFolder for this title → genuinely unsupported.
+                status.metadataChecked -> "No cloud-save support for this title"
+                else -> "Open the Epic store to load this game's cloud-save info."
             }
             Text(
                 text = statusLine,
@@ -1067,11 +1070,22 @@ private fun EpicSaveRow(
             )
         }
 
+        val noCloudSupport = !status.cloudSaveEnabled && status.metadataChecked
         if (busy) {
             CircularProgressIndicator(
                 modifier = Modifier.size(22.dp),
                 color = MaterialTheme.colorScheme.primary,
                 strokeWidth = 2.dp,
+            )
+        } else if (noCloudSupport) {
+            // No sync buttons for a title Epic doesn't cloud-sync — a single dimmed "cloud off" badge
+            // makes the unsupported state unmistakable (vs a not-yet-refreshed game, which keeps its
+            // buttons so a refresh can light them up).
+            Icon(
+                imageVector = Icons.Filled.CloudOff,
+                contentDescription = "No cloud-save support",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                modifier = Modifier.size(24.dp),
             )
         } else {
             val disabledTint = MaterialTheme.colorScheme.primary.copy(alpha = 0.38f)

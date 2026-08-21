@@ -564,7 +564,12 @@ class EpicGamesActivity : ComponentActivity() {
             // tab (EpicCloudSavePaths.resolveSaveDirectory) can resolve it without another catalog call.
             for (g in games) {
                 if (g.appName.isEmpty()) continue
+                // Mark that we've fetched this game's cloud-save metadata at least once — lets the Save
+                // Manager tell "no cloud-save support" (checked, empty folder) apart from "not refreshed
+                // yet" (never checked).
+                ed.putBoolean("epic_cloud_checked_${g.appName}", true)
                 if (g.cloudSaveFolder.isNotEmpty()) ed.putString("epic_save_folder_${g.appName}", g.cloudSaveFolder)
+                else ed.remove("epic_save_folder_${g.appName}")
             }
             ed.apply()
         } catch (e: Exception) { Log.e(TAG, "saveCachedGames failed", e) }
