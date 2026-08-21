@@ -92,6 +92,7 @@ import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Help
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Info
@@ -122,6 +123,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RadioButton
 import com.winlator.star.communityconfigs.AccountManager
 import com.winlator.star.communityconfigs.CanonicalDevice
@@ -6603,49 +6605,51 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                         (if (preferBigCores != com.winlator.star.perf.PerformanceSettings.preferBigCores.value) 1 else 0) +
                         com.winlator.star.perf.PerfRootApplier.ROOT_KEYS.count { (rootOverrides[it] ?: false) != com.winlator.star.perf.PerformanceSettings.rootDefaultValue(it) }
 
-                    // Collapsible header.
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth().clickable { perfExpanded = !perfExpanded }.padding(vertical = 8.dp)
-                    ) {
-                        Text("Performance", fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
-                            modifier = Modifier.weight(1f))
-                        Text(
-                            if (perfOverrideCount > 0) "$perfOverrideCount overridden" else "Global defaults",
-                            fontSize = 11.sp,
-                            color = if (perfOverrideCount > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(end = 6.dp)
+                    // Performance — one row opens the full dashboard menu (same as in-game), bound to
+                    // this shortcut's saved-per-game toggles. Replaces the old inline toggle list; the
+                    // save block below still persists whatever the dialog set (override-when-different).
+                    var showPerfDialog by remember { mutableStateOf(false) }
+                    // Styled to match the other outlined menu fields (notched "Performance" label +
+                    // border + trailing chevron). The read-only field shows the override status; a
+                    // transparent overlay Box catches taps so the whole field opens the dashboard
+                    // dialog instead of focusing the text field.
+                    Box(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                        OutlinedTextField(
+                            value = if (perfOverrideCount > 0) "$perfOverrideCount overridden" else "Global defaults",
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Performance") },
+                            trailingIcon = { Icon(Icons.Default.KeyboardArrowRight, contentDescription = "Open") },
+                            // Accent-colored outline so this opener stands out from the grey menu fields.
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.primary,
+                                focusedLabelColor = MaterialTheme.colorScheme.primary,
+                                unfocusedLabelColor = MaterialTheme.colorScheme.primary,
+                                focusedTrailingIconColor = MaterialTheme.colorScheme.primary,
+                                unfocusedTrailingIconColor = MaterialTheme.colorScheme.primary,
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
                         )
-                        Icon(
-                            if (perfExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                            contentDescription = if (perfExpanded) "Collapse" else "Expand"
-                        )
+                        Box(Modifier.matchParentSize().clickable { showPerfDialog = true })
                     }
 
-                    if (perfExpanded) {
-                        PerfEditRow(dp, "sustainedPerf", "Sustained Performance Mode", sustainedPerfMode,
-                            com.winlator.star.perf.PerformanceSettings.sustainedPerfMode.value) { sustainedPerfMode = it }
-                        PerfEditRow(dp, "perfPriority", "Thread Priority Boost", perfPriorityBoost,
-                            com.winlator.star.perf.PerformanceSettings.perfPriorityBoost.value) { perfPriorityBoost = it }
-                        PerfEditRow(dp, "preferBigCores", "Prefer Big Cores", preferBigCores,
-                            com.winlator.star.perf.PerformanceSettings.preferBigCores.value) { preferBigCores = it }
-                        // Root six (per-game overrides; only take effect with root, honored at launch).
-                        for (rk in com.winlator.star.perf.PerfRootApplier.ROOT_KEYS) {
-                            PerfEditRow(dp, rk, ROOT_PERF_LABELS[rk] ?: rk, rootOverrides[rk] ?: false,
-                                com.winlator.star.perf.PerformanceSettings.rootDefaultValue(rk)) { rootOverrides[rk] = it }
-                        }
-                        // Reset ALL 9 perf keys to the global defaults (visible when this game overrides any).
-                        if (anyPerfOverride) {
-                            Text("↺ Reset all performance toggles to global",
-                                fontSize = 12.sp, color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.fillMaxWidth().clickable {
-                                    sustainedPerfMode = com.winlator.star.perf.PerformanceSettings.sustainedPerfMode.value
-                                    perfPriorityBoost = com.winlator.star.perf.PerformanceSettings.perfPriorityBoost.value
-                                    preferBigCores = com.winlator.star.perf.PerformanceSettings.preferBigCores.value
-                                    for (rk in com.winlator.star.perf.PerfRootApplier.ROOT_KEYS)
-                                        rootOverrides[rk] = com.winlator.star.perf.PerformanceSettings.rootDefaultValue(rk)
-                                }.padding(vertical = 6.dp))
-                        }
+                    if (showPerfDialog) {
+                        com.winlator.star.ui.PerformanceDashboardDialogPerGame(
+                            sustained = sustainedPerfMode, onSustained = { sustainedPerfMode = it },
+                            priority = perfPriorityBoost, onPriority = { perfPriorityBoost = it },
+                            bigCores = preferBigCores, onBigCores = { preferBigCores = it },
+                            rootValue = { rootOverrides[it] ?: false },
+                            onRoot = { k, v -> rootOverrides[k] = v },
+                            onResetAll = {
+                                sustainedPerfMode = com.winlator.star.perf.PerformanceSettings.sustainedPerfMode.value
+                                perfPriorityBoost = com.winlator.star.perf.PerformanceSettings.perfPriorityBoost.value
+                                preferBigCores = com.winlator.star.perf.PerformanceSettings.preferBigCores.value
+                                for (rk in com.winlator.star.perf.PerfRootApplier.ROOT_KEYS)
+                                    rootOverrides[rk] = com.winlator.star.perf.PerformanceSettings.rootDefaultValue(rk)
+                            },
+                            onDismiss = { showPerfDialog = false },
+                        )
                     }
 
                     // Audio driver

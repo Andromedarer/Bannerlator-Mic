@@ -3458,51 +3458,19 @@ private fun AdvancedContent(state: XServerDrawerState) {
 
     Spacer(Modifier.height(14.dp))
 
-    // ── Performance ── non-root power-user toggles; always enabled, applied + persisted live.
-    // Each row shows whether it's a per-game override or inheriting the App Settings global default,
-    // with a "Reset to global" affordance (a per-game toggle is only saved when it differs).
+    // ── Performance ── one entry that opens the full dashboard dialog (Form C). This REPLACES the
+    // old inline toggle stack; every control still binds to the SAME XServerDrawerState flows and
+    // perf/* objects — now inside PerformanceDashboardDialog — so it is a pure drop-in swap.
     SectionHeader("Performance")
+    var showPerfDialog by remember { mutableStateOf(false) }
+    AdvancedActionRow(
+        "Performance",
+        R.drawable.ic_sidebar_performance,
+        subtitle = "CPU / GPU clocks, thermal, memory — live gauges, root-aware.",
+    ) { showPerfDialog = true }
 
-    val overridden by state.overriddenKeys.collectAsState()
-
-    val sustainedPerf by state.sustainedPerfMode.collectAsState()
-    ToggleRow("Sustained Performance Mode", sustainedPerf) {
-        state.setSustainedPerfMode(it); state.onSustainedPerfModeChange?.run()
-    }
-    PerfOverrideLine("sustainedPerfMode" in overridden) { state.onResetPerfKey?.accept("sustainedPerfMode") }
-
-    val priorityBoost by state.perfPriorityBoost.collectAsState()
-    ToggleRow("Thread Priority Boost", priorityBoost) {
-        state.setPerfPriorityBoost(it); state.onPerfPriorityBoostChange?.run()
-    }
-    PerfOverrideLine("perfPriorityBoost" in overridden) { state.onResetPerfKey?.accept("perfPriorityBoost") }
-
-    val bigCores by state.preferBigCores.collectAsState()
-    ToggleRow("Prefer Big Cores", bigCores) {
-        state.setPreferBigCores(it); state.onPreferBigCoresChange?.run()
-    }
-    PerfOverrideLine("preferBigCores" in overridden) { state.onResetPerfKey?.accept("preferBigCores") }
-
-    // GPU max-clock pin — sits with the no-root toggles because on Adreno it works without root
-    // (KGSL turbo); it upgrades to the sysfs pin automatically when root is granted.
-    GpuClockLockRow(state, overridden)
-
-    Spacer(Modifier.height(14.dp))
-    RootPerformanceSection(state)
-
-    // One-tap "reset every per-game override" — shown only when this game overrides something.
-    if (overridden.isNotEmpty()) {
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "↺ Reset all game overrides to global",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(10.dp))
-                .clickable { state.onResetAllPerf?.run() }
-                .padding(horizontal = 12.dp, vertical = 8.dp)
-        )
+    if (showPerfDialog) {
+        PerformanceDashboardDialog(state) { showPerfDialog = false }
     }
 }
 
