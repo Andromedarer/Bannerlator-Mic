@@ -16,10 +16,10 @@ package com.winlator.star.core
 object DirectAudioSupport {
     /** The Proton/Wine builds (arm64ec) that ship a compatible winedirectaudio.drv. */
     @JvmField
-    val SUPPORTED_BUILD_TOKENS = listOf("10.0-4", "10.0-38", "11.0-1", "11.0-2", "11.0-3", "11.0-5")
+    val SUPPORTED_BUILD_TOKENS = listOf("10.0-4", "10.0-34", "11.0-1", "11.0-2", "11.0-3", "11.0-5")
 
-    /** Human-readable list for helper notes: "10.0-4 / 10.0-38 / 11.0-1 / 11.0-2 / 11.0-3 / 11.0-5". */
-    const val SUPPORTED_LABEL = "10.0-4 / 10.0-38 / 11.0-1 / 11.0-2 / 11.0-3 / 11.0-5"
+    /** Human-readable list for helper notes: "10.0-4 / 10.0-34 / 11.0-1 / 11.0-2 / 11.0-3 / 11.0-5". */
+    const val SUPPORTED_LABEL = "10.0-4 / 10.0-34 / 11.0-1 / 11.0-2 / 11.0-3 / 11.0-5"
 
     /**
      * True when the selected Wine/Proton version name is one of the six supported builds. A blank/null
