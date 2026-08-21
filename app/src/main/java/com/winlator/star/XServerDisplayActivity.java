@@ -7333,13 +7333,17 @@ return true;
             Integer cpuT = rootHudMetrics.getCpuTempC();
             Integer gpuT = rootHudMetrics.getGpuTempC();
             Integer soc = (cpuT != null && gpuT != null) ? Math.max(cpuT, gpuT) : (cpuT != null ? cpuT : gpuT);
-            m.put("socTemp", soc != null ? soc + "°C" : "—");
-            // GPU current clock (MHz).
-            String gpuMhz = readGpuMhz();
-            m.put("gpuMhz", gpuMhz != null ? gpuMhz + "MHz" : "—");
+            // Raw numbers only — the dashboard gauges format their own units, so appending them here
+            // would double up ("47°C °C").
+            m.put("socTemp", soc != null ? String.valueOf(soc) : "—");
+            // GPU current clock (MHz). Prefer HudMetrics' accessor (multi-path, works where the bare
+            // kgsl gpuclk node is SELinux-blocked, e.g. SD8Gen3); fall back to the raw sysfs read.
+            Integer gpuClk = rootHudMetrics.getGpuClockMhz();
+            String gpuMhz = gpuClk != null ? String.valueOf(gpuClk) : readGpuMhz();
+            m.put("gpuMhz", gpuMhz != null ? gpuMhz : "—");
             // Fan RPM (hwmon fanN_input), if any.
             String fan = readFanRpm();
-            m.put("fanRpm", fan != null ? fan + "rpm" : "n/a");
+            m.put("fanRpm", fan != null ? fan : "n/a");
             XServerDrawerState.INSTANCE.setRootReadouts(m);
         } catch (Exception ignored) {}
     }
