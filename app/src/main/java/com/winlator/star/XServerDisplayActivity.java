@@ -59,6 +59,7 @@ import com.winlator.star.container.Container;
 import com.winlator.star.container.ContainerManager;
 import com.winlator.star.container.Shortcut;
 import com.winlator.star.core.CustomSaveVault;
+import com.winlator.star.store.EpicOverlayManager;
 import com.winlator.star.store.SteamCloudSaveManager;
 import com.winlator.star.store.SteamDatabase;
 import com.winlator.star.store.SteamRepository;
@@ -107,6 +108,7 @@ import com.winlator.star.renderer.effects.FXAAEffect;
 import com.winlator.star.renderer.effects.NTSCCombinedEffect;
 import com.winlator.star.renderer.effects.ToonEffect;
 import com.winlator.star.renderer.effects.HDREffect;
+import com.winlator.star.widget.EpicOverlayPill;
 import com.winlator.star.widget.FpsCounter;
 import com.winlator.star.widget.FrameRating;
 import com.winlator.star.widget.FrameRatingHorizontal;
@@ -137,6 +139,7 @@ import com.winlator.star.xserver.ScreenInfo;
 import com.winlator.star.xserver.extensions.RandrExtension;
 import com.winlator.star.xserver.Window;
 import com.winlator.star.xserver.WindowManager;
+import com.winlator.star.xserver.XKeycode;
 import com.winlator.star.xserver.XServer;
 
 import org.json.JSONArray;
@@ -2252,6 +2255,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     extractGraphicsDriverFiles();
                     changeWineAudioDriver();
                     applyGameRefreshRateUnlock();
+                    provisionEpicOverlay();
                     stage[0] = "Building environment";
                     setupXEnvironment();
                 } catch (Exception e) {
@@ -4176,6 +4180,21 @@ public class XServerDisplayActivity extends AppCompatActivity {
             startupServices = container.getStartupServices();
         }
 
+        // Epic Friends Overlay (Phase 3) needs full Wine services alive: the EOS SDK spins the overlay
+        // up through services.exe (RpcSs + BITS). An AGGRESSIVE startup kills services.exe, so the
+        // overlay can't render. When the per-shortcut overlay toggle is ON, bump an aggressive selection
+        // to NORMAL for THIS launch (in-memory; it flows through changeServicesStatus below). Only the
+        // aggressive case is touched — ESSENTIAL/NORMAL already keep services running.
+        if (isEpicOverlayEnabledForLaunch()) {
+            try {
+                if (Byte.parseByte(startupSelection) == Container.STARTUP_SELECTION_AGGRESSIVE) {
+                    Log.i("XServerDisplayActivity", "Epic overlay ON: overriding AGGRESSIVE startup -> NORMAL "
+                            + "so Wine services (RpcSs/BITS) survive for the EOS overlay");
+                    startupSelection = String.valueOf(Container.STARTUP_SELECTION_NORMAL);
+                }
+            } catch (NumberFormatException ignored) {}
+        }
+
         // Cache signature: for the three presets it's just the selection (unchanged behaviour — the
         // cached "startupSelection" extra keeps holding "0"/"1"/"2"). For Custom the signature also
         // folds in the enabled-CSV, so two DIFFERENT custom sets (both selection "3") produce
@@ -5042,6 +5061,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         // Initialize inline tab states (Graphics, Controls, HUD)
         initInlineTabStates(renderer);
+
+        // Epic Friends Overlay pill — added last so it sits above the HUD/controls (only for an Epic
+        // shortcut with the overlay toggle on).
+        attachEpicOverlayPill();
     }
 
     // Apply a fullscreen aspect-ratio mode (#71) live and remember it PER GAME: the per-game shortcut
@@ -7942,6 +7965,95 @@ return true;
     // + per-layer cache lives in WineRandrSupport (shared with the container editor's warning hint).
     private boolean isSelectedLayerXrandrCapable() {
         return com.winlator.star.core.WineRandrSupport.isXrandrCapable(wineInfo);
+    }
+
+    // ── Epic Friends Overlay (Phase 3) ────────────────────────────────────────────────────────
+    // Provision-only: we drop Epic's REAL overlay component into the prefix and write ONE HKCU
+    // pointer; the game's own bundled EOS SDK loads it and owns the hotkey (Shift+F3). We render
+    // nothing. Gated per-shortcut by storeSource=epic + epicOverlay=1.
+
+    /**
+     * True when the launching shortcut is an Epic game with the Friends-Overlay toggle on AND the
+     * feature is enabled at build time. This is the single authoritative predicate: it gates the
+     * pill attach, the AGGRESSIVE-startup override, and (via the strip branch below) provisioning.
+     * While {@link com.winlator.star.FeatureFlags#EPIC_OVERLAY_ENABLED} is false this always returns
+     * false, so every Epic launch takes the strip-and-do-nothing path — inert and self-cleaning.
+     */
+    private boolean isEpicOverlayEnabledForLaunch() {
+        return com.winlator.star.FeatureFlags.EPIC_OVERLAY_ENABLED
+                && shortcut != null
+                && "epic".equals(shortcut.getExtra("storeSource"))
+                && "1".equals(shortcut.getExtra("epicOverlay"));
+    }
+
+    // Install the overlay component (idempotent CDN download) and write the OverlayPath pointer when
+    // the toggle is on; strip the pointer when it's off so a disabled overlay leaves no stale key.
+    // Runs on the background launch worker (sync file/reg/network I/O is ANR-safe there). Never throws.
+    private void provisionEpicOverlay() {
+        if (shortcut == null || !"epic".equals(shortcut.getExtra("storeSource"))) return;
+        File prefixDir = new File(ImageFs.find(this).wineprefix);
+        try {
+            if (!isEpicOverlayEnabledForLaunch()) {
+                EpicOverlayManager.stripRegistry(prefixDir);
+                return;
+            }
+            boolean ok = EpicOverlayManager.ensureOverlayInstalled(this, prefixDir);
+            if (ok) {
+                EpicOverlayManager.writeRegistry(prefixDir);
+                // DXVK guarantee note: the EOS overlay renders through the guest's D3D/DXVK path; a
+                // software (no3d) wrapper yields a grey overlay. We don't force-rewrite the user's
+                // wrapper (that could break the game), but warn when it isn't a DXVK-based one.
+                if (this.dxwrapper == null || !this.dxwrapper.contains("dxvk")) {
+                    Log.w("XServerDisplayActivity", "Epic overlay ON but dxwrapper is not DXVK-based ("
+                            + this.dxwrapper + ") — overlay may render grey; DXVK is recommended");
+                }
+                Log.i("XServerDisplayActivity", "Epic overlay provisioned for launch");
+            } else {
+                Log.w("XServerDisplayActivity", "Epic overlay provisioning failed; leaving registry untouched");
+            }
+        } catch (Throwable t) {
+            Log.w("XServerDisplayActivity", "provisionEpicOverlay failed", t);
+        }
+    }
+
+    // Synthesise the EOS overlay hotkey (Shift+F3) into the guest — four ordered X calls, mirroring a
+    // real keyboard chord. UI-thread only (that's where the OSC injects too). The overlay is ALSO
+    // summonable by a physical Shift+F3 independently — this is just a touch-friendly synthesiser.
+    private void injectEpicOverlayHotkey() {
+        if (xServer == null) return;
+        if (XKeycode.KEY_SHIFT_L.id == 0 || XKeycode.KEY_F3.id == 0) return; // guard KEY_NONE/id 0
+        try {
+            xServer.injectKeyPress(XKeycode.KEY_SHIFT_L);
+            xServer.injectKeyPress(XKeycode.KEY_F3);
+            xServer.injectKeyRelease(XKeycode.KEY_F3);
+            xServer.injectKeyRelease(XKeycode.KEY_SHIFT_L);
+        } catch (Throwable t) {
+            Log.w("XServerDisplayActivity", "injectEpicOverlayHotkey failed", t);
+        }
+    }
+
+    // Add the draggable edge-snap Epic pill over the game, only for an Epic shortcut with the overlay
+    // toggle on. The pill just synthesises Shift+F3 — it is never a prerequisite for the overlay
+    // rendering (a hardware keyboard works regardless). Position is persisted per game.
+    private void attachEpicOverlayPill() {
+        if (!isEpicOverlayEnabledForLaunch()) return;
+        FrameLayout rootView = findViewById(R.id.FLXServerDisplay);
+        if (rootView == null) return;
+        float density = getResources().getDisplayMetrics().density;
+        EpicOverlayPill pill = new EpicOverlayPill(this);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            android.view.Gravity.TOP | android.view.Gravity.START
+        );
+        lp.leftMargin = Math.round(8 * density);
+        lp.topMargin  = Math.round(120 * density);
+        pill.setLayoutParams(lp);
+        pill.setOnTapListener(this::injectEpicOverlayHotkey);
+        pill.setOnMovedListener((x, y) -> persistHudPosition("epicPillPos", x, y));
+        restoreHudPosition(pill, "epicPillPos");
+        rootView.addView(pill);
+        pill.bringToFront();
     }
 
     private void applyGeneralPatches(Container container) {

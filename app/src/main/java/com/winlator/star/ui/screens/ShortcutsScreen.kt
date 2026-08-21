@@ -5469,6 +5469,9 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
     var epicOvtForce by remember { mutableStateOf(shortcut.getExtra("epicOvtForce", "0") == "1") }
     // Launch offline — skip EOS online auth for this game (keeps its Epic identity args). Default OFF.
     var epicOffline by remember { mutableStateOf(shortcut.getExtra("epicOffline", "0") == "1") }
+    // Epic Friends Overlay (Phase 3) — provision Epic's real EOS overlay into the prefix so the game's
+    // own EOS SDK renders friends/notifications on Shift+F3. Default OFF (opt-in per game).
+    var epicOverlayEnabled by remember { mutableStateOf(shortcut.getExtra("epicOverlay", "0") == "1") }
 
     // Async-loaded state
     var isArm64EC by remember { mutableStateOf(false) }
@@ -5973,6 +5976,7 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
             if (isEpicShortcut) putExtra("epicEos", if (epicEosEnabled) "1" else "0")
             if (isEpicShortcut) putExtra("epicOvtForce", if (epicOvtForce) "1" else "0")
             if (isEpicShortcut) putExtra("epicOffline", if (epicOffline) "1" else "0")
+            if (isEpicShortcut) putExtra("epicOverlay", if (epicOverlayEnabled) "1" else "0")
             putExtra("screenSize", screenSize)
             putExtra("graphicsDriver", StringUtils.parseIdentifier(selectedGfxDriver))
             putExtra("graphicsDriverConfig", graphicsDriverConfig)
@@ -6226,6 +6230,28 @@ internal fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> U
                             // Sub-option of EOS auth: offline has nothing to skip when EOS auth is off.
                             Switch(checked = epicOffline, onCheckedChange = { epicOffline = it },
                                    enabled = epicEosEnabled)
+                        }
+                        // Epic Friends Overlay (Phase 3): provision Epic's real EOS overlay into the
+                        // prefix; the game's own EOS SDK renders it on Shift+F3. Default OFF.
+                        // Dark-launched: hidden behind FeatureFlags.EPIC_OVERLAY_ENABLED so no shortcut
+                        // can be set to epicOverlay=1 through the UI until the DXVK wrapper lands.
+                        if (com.winlator.star.FeatureFlags.EPIC_OVERLAY_ENABLED) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Epic Friends Overlay", fontSize = 14.sp)
+                                    Text(
+                                        "Experimental — in-game Epic overlay on Shift+F3 (a draggable pill " +
+                                                "can summon it too). Needs the container to allow full services.",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Spacer(Modifier.width(8.dp))
+                                Switch(checked = epicOverlayEnabled, onCheckedChange = { epicOverlayEnabled = it })
+                            }
                         }
                     }
 
