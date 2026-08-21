@@ -213,7 +213,12 @@ public final class EpicCloudSaveManager {
             JSONObject entry = files.optJSONObject(key);
             if (entry == null) continue;
             CloudFile cf = new CloudFile();
-            cf.name = key;
+            // Epic's GET listing returns the full canonical storage key
+            // ("savesync/<hash>/<appName>/<relPath>"), while requestWriteLinks echoes the
+            // bare name we asked for. Normalize to the game-relative tail so download writes
+            // to localFolder/<relPath> (not a recreated server tree) and the upload
+            // newer-than-cloud dedup matches local relative paths. See stripCloudKeyPrefix.
+            cf.name = stripCloudKeyPrefix(key, appName);
             cf.readLink = entry.optString("readLink", null);
             String lastModStr = entry.optString("lastModified", null);
             cf.lastModifiedMs = parseIso8601Ms(lastModStr);
@@ -346,6 +351,25 @@ public final class EpicCloudSaveManager {
                     .putString("epic_sync_timestamp_" + appName, iso.format(new Date()))
                     .apply();
         } catch (Exception ignored) {}
+    }
+
+    /**
+     * Reduce an Epic cloud storage key to the game-relative path.
+     * Epic returns keys as "savesync/&lt;hash&gt;/&lt;appName&gt;/&lt;relPath&gt;"; strip everything
+     * up to and including the "/&lt;appName&gt;/" segment so the tail is what the game reads
+     * under its save folder. Also handles a key already rooted at "&lt;appName&gt;/", and leaves
+     * an already-bare key (no prefix) untouched so this is safe to apply unconditionally.
+     */
+    private static String stripCloudKeyPrefix(String key, String appName) {
+        if (key == null) return null;
+        if (appName != null && !appName.isEmpty()) {
+            String marker = "/" + appName + "/";
+            int idx = key.indexOf(marker);
+            if (idx >= 0) return key.substring(idx + marker.length());
+            String rooted = appName + "/";
+            if (key.startsWith(rooted)) return key.substring(rooted.length());
+        }
+        return key;
     }
 
     private static long getCloudModifiedMs(List<CloudFile> cloudFiles, String name) {
