@@ -1,5 +1,24 @@
 # Star-Compose — Progress Log
 
+## 2026-08-22 (follow-up 2) — 🛒☁️ **GOG auto-upload: double-fire guard + visible shutdown indicator**
+> Device re-test (overlay-fix build `17c6da8a`): freeze gone (only a small stutter), BUT (1) no upload
+> indicator showed on the "Shutting down…" screen, and (2) the debug log showed the GOG upload firing
+> TWICE (18:05:17 + :19), each stopping at "listCloudFiles parsed 13" with no completion line — the
+> confirming logcat summary had rotated out, so this session's upload couldn't be confirmed complete.
+> Two real bugs found + fixed:
+> - **Double-fire:** `exit()` has multiple callers (menu/onCancel, game-exit watcher @9010, installer
+>   watcher @9056, autoClose) and NO re-entry guard. Before the worker-thread move they serialized on
+>   main harmlessly; now a 2nd exit() spawns a 2nd upload worker whose restart can kill the 1st upload
+>   mid-flight. FIX: `private volatile boolean exiting` latch at the top of `exit()` (always main-thread).
+> - **Invisible indicator:** the shutdown screen is the `centered` PreloaderUi variant; `PreloaderOverlay`
+>   renders `hint` only in the non-centered launch layout, so `CenteredStatus` never drew it. FIX: pass
+>   `ui.hint` into `CenteredStatus(message, subMessage)` and render it as a dim bodyMedium line (1-line
+>   ellipsized) between the title and the indeterminate bar. Now "Backing up your saves…" → live
+>   "Uploading: <file>" shows during the (off-main, animating) upload.
+> CI-pending. Files: `XServerDisplayActivity.java` (guard), `ui/PreloaderOverlay.kt` (CenteredStatus).
+> RE-TEST: play ELDERBORN → exit → confirm ONE upload, visible "Uploading…" + moving bar, and capture
+> `BH_SAVE_SYNC` "Uploaded N" LIVE before it rotates.
+
 ## 2026-08-22 (follow-up) — 🛒☁️ **GOG auto-upload: fix frozen "Shutting down…" screen**
 > ✅ auto-upload-on-exit DEVICE-PROVEN (ELDERBORN, "Uploaded 13 files"). But the ~11s upload FROZE the
 > "Shutting down…" overlay (progress bar stuck mid-animation) → user reported it looks hung, risks users

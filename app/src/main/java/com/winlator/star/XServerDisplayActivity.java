@@ -3613,7 +3613,16 @@ public class XServerDisplayActivity extends AppCompatActivity {
         editor.apply();
     }
 
+    // Re-entry guard: exit() has several callers (menu quit / onCancel, the game-exit watcher, the
+    // installer auto-exit watcher, autoClose). Before the save phase ran on a worker thread they
+    // serialized harmlessly on the main thread, but now a second exit() would spawn a SECOND save/upload
+    // worker whose restart can kill the first upload mid-flight (observed: two concurrent GOG uploads on
+    // one exit). Latch the first call; ignore the rest. exit() is always on the main thread.
+    private volatile boolean exiting = false;
+
     private void exit() {
+        if (exiting) return;
+        exiting = true;
         // A frozen (SIGSTOP'd) guest can't act on the SIGTERM below — resume before tearing down so
         // graceful termination isn't stuck waiting on a suspended process (any pending pulse aside).
         reshadePulseInProgress = false;
