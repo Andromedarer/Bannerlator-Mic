@@ -183,7 +183,8 @@ internal fun SaveManagerScreen(
     var loading by remember { mutableStateOf(true) }
     // 0 = Steam (cloud+local, appId-keyed), 1 = Custom (local vault, non-Steam imports), 2 = Settings,
     // 3 = Epic (Epic cloud saves via EpicCloudSaveManager + the EpicCloudSavePaths resolver),
-    // 4 = GOG (GOG cloud saves via GogCloudSaveManager — manual save-folder pick, no auto resolver).
+    // 4 = GOG (GOG cloud saves via GogCloudSaveManager + the GogCloudSavePaths auto resolver;
+    //     manual Browse pick still wins as an override).
     // rememberSaveable so the active section survives process death (the manifest now also carries
     // orientation in configChanges, so rotation no longer recreates the Activity and drops it).
     var selectedTab by rememberSaveable { mutableStateOf(0) }
@@ -1118,12 +1119,12 @@ private fun EpicSaveRow(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GOG tab — installed GOG games with cloud-save sync via GogCloudSaveManager. GOG has no auto
-// save-folder resolver like Epic's EpicCloudSavePaths (known gap #2): the folder is a manual pick
-// the user makes on the game's GOG detail page, persisted as `gog_save_dir_<gameId>` in bh_gog_prefs.
-// So this tab is deliberately thin — list the installed GOG library, show whether a save folder is
-// set, and offer manual Up / Down against whatever folder the user picked. No container resolution
-// (GOG stores an absolute folder path, not a container-relative save root) and no conflict logic.
+// GOG tab — installed GOG games with cloud-save sync via GogCloudSaveManager + the GogCloudSavePaths
+// AUTO resolver (gap #2, P1). The save folder is auto-resolved inside the game's Wine container prefix
+// from GOG's cloud-storage location template (remote-config, keyed by clientId) — the same pattern
+// Epic uses. A manual Browse pick (`gog_save_dir_<gameId>` in bh_gog_prefs) still wins as an override.
+// Up/Down light up when EITHER a manual folder is set OR the game is auto-resolvable (container + a
+// known clientId). No conflict logic (P2/P3).
 
 /** One row of the GOG save tab: an installed GOG game + its (optional) manual cloud-save folder. */
 private data class GogSaveStatus(
@@ -1131,6 +1132,14 @@ private data class GogSaveStatus(
     val name: String,
     /** Absolute path of the user-picked save folder (`gog_save_dir_<gameId>`), or null if unset. */
     val saveDir: String?,
+    /** Launch container's label, or null when the game isn't attached to a container yet. */
+    val containerLabel: String?,
+    /**
+     * True when we can attempt an auto-resolve at sync time: a launch container is present AND a
+     * clientId is known (so [GogCloudSavePaths] can fetch/expand the cloud-storage location). The
+     * exact folder is resolved off-main lazily (may hit the network once).
+     */
+    val autoResolvable: Boolean,
 )
 
 /**
@@ -1155,9 +1164,20 @@ private fun loadGogSaveStatuses(context: Context): List<GogSaveStatus> {
         if (!installPath.exists() || exe == null || !File(exe).exists()) continue
         val name = GogLibrarySync.cachedDetail(context, gameId)?.title?.takeIf { it.isNotEmpty() } ?: gameId
         val saveDir = prefs.getString("gog_save_dir_$gameId", null)?.takeIf { it.isNotEmpty() }
-        out.add(GogSaveStatus(gameId, name, saveDir))
+        // Cheap (no network): launch container + clientId presence decide whether auto-resolve is
+        // possible. The actual folder is resolved lazily off-main (GogCloudSavePaths.resolve).
+        val container = try {
+            GogCloudSavePaths.resolveContainer(context, gameId, installPath.absolutePath)
+        } catch (e: Exception) { null }
+        val autoResolvable = container != null && GogCloudSavePaths.clientId(context, gameId) != null
+        out.add(GogSaveStatus(
+            gameId, name, saveDir,
+            containerLabel = container?.let { GogCloudSavePaths.containerLabel(it) },
+            autoResolvable = autoResolvable,
+        ))
     }
-    out.sortWith(compareBy({ it.saveDir != null }, { it.name.lowercase() }))
+    // Needs-attention first (can't sync at all: no manual folder AND not auto-resolvable), then by name.
+    out.sortWith(compareBy({ it.saveDir != null || it.autoResolvable }, { it.name.lowercase() }))
     return out
 }
 
@@ -1170,6 +1190,8 @@ private fun GogSaveTab(modifier: Modifier = Modifier, columns: Int = 1) {
     var loading by remember { mutableStateOf(true) }
     // Rows with an in-flight up/down (keyed by gameId).
     var busyKeys by remember { mutableStateOf<Set<String>>(emptySet()) }
+    // Auto-resolved folder tail per gameId ("Auto: …/<tail>"), filled lazily off-main.
+    var autoTails by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
 
     suspend fun reload() {
         val fresh = withContext(Dispatchers.IO) { loadGogSaveStatuses(context) }
@@ -1178,16 +1200,21 @@ private fun GogSaveTab(modifier: Modifier = Modifier, columns: Int = 1) {
     }
     LaunchedEffect(Unit) { reload() }
 
-    // Drive the transport against the game's manual save folder. No container/auto-resolve step — GOG
-    // stores an absolute folder path, so a missing folder is a "set one first" prompt, not a resolve.
+    // Lazily resolve the auto folder for rows without a manual pick so the row can show "Auto: …/tail"
+    // (mirrors the detail page). One resolve per eligible row, off-main; caches after the first fetch.
+    LaunchedEffect(rows) {
+        for (s in rows) {
+            if (s.saveDir != null || !s.autoResolvable || autoTails.containsKey(s.gameId)) continue
+            val dir = withContext(Dispatchers.IO) { GogCloudSavePaths.resolve(context, s.gameId).second }
+            if (dir != null) autoTails = autoTails + (s.gameId to dir.name)
+        }
+    }
+
+    // Drive the transport against the game's save folder: a manual pick (Browse) wins; otherwise
+    // auto-resolve (container match + cloud-storage location expand) off-main, like the Epic tab.
     fun runSync(s: GogSaveStatus, up: Boolean) {
         val key = s.gameId
         if (key in busyKeys) return
-        val dir = s.saveDir
-        if (dir == null) {
-            Toast.makeText(context, "Set a save folder for \"${s.name}\" on its GOG detail page first.", Toast.LENGTH_LONG).show()
-            return
-        }
         busyKeys = busyKeys + key
         Toast.makeText(context, if (up) "Uploading \"${s.name}\" to GOG Cloud…" else "Downloading \"${s.name}\" from GOG Cloud…", Toast.LENGTH_SHORT).show()
         val cb = object : GogCloudSaveManager.Callback {
@@ -1206,8 +1233,19 @@ private fun GogSaveTab(modifier: Modifier = Modifier, columns: Int = 1) {
                 }
             }
         }
-        if (up) GogCloudSaveManager.uploadSaves(context, s.gameId, File(dir), cb)
-        else GogCloudSaveManager.downloadSaves(context, s.gameId, File(dir), cb)
+        scope.launch {
+            val dir = withContext(Dispatchers.IO) {
+                // Manual pick wins as an override; else auto-resolve.
+                s.saveDir?.let { File(it) } ?: GogCloudSavePaths.resolve(context, s.gameId).second
+            }
+            if (dir == null) {
+                Toast.makeText(context, "Couldn't resolve a save folder for \"${s.name}\". Add it to a container, or set one on its GOG detail page.", Toast.LENGTH_LONG).show()
+                busyKeys = busyKeys - key
+                return@launch
+            }
+            if (up) GogCloudSaveManager.uploadSaves(context, s.gameId, dir, cb)
+            else GogCloudSaveManager.downloadSaves(context, s.gameId, dir, cb)
+        }
     }
 
     Column(modifier = modifier.fillMaxWidth()) {
@@ -1229,6 +1267,7 @@ private fun GogSaveTab(modifier: Modifier = Modifier, columns: Int = 1) {
                 items(rows, key = { it.gameId }) { s ->
                     GogSaveRow(
                         status = s,
+                        autoTail = autoTails[s.gameId],
                         busy = s.gameId in busyKeys,
                         onUpload = { runSync(s, up = true) },
                         onDownload = { runSync(s, up = false) },
@@ -1242,12 +1281,14 @@ private fun GogSaveTab(modifier: Modifier = Modifier, columns: Int = 1) {
 @Composable
 private fun GogSaveRow(
     status: GogSaveStatus,
+    autoTail: String?,
     busy: Boolean,
     onUpload: () -> Unit,
     onDownload: () -> Unit,
 ) {
-    val hasFolder = status.saveDir != null
-    val actionsEnabled = !busy && hasFolder
+    val hasManualFolder = status.saveDir != null
+    // Up/Down light up when EITHER a manual folder is set OR the game can auto-resolve.
+    val actionsEnabled = !busy && (hasManualFolder || status.autoResolvable)
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -1284,18 +1325,34 @@ private fun GogSaveRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            // Line 2: the folder source. Manual pick → "Folder: …"; else auto → "Auto: …/tail" once
+            // resolved (falls back to the container label while the async resolve is in flight).
+            val folderLine = when {
+                hasManualFolder -> "Folder: ${status.saveDir!!.substringAfterLast('/')}"
+                autoTail != null -> "Auto: …/$autoTail"
+                status.autoResolvable -> status.containerLabel?.let { "Container: $it" } ?: "Auto-resolve on sync"
+                status.containerLabel != null -> "Container: ${status.containerLabel}"
+                else -> "No save folder set"
+            }
             Text(
-                text = status.saveDir?.let { "Folder: ${it.substringAfterLast('/')}" } ?: "No save folder set",
+                text = folderLine,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            // Line 3: sync state / actionable hint.
+            val canSync = hasManualFolder || status.autoResolvable
+            val statusLine = when {
+                hasManualFolder -> "Manual sync — GOG Cloud"
+                status.autoResolvable -> "Auto save-folder — GOG Cloud"
+                status.containerLabel == null -> "Add this game to a container first to sync."
+                else -> "No cloud-save location — set a folder on its GOG detail page."
+            }
             Text(
-                text = if (hasFolder) "Manual sync — GOG Cloud"
-                       else "Set a save folder on this game's GOG detail page to sync.",
+                text = statusLine,
                 style = MaterialTheme.typography.bodySmall,
-                color = if (hasFolder) MaterialTheme.colorScheme.onSurfaceVariant
+                color = if (canSync) MaterialTheme.colorScheme.onSurfaceVariant
                         else MaterialTheme.colorScheme.primary,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
@@ -1311,7 +1368,7 @@ private fun GogSaveRow(
         } else {
             // GOG surfaces "unsupported" only at transport time (CLOUD_SAVES_NOT_SUPPORTED), so unlike
             // Epic there's no pre-checked cloud-off state — always show the buttons, disabled until a
-            // save folder is set.
+            // save folder is set (manual) or the game is auto-resolvable.
             val disabledTint = MaterialTheme.colorScheme.primary.copy(alpha = 0.38f)
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 IconButton(onClick = onDownload, enabled = actionsEnabled) {
