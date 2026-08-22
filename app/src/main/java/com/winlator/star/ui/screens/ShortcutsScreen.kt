@@ -4571,7 +4571,7 @@ private fun ShortcutItemLayoutL(
         Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             // Store badges beside the name (thumbnail too small to overlay): EPIC (storeSource==epic)
-            // then EOS.
+            // then EOS, then GOG (storeSource==gog or gog_games exec path).
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = shortcut.name,
@@ -4584,6 +4584,7 @@ private fun ShortcutItemLayoutL(
                 ShortcutBadgeOverlay(
                     showEpic = remember(shortcut) { shortcut.getExtra("storeSource") == "epic" },
                     showEos = rememberEosBadge(shortcut),
+                    showGog = remember(shortcut) { isGogShortcut(shortcut) },
                     modifier = Modifier.padding(start = 6.dp),
                 )
             }
@@ -4817,10 +4818,12 @@ private fun ShortcutGridItem(
             )
         }
 
-        // Store badges overlaid top-left on the cover: EPIC (storeSource==epic) then EOS.
+        // Store badges overlaid top-left on the cover: EPIC (storeSource==epic) then EOS, then GOG
+        // (storeSource==gog or gog_games exec path).
         ShortcutBadgeOverlay(
             showEpic = remember(shortcut) { shortcut.getExtra("storeSource") == "epic" },
             showEos = rememberEosBadge(shortcut),
+            showGog = remember(shortcut) { isGogShortcut(shortcut) },
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .padding(6.dp),
@@ -7789,15 +7792,52 @@ private fun EpicBadge(modifier: Modifier = Modifier) {
 }
 
 /**
- * EPIC + EOS pills clustered for the top-left corner of a shortcut's cover art. Caller aligns and
- * insets this (Alignment.TopStart, ~6dp); each pill keeps its own opaque background for contrast.
+ * Marks a shortcut whose store source is GOG (storeSource=gog, or — for untagged legacy GOG installs
+ * — an exec path under `gog_games`). GOG-brand purple pill, sized like the EPIC/EOS pills.
  */
 @Composable
-private fun ShortcutBadgeOverlay(showEpic: Boolean, showEos: Boolean, modifier: Modifier = Modifier) {
-    if (!showEpic && !showEos) return
+private fun GogBadge(modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(Color(0xFF7A2FBB))
+            .padding(horizontal = 5.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "GOG",
+            color = Color.White,
+            style = MaterialTheme.typography.labelSmall,
+        )
+    }
+}
+
+/**
+ * True when a shortcut is a GOG game. GOG shortcuts are UNTAGGED (StarLaunchBridge stamps no
+ * `storeSource` for the legacy GOG overload), so the load-bearing signal is the exec path living
+ * under `gog_games` (installs at `imagefs/gog_games/…` → `Z:\gog_games\…`); the `storeSource==gog`
+ * branch is defensive / forward-compat. Mirrors CustomSaveVault.isCustom's GOG exclusion.
+ */
+private fun isGogShortcut(shortcut: Shortcut): Boolean =
+    shortcut.getExtra("storeSource") == "gog" ||
+        (shortcut.path?.contains("gog_games", ignoreCase = true) == true)
+
+/**
+ * EPIC + EOS + GOG pills clustered for the top-left corner of a shortcut's cover art. Caller aligns
+ * and insets this (Alignment.TopStart, ~6dp); each pill keeps its own opaque background for contrast.
+ */
+@Composable
+private fun ShortcutBadgeOverlay(
+    showEpic: Boolean,
+    showEos: Boolean,
+    showGog: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    if (!showEpic && !showEos && !showGog) return
     Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         if (showEpic) EpicBadge()
         if (showEos) EosBadge()
+        if (showGog) GogBadge()
     }
 }
 
