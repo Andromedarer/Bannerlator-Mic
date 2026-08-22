@@ -1,5 +1,69 @@
 # Star-Compose — Progress Log
 
+## 2026-08-22 (follow-up 2) — 🛒☁️ **GOG auto-upload: double-fire guard + visible shutdown indicator**
+> Device re-test (overlay-fix build `17c6da8a`): freeze gone (only a small stutter), BUT (1) no upload
+> indicator showed on the "Shutting down…" screen, and (2) the debug log showed the GOG upload firing
+> TWICE (18:05:17 + :19), each stopping at "listCloudFiles parsed 13" with no completion line — the
+> confirming logcat summary had rotated out, so this session's upload couldn't be confirmed complete.
+> Two real bugs found + fixed:
+> - **Double-fire:** `exit()` has multiple callers (menu/onCancel, game-exit watcher @9010, installer
+>   watcher @9056, autoClose) and NO re-entry guard. Before the worker-thread move they serialized on
+>   main harmlessly; now a 2nd exit() spawns a 2nd upload worker whose restart can kill the 1st upload
+>   mid-flight. FIX: `private volatile boolean exiting` latch at the top of `exit()` (always main-thread).
+> - **Invisible indicator:** the shutdown screen is the `centered` PreloaderUi variant; `PreloaderOverlay`
+>   renders `hint` only in the non-centered launch layout, so `CenteredStatus` never drew it. FIX: pass
+>   `ui.hint` into `CenteredStatus(message, subMessage)` and render it as a dim bodyMedium line (1-line
+>   ellipsized) between the title and the indeterminate bar. Now "Backing up your saves…" → live
+>   "Uploading: <file>" shows during the (off-main, animating) upload.
+> CI-pending. Files: `XServerDisplayActivity.java` (guard), `ui/PreloaderOverlay.kt` (CenteredStatus).
+> RE-TEST: play ELDERBORN → exit → confirm ONE upload, visible "Uploading…" + moving bar, and capture
+> `BH_SAVE_SYNC` "Uploaded N" LIVE before it rotates.
+
+## 2026-08-22 (follow-up) — 🛒☁️ **GOG auto-upload: fix frozen "Shutting down…" screen**
+> ✅ auto-upload-on-exit DEVICE-PROVEN (ELDERBORN, "Uploaded 13 files"). But the ~11s upload FROZE the
+> "Shutting down…" overlay (progress bar stuck mid-animation) → user reported it looks hung, risks users
+> swiping the app off recents mid-upload. ROOT CAUSE: the whole exit runnable — teardown AND the blocking
+> `latch.await` save phase — ran on the MAIN thread, so the Compose preloader couldn't produce frames
+> (all its `runOnUiThread`/`closeOnUiThread` calls were queued behind the runnable and never ran until it
+> finished). FIX (`XServerDisplayActivity.exit()`): keep the short teardown on-main, then run the
+> save-backup phase on a WORKER thread (`BH-ExitSaveBackup`) so the main thread returns and the overlay
+> keeps animating; surface a live `hint()` ("Backing up your saves…", then the GOG upload's per-file
+> "Uploading: <file>" via its `onStatus`); finalize (close overlay + `restartApplication`) back on main in
+> a `finally`. Also REMOVED the now-harmful early `closeOnUiThread()` (in the new flow it would fire the
+> instant the worker starts and hide the overlay). New string `saving_on_exit`. Applies to Steam/custom
+> exits too (same path) but the visible win is the network-slow GOG case. NOT yet CI/device-proven.
+
+## 2026-08-22 (checkpoint) — 🛒☁️ **GOG cloud-save AUTO-UPLOAD on exit (gap #2-P2, auto-triggers)**
+> Picking up the deferred GOG GN-parity work. Highest-value remaining item = cloud-save **auto-triggers**
+> (Galaxy-parity: sync without manual taps). This lands the **auto-upload-on-exit** half — GOG-library
+> games push their saves to GOG cloud automatically the moment the game exits.
+>
+> **Design:** mirrors the already-shipped, device-proven Steam auto-collect-on-exit pattern. The exit
+> teardown (`XServerDisplayActivity.exit()`, before `restartApplication()`) already gates Steam-collect
+> and custom-vault backups by `save_manager_prefs` booleans (default true); GOG drops in the same way.
+> Additive + non-regressive: GOG games ALSO keep their existing local vault snapshot as an offline net.
+> **Safe by construction:** the transport's newest-wins (`GogCloudSaveManager.uploadSaves`) never
+> overwrites a newer cloud save, so an automatic push can't clobber progress from another device.
+>
+> **Files (3):**
+> - `store/GogCloudSavePaths.kt` — NEW `gameIdForExecPath(ctx, execPath)`: reverse-maps a running
+>   shortcut's `gog_games/<dir>` exec path back to its GOG gameId via the `gog_dir_<gameId>` prefs
+>   (untagged GOG shortcuts have no other link back to the store gameId). Offline pref scan.
+> - `XServerDisplayActivity.java` — NEW `isGogShortcut()` (path under `gog_games`) + NEW
+>   `autoUploadGogSavesBlocking()` (worker-thread resolve off-main via `resolveSaveDirectory` against the
+>   RUNNING container, then `uploadSaves`; 15s bounded latch before exit(0); skips cleanly on no-gameId /
+>   no-container / no-cloud-support / unplayed-dir-absent). Wired into the exit block, gated by new pref
+>   `auto_upload_gog_on_exit` (default true).
+> - `store/SteamSaveManagerActivity.kt` — new Save Manager toggle "GOG games: auto-upload to cloud on
+>   exit" (ToggleKind.GOG), with OFF-confirm + ON-info dialogs, matching the Steam/Custom toggles.
+>
+> **Clean-room:** GN GOG code is GPL-3.0 — reimplemented from GOG protocol/behavior + our own Steam/Epic
+> patterns. No versionCode bump (GOG feature convention). NOT yet CI/device-proven at time of commit.
+> **NEXT (paired follow-up, riskier — own test):** pre-launch DOWNLOAD (pull cloud → local before play).
+> Note: Steam does pre-launch restore at the detail-page launch button, NOT in the in-game activity;
+> generic GOG shortcut launches (library/Big Picture) bypass any detail page, so full launch-coverage
+> needs an in-activity onCreate gate (blocks guest exec on a bounded network pull) — deliberately deferred.
+
 ## 2026-08-22 (checkpoint) — 🛒✅ **GOG GN-parity mega-push — MOST gaps CLOSED, main `e11fc162`**
 > Multi-day GOG storefront push, all merged to main and device-proven where testable.
 > **DONE (device-proven, on main):**
