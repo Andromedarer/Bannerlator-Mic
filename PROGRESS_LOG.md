@@ -1,5 +1,19 @@
 # Star-Compose — Progress Log
 
+## 2026-08-22 (follow-up) — 🛒☁️ **GOG auto-upload: fix frozen "Shutting down…" screen**
+> ✅ auto-upload-on-exit DEVICE-PROVEN (ELDERBORN, "Uploaded 13 files"). But the ~11s upload FROZE the
+> "Shutting down…" overlay (progress bar stuck mid-animation) → user reported it looks hung, risks users
+> swiping the app off recents mid-upload. ROOT CAUSE: the whole exit runnable — teardown AND the blocking
+> `latch.await` save phase — ran on the MAIN thread, so the Compose preloader couldn't produce frames
+> (all its `runOnUiThread`/`closeOnUiThread` calls were queued behind the runnable and never ran until it
+> finished). FIX (`XServerDisplayActivity.exit()`): keep the short teardown on-main, then run the
+> save-backup phase on a WORKER thread (`BH-ExitSaveBackup`) so the main thread returns and the overlay
+> keeps animating; surface a live `hint()` ("Backing up your saves…", then the GOG upload's per-file
+> "Uploading: <file>" via its `onStatus`); finalize (close overlay + `restartApplication`) back on main in
+> a `finally`. Also REMOVED the now-harmful early `closeOnUiThread()` (in the new flow it would fire the
+> instant the worker starts and hide the overlay). New string `saving_on_exit`. Applies to Steam/custom
+> exits too (same path) but the visible win is the network-slow GOG case. NOT yet CI/device-proven.
+
 ## 2026-08-22 (checkpoint) — 🛒☁️ **GOG cloud-save AUTO-UPLOAD on exit (gap #2-P2, auto-triggers)**
 > Picking up the deferred GOG GN-parity work. Highest-value remaining item = cloud-save **auto-triggers**
 > (Galaxy-parity: sync without manual taps). This lands the **auto-upload-on-exit** half — GOG-library

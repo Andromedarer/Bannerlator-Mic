@@ -3638,7 +3638,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 if (midiHandler != null) midiHandler.stop();
                 // Unregister sensor listener to avoid memory leaks
                 if (environment != null) environment.stopEnvironmentComponents();
-                if (preloaderDialog != null && preloaderDialog.isShowing()) preloaderDialog.closeOnUiThread();
                 if (winHandler != null) winHandler.stop();
                 if (wineRequestHandler != null) wineRequestHandler.stop();
                 /* Gracefully terminate all running wine processes */
@@ -3652,27 +3651,46 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     }
                 }
                 // Best-effort save backup on exit, now that the game has terminated (and flushed).
-                // Steam-library games → their per-appId local Library (Collect, no cloud); custom
-                // imports → the persistent local vault. Runs BEFORE restartApplication() because that
-                // kills the process (exit(0)), which would otherwise abort the copy. Both are bounded
-                // + fully guarded so they can never hang or break game-exit. Nothing is ever uploaded.
-                // Each auto-back-up branch is gated by its Save Manager toggle (shared prefs, both
-                // default true → behavior unchanged unless the user turns it off). When off, we skip
-                // cleanly — no worker thread, no latch, no work.
-                SharedPreferences savePrefs = getSharedPreferences("save_manager_prefs", MODE_PRIVATE);
-                if (isGenuineSteamShortcut()) {
-                    if (savePrefs.getBoolean("auto_collect_steam_on_exit", true)) autoCollectSteamSavesBlocking();
-                } else {
-                    // GOG-library games (untagged shortcuts installed under gog_games/) push their saves
-                    // to GOG cloud on exit — the Galaxy-parity auto-trigger. Additive: they ALSO keep the
-                    // local vault snapshot below as an offline safety net (fast, local), so a game with no
-                    // cloud support (or a stalled upload) still gets its usual local backup.
-                    if (isGogShortcut() && savePrefs.getBoolean("auto_upload_gog_on_exit", true))
-                        autoUploadGogSavesBlocking();
-                    if (savePrefs.getBoolean("auto_backup_custom_on_exit", true)) autoSnapshotCustomSavesBlocking();
-                }
-                preloaderDialog.closeOnUiThread();
-                AppUtils.restartApplication(getApplicationContext());
+                // Steam-library games → their per-appId local Library (Collect, no cloud); GOG-library
+                // games → GOG cloud upload (Galaxy-parity); custom imports → the persistent local vault.
+                // Runs BEFORE restartApplication() because that kills the process (exit(0)), which would
+                // otherwise abort the copy. Each branch is bounded + fully guarded, gated by its Save
+                // Manager toggle (shared prefs, all default true).
+                //
+                // CRITICAL: this phase can be SLOW — the GOG cloud upload is a NETWORK op (bounded to
+                // ~15s). It used to run inline on THIS main-thread runnable, which froze the "Shutting
+                // down…" overlay's progress animation for the whole upload → users thought the app hung
+                // and swiped it off recents, killing the upload mid-flight. So the save phase now runs on
+                // a WORKER thread: the main thread returns, the Compose preloader keeps animating, we
+                // surface a live "Backing up… / Uploading…" hint, and only once the phase finishes (or
+                // its own internal bounds elapse) do we post the overlay close + process restart back to
+                // the main thread. (Teardown above stays on-main; it's short.)
+                preloaderDialog.hint(getString(R.string.saving_on_exit));
+                new Thread(() -> {
+                    try {
+                        SharedPreferences savePrefs = getSharedPreferences("save_manager_prefs", MODE_PRIVATE);
+                        if (isGenuineSteamShortcut()) {
+                            if (savePrefs.getBoolean("auto_collect_steam_on_exit", true)) autoCollectSteamSavesBlocking();
+                        } else {
+                            // GOG-library games (untagged, installed under gog_games/) push their saves to
+                            // GOG cloud — the Galaxy-parity auto-trigger. Additive: they ALSO keep the local
+                            // vault snapshot below, so a game with no cloud support (or a stalled upload)
+                            // still gets its usual offline backup.
+                            if (isGogShortcut() && savePrefs.getBoolean("auto_upload_gog_on_exit", true))
+                                autoUploadGogSavesBlocking();
+                            if (savePrefs.getBoolean("auto_backup_custom_on_exit", true)) autoSnapshotCustomSavesBlocking();
+                        }
+                    } catch (Throwable t) {
+                        Log.w("XServerDisplayActivity", "exit save-backup phase errored", t);
+                    } finally {
+                        // Always finalize — close the overlay + restart the process — on the main thread,
+                        // whatever happened above. Guarded so a torn-down activity can't crash the restart.
+                        runOnUiThread(() -> {
+                            try { if (preloaderDialog != null) preloaderDialog.close(); } catch (Throwable ignored) {}
+                            AppUtils.restartApplication(getApplicationContext());
+                        });
+                    }
+                }, "BH-ExitSaveBackup").start();
             }
         }, 1000);
     }
@@ -3936,7 +3954,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     }
                     // uploadSaves runs on its OWN worker thread; the latch is released by its callback.
                     GogCloudSaveManager.uploadSaves(appCtx, gameId, dir, new GogCloudSaveManager.Callback() {
-                        @Override public void onStatus(String message) {}
+                        @Override public void onStatus(String message) {
+                            // Surface live upload progress on the "Shutting down…" overlay so the user
+                            // sees it's actively working (not frozen) and doesn't swipe it away mid-upload.
+                            try { if (preloaderDialog != null) preloaderDialog.hint(message); } catch (Throwable ignored) {}
+                        }
                         @Override public void onDone(String summary) {
                             Log.i("BH_SAVE_SYNC", "auto-upload GOG on exit (" + gameId + "): " + summary);
                             latch.countDown();
