@@ -248,6 +248,26 @@ public final class GogDownloadManager {
         }
     }
 
+    // Resolve the download-pool thread count. Default heuristic is (cores * 2)
+    // clamped to [6, 16] — low-core devices stay conservative, fast phones scale
+    // up without hammering the CDN or device I/O. An optional user override lives
+    // in bh_gog_prefs under "gog_dl_threads" (>=1 wins; <1 or absent = auto).
+    // This is our clean-room DownloadSpeedConfig equivalent: a plain int knob.
+    private static int resolveDownloadThreads(Context ctx) {
+        try {
+            int override = ctx.getSharedPreferences("bh_gog_prefs", 0)
+                    .getInt("gog_dl_threads", 0);
+            if (override >= 1) return override;
+        } catch (Exception ignored) {
+            // Absent/invalid pref → fall through to the auto heuristic.
+        }
+        int cores = Runtime.getRuntime().availableProcessors();
+        int threads = cores * 2;
+        if (threads < 6)  threads = 6;
+        if (threads > 16) threads = 16;
+        return threads;
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Gen 2 pipeline
     // ─────────────────────────────────────────────────────────────────────────
@@ -398,7 +418,15 @@ public final class GogDownloadManager {
                 }
             }
 
-            // Download + assemble files — 6 parallel threads
+            // Largest-file-first (LPT) scheduling: sort the already-filtered install
+            // list by descending total (decompressed) size so the biggest archives
+            // start first and small files fill the tail — no lone-giant straggler at
+            // the end. Pure ordering change; runs AFTER the base-product/language
+            // filters so those selections are untouched. df.totalSize == Σ chunk.size.
+            java.util.Collections.sort(files, (a, b) -> Long.compare(b.totalSize, a.totalSize));
+
+            // Download + assemble files — pool size resolved by resolveDownloadThreads
+            final int downloadThreads = resolveDownloadThreads(ctx);
             final int total = files.size();
             final AtomicInteger doneCount    = new AtomicInteger(0);
             final AtomicLong    totalBytes   = new AtomicLong(0);
@@ -412,9 +440,10 @@ public final class GogDownloadManager {
             final String fSecureLinkUrl  = secureLinkUrl;
             final java.util.concurrent.ConcurrentLinkedQueue<String> fileLog2 =
                     new java.util.concurrent.ConcurrentLinkedQueue<>();
-            dbg.append("gen2 parallel download: ").append(total).append(" files, 8 threads\n");
+            dbg.append("gen2 parallel download: ").append(total)
+               .append(" files, ").append(downloadThreads).append(" threads (largest-first)\n");
 
-            ExecutorService pool = Executors.newFixedThreadPool(8);
+            ExecutorService pool = Executors.newFixedThreadPool(downloadThreads);
             List<Future<Void>> futures = new ArrayList<>();
             for (DepotFile df : files) {
                 futures.add(pool.submit((Callable<Void>) () -> {
@@ -884,9 +913,11 @@ public final class GogDownloadManager {
             final AtomicBoolean anyFailedG1     = new AtomicBoolean(false);
             final java.util.concurrent.ConcurrentLinkedQueue<String> fileLog1 =
                     new java.util.concurrent.ConcurrentLinkedQueue<>();
-            dbg.append("gen1 parallel download: ").append(totalG1).append(" files, 8 threads\n");
+            final int downloadThreadsG1 = resolveDownloadThreads(ctx);
+            dbg.append("gen1 parallel download: ").append(totalG1)
+               .append(" files, ").append(downloadThreadsG1).append(" threads\n");
 
-            ExecutorService poolG1 = Executors.newFixedThreadPool(8);
+            ExecutorService poolG1 = Executors.newFixedThreadPool(downloadThreadsG1);
             List<Future<Void>> futuresG1 = new ArrayList<>();
             for (Gen1File gf : files) {
                 futuresG1.add(poolG1.submit((Callable<Void>) () -> {
