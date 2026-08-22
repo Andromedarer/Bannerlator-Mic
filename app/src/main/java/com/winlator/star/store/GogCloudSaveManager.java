@@ -115,11 +115,19 @@ public final class GogCloudSaveManager {
                             if (!putFile(fUserId, fClientId, fToken, key, data)) {
                                 firstError.compareAndSet(null, "Upload failed for: " + key); return;
                             }
+                            // Sync the local file's mtime to the cloud's freshly-assigned Last-Modified so
+                            // the next launch's newest-wins treats them as equal and SKIPS (rather than
+                            // re-downloading this exact save, since the server stamps the object a few
+                            // seconds after the local file was written). One cheap HEAD, parallelized.
+                            long cm = headModifiedMs(ctx, fUserId, fClientId, fToken, key);
+                            if (cm > 0) local.setLastModified(cm);
                             uploaded.incrementAndGet();
                         } catch (Exception e) {
                             firstError.compareAndSet(null, e.getMessage());
                         } finally {
-                            cb.onStatus("Uploading game saves… (" + completed.incrementAndGet() + "/" + total + ")");
+                            // Neutral verb: this fires per file completed whether it was uploaded OR
+                            // skipped (newest-wins), so it must not claim every file is "uploading".
+                            cb.onStatus("Backing up game saves… (" + completed.incrementAndGet() + "/" + total + ")");
                         }
                     });
                 }
@@ -201,17 +209,23 @@ public final class GogCloudSaveManager {
                                     return;
                                 }
                             }
-                            byte[] data = getFile(fUserId, fClientId, fToken, cf.name);
+                            long[] cloudMt = new long[]{-1L};
+                            byte[] data = getFile(fUserId, fClientId, fToken, cf.name, cloudMt);
                             if (data == null) { firstError.compareAndSet(null, "Download failed for: " + cf.name); return; }
                             // writeFile does NOT mkdirs — create parent dirs for subpath keys.
                             File parent = dest.getParentFile();
                             if (parent != null && !parent.exists()) parent.mkdirs();
                             writeFile(dest, data);
+                            // Stamp the local file with the cloud's Last-Modified so that after this save is
+                            // later played + re-uploaded, the NEXT launch's newest-wins sees them as equal
+                            // and SKIPS — instead of re-pulling identical bytes every launch. Best-effort.
+                            if (cloudMt[0] > 0) dest.setLastModified(cloudMt[0]);
                             downloaded.incrementAndGet();
                         } catch (Exception e) {
                             firstError.compareAndSet(null, e.getMessage());
                         } finally {
-                            cb.onStatus("Downloading game saves… (" + completed.incrementAndGet() + "/" + total + ")");
+                            // Neutral verb: fires per file completed whether pulled OR skipped.
+                            cb.onStatus("Syncing game saves… (" + completed.incrementAndGet() + "/" + total + ")");
                         }
                     });
                 }
@@ -458,14 +472,23 @@ public final class GogCloudSaveManager {
         return body;
     }
 
-    private static byte[] getFile(String userId, String clientId, String token, String filename)
-            throws Exception {
+    /**
+     * GETs a cloud object. If {@code outMtime} is non-null, its [0] is set to the response's
+     * Last-Modified epoch-ms (or -1 if absent/unparseable) so the caller can stamp the local file with
+     * the cloud mtime — keeping the two in lockstep for newest-wins.
+     */
+    private static byte[] getFile(String userId, String clientId, String token, String filename,
+                                  long[] outMtime) throws Exception {
         String urlStr = BASE + userId + "/" + clientId + "/" + java.net.URLEncoder.encode(filename, "UTF-8");
         HttpURLConnection conn = openConn(urlStr, "GET", token);
         int code = conn.getResponseCode();
         if (code < 200 || code >= 300) {
             conn.disconnect();
             throw new Exception("HTTP " + code + " for " + filename);
+        }
+        if (outMtime != null) {
+            String lm = conn.getHeaderField("Last-Modified");
+            outMtime[0] = (lm != null && !lm.isEmpty()) ? parseHttpDate(lm) : -1L;
         }
         byte[] data = readBytes(conn.getInputStream());
         conn.disconnect();

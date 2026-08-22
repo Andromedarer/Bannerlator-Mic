@@ -3970,6 +3970,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                         }
                         @Override public void onDone(String summary) {
                             Log.i("BH_SAVE_SYNC", "auto-upload GOG on exit (" + gameId + "): " + summary);
+                            try { if (preloaderDialog != null) preloaderDialog.hint(summary); } catch (Throwable ignored) {}
                             latch.countDown();
                         }
                         @Override public void onError(String message) {
@@ -4043,6 +4044,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 }
                 @Override public void onDone(String summary) {
                     Log.i("BH_SAVE_SYNC", "auto-download GOG on launch (" + gameId + "): " + summary);
+                    // Show the outcome (e.g. "Already up to date (13 files)" / "Downloaded N") so a skip
+                    // reads as up-to-date, not a silent "was it downloading?".
+                    try { if (preloaderDialog != null) preloaderDialog.hint(summary); } catch (Throwable ignored) {}
                     latch.countDown();
                 }
                 @Override public void onError(String message) {
