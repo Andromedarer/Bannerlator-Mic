@@ -555,9 +555,23 @@ class EpicGamesActivity : ComponentActivity() {
                 j.put("installPath", g.installPath)
                 j.put("installSize", g.installSize)
                 j.put("canRunOffline", g.canRunOffline)
+                j.put("cloudSaveEnabled", g.cloudSaveEnabled)
+                j.put("cloudSaveFolder", g.cloudSaveFolder)
                 arr.put(j)
             }
-            prefs!!.edit().putString(CACHE_KEY, arr.toString()).apply()
+            val ed = prefs!!.edit().putString(CACHE_KEY, arr.toString())
+            // Persist each game's CloudSaveFolder token string per-appName so the Save Manager's Epic
+            // tab (EpicCloudSavePaths.resolveSaveDirectory) can resolve it without another catalog call.
+            for (g in games) {
+                if (g.appName.isEmpty()) continue
+                // Mark that we've fetched this game's cloud-save metadata at least once — lets the Save
+                // Manager tell "no cloud-save support" (checked, empty folder) apart from "not refreshed
+                // yet" (never checked).
+                ed.putBoolean("epic_cloud_checked_${g.appName}", true)
+                if (g.cloudSaveFolder.isNotEmpty()) ed.putString("epic_save_folder_${g.appName}", g.cloudSaveFolder)
+                else ed.remove("epic_save_folder_${g.appName}")
+            }
+            ed.apply()
         } catch (e: Exception) { Log.e(TAG, "saveCachedGames failed", e) }
     }
 
@@ -583,6 +597,8 @@ class EpicGamesActivity : ComponentActivity() {
                 val cachedSize = j.optLong("installSize", 0L)
                 g.installSize = if (cachedSize > 1_099_511_627_776L) 0L else cachedSize
                 g.canRunOffline = j.optBoolean("canRunOffline", true)
+                g.cloudSaveEnabled = j.optBoolean("cloudSaveEnabled", false)
+                g.cloudSaveFolder = j.optString("cloudSaveFolder", "")
                 list.add(g)
             }
             list.distinctBy { it.appName }

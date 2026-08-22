@@ -141,6 +141,10 @@ class EpicGameDetailActivity : ComponentActivity() {
         if (savedDir != null) {
             cloudSaveDirText = shortenPath(savedDir)
             cloudSaveDirColor = 0xFFCCCCCC.toInt()
+        } else {
+            // No manual pick — show the auto-resolved folder so this surface agrees
+            // with the Save Manager Epic tab (both use EpicCloudSavePaths).
+            refreshResolvedSaveDirLabel()
         }
 
         dlcJson = catalogItemId?.let { prefs!!.getString("epic_dlcs_$it", null) }
@@ -721,30 +725,75 @@ class EpicGameDetailActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Resolve this game's Epic save folder: prefer the auto-resolver
+     * ([EpicCloudSavePaths]: container match + CloudSaveFolder token-expand, same as the
+     * Save Manager Epic tab), and fall back to a manually-picked folder
+     * (`epic_save_dir_<appName>`) only if resolve yields nothing.
+     * Does file I/O (shortcut load + prefix walk) \u2014 MUST be called off the main thread.
+     */
+    private fun resolveEpicSaveDir(): File? {
+        val an = appName ?: return null
+        // Explicit manual pick (Browse) wins as a user override.
+        prefs!!.getString("epic_save_dir_$an", null)?.let { return File(it) }
+        // Otherwise auto-resolve exactly like the Save Manager Epic tab.
+        val installDir = prefs!!.getString("epic_dir_$an", null)
+        val container = try {
+            EpicCloudSavePaths.resolveContainer(this, an, installDir)
+        } catch (e: Exception) { null }
+        return EpicCloudSavePaths.resolveSaveDirectory(this, an, container)
+    }
+
+    /** Populate the Cloud Saves label from the auto-resolver (off-main) when no manual folder is set. */
+    private fun refreshResolvedSaveDirLabel() {
+        if (appName == null) return
+        Thread {
+            val dir = resolveEpicSaveDir()
+            runOnUiThread {
+                if (dir != null && dir.exists()) {
+                    cloudSaveDirText = "Auto: " + shortenPath(dir.absolutePath)
+                    cloudSaveDirColor = 0xFFCCCCCC.toInt()
+                }
+            }
+        }.start()
+    }
+
     private fun cloudUpload() {
-        val dir = prefs!!.getString("epic_save_dir_$appName", null)
-        if (dir == null) { resultBarMsg = "Set a save folder first"; return }
         cloudButtonsEnabled = false
-        cloudSaveStatusText = "Preparing upload\u2026"
+        cloudSaveStatusText = "Resolving save folder\u2026"
         cloudSaveStatusVisible = true
-        EpicCloudSaveManager.uploadSaves(this, appName!!, File(dir), object : EpicCloudSaveManager.Callback {
-            override fun onStatus(msg: String) { runOnUiThread { cloudSaveStatusText = msg } }
-            override fun onDone(msg: String) { runOnUiThread { cloudSaveStatusText = msg; cloudButtonsEnabled = true } }
-            override fun onError(msg: String) { runOnUiThread { cloudSaveStatusText = "Error: $msg"; cloudButtonsEnabled = true } }
-        })
+        Thread {
+            val dir = resolveEpicSaveDir()
+            if (dir == null || !dir.exists()) {
+                runOnUiThread { cloudSaveStatusText = "No save folder found for this game"; cloudButtonsEnabled = true }
+                return@Thread
+            }
+            runOnUiThread { cloudSaveStatusText = "Preparing upload\u2026" }
+            EpicCloudSaveManager.uploadSaves(this, appName!!, dir, object : EpicCloudSaveManager.Callback {
+                override fun onStatus(msg: String) { runOnUiThread { cloudSaveStatusText = msg } }
+                override fun onDone(msg: String) { runOnUiThread { cloudSaveStatusText = msg; cloudButtonsEnabled = true } }
+                override fun onError(msg: String) { runOnUiThread { cloudSaveStatusText = "Error: $msg"; cloudButtonsEnabled = true } }
+            })
+        }.start()
     }
 
     private fun cloudDownload() {
-        val dir = prefs!!.getString("epic_save_dir_$appName", null)
-        if (dir == null) { resultBarMsg = "Set a save folder first"; return }
         cloudButtonsEnabled = false
-        cloudSaveStatusText = "Preparing download\u2026"
+        cloudSaveStatusText = "Resolving save folder\u2026"
         cloudSaveStatusVisible = true
-        EpicCloudSaveManager.downloadSaves(this, appName!!, File(dir), object : EpicCloudSaveManager.Callback {
-            override fun onStatus(msg: String) { runOnUiThread { cloudSaveStatusText = msg } }
-            override fun onDone(msg: String) { runOnUiThread { cloudSaveStatusText = msg; cloudButtonsEnabled = true } }
-            override fun onError(msg: String) { runOnUiThread { cloudSaveStatusText = "Error: $msg"; cloudButtonsEnabled = true } }
-        })
+        Thread {
+            val dir = resolveEpicSaveDir()
+            if (dir == null) {
+                runOnUiThread { cloudSaveStatusText = "No save folder found for this game"; cloudButtonsEnabled = true }
+                return@Thread
+            }
+            runOnUiThread { cloudSaveStatusText = "Preparing download\u2026" }
+            EpicCloudSaveManager.downloadSaves(this, appName!!, dir, object : EpicCloudSaveManager.Callback {
+                override fun onStatus(msg: String) { runOnUiThread { cloudSaveStatusText = msg } }
+                override fun onDone(msg: String) { runOnUiThread { cloudSaveStatusText = msg; cloudButtonsEnabled = true } }
+                override fun onError(msg: String) { runOnUiThread { cloudSaveStatusText = "Error: $msg"; cloudButtonsEnabled = true } }
+            })
+        }.start()
     }
 
     private fun showExePicker(candidates: List<String>, onSelected: (String?) -> Unit) {

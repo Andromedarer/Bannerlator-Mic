@@ -31,7 +31,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Settings
@@ -177,7 +179,8 @@ internal fun SaveManagerScreen(
 
     var statuses by remember { mutableStateOf<List<SaveStatus>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
-    // 0 = Steam (cloud+local, appId-keyed), 1 = Custom (local vault, non-Steam imports), 2 = Settings.
+    // 0 = Steam (cloud+local, appId-keyed), 1 = Custom (local vault, non-Steam imports), 2 = Settings,
+    // 3 = Epic (Epic cloud saves via EpicCloudSaveManager + the EpicCloudSavePaths resolver).
     // rememberSaveable so the active section survives process death (the manifest now also carries
     // orientation in configChanges, so rotation no longer recreates the Activity and drops it).
     var selectedTab by rememberSaveable { mutableStateOf(0) }
@@ -329,6 +332,7 @@ internal fun SaveManagerScreen(
         val activeSection = when (selectedTab) {
             0 -> "Steam"
             1 -> "Custom"
+            3 -> "Epic"
             else -> "Settings"
         }
 
@@ -342,6 +346,7 @@ internal fun SaveManagerScreen(
                         items = listOf(
                             RailItem("Steam", Icons.Filled.VideogameAsset, selectedTab == 0, badge = needSync, onClick = { selectedTab = 0 }),
                             RailItem("Custom", Icons.Filled.Folder, selectedTab == 1) { selectedTab = 1 },
+                            RailItem("Epic", Icons.Filled.Cloud, selectedTab == 3) { selectedTab = 3 },
                             RailItem("Settings", Icons.Filled.Settings, selectedTab == 2) { selectedTab = 2 },
                         ),
                     ),
@@ -364,8 +369,9 @@ internal fun SaveManagerScreen(
                 }
 
                 // Content-pane warning strip — how many games still need syncing (Steam-list scope).
-                // Shown only when there's something to sync, and not on the Settings tab; hidden at 0.
-                if (needSync > 0 && selectedTab != 2) {
+                // Shown only when there's something to sync, and only on the Steam tab (its scope);
+                // hidden at 0 and on the Custom/Epic/Settings tabs.
+                if (needSync > 0 && selectedTab == 0) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
@@ -441,6 +447,9 @@ internal fun SaveManagerScreen(
                   }
                   1 -> {
                     CustomSaveTab(modifier = Modifier.weight(1f), columns = cols)
+                  }
+                  3 -> {
+                    EpicSaveTab(modifier = Modifier.weight(1f), columns = cols)
                   }
                   else -> {
                     SaveManagerSettingsSection(modifier = Modifier.weight(1f))
@@ -890,6 +899,211 @@ private fun CustomSaveRow(
                 // Restore is always available: latest vault snapshot if present, else browse for a
                 // GameHub/Bannerlator save file (the chooser decides).
                 TextButton(onClick = onRestore) { Text("Restore") }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Epic tab — installed Epic games with cloud-save sync via EpicCloudSaveManager + the
+// EpicCloudSavePaths resolver (auto save-folder resolution; no manual folder pick). Manual Up / Down
+// only for P1 — conflict resolution + auto-triggers are P2.
+@Composable
+private fun EpicSaveTab(modifier: Modifier = Modifier, columns: Int = 1) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    var rows by remember { mutableStateOf<List<EpicCloudSavePaths.EpicSaveStatus>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    // Rows with an in-flight up/down (keyed by appName).
+    var busyKeys by remember { mutableStateOf<Set<String>>(emptySet()) }
+
+    suspend fun reload() {
+        val fresh = withContext(Dispatchers.IO) { EpicCloudSavePaths.listStatuses(context) }
+        rows = fresh
+        loading = false
+    }
+    LaunchedEffect(Unit) { reload() }
+
+    // Resolve the container + auto save dir (off-main), then drive the transport. Distinguishes
+    // "not set up in a container" from "no cloud-save folder" so the toast is actionable.
+    fun runSync(s: EpicCloudSavePaths.EpicSaveStatus, up: Boolean) {
+        val key = s.appName
+        if (key in busyKeys) return
+        busyKeys = busyKeys + key
+        Toast.makeText(context, if (up) "Uploading \"${s.name}\" to Epic Cloud…" else "Downloading \"${s.name}\" from Epic Cloud…", Toast.LENGTH_SHORT).show()
+        scope.launch {
+            val resolved = withContext(Dispatchers.IO) {
+                val installDir = EpicCloudSavePaths.installDir(context, s.appName)?.absolutePath
+                val container = EpicCloudSavePaths.resolveContainer(context, s.appName, installDir)
+                container to container?.let { EpicCloudSavePaths.resolveSaveDirectory(context, s.appName, it) }
+            }
+            val (container, dir) = resolved
+            if (container == null) {
+                Toast.makeText(context, "Add \"${s.name}\" to a container first to sync.", Toast.LENGTH_LONG).show()
+                busyKeys = busyKeys - key
+                return@launch
+            }
+            if (dir == null) {
+                Toast.makeText(context, "Couldn't resolve a cloud-save folder for \"${s.name}\". Open the Epic store once to refresh its info.", Toast.LENGTH_LONG).show()
+                busyKeys = busyKeys - key
+                return@launch
+            }
+            val cb = object : EpicCloudSaveManager.Callback {
+                override fun onStatus(message: String) { /* per-file progress omitted in P1 */ }
+                override fun onDone(summary: String) {
+                    scope.launch {
+                        Toast.makeText(context, summary, Toast.LENGTH_LONG).show()
+                        busyKeys = busyKeys - key
+                        reload()
+                    }
+                }
+                override fun onError(message: String) {
+                    scope.launch {
+                        Toast.makeText(context, "Error: $message", Toast.LENGTH_LONG).show()
+                        busyKeys = busyKeys - key
+                    }
+                }
+            }
+            if (up) EpicCloudSaveManager.uploadSaves(context, s.appName, dir, cb)
+            else EpicCloudSaveManager.downloadSaves(context, s.appName, dir, cb)
+        }
+    }
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        when {
+            loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+            }
+            rows.isEmpty() -> Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+                Text(
+                    text = "No installed Epic games found.\nInstall a game from the Epic store, then sync its cloud saves here.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            else -> LazyVerticalGrid(
+                columns = GridCells.Fixed(columns),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                items(rows, key = { it.appName }) { s ->
+                    EpicSaveRow(
+                        status = s,
+                        busy = s.appName in busyKeys,
+                        onUpload = { runSync(s, up = true) },
+                        onDownload = { runSync(s, up = false) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EpicSaveRow(
+    status: EpicCloudSavePaths.EpicSaveStatus,
+    busy: Boolean,
+    onUpload: () -> Unit,
+    onDownload: () -> Unit,
+) {
+    val setUp = status.containerLabel != null
+    val actionsEnabled = !busy && setUp && status.cloudSaveEnabled
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp))
+            .padding(start = 12.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
+    ) {
+        // Epic art is a remote URL (no local bitmap like Custom / no appId poster like Steam), so use
+        // the neutral game-asset placeholder for P1 — cover rendering is a later polish.
+        Box(
+            modifier = Modifier
+                .size(width = 44.dp, height = 60.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surface),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.VideogameAsset,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(22.dp),
+            )
+        }
+
+        Spacer(Modifier.width(12.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = status.name,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = status.containerLabel?.let { "Container: $it" } ?: "Not set up in a container",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            val statusLine = when {
+                !setUp -> "Add this game to a container first to sync."
+                status.cloudSaveEnabled && status.lastSyncMillis > 0L -> "Synced ${relTime(status.lastSyncMillis)}"
+                status.cloudSaveEnabled -> "Cloud saves ready — not synced yet"
+                // Metadata fetched, but Epic ships no CloudSaveFolder for this title → genuinely unsupported.
+                status.metadataChecked -> "No cloud-save support for this title"
+                else -> "Open the Epic store to load this game's cloud-save info."
+            }
+            Text(
+                text = statusLine,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (actionsEnabled && status.lastSyncMillis == 0L) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+
+        val noCloudSupport = !status.cloudSaveEnabled && status.metadataChecked
+        if (busy) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(22.dp),
+                color = MaterialTheme.colorScheme.primary,
+                strokeWidth = 2.dp,
+            )
+        } else if (noCloudSupport) {
+            // No sync buttons for a title Epic doesn't cloud-sync — a single dimmed "cloud off" badge
+            // makes the unsupported state unmistakable (vs a not-yet-refreshed game, which keeps its
+            // buttons so a refresh can light them up).
+            Icon(
+                imageVector = Icons.Filled.CloudOff,
+                contentDescription = "No cloud-save support",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                modifier = Modifier.size(24.dp),
+            )
+        } else {
+            val disabledTint = MaterialTheme.colorScheme.primary.copy(alpha = 0.38f)
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                IconButton(onClick = onDownload, enabled = actionsEnabled) {
+                    Icon(
+                        imageVector = Icons.Filled.CloudDownload,
+                        contentDescription = "Download from Epic Cloud",
+                        tint = if (actionsEnabled) MaterialTheme.colorScheme.primary else disabledTint,
+                    )
+                }
+                IconButton(onClick = onUpload, enabled = actionsEnabled) {
+                    Icon(
+                        imageVector = Icons.Filled.CloudUpload,
+                        contentDescription = "Upload to Epic Cloud",
+                        tint = if (actionsEnabled) MaterialTheme.colorScheme.primary else disabledTint,
+                    )
+                }
             }
         }
     }
