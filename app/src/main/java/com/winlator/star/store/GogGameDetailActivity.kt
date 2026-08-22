@@ -280,6 +280,7 @@ class GogGameDetailActivity : ComponentActivity() {
                         }
                     },
                     onCheckUpdate = { doCheckUpdate() },
+                    onVerifyRepair = { doVerifyRepair() },
                     onUpdateNow = {
                         updateBtnVisible = false
                         updateStatusText = "Updating\u2026"
@@ -393,7 +394,7 @@ class GogGameDetailActivity : ComponentActivity() {
         startInstall()
     }
 
-    private fun startInstall() {
+    private fun startInstall(verify: Boolean = false) {
         installBtnText = "Cancel"
         installBtnColor = 0xFFCC3333.toInt()
         progressVisible = true
@@ -420,7 +421,7 @@ class GogGameDetailActivity : ComponentActivity() {
         // being destroyed / the app backgrounded without leaking the Activity. Registry hooks below
         // run on the engine's callback thread and are Activity-independent; only the mutableState UI
         // writes are guarded with !isDestroyed && !isFinishing.
-        cancelDownload = GogDownloadManager.startDownload(applicationContext, makeGogGame(), object : GogDownloadManager.Callback {
+        val cb: GogDownloadManager.Callback = object : GogDownloadManager.Callback {
             override fun onProgress(msg: String, pct: Int) {
                 StoreDownloadHooks.tick(Store.GOG, gameId, pct)
                 if (!isDestroyed && !isFinishing) runOnUiThread {
@@ -492,7 +493,20 @@ class GogGameDetailActivity : ComponentActivity() {
                 // the exe choice is available later via "Set .exe…". Mirrors the Amazon fix.
                 if (onSelected != null) onSelected.accept(candidates?.firstOrNull() ?: "")
             }
-        })
+        }
+        cancelDownload = if (verify)
+            GogDownloadManager.verifyRepair(applicationContext, makeGogGame(), cb)
+        else
+            GogDownloadManager.startDownload(applicationContext, makeGogGame(), cb)
+    }
+
+    /**
+     * Verify installed files and re-download only those missing or failing MD5 (gen2). Reuses the
+     * whole install flow + progress UI; the engine's size+MD5 skip-logic makes the re-run a repair.
+     */
+    private fun doVerifyRepair() {
+        updateStatusText = "Verifying files…"
+        startInstall(verify = true)
     }
 
     private fun confirmUninstall() {
@@ -726,6 +740,7 @@ private fun GogGameDetailScreen(
     onUninstall: () -> Unit,
     onCopy: () -> Unit,
     onCheckUpdate: () -> Unit,
+    onVerifyRepair: () -> Unit,
     onUpdateNow: () -> Unit,
     onBrowseCloud: () -> Unit,
     onUploadSaves: () -> Unit,
@@ -850,6 +865,7 @@ private fun GogGameDetailScreen(
                 checkUpdateEnabled = checkUpdateEnabled,
                 updateBtnVisible = updateBtnVisible,
                 onCheckUpdate = onCheckUpdate,
+                onVerifyRepair = onVerifyRepair,
                 onUpdateNow = onUpdateNow,
             )
         }
@@ -886,6 +902,7 @@ private fun GogUpdatesContent(
     checkUpdateEnabled: Boolean,
     updateBtnVisible: Boolean,
     onCheckUpdate: () -> Unit,
+    onVerifyRepair: () -> Unit,
     onUpdateNow: () -> Unit,
 ) {
     // Not installed yet — just the muted hint, no buttons.
@@ -907,6 +924,15 @@ private fun GogUpdatesContent(
     StoreActionButton(
         text = "Check for Updates",
         onClick = onCheckUpdate,
+        modifier = Modifier.fillMaxWidth(),
+        enabled = checkUpdateEnabled,
+    )
+    Spacer(Modifier.height(8.dp))
+    // Re-verify installed files against the manifest (size + MD5); re-downloads only the
+    // missing/corrupt ones. Gated on the same installed+idle signal as Check for Updates.
+    StoreActionButton(
+        text = "Verify / Repair Files",
+        onClick = onVerifyRepair,
         modifier = Modifier.fillMaxWidth(),
         enabled = checkUpdateEnabled,
     )

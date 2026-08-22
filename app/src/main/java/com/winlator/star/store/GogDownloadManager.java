@@ -93,6 +93,23 @@ public final class GogDownloadManager {
         };
     }
 
+    /**
+     * Verify / Repair entry point.  Clears the completion marker and re-runs the
+     * normal download: the per-file size+MD5 resume check ({@link #fileVerified})
+     * then re-pulls only the files that are missing or fail integrity — i.e. a
+     * repair.  Returns the same cancel Runnable as {@link #startDownload}.
+     */
+    public static Runnable verifyRepair(Context ctx, GogGame game, Callback cb) {
+        try {
+            SharedPreferences prefs = ctx.getSharedPreferences("bh_gog_prefs", 0);
+            String dirName = prefs.getString("gog_dir_" + game.gameId, game.title);
+            File installPath = GogInstallPath.getInstallDir(ctx, dirName);
+            File marker = new File(installPath, "_gog_manifest.json");
+            if (marker.exists()) marker.delete();
+        } catch (Exception ignored) {}
+        return startDownload(ctx, game, cb);
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Main pipeline
     // ─────────────────────────────────────────────────────────────────────────
@@ -136,6 +153,13 @@ public final class GogDownloadManager {
             if (buildsJson != null) {
                 String err = runGen2(ctx, game, token, buildsJson, cb, dbg, cancelled, installDirRef);
                 if (err == null) { writeDebug(ctx, dbg); return; }
+                if (err.startsWith("DISK_GUARD:")) {
+                    // Hard stop — user already notified via cb.onError; do NOT fall through
+                    // to Gen1 (same install would need the same missing space).
+                    dbg.append("gen2_disk_guard=").append(err).append("\n");
+                    writeDebug(ctx, dbg);
+                    return;
+                }
                 dbg.append("gen2_failed=").append(err).append("\n");
             }
 
@@ -328,6 +352,21 @@ public final class GogDownloadManager {
             File chunksDir = new File(installPath, ".gog_chunks");
             chunksDir.mkdirs();
 
+            // Free-space guard: sum planned (decompressed) size, compare to usable bytes
+            // on the install target. Hard-stop (via DISK_GUARD sentinel) before writing.
+            long plannedBytes = 0;
+            for (DepotFile df : files) plannedBytes += df.totalSize;
+            if (plannedBytes > 0) {
+                long usable = installPath.getUsableSpace();
+                dbg.append("disk guard: planned=").append(plannedBytes)
+                   .append(" usable=").append(usable).append("\n");
+                if (usable > 0 && plannedBytes > usable) {
+                    cb.onError("Not enough free space: need " + formatBytes(plannedBytes)
+                            + ", only " + formatBytes(usable) + " free");
+                    return "DISK_GUARD: need=" + plannedBytes + " usable=" + usable;
+                }
+            }
+
             // Download + assemble files — 6 parallel threads
             final int total = files.size();
             final AtomicInteger doneCount    = new AtomicInteger(0);
@@ -336,7 +375,10 @@ public final class GogDownloadManager {
             final AtomicLong    lastSpeedB   = new AtomicLong(0);
             final AtomicLong    speedBps     = new AtomicLong(0);
             final AtomicBoolean anyFailed    = new AtomicBoolean(false);
-            final String        fCdnBase     = cdnBase;
+            final AtomicReference<String> cdnBaseRef = new AtomicReference<>(cdnBase);
+            final AtomicInteger cdnRefreshCount = new AtomicInteger(0);
+            final int    MAX_CDN_REFRESH = 5;
+            final String fSecureLinkUrl  = secureLinkUrl;
             final java.util.concurrent.ConcurrentLinkedQueue<String> fileLog2 =
                     new java.util.concurrent.ConcurrentLinkedQueue<>();
             dbg.append("gen2 parallel download: ").append(total).append(" files, 8 threads\n");
@@ -350,69 +392,75 @@ public final class GogDownloadManager {
                     File tmpFile = new File(installPath, df.relativePath + ".bhtmp");
                     outFile.getParentFile().mkdirs();
 
-                    // Resume: skip if already fully written
-                    if (outFile.exists() && outFile.length() > 0) {
+                    // Resume / repair: skip only if the existing file passes size+MD5.
+                    // A corrupt or truncated partial fails this and is re-downloaded.
+                    if (fileVerified(outFile, df.totalSize, df.md5)) {
                         int done = doneCount.incrementAndGet();
                         int pct  = 15 + (int) ((done / (float) total) * 80);
-                        cb.onProgress("Resuming…", pct);
+                        cb.onProgress("Verified…", pct);
                         return null;
                     }
 
-                    for (int attempt = 1; attempt <= 3; attempt++) {
-                        if (cancelled.get() || anyFailed.get()) return null;
-                        tmpFile.delete();
-                        long fileBytes = 0;
-                        boolean ok = false;
-                        try (FileOutputStream fos = new FileOutputStream(tmpFile)) {
-                            ok = true;
-                            for (DepotFile.ChunkRef chunk : df.chunks) {
-                                if (cancelled.get()) return null;
-                                String chunkPath = buildCdnPath(chunk.hash);
-                                int qIdx = fCdnBase.indexOf('?');
-                                String chunkUrl = qIdx >= 0
-                                        ? fCdnBase.substring(0, qIdx) + "/" + chunkPath + fCdnBase.substring(qIdx)
-                                        : fCdnBase + "/" + chunkPath;
-                                byte[] chunkRaw = fetchBytes(chunkUrl, null);
-                                if (chunkRaw == null) { ok = false; break; }
-                                fileBytes += chunkRaw.length;
-                                byte[] inflated = inflateZlib(chunkRaw);
-                                if (inflated == null) inflated = chunkRaw;
-                                fos.write(inflated);
-                            }
-                        } catch (Exception e) {
+                    tmpFile.delete();
+                    long fileBytes = 0;
+                    boolean ok = true;
+                    try (FileOutputStream fos = new FileOutputStream(tmpFile)) {
+                        for (DepotFile.ChunkRef chunk : df.chunks) {
+                            if (cancelled.get()) return null;
+                            String chunkPath = buildCdnPath(chunk.hash);
+                            byte[] inflated = fetchChunkVerified(
+                                    cdnBaseRef, chunkPath, chunk, fSecureLinkUrl, token,
+                                    cdnRefreshCount, MAX_CDN_REFRESH, cancelled, fileLog2);
+                            if (inflated == null) { ok = false; break; }
+                            fileBytes += inflated.length;
+                            fos.write(inflated);
+                        }
+                    } catch (Exception e) {
+                        ok = false;
+                    }
+
+                    if (cancelled.get()) { tmpFile.delete(); return null; }
+
+                    // Whole-file integrity: size (from summed chunk sizes) + MD5 when present.
+                    if (ok && df.totalSize > 0 && tmpFile.length() != df.totalSize) {
+                        fileLog2.add("FILE size mismatch file=" + df.relativePath
+                                + " exp=" + df.totalSize + " got=" + tmpFile.length());
+                        ok = false;
+                    }
+                    if (ok && df.md5 != null && !df.md5.isEmpty()) {
+                        String actual = md5HexFile(tmpFile);
+                        if (actual == null || !actual.equalsIgnoreCase(df.md5)) {
+                            fileLog2.add("FILE md5 mismatch file=" + df.relativePath);
                             ok = false;
                         }
-                        if (ok) {
-                            if (outFile.exists()) outFile.delete();
-                            tmpFile.renameTo(outFile);
-                            int done = doneCount.incrementAndGet();
-                            long tb  = totalBytes.addAndGet(fileBytes);
-                            int pct  = 15 + (int) ((done / (float) total) * 80);
-                            long nowMs  = System.currentTimeMillis();
-                            long prevMs = lastSpeedMs.get();
-                            if (nowMs - prevMs >= 500 && lastSpeedMs.compareAndSet(prevMs, nowMs)) {
-                                long prevB = lastSpeedB.getAndSet(tb);
-                                long dt = nowMs - prevMs;
-                                if (dt > 0) speedBps.set((tb - prevB) * 1000L / dt);
-                            }
-                            String speedStr = formatSpeed(speedBps.get());
-                            String name = df.relativePath.contains("/")
-                                    ? df.relativePath.substring(df.relativePath.lastIndexOf('/') + 1)
-                                    : df.relativePath;
-                            cb.onProgress("Downloading: " + name
-                                    + (speedStr.isEmpty() ? "" : "  " + speedStr), pct);
-                            return null;
-                        }
-                        fileLog2.add("RETRY attempt=" + attempt + " file=" + df.relativePath);
-                        tmpFile.delete();
-                        if (attempt < 3) {
-                            try { Thread.sleep(1000L << (attempt - 1)); }
-                            catch (InterruptedException ie) { Thread.currentThread().interrupt(); return null; }
-                        }
                     }
-                    fileLog2.add("FAIL file=" + df.relativePath);
-                    Log.e(TAG, "Gen2 file failed after 3 attempts: " + df.relativePath);
-                    anyFailed.set(true);
+
+                    if (!ok) {
+                        tmpFile.delete();
+                        fileLog2.add("FAIL file=" + df.relativePath);
+                        Log.e(TAG, "Gen2 file failed integrity/download: " + df.relativePath);
+                        anyFailed.set(true);
+                        return null;
+                    }
+
+                    if (outFile.exists()) outFile.delete();
+                    tmpFile.renameTo(outFile);
+                    int done = doneCount.incrementAndGet();
+                    long tb  = totalBytes.addAndGet(fileBytes);
+                    int pct  = 15 + (int) ((done / (float) total) * 80);
+                    long nowMs  = System.currentTimeMillis();
+                    long prevMs = lastSpeedMs.get();
+                    if (nowMs - prevMs >= 500 && lastSpeedMs.compareAndSet(prevMs, nowMs)) {
+                        long prevB = lastSpeedB.getAndSet(tb);
+                        long dt = nowMs - prevMs;
+                        if (dt > 0) speedBps.set((tb - prevB) * 1000L / dt);
+                    }
+                    String speedStr = formatSpeed(speedBps.get());
+                    String name = df.relativePath.contains("/")
+                            ? df.relativePath.substring(df.relativePath.lastIndexOf('/') + 1)
+                            : df.relativePath;
+                    cb.onProgress("Downloading: " + name
+                            + (speedStr.isEmpty() ? "" : "  " + speedStr), pct);
                     return null;
                 }));
             }
@@ -853,12 +901,24 @@ public final class GogDownloadManager {
                 if (path.isEmpty() || chunks == null || chunks.length() == 0) continue;
 
                 DepotFile df = new DepotFile(path);
+                String fileMd5 = entry.optString("md5", null);
+                if (fileMd5 != null && !fileMd5.isEmpty()) df.md5 = fileMd5;
+                long fileTotal = 0;
                 for (int c = 0; c < chunks.length(); c++) {
                     JSONObject chunk = chunks.getJSONObject(c);
-                    String md5 = chunk.optString("compressedMd5");
-                    if (md5 == null || md5.isEmpty()) md5 = chunk.optString("md5");
-                    if (md5 != null && !md5.isEmpty()) df.chunks.add(new DepotFile.ChunkRef(md5));
+                    String compressedMd5 = chunk.optString("compressedMd5");
+                    String decMd5        = chunk.optString("md5");
+                    long compressedSize  = chunk.optLong("compressedSize", 0);
+                    long decSize         = chunk.optLong("size", 0);
+                    // GOG v2 CDN path is keyed on the compressed MD5 (fall back to md5).
+                    String hash = (compressedMd5 != null && !compressedMd5.isEmpty())
+                            ? compressedMd5 : decMd5;
+                    if (hash == null || hash.isEmpty()) continue;
+                    df.chunks.add(new DepotFile.ChunkRef(
+                            hash, compressedMd5, decMd5, compressedSize, decSize));
+                    fileTotal += decSize;
                 }
+                df.totalSize = fileTotal;
                 if (!df.chunks.isEmpty()) out.add(df);
             }
         } catch (Exception e) {
@@ -946,27 +1006,7 @@ public final class GogDownloadManager {
 
     /** Fetches URL bytes, returns null on failure. */
     private static byte[] fetchBytes(String url, String token) {
-        try {
-            HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
-            conn.setConnectTimeout(TIMEOUT);
-            conn.setReadTimeout(TIMEOUT);
-            conn.setRequestProperty("User-Agent", "GOG Galaxy");
-            if (token != null) conn.setRequestProperty("Authorization", "Bearer " + token);
-            if (conn.getResponseCode() != 200) { conn.disconnect(); return null; }
-            int contentLength = conn.getContentLength();
-            ByteArrayOutputStream bos = contentLength > 0
-                    ? new ByteArrayOutputStream(contentLength)
-                    : new ByteArrayOutputStream();
-            byte[] buf = new byte[131072];
-            try (InputStream is = conn.getInputStream()) {
-                int n;
-                while ((n = is.read(buf)) != -1) bos.write(buf, 0, n);
-            }
-            conn.disconnect();
-            return bos.toByteArray();
-        } catch (Exception e) {
-            return null;
-        }
+        return fetchBytesEx(url, token).body;
     }
 
     /**
@@ -1027,6 +1067,199 @@ public final class GogDownloadManager {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Integrity + resilient chunk fetch (GOG reliability bundle)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private static final class HttpResult {
+        final byte[] body; final int status;
+        HttpResult(byte[] body, int status) { this.body = body; this.status = status; }
+    }
+
+    /** Like fetchBytes but surfaces the HTTP status (or -1 on connect error). */
+    private static HttpResult fetchBytesEx(String url, String token) {
+        HttpURLConnection conn = null;
+        try {
+            conn = (HttpURLConnection) new URL(url).openConnection();
+            conn.setConnectTimeout(TIMEOUT);
+            conn.setReadTimeout(TIMEOUT);
+            conn.setRequestProperty("User-Agent", "GOG Galaxy");
+            if (token != null) conn.setRequestProperty("Authorization", "Bearer " + token);
+            int code = conn.getResponseCode();
+            if (code != 200) { conn.disconnect(); return new HttpResult(null, code); }
+            int contentLength = conn.getContentLength();
+            ByteArrayOutputStream bos = contentLength > 0
+                    ? new ByteArrayOutputStream(contentLength) : new ByteArrayOutputStream();
+            byte[] buf = new byte[131072];
+            try (InputStream is = conn.getInputStream()) {
+                int n;
+                while ((n = is.read(buf)) != -1) bos.write(buf, 0, n);
+            }
+            conn.disconnect();
+            return new HttpResult(bos.toByteArray(), code);
+        } catch (Exception e) {
+            if (conn != null) { try { conn.disconnect(); } catch (Exception ignored) {} }
+            return new HttpResult(null, -1);
+        }
+    }
+
+    /** Appends the chunk path BEFORE any query string so the secure-link token survives. */
+    private static String buildChunkUrl(String base, String chunkPath) {
+        int qIdx = base.indexOf('?');
+        return qIdx >= 0
+                ? base.substring(0, qIdx) + "/" + chunkPath + base.substring(qIdx)
+                : base + "/" + chunkPath;
+    }
+
+    /** lowercase hex MD5 of an in-memory buffer (chunks are bounded — safe to hash directly). */
+    private static String md5Hex(byte[] data) {
+        try {
+            return toHex(java.security.MessageDigest.getInstance("MD5").digest(data));
+        } catch (Exception e) { return null; }
+    }
+
+    /** Streaming lowercase hex MD5 of a file — never buffers the whole file (OOM-safe). */
+    private static String md5HexFile(File f) {
+        try (FileInputStream fis = new FileInputStream(f)) {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("MD5");
+            byte[] buf = new byte[131072];
+            int n;
+            while ((n = fis.read(buf)) != -1) md.update(buf, 0, n);
+            return toHex(md.digest());
+        } catch (Exception e) { return null; }
+    }
+
+    private static String toHex(byte[] d) {
+        StringBuilder sb = new StringBuilder(d.length * 2);
+        for (byte b : d) {
+            int v = b & 0xFF;
+            if (v < 16) sb.append('0');
+            sb.append(Integer.toHexString(v));
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Resume/repair predicate: true only if {@code f} exists and passes the size
+     * (when known) and MD5 (when known) checks.  Falls back to exists+non-empty
+     * when the manifest supplies neither — preserving old resume behavior.
+     */
+    private static boolean fileVerified(File f, long expectedSize, String expectedMd5) {
+        if (f == null || !f.exists() || f.length() == 0) return false;
+        if (expectedSize > 0 && f.length() != expectedSize) return false;
+        if (expectedMd5 != null && !expectedMd5.isEmpty()) {
+            String actual = md5HexFile(f);
+            if (actual == null || !actual.equalsIgnoreCase(expectedMd5)) return false;
+        }
+        return true;
+    }
+
+    private static void sleepBackoff(int attempt) {
+        try { Thread.sleep(Math.min(1000L << Math.max(0, attempt - 1), 8000L)); }
+        catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+    }
+
+    /**
+     * Re-requests the secure link and rebuilds the CDN base when a chunk 401/403/
+     * 404/500s (expired link).  Capped by {@code refreshCount}/{@code cap}.
+     * Returns true if the base is now usable (refreshed, or another thread already
+     * refreshed it); false if the cap is hit or the refresh failed.
+     */
+    private static boolean tryRefreshCdn(AtomicReference<String> cdnBaseRef, String staleBase,
+            String secureLinkUrl, String token, AtomicInteger refreshCount, int cap,
+            java.util.concurrent.ConcurrentLinkedQueue<String> log) {
+        synchronized (cdnBaseRef) {
+            String current = cdnBaseRef.get();
+            if (staleBase == null || !staleBase.equals(current)) return true; // already refreshed
+            if (refreshCount.get() >= cap) {
+                log.add("CDN refresh cap reached (" + cap + ")");
+                return false;
+            }
+            String json = httpGet(secureLinkUrl, token);
+            String neu = parseCdnUrl(json);
+            if (neu == null || neu.isEmpty()) {
+                log.add("CDN refresh FAILED (secure_link null/parse)");
+                return false;
+            }
+            cdnBaseRef.set(neu);
+            int n = refreshCount.incrementAndGet();
+            log.add("secure-link refreshed #" + n);
+            return true;
+        }
+    }
+
+    /**
+     * Fetches one chunk and verifies it end-to-end:
+     *   compressed size + compressed MD5 (before inflate) → inflate →
+     *   decompressed size + decompressed MD5 (after inflate).
+     * Re-fetches on mismatch (bounded to 3 hard failures) and refreshes the secure
+     * link on expiry HTTP codes (which do not count as a hard failure).  Returns the
+     * verified, inflated bytes, or null on unrecoverable failure.
+     */
+    private static byte[] fetchChunkVerified(AtomicReference<String> cdnBaseRef, String chunkPath,
+            DepotFile.ChunkRef chunk, String secureLinkUrl, String token,
+            AtomicInteger cdnRefreshCount, int maxCdnRefresh, AtomicBoolean cancelled,
+            java.util.concurrent.ConcurrentLinkedQueue<String> log) {
+        int hardFail = 0;
+        int iterGuard = 0;
+        while (iterGuard++ < 8) {
+            if (cancelled.get()) return null;
+            String base = cdnBaseRef.get();
+            String url = buildChunkUrl(base, chunkPath);
+            HttpResult res = fetchBytesEx(url, null);
+            if (res.body == null) {
+                int code = res.status;
+                if (code == 401 || code == 403 || code == 404 || code == 500) {
+                    if (tryRefreshCdn(cdnBaseRef, base, secureLinkUrl, token,
+                            cdnRefreshCount, maxCdnRefresh, log)) {
+                        continue; // retry with fresh base — not a hard failure
+                    }
+                }
+                log.add("chunk http fail code=" + code + " chunk=" + chunk.hash);
+                if (++hardFail >= 3) return null;
+                sleepBackoff(hardFail);
+                continue;
+            }
+            byte[] raw = res.body;
+            if (chunk.compressedSize > 0 && raw.length != chunk.compressedSize) {
+                log.add("chunk compressed-size mismatch chunk=" + chunk.hash
+                        + " exp=" + chunk.compressedSize + " got=" + raw.length);
+                if (++hardFail >= 3) return null;
+                sleepBackoff(hardFail);
+                continue;
+            }
+            if (chunk.compressedMd5 != null && !chunk.compressedMd5.isEmpty()) {
+                String actual = md5Hex(raw);
+                if (actual == null || !actual.equalsIgnoreCase(chunk.compressedMd5)) {
+                    log.add("chunk compressed-md5 mismatch chunk=" + chunk.hash);
+                    if (++hardFail >= 3) return null;
+                    sleepBackoff(hardFail);
+                    continue;
+                }
+            }
+            byte[] inflated = inflateZlib(raw);
+            if (inflated == null) inflated = raw; // stored (non-zlib) chunk
+            if (chunk.size > 0 && inflated.length != chunk.size) {
+                log.add("chunk decompressed-size mismatch chunk=" + chunk.hash
+                        + " exp=" + chunk.size + " got=" + inflated.length);
+                if (++hardFail >= 3) return null;
+                sleepBackoff(hardFail);
+                continue;
+            }
+            if (chunk.md5 != null && !chunk.md5.isEmpty()) {
+                String actual = md5Hex(inflated);
+                if (actual == null || !actual.equalsIgnoreCase(chunk.md5)) {
+                    log.add("chunk decompressed-md5 mismatch chunk=" + chunk.hash);
+                    if (++hardFail >= 3) return null;
+                    sleepBackoff(hardFail);
+                    continue;
+                }
+            }
+            return inflated;
+        }
+        return null;
     }
 
     private static void writeFile(File f, byte[] data) throws IOException {
@@ -1112,12 +1345,25 @@ public final class GogDownloadManager {
     private static class DepotFile {
         final String relativePath;
         final List<ChunkRef> chunks = new ArrayList<>();
+        String md5;         // whole-file MD5 from manifest (null if absent)
+        long totalSize;     // sum of chunk decompressed sizes (0 if unknown)
 
         DepotFile(String relativePath) { this.relativePath = relativePath; }
 
         static class ChunkRef {
-            final String hash;
-            ChunkRef(String hash) { this.hash = hash; }
+            final String hash;          // CDN-path hash (compressedMd5 preferred, else md5)
+            final String compressedMd5; // verify compressed bytes before inflate (may be empty)
+            final String md5;           // verify decompressed bytes after inflate (may be empty)
+            final long compressedSize;  // expected compressed size, 0 if absent
+            final long size;            // expected decompressed size, 0 if absent
+            ChunkRef(String hash, String compressedMd5, String md5,
+                     long compressedSize, long size) {
+                this.hash = hash;
+                this.compressedMd5 = compressedMd5;
+                this.md5 = md5;
+                this.compressedSize = compressedSize;
+                this.size = size;
+            }
         }
     }
 
