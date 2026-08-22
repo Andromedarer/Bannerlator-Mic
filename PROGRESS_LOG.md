@@ -1,5 +1,19 @@
 # Star-Compose — Progress Log
 
+## 2026-08-22 (checkpoint) — 🛒✅ **GOG GN-parity mega-push — MOST gaps CLOSED, main `e11fc162`**
+> Multi-day GOG storefront push, all merged to main and device-proven where testable.
+> **DONE (device-proven, on main):**
+> - **#1 File-integrity 3-layer MD5** + **#9 Verify/Repair** + **#6 secure-link refresh** + **#11 disk-guard** + **#12 OAuth-state** — reliability bundle (`86258436`).
+> - **#2 Cloud saves P1** — auto path-resolution (GOG remote-config `content.Windows.cloudStorage`), recursive sync, real newest-wins (per-file Last-Modified HEAD); byte-exact round-trip on ELDERBORN (`d0881705`+`5be993f3`).
+> - **#3 Redists P1** — VC++/.NET auto-install into container prefix via existing `ComponentExecInstaller`, prompt+button; proven VC++2017 into P11-2 (`d331a0ad`).
+> - **#5 DLC install P1** — per-DLC Install buttons + per-product secure link; `baseProductId` depot filter ALSO fixes latent multi-product base-install failure; proven XCOM 2 (baseDepots=30 skippedDlcDepots=27) (`660bbf7c`).
+> - **#8 Library behaviors (NO Room)** — incremental diff + 15-min throttle + prime/size-0 filter + **vertical cover art** (gamesdb.gog.com); posters render (`e11fc162`).
+> - **#10 Download-perf P1** — device-aware pool (cores×2 [6,16] + `gog_dl_threads`) + largest-file-first; proven ELDERBORN 16-thread (`e11fc162`).
+> - **Extras:** gen1/2 badge fix, GOG Save-Manager tab + Custom de-dup, game-card/list GOG badge, save-row cover art + tap-to-detail, `listCloudFiles` plaintext parse fix, readable-bar toasts (Save Manager + redist).
+> **Recon saved effort:** Room NOT set up in app → #8 done on prefs cache instead (Room parked); chunk-dedup ≤2.1% shared → SKIPPED; true-silent VC++ `/quiet` black-screens fresh install → ABANDONED (wizard stays).
+> **❌ REMAINING GOG (deferred, none started):** #2-P2 cloud auto-triggers (install/launch/exit) + conflict/gzip/Etag/tombstones (highest-value); #4 `.info`-driven launch (playTasks exe/args/workingDir); #7 language selection (English-only today); #3-P2a ISI script-interpreter + P2b per-game launch-arg catalog; #5-P2 DLC at-install-picker + per-DLC-uninstall + DLC-download happy-path device-proof (needs owned DLC); #13 recommendations (low prio). Full scorecard → memory `reference_gog_gamenative_gap_roadmap`.
+> **STAGED main:** `/sdcard/Download/Bannerlator-main-e11fc162-pubg.apk` sha `b447b0916f52cc0d2745196e882e17abba82e98686bf5407df80b5a7e7d3fc0a`.
+
 ## 2026-08-22 — 🛒☁️ **GOG cloud-save AUTO-PATH (gap #2 P1) + reliability bundle MERGED to main**
 > **Ask (user, going to bed):** merge the reliability bundle, then start GOG cloud-save auto-path, build + stage for morning test, checkpoint memory+log.
 > **MERGE:** `feat/gog-reliability-bundle` → **main `86258436`** (no-ff, The412Banner; main had advanced to `cfdf6e40` via unrelated mali-report docs commits — disjoint, clean ort merge, 9 files +812/−103). Backout `git revert -m 1 86258436`. Main build `32553145739` GREEN; **STAGED `/sdcard/Download/Bannerlator-main-86258436-gogbundle-pubg.apk` sha `e1f9944291ab83f682728d79566b3866b6a1e1edea75400495b8ed460142be7c`** (bundle-only fallback).
