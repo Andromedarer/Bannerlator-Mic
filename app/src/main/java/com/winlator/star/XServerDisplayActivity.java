@@ -60,6 +60,8 @@ import com.winlator.star.container.ContainerManager;
 import com.winlator.star.container.Shortcut;
 import com.winlator.star.core.CustomSaveVault;
 import com.winlator.star.store.EpicOverlayManager;
+import com.winlator.star.store.GogCloudSaveManager;
+import com.winlator.star.store.GogCloudSavePaths;
 import com.winlator.star.store.SteamCloudSaveManager;
 import com.winlator.star.store.SteamDatabase;
 import com.winlator.star.store.SteamRepository;
@@ -3661,6 +3663,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 if (isGenuineSteamShortcut()) {
                     if (savePrefs.getBoolean("auto_collect_steam_on_exit", true)) autoCollectSteamSavesBlocking();
                 } else {
+                    // GOG-library games (untagged shortcuts installed under gog_games/) push their saves
+                    // to GOG cloud on exit — the Galaxy-parity auto-trigger. Additive: they ALSO keep the
+                    // local vault snapshot below as an offline safety net (fast, local), so a game with no
+                    // cloud support (or a stalled upload) still gets its usual local backup.
+                    if (isGogShortcut() && savePrefs.getBoolean("auto_upload_gog_on_exit", true))
+                        autoUploadGogSavesBlocking();
                     if (savePrefs.getBoolean("auto_backup_custom_on_exit", true)) autoSnapshotCustomSavesBlocking();
                 }
                 preloaderDialog.closeOnUiThread();
@@ -3693,6 +3701,17 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if ("steam".equals(shortcut.getExtra("storeSource"))) return true;
         String p = shortcut.path;
         return p != null && p.toLowerCase().contains("steam_games");
+    }
+
+    /**
+     * Whether this shortcut is a GOG-library game: GOG shortcuts are UNTAGGED (StarLaunchBridge only
+     * stamps steam/epic), so the only signal is the exec path living under the {@code gog_games} install
+     * root ({@link GogInstallPath}). Used to fire GOG cloud auto-upload on exit.
+     */
+    private boolean isGogShortcut() {
+        if (shortcut == null) return false;
+        String p = shortcut.path;
+        return p != null && p.toLowerCase().contains("gog_games");
     }
 
     /**
@@ -3869,6 +3888,76 @@ public class XServerDisplayActivity extends AppCompatActivity {
             latch.await(8, TimeUnit.SECONDS);
         } catch (Throwable t) {
             Log.w("BH_SAVE_SYNC", "auto-vault on exit wrapper errored", t);
+        }
+    }
+
+    /**
+     * On game exit, push a GOG-library game's saves to GOG cloud (local → cloud), the Galaxy-parity
+     * auto-trigger for gap #2-P2. Mirrors {@link #autoCollectSteamSavesBlocking()}'s robustness
+     * envelope: application context (not this dying activity), all work off a worker thread, and a
+     * bound-wait on a latch so the upload finishes BEFORE {@link AppUtils#restartApplication}'s exit(0)
+     * aborts it — while a stalled network can never freeze game-exit.
+     *
+     * Fully guarded + silent (logs to "BH_SAVE_SYNC"). Skips cleanly (no upload) when the game can't be
+     * reverse-mapped to a gameId, has no resolvable save dir (missing container / no GOG cloud support),
+     * or the save dir doesn't exist yet (unplayed → nothing to upload). Safe by construction: the
+     * transport's newest-wins logic ({@link GogCloudSaveManager#uploadSaves}) never overwrites a newer
+     * cloud save, so an automatic push can't clobber progress made on another device.
+     */
+    private void autoUploadGogSavesBlocking() {
+        try {
+            final Shortcut sc = shortcut;
+            final Container ctn = container;
+            if (sc == null || sc.path == null || ctn == null) return;
+
+            final Context appCtx = getApplicationContext();
+            // Reverse-map the running shortcut's gog_games/<dir> exec path to its GOG gameId (offline).
+            final String gameId = GogCloudSavePaths.INSTANCE.gameIdForExecPath(appCtx, sc.path);
+            if (gameId == null) {
+                Log.i("BH_SAVE_SYNC", "auto-upload GOG: no gameId for " + sc.path + " — skip");
+                return;
+            }
+
+            final CountDownLatch latch = new CountDownLatch(1);
+            new Thread(() -> {
+                try {
+                    // Resolve the concrete save dir inside the RUNNING container's prefix. Off-main:
+                    // hits the network on a cloud-location cache-miss (remote-config fetch).
+                    File dir = GogCloudSavePaths.INSTANCE.resolveSaveDirectory(appCtx, gameId, ctn);
+                    if (dir == null) {
+                        Log.i("BH_SAVE_SYNC", "auto-upload GOG (" + gameId + "): no resolvable save dir — skip");
+                        latch.countDown();
+                        return;
+                    }
+                    if (!dir.isDirectory()) {
+                        Log.i("BH_SAVE_SYNC", "auto-upload GOG (" + gameId + "): save dir absent (no saves yet) — skip");
+                        latch.countDown();
+                        return;
+                    }
+                    // uploadSaves runs on its OWN worker thread; the latch is released by its callback.
+                    GogCloudSaveManager.uploadSaves(appCtx, gameId, dir, new GogCloudSaveManager.Callback() {
+                        @Override public void onStatus(String message) {}
+                        @Override public void onDone(String summary) {
+                            Log.i("BH_SAVE_SYNC", "auto-upload GOG on exit (" + gameId + "): " + summary);
+                            latch.countDown();
+                        }
+                        @Override public void onError(String message) {
+                            Log.w("BH_SAVE_SYNC", "auto-upload GOG on exit failed (" + gameId + "): " + message);
+                            latch.countDown();
+                        }
+                    });
+                } catch (Throwable t) {
+                    Log.w("BH_SAVE_SYNC", "auto-upload GOG on exit errored", t);
+                    latch.countDown();
+                }
+            }, "BH-GogCloudAutoUpload").start();
+
+            // Network op, so more headroom than the local copies (8s) — but still bounded so a stalled
+            // upload never hangs game-exit. GOG saves are small (config + slot files), so this is ample.
+            if (!latch.await(15, TimeUnit.SECONDS))
+                Log.w("BH_SAVE_SYNC", "auto-upload GOG on exit timed out (15s) — proceeding with exit");
+        } catch (Throwable t) {
+            Log.w("BH_SAVE_SYNC", "auto-upload GOG on exit wrapper errored", t);
         }
     }
 

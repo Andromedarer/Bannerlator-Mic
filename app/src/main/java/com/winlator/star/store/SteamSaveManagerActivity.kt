@@ -523,6 +523,7 @@ private fun SaveManagerSettingsSection(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("save_manager_prefs", Context.MODE_PRIVATE) }
     var steamOn by remember { mutableStateOf(prefs.getBoolean("auto_collect_steam_on_exit", true)) }
+    var gogOn by remember { mutableStateOf(prefs.getBoolean("auto_upload_gog_on_exit", true)) }
     var customOn by remember { mutableStateOf(prefs.getBoolean("auto_backup_custom_on_exit", true)) }
     // A pending toggle interaction rendered over the section (null = none).
     var pendingToggle by remember { mutableStateOf<TogglePrompt?>(null) }
@@ -537,6 +538,13 @@ private fun SaveManagerSettingsSection(modifier: Modifier = Modifier) {
         )
         Spacer(Modifier.height(16.dp))
         SettingsToggleRow(
+            title = "GOG games: auto-upload to cloud on exit",
+            subtitle = "Push GOG-library saves to GOG cloud when a game exits (newest-wins — never overwrites a newer cloud save).",
+            checked = gogOn,
+            onCheckedChange = { pendingToggle = TogglePrompt(ToggleKind.GOG, it) },
+        )
+        Spacer(Modifier.height(16.dp))
+        SettingsToggleRow(
             title = "Custom games: auto-back up on exit",
             subtitle = "Snapshot custom-import saves to the local vault when a game exits.",
             checked = customOn,
@@ -547,6 +555,7 @@ private fun SaveManagerSettingsSection(modifier: Modifier = Modifier) {
     pendingToggle?.let { prompt ->
             val prefKey = when (prompt.kind) {
                 ToggleKind.STEAM -> "auto_collect_steam_on_exit"
+                ToggleKind.GOG -> "auto_upload_gog_on_exit"
                 ToggleKind.CUSTOM -> "auto_backup_custom_on_exit"
             }
             // Commit a new value to both the pref and the controlling switch state.
@@ -554,6 +563,7 @@ private fun SaveManagerSettingsSection(modifier: Modifier = Modifier) {
                 prefs.edit().putBoolean(prefKey, value).apply()
                 when (prompt.kind) {
                     ToggleKind.STEAM -> steamOn = value
+                    ToggleKind.GOG -> gogOn = value
                     ToggleKind.CUSTOM -> customOn = value
                 }
             }
@@ -570,6 +580,10 @@ private fun SaveManagerSettingsSection(modifier: Modifier = Modifier) {
                                     "Automatic save backup on exit will be OFF for your Steam library games. " +
                                         "Their saves won't be captured when a game closes — you'll need to back " +
                                         "them up yourself via a container's backup option or the Save Manager. Continue?"
+                                ToggleKind.GOG ->
+                                    "Automatic cloud upload on exit will be OFF for your GOG library games. " +
+                                        "Their saves won't be pushed to GOG cloud when a game closes — you'll need to " +
+                                        "upload them yourself from the GOG Save Manager tab or the game's detail page. Continue?"
                                 ToggleKind.CUSTOM ->
                                     "Automatic save backup on exit will be OFF for your custom-imported games. " +
                                         "Their saves won't be captured when a game closes — you'll need to back them " +
@@ -596,6 +610,8 @@ private fun SaveManagerSettingsSection(modifier: Modifier = Modifier) {
                             when (prompt.kind) {
                                 ToggleKind.STEAM ->
                                     "Automatic save backup on exit is ON for your Steam library games."
+                                ToggleKind.GOG ->
+                                    "Automatic cloud upload on exit is ON for your GOG library games."
                                 ToggleKind.CUSTOM ->
                                     "Automatic save backup on exit is ON for your custom-imported games."
                             },
@@ -610,7 +626,7 @@ private fun SaveManagerSettingsSection(modifier: Modifier = Modifier) {
 }
 
 /** Which auto-backup toggle a pending confirm/info prompt belongs to. */
-private enum class ToggleKind { STEAM, CUSTOM }
+private enum class ToggleKind { STEAM, GOG, CUSTOM }
 
 /** A pending toggle interaction: which toggle, and the value the user is trying to set it to. */
 private data class TogglePrompt(val kind: ToggleKind, val newValue: Boolean)

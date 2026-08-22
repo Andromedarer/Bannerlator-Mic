@@ -1,5 +1,36 @@
 # Star-Compose — Progress Log
 
+## 2026-08-22 (checkpoint) — 🛒☁️ **GOG cloud-save AUTO-UPLOAD on exit (gap #2-P2, auto-triggers)**
+> Picking up the deferred GOG GN-parity work. Highest-value remaining item = cloud-save **auto-triggers**
+> (Galaxy-parity: sync without manual taps). This lands the **auto-upload-on-exit** half — GOG-library
+> games push their saves to GOG cloud automatically the moment the game exits.
+>
+> **Design:** mirrors the already-shipped, device-proven Steam auto-collect-on-exit pattern. The exit
+> teardown (`XServerDisplayActivity.exit()`, before `restartApplication()`) already gates Steam-collect
+> and custom-vault backups by `save_manager_prefs` booleans (default true); GOG drops in the same way.
+> Additive + non-regressive: GOG games ALSO keep their existing local vault snapshot as an offline net.
+> **Safe by construction:** the transport's newest-wins (`GogCloudSaveManager.uploadSaves`) never
+> overwrites a newer cloud save, so an automatic push can't clobber progress from another device.
+>
+> **Files (3):**
+> - `store/GogCloudSavePaths.kt` — NEW `gameIdForExecPath(ctx, execPath)`: reverse-maps a running
+>   shortcut's `gog_games/<dir>` exec path back to its GOG gameId via the `gog_dir_<gameId>` prefs
+>   (untagged GOG shortcuts have no other link back to the store gameId). Offline pref scan.
+> - `XServerDisplayActivity.java` — NEW `isGogShortcut()` (path under `gog_games`) + NEW
+>   `autoUploadGogSavesBlocking()` (worker-thread resolve off-main via `resolveSaveDirectory` against the
+>   RUNNING container, then `uploadSaves`; 15s bounded latch before exit(0); skips cleanly on no-gameId /
+>   no-container / no-cloud-support / unplayed-dir-absent). Wired into the exit block, gated by new pref
+>   `auto_upload_gog_on_exit` (default true).
+> - `store/SteamSaveManagerActivity.kt` — new Save Manager toggle "GOG games: auto-upload to cloud on
+>   exit" (ToggleKind.GOG), with OFF-confirm + ON-info dialogs, matching the Steam/Custom toggles.
+>
+> **Clean-room:** GN GOG code is GPL-3.0 — reimplemented from GOG protocol/behavior + our own Steam/Epic
+> patterns. No versionCode bump (GOG feature convention). NOT yet CI/device-proven at time of commit.
+> **NEXT (paired follow-up, riskier — own test):** pre-launch DOWNLOAD (pull cloud → local before play).
+> Note: Steam does pre-launch restore at the detail-page launch button, NOT in the in-game activity;
+> generic GOG shortcut launches (library/Big Picture) bypass any detail page, so full launch-coverage
+> needs an in-activity onCreate gate (blocks guest exec on a bounded network pull) — deliberately deferred.
+
 ## 2026-08-22 (checkpoint) — 🛒✅ **GOG GN-parity mega-push — MOST gaps CLOSED, main `e11fc162`**
 > Multi-day GOG storefront push, all merged to main and device-proven where testable.
 > **DONE (device-proven, on main):**

@@ -75,6 +75,33 @@ object GogCloudSavePaths {
         installDirName(ctx, gameId)?.let { GogInstallPath.getInstallDir(ctx, it) }
 
     /**
+     * Reverse-map a launched shortcut's exec target back to the GOG gameId it belongs to, by matching
+     * the `gog_games/<dir>` leaf against the per-game install-dir prefs (`gog_dir_<gameId>`). GOG
+     * shortcuts carry no `storeSource` tag, so this install-path match is the ONLY link from an
+     * in-flight shortcut (e.g. the running game in [XServerDisplayActivity]) back to its store gameId —
+     * the inverse of [matchContainer]. Offline (pref scan only). Null when the path has no
+     * `gog_games/<dir>` segment, or no installed game claims that dir. Case-insensitive, slash-normalized
+     * so "Game" can't false-match "Game 2".
+     */
+    fun gameIdForExecPath(ctx: Context, execPath: String?): String? {
+        if (execPath.isNullOrBlank()) return null
+        val norm = execPath.replace('\\', '/').lowercase()
+        val marker = "gog_games/"
+        val idx = norm.indexOf(marker)
+        if (idx < 0) return null
+        val after = norm.substring(idx + marker.length)
+        val slash = after.indexOf('/')
+        val dir = (if (slash >= 0) after.substring(0, slash) else after).trim()
+        if (dir.isEmpty()) return null
+        for ((key, value) in prefs(ctx).all) {
+            if (!key.startsWith("gog_dir_")) continue
+            val v = (value as? String)?.trim()?.lowercase() ?: continue
+            if (v == dir) return key.substring("gog_dir_".length)
+        }
+        return null
+    }
+
+    /**
      * The game's Galaxy clientId used to key remote-config. Prefer the cached pref
      * (`gog_client_id_<gameId>`, written at install/browse time); fall back to parsing the installed
      * `goggame-<gameId>.info` (offline). Null ⇒ can't fetch cloud-save metadata.
