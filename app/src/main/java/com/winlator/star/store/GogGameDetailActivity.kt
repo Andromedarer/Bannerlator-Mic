@@ -142,6 +142,11 @@ class GogGameDetailActivity : ComponentActivity() {
     private var updateBtnVisible by mutableStateOf(false)
 
     private var dlcJson by mutableStateOf<String?>(null)
+    // gap#5 DLC install: per-DLC row state (id → Install / Installing…% / Installed), observable so
+    // the DLC section re-renders as each install progresses. Base-installed gate (DLC interleaves
+    // into the base install dir, so it needs the base game present first).
+    private val dlcStates = androidx.compose.runtime.mutableStateMapOf<String, DlcRowUi>()
+    private var dlcBaseInstalled by mutableStateOf(false)
 
     private var cloudSaveDir by mutableStateOf<String?>(null)
     private var cloudSaveDirText by mutableStateOf("No save folder set")
@@ -194,6 +199,7 @@ class GogGameDetailActivity : ComponentActivity() {
         generation = i.getIntExtra("generation", 0)
 
         dlcJson = prefs.getString("gog_dlcs_$gameId", null)
+        initDlcStates()
         updateStatusText = prefs.getString("gog_build_$gameId", null)?.let {
             "Installed build: ${it.substring(0, minOf(12, it.length))}\u2026"
         } ?: "Build ID not recorded \u2014 tap Check to verify"
@@ -247,6 +253,9 @@ class GogGameDetailActivity : ComponentActivity() {
                     checkUpdateEnabled = checkUpdateEnabled,
                     updateBtnVisible = updateBtnVisible,
                     dlcJson = dlcJson,
+                    dlcStates = dlcStates,
+                    dlcBaseInstalled = dlcBaseInstalled,
+                    onInstallDlc = { id, dlcTitle -> installDlc(id, dlcTitle) },
                     cloudSaveDirText = cloudSaveDirText,
                     cloudSaveDirColor = cloudSaveDirColor,
                     cloudSaveStatusText = cloudSaveStatusText,
@@ -590,8 +599,56 @@ class GogGameDetailActivity : ComponentActivity() {
         setExeVisible = installed
         uninstallVisible = installed
         copyVisible = installed
+        // gap#5: DLC needs the base install dir present. Gate the DLC Install buttons on it.
+        dlcBaseInstalled = installed
         // Offer the manual prereq install once the game is installed AND it declared GOG deps.
         prereqsVisible = installed && GogRedistInstaller.hasPrereqs(this, gameId)
+    }
+
+    /** Seed each owned DLC's row state from its per-DLC installed marker (Installed on return). */
+    private fun initDlcStates() {
+        dlcStates.clear()
+        val json = dlcJson ?: return
+        val arr = runCatching { org.json.JSONArray(json) }.getOrNull() ?: return
+        for (i in 0 until arr.length()) {
+            val id = arr.optJSONObject(i)?.optString("id") ?: continue
+            if (id.isEmpty()) continue
+            val installed = GogDownloadManager.isDlcInstalled(this, gameId, id)
+            dlcStates[id] = DlcRowUi(installing = false, installed = installed, pct = 0)
+        }
+    }
+
+    /**
+     * gap#5 — drive one owned DLC's install. Records progress into [dlcStates] so its row shows
+     * Installing…pct% then Installed; a 403/failure surfaces on the themed result bar and reverts
+     * the row to Install. Fail-soft: never touches the base game.
+     */
+    private fun installDlc(dlcId: String, dlcTitle: String) {
+        dlcStates[dlcId] = DlcRowUi(installing = true, installed = false, pct = 0)
+        val cb = object : GogDownloadManager.Callback {
+            override fun onProgress(msg: String, pct: Int) {
+                if (!isDestroyed && !isFinishing) runOnUiThread {
+                    if (isDestroyed || isFinishing) return@runOnUiThread
+                    dlcStates[dlcId] = DlcRowUi(installing = true, installed = false, pct = pct)
+                }
+            }
+            override fun onComplete(exePath: String) {
+                if (!isDestroyed && !isFinishing) runOnUiThread {
+                    if (isDestroyed || isFinishing) return@runOnUiThread
+                    dlcStates[dlcId] = DlcRowUi(installing = false, installed = true, pct = 100)
+                    resultBarMsg = "$dlcTitle installed"
+                }
+            }
+            override fun onError(msg: String) {
+                if (!isDestroyed && !isFinishing) runOnUiThread {
+                    if (isDestroyed || isFinishing) return@runOnUiThread
+                    dlcStates[dlcId] = DlcRowUi(installing = false, installed = false, pct = 0)
+                    resultBarMsg = if (msg.contains("own", ignoreCase = true))
+                        "You may not own this DLC" else "DLC install failed: $msg"
+                }
+            }
+        }
+        GogDownloadManager.installDlc(applicationContext, makeGogGame(), dlcId, dlcTitle, cb)
     }
 
     private fun doCheckUpdate() {
@@ -743,6 +800,13 @@ private data class ExePickerStateGame(
     val onSelected: (String) -> Unit,
 )
 
+/** gap#5 — one DLC row's install state: Install (idle) → Installing…pct% → Installed. */
+private data class DlcRowUi(
+    val installing: Boolean,
+    val installed: Boolean,
+    val pct: Int,
+)
+
 // ── Composable Screen ──────────────────────────────────────────────────────
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -773,6 +837,9 @@ private fun GogGameDetailScreen(
     checkUpdateEnabled: Boolean,
     updateBtnVisible: Boolean,
     dlcJson: String?,
+    dlcStates: Map<String, DlcRowUi>,
+    dlcBaseInstalled: Boolean,
+    onInstallDlc: (String, String) -> Unit,
     cloudSaveDirText: String,
     cloudSaveDirColor: Int,
     cloudSaveStatusText: String,
@@ -934,7 +1001,12 @@ private fun GogGameDetailScreen(
 
         // DLC
         StoreSection(title = "DLC") {
-            GogDlcContent(dlcJson = dlcJson)
+            GogDlcContent(
+                dlcJson = dlcJson,
+                baseInstalled = dlcBaseInstalled,
+                states = dlcStates,
+                onInstall = onInstallDlc,
+            )
         }
 
         // Cloud Saves
@@ -1001,7 +1073,12 @@ private fun GogUpdatesContent(
 }
 
 @Composable
-private fun GogDlcContent(dlcJson: String?) {
+private fun GogDlcContent(
+    dlcJson: String?,
+    baseInstalled: Boolean,
+    states: Map<String, DlcRowUi>,
+    onInstall: (String, String) -> Unit,
+) {
     val arr = remember(dlcJson) {
         if (dlcJson.isNullOrEmpty() || dlcJson == "[]") null
         else runCatching { org.json.JSONArray(dlcJson) }.getOrNull()
@@ -1018,14 +1095,17 @@ private fun GogDlcContent(dlcJson: String?) {
         fontWeight = FontWeight.Bold,
     )
     Text(
-        text = "DLC content is included in gen2 game installs.",
+        text = if (baseInstalled) "Install a DLC to add its files to your game."
+        else "Install the game first, then you can add its DLC.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(top = 3.dp, bottom = 6.dp),
     )
     for (i in 0 until arr.length()) {
         val dlc = arr.optJSONObject(i) ?: continue
+        val dlcId = dlc.optString("id", "")
         val dlcTitle = dlc.optString("title", "Unknown DLC")
+        val state = states[dlcId]
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1039,12 +1119,30 @@ private fun GogDlcContent(dlcJson: String?) {
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.weight(1f),
             )
-            Text(
-                text = "Owned",
-                style = MaterialTheme.typography.labelSmall,
-                color = INSTALLED_GREEN,
-                fontWeight = FontWeight.Bold,
-            )
+            when {
+                state?.installed == true -> Text(
+                    text = "Installed",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = INSTALLED_GREEN,
+                    fontWeight = FontWeight.Bold,
+                )
+                state?.installing == true -> Text(
+                    text = "Installing… ${state.pct}%",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.Bold,
+                )
+                !baseInstalled -> Text(
+                    text = "Install the game first",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                else -> StoreActionButton(
+                    text = "Install",
+                    onClick = { if (dlcId.isNotEmpty()) onInstall(dlcId, dlcTitle) },
+                    enabled = dlcId.isNotEmpty(),
+                )
+            }
         }
         Spacer(Modifier.height(4.dp))
     }

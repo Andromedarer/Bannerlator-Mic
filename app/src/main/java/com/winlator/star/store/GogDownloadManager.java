@@ -110,6 +110,39 @@ public final class GogDownloadManager {
         return startDownload(ctx, game, cb);
     }
 
+    /**
+     * gap#5 — installs one owned DLC into an already-installed base game.
+     *
+     * DLC lives in the SAME base build manifest, tagged by {@code productId}; its chunks live in a
+     * per-product CDN namespace behind a per-product, entitlement-gated secure link. So this:
+     *   1. re-fetches the base build manifest (shared head),
+     *   2. collects depots where {@code depot.productId == dlcProductId} (+ language compat),
+     *   3. requests a secure link for the DLC's OWN productId (403 ⇒ not owned / not propagated),
+     *   4. downloads + MD5-verifies into the SAME base install dir via {@link #assembleDepotFile},
+     *   5. records a per-DLC installed marker + written-file list (for a future per-DLC uninstall).
+     *
+     * Idempotent (per-file size+MD5 skip). Fail-soft: a DLC failure NEVER touches the base game.
+     * Mirrors {@link #startDownload}'s threading; the returned Runnable cancels (it does NOT delete
+     * anything — DLC files interleave into the base dir, which must survive a cancel).
+     */
+    public static Runnable installDlc(Context ctx, GogGame baseGame, String dlcProductId,
+                                       String dlcTitle, Callback cb) {
+        AtomicBoolean cancelled = new AtomicBoolean(false);
+        Thread t = new Thread(
+                () -> doInstallDlc(ctx, baseGame, dlcProductId, dlcTitle, cb, cancelled),
+                "gog-dlc-" + baseGame.gameId + "-" + dlcProductId);
+        t.start();
+        return () -> { cancelled.set(true); cb.onCancelled(); };
+    }
+
+    /** True if this DLC's per-DLC installed marker is set. */
+    public static boolean isDlcInstalled(Context ctx, String baseId, String dlcProductId) {
+        try {
+            return ctx.getSharedPreferences("bh_gog_prefs", 0)
+                    .getBoolean("gog_dlc_installed_" + baseId + "_" + dlcProductId, false);
+        } catch (Exception e) { return false; }
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Main pipeline
     // ─────────────────────────────────────────────────────────────────────────
@@ -225,42 +258,14 @@ public final class GogDownloadManager {
                                    AtomicBoolean cancelled, AtomicReference<File> installDirRef) {
         try {
             dbg.append("\n--- Gen2 ---\n");
-            JSONObject builds = new JSONObject(buildsJson);
-            JSONArray items = builds.optJSONArray("items");
-            if (items == null || items.length() == 0)
-                return "no items in builds response";
-            dbg.append("items=").append(items.length()).append("\n");
-
-            // Pick first windows build
-            String buildId = null, manifestUrl = null;
-            for (int i = 0; i < items.length(); i++) {
-                JSONObject item = items.getJSONObject(i);
-                dbg.append("item[").append(i).append("] os=").append(item.optString("os"))
-                   .append(" gen=").append(item.optInt("generation")).append("\n");
-                if ("windows".equals(item.optString("os"))) {
-                    buildId     = item.optString("build_id");
-                    manifestUrl = item.optString("link");
-                    if (manifestUrl == null || manifestUrl.isEmpty())
-                        manifestUrl = item.optString("meta_url");
-                    break;
-                }
-            }
-            if (buildId == null || manifestUrl == null || manifestUrl.isEmpty())
-                return "no windows build or manifest URL empty";
-            dbg.append("buildId=").append(buildId).append("\nmanifestUrl=")
-               .append(manifestUrl.substring(0, Math.min(120, manifestUrl.length()))).append("\n");
-
             cb.onProgress("Fetching manifest…", 5);
-            byte[] manifestRaw = fetchBytes(manifestUrl, token);
-            if (manifestRaw == null) return "manifest fetch returned null";
-            dbg.append("manifestRaw bytes=").append(manifestRaw.length)
-               .append(String.format(" first2=%02X%02X\n", manifestRaw[0]&0xFF, manifestRaw[1]&0xFF));
-            String manifestStr = decompressBytes(manifestRaw);
-            if (manifestStr == null) return "manifest decompress failed";
-            dbg.append("manifestStr snippet=")
-               .append(manifestStr.substring(0, Math.min(300, manifestStr.length()))).append("\n");
-
-            JSONObject manifest = new JSONObject(manifestStr);
+            // Shared build-manifest head (token → builds → windows build → meta → decompress → JSON),
+            // reused by installDlc() so the fetch/decompress logic lives in one place.
+            Gen2Manifest gm = resolveGen2Manifest(buildsJson, token, dbg);
+            if (gm == null) return "gen2 manifest resolve failed";
+            String buildId = gm.buildId;
+            JSONObject manifest = gm.manifest;
+            dbg.append("buildId=").append(buildId).append("\n");
             String installDir = manifest.optString("installDirectory", game.title);
             String manifestClientId     = manifest.optString("clientId", null);
             String manifestClientSecret = manifest.optString("clientSecret", null);
@@ -287,23 +292,41 @@ public final class GogDownloadManager {
             }
             dbg.append("tempExe=").append(tempExe).append("\n");
 
-            // Collect DepotFiles from each language-compatible depot
+            // gap#5 base-install fix: the base build manifest lists EVERY product's depots (base +
+            // DLC), each tagged by its own productId, with a top-level baseProductId. Restrict the
+            // base install to the BASE product's depots. Without this, DLC depots that pass the
+            // language filter get pulled under the base secure_link — which is path-scoped to the
+            // base product (§2 of the plan) → 403 on DLC chunks → the whole install fails. DLC is
+            // installed separately via installDlc() with its own per-product secure link.
+            // Type coercion: productId is numeric in JSON; optString() coerces both sides to the
+            // same string form so "1508702879" == "1508702879".
+            String baseProductId = manifest.optString("baseProductId", null);
+            if (baseProductId == null || baseProductId.isEmpty()) {
+                if (products != null && products.length() > 0)
+                    baseProductId = products.getJSONObject(0).optString("productId", null);
+            }
+            if (baseProductId == null || baseProductId.isEmpty()) baseProductId = game.gameId;
+            dbg.append("baseProductId=").append(baseProductId).append("\n");
+
+            // Collect DepotFiles from each language-compatible BASE depot
             cb.onProgress("Reading depot manifests…", 10);
             List<DepotFile> files = new ArrayList<>();
+            int baseDepotCount = 0, skippedDlcDepotCount = 0;
             for (int i = 0; i < depots.length(); i++) {
                 JSONObject depot = depots.getJSONObject(i);
-                JSONArray languages = depot.optJSONArray("languages");
-                boolean compatible = false;
-                if (languages == null || languages.length() == 0) {
-                    compatible = true;
-                } else {
-                    String langsStr = languages.toString();
-                    if (langsStr.contains("*") || langsStr.contains("en-US")
-                            || langsStr.contains("\"en\"") || langsStr.contains("english")) {
-                        compatible = true;
-                    }
+                // Skip any depot NOT belonging to the base product. Depots with no productId
+                // (older / single-product manifests, e.g. ELDERBORN) are always kept so single-
+                // product titles install exactly as before.
+                String depotPid = depot.optString("productId", "");
+                if (!depotPid.isEmpty() && !depotPid.equals(baseProductId)) {
+                    skippedDlcDepotCount++;
+                    dbg.append("depot[").append(i).append("] skipped: productId=").append(depotPid)
+                       .append(" != base\n");
+                    continue;
                 }
-                dbg.append("depot[").append(i).append("] langs=").append(languages)
+                baseDepotCount++;
+                boolean compatible = languageCompatible(depot);
+                dbg.append("depot[").append(i).append("] langs=").append(depot.optJSONArray("languages"))
                    .append(" compat=").append(compatible).append("\n");
                 if (!compatible) continue;
 
@@ -332,16 +355,15 @@ public final class GogDownloadManager {
                 dbg.append("depot[").append(i).append("] added ").append(files.size() - before).append(" files\n");
             }
 
+            dbg.append("base depot filter: base=").append(baseDepotCount)
+               .append(" skippedDlc=").append(skippedDlcDepotCount).append("\n");
+            GogCloudSaveManager.debug(ctx, "DLC: base install productId=" + baseProductId
+                    + " baseDepots=" + baseDepotCount + " skippedDlcDepots=" + skippedDlcDepotCount);
             if (files.isEmpty()) return "no depot files collected after processing all depots";
             dbg.append("total files=").append(files.size()).append("\n");
 
-            // Fetch CDN base URL via secure_link
+            // Fetch CDN base URL via secure_link (base product — path-scoped to baseProductId)
             cb.onProgress("Fetching CDN link…", 15);
-            String baseProductId = game.gameId;
-            if (products != null && products.length() > 0) {
-                String pid = products.getJSONObject(0).optString("productId", null);
-                if (pid != null && !pid.isEmpty()) baseProductId = pid;
-            }
             String secureLinkUrl = "https://content-system.gog.com/products/" + baseProductId
                     + "/secure_link?_version=2&generation=2&path=/";
             String secureLinkJson = httpGet(secureLinkUrl, token);
@@ -511,6 +533,282 @@ public final class GogDownloadManager {
         } catch (Exception e) {
             return "exception: " + e;
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Shared gen2 build-manifest head + language predicate
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /** Parsed gen2 windows build manifest (shared by base install + DLC install). */
+    private static final class Gen2Manifest {
+        final JSONObject manifest;
+        final String buildId;
+        final String manifestUrl;
+        Gen2Manifest(JSONObject manifest, String buildId, String manifestUrl) {
+            this.manifest = manifest; this.buildId = buildId; this.manifestUrl = manifestUrl;
+        }
+    }
+
+    /**
+     * Picks the first windows build from a {@code builds?generation=2} response, fetches its meta
+     * manifest, decompresses, and parses to JSON. Returns null on any failure (a short reason is
+     * appended to {@code dbg}). Shared by {@link #runGen2} and {@link #doInstallDlc}.
+     */
+    private static Gen2Manifest resolveGen2Manifest(String buildsJson, String token, StringBuilder dbg) {
+        try {
+            JSONObject builds = new JSONObject(buildsJson);
+            JSONArray items = builds.optJSONArray("items");
+            if (items == null || items.length() == 0) { dbg.append("resolveGen2Manifest: no items\n"); return null; }
+            dbg.append("items=").append(items.length()).append("\n");
+            String buildId = null, manifestUrl = null;
+            for (int i = 0; i < items.length(); i++) {
+                JSONObject item = items.getJSONObject(i);
+                if ("windows".equals(item.optString("os"))) {
+                    buildId     = item.optString("build_id");
+                    manifestUrl = item.optString("link");
+                    if (manifestUrl == null || manifestUrl.isEmpty())
+                        manifestUrl = item.optString("meta_url");
+                    break;
+                }
+            }
+            if (buildId == null || manifestUrl == null || manifestUrl.isEmpty()) {
+                dbg.append("resolveGen2Manifest: no windows build / manifest URL empty\n"); return null;
+            }
+            byte[] manifestRaw = fetchBytes(manifestUrl, token);
+            if (manifestRaw == null) { dbg.append("resolveGen2Manifest: manifest fetch null\n"); return null; }
+            String manifestStr = decompressBytes(manifestRaw);
+            if (manifestStr == null) { dbg.append("resolveGen2Manifest: decompress failed\n"); return null; }
+            return new Gen2Manifest(new JSONObject(manifestStr), buildId, manifestUrl);
+        } catch (Exception e) {
+            dbg.append("resolveGen2Manifest exception: ").append(e).append("\n");
+            return null;
+        }
+    }
+
+    /** English/all-language depot predicate (shared by base install + DLC install). */
+    private static boolean languageCompatible(JSONObject depot) {
+        JSONArray languages = depot.optJSONArray("languages");
+        if (languages == null || languages.length() == 0) return true;
+        String langsStr = languages.toString();
+        return langsStr.contains("*") || langsStr.contains("en-US")
+                || langsStr.contains("\"en\"") || langsStr.contains("english");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // DLC install (gap#5)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private static void doInstallDlc(Context ctx, GogGame baseGame, String dlcProductId,
+                                      String dlcTitle, Callback cb, AtomicBoolean cancelled) {
+        final String baseId = baseGame.gameId;
+        final String dlgTag = "DLC: " + dlcProductId + " (" + dlcTitle + ") base=" + baseId;
+        StringBuilder dbg = new StringBuilder();
+        try {
+            GogCloudSaveManager.debug(ctx, dlgTag + " install start");
+            if (cancelled.get()) return;
+
+            SharedPreferences prefs = ctx.getSharedPreferences("bh_gog_prefs", 0);
+
+            // Base must be installed — DLC files interleave into the base install dir.
+            String dirName = prefs.getString("gog_dir_" + baseId, null);
+            if (dirName == null) {
+                GogCloudSaveManager.debug(ctx, dlgTag + " ABORT base not installed");
+                cb.onError("Install the game first"); return;
+            }
+
+            boolean already = isDlcInstalled(ctx, baseId, dlcProductId);
+            if (already) GogCloudSaveManager.debug(ctx, dlgTag + " already marked installed — verify-and-skip run");
+
+            cb.onProgress("Checking token…", 0);
+            String token = prefs.getString("access_token", null);
+            if (token == null) { cb.onError("Not logged in to GOG"); return; }
+            int loginTime = prefs.getInt("bh_gog_login_time", 0);
+            int expiresIn = prefs.getInt("bh_gog_expires_in", 3600);
+            int nowSec    = (int) (System.currentTimeMillis() / 1000L);
+            if (loginTime == 0 || nowSec >= loginTime + expiresIn) {
+                cb.onProgress("Refreshing token…", 0);
+                String newToken = GogTokenRefresh.refresh(ctx);
+                if (newToken == null) { cb.onError("Token expired — please sign in again"); return; }
+                token = newToken;
+            }
+
+            if (cancelled.get()) return;
+
+            // Re-fetch the base build manifest (DLC lives in the SAME manifest, tagged by productId).
+            cb.onProgress("Fetching manifest…", 3);
+            String buildsUrl = "https://content-system.gog.com/products/" + baseId
+                    + "/os/windows/builds?generation=2";
+            String buildsJson = httpGet(buildsUrl, null);
+            if (buildsJson == null) buildsJson = httpGet(buildsUrl, token);
+            if (buildsJson == null) {
+                GogCloudSaveManager.debug(ctx, dlgTag + " builds fetch null");
+                cb.onError("DLC install failed: no builds"); return;
+            }
+            Gen2Manifest gm = resolveGen2Manifest(buildsJson, token, dbg);
+            if (gm == null) {
+                GogCloudSaveManager.debug(ctx, dlgTag + " manifest resolve failed: " + dbg);
+                cb.onError("DLC install failed: manifest unavailable"); return;
+            }
+            JSONObject manifest = gm.manifest;
+            JSONArray depots = manifest.optJSONArray("depots");
+            if (depots == null) { cb.onError("DLC install failed: no depots"); return; }
+
+            // Collect the DLC's own depots (productId == dlcProductId) + language compat.
+            cb.onProgress("Reading DLC manifests…", 8);
+            List<DepotFile> files = new ArrayList<>();
+            int matched = 0;
+            for (int i = 0; i < depots.length(); i++) {
+                if (cancelled.get()) return;
+                JSONObject depot = depots.getJSONObject(i);
+                if (!dlcProductId.equals(depot.optString("productId", ""))) continue;
+                matched++;
+                if (!languageCompatible(depot)) continue;
+                String manifestHash = depot.optString("manifest");
+                if (manifestHash == null || manifestHash.isEmpty()) continue;
+                String metaUrl = "https://gog-cdn-fastly.gog.com/content-system/v2/meta/"
+                        + buildCdnPath(manifestHash);
+                byte[] dmRaw = fetchBytes(metaUrl, null); // CDN, no auth
+                if (dmRaw == null) continue;
+                String dmStr = decompressBytes(dmRaw);
+                if (dmStr == null) continue;
+                parseDepotManifest(dmStr, files);
+            }
+            GogCloudSaveManager.debug(ctx, dlgTag + " depots matched=" + matched + " files=" + files.size());
+
+            // A product with no depots of its own (data already ships in the base) → nothing to
+            // download. Mark installed and finish cleanly (not an error).
+            if (files.isEmpty()) {
+                markDlcInstalled(ctx, baseId, dlcProductId, new ArrayList<>());
+                GogCloudSaveManager.debug(ctx, dlgTag + " no own depots — content included in base, marked installed");
+                cb.onProgress("Already included in the base game", 100);
+                cb.onComplete("");
+                return;
+            }
+
+            // The DLC's OWN secure link (path-scoped to dlcProductId). 403/parse-fail ⇒ not owned
+            // (server-side entitlement gate) or the licence hasn't propagated yet.
+            cb.onProgress("Fetching CDN link…", 12);
+            String secureLinkUrl = "https://content-system.gog.com/products/" + dlcProductId
+                    + "/secure_link?_version=2&generation=2&path=/";
+            String secureLinkJson = httpGet(secureLinkUrl, token);
+            String cdnBase = parseCdnUrl(secureLinkJson);
+            if (cdnBase == null) {
+                GogCloudSaveManager.debug(ctx, dlgTag + " secure_link FAILED (403/entitlement) resp="
+                        + (secureLinkJson == null ? "NULL"
+                           : secureLinkJson.substring(0, Math.min(160, secureLinkJson.length()))));
+                cb.onError("You may not own this DLC (or the licence hasn't propagated yet)");
+                return;
+            }
+            GogCloudSaveManager.debug(ctx, dlgTag + " secure_link OK");
+
+            // Assemble into the SAME base install dir (never a separate target).
+            File installPath = GogInstallPath.getInstallDir(ctx, dirName);
+            installPath.mkdirs();
+
+            // Free-space guard before writing.
+            long plannedBytes = 0;
+            for (DepotFile df : files) plannedBytes += df.totalSize;
+            if (plannedBytes > 0) {
+                long usable = installPath.getUsableSpace();
+                if (usable > 0 && plannedBytes > usable) {
+                    GogCloudSaveManager.debug(ctx, dlgTag + " disk guard need=" + plannedBytes + " usable=" + usable);
+                    cb.onError("Not enough free space: need " + formatBytes(plannedBytes)
+                            + ", only " + formatBytes(usable) + " free");
+                    return;
+                }
+            }
+
+            final int total = files.size();
+            final AtomicInteger doneCount = new AtomicInteger(0);
+            final AtomicBoolean anyFailed = new AtomicBoolean(false);
+            final AtomicReference<String> cdnBaseRef = new AtomicReference<>(cdnBase);
+            final AtomicInteger cdnRefreshCount = new AtomicInteger(0);
+            final int MAX_CDN_REFRESH = 5;
+            final String fSecureLinkUrl = secureLinkUrl;
+            final String fToken = token;
+            final File fInstallPath = installPath;
+            final java.util.concurrent.ConcurrentLinkedQueue<String> fileLog =
+                    new java.util.concurrent.ConcurrentLinkedQueue<>();
+            final java.util.concurrent.ConcurrentLinkedQueue<String> written =
+                    new java.util.concurrent.ConcurrentLinkedQueue<>();
+
+            ExecutorService pool = Executors.newFixedThreadPool(8);
+            List<Future<Void>> futures = new ArrayList<>();
+            for (DepotFile df : files) {
+                futures.add(pool.submit((Callable<Void>) () -> {
+                    if (cancelled.get() || anyFailed.get()) return null;
+                    File outFile = new File(fInstallPath, df.relativePath);
+                    if (outFile.getParentFile() != null) outFile.getParentFile().mkdirs();
+
+                    // Idempotent resume: skip if the existing file already passes size+MD5.
+                    if (fileVerified(outFile, df.totalSize, df.md5)) {
+                        written.add(df.relativePath);
+                        int done = doneCount.incrementAndGet();
+                        cb.onProgress("Verified…", 15 + (int) ((done / (float) total) * 80));
+                        return null;
+                    }
+                    boolean ok = assembleDepotFile(df, outFile, cdnBaseRef, fSecureLinkUrl, fToken,
+                            cdnRefreshCount, MAX_CDN_REFRESH, cancelled, fileLog);
+                    if (cancelled.get()) return null;
+                    if (!ok) {
+                        fileLog.add("FAIL file=" + df.relativePath);
+                        anyFailed.set(true);
+                        return null;
+                    }
+                    written.add(df.relativePath);
+                    int done = doneCount.incrementAndGet();
+                    int pct = 15 + (int) ((done / (float) total) * 80);
+                    String name = df.relativePath.contains("/")
+                            ? df.relativePath.substring(df.relativePath.lastIndexOf('/') + 1)
+                            : df.relativePath;
+                    cb.onProgress("Downloading: " + name, pct);
+                    return null;
+                }));
+            }
+            pool.shutdown();
+            try {
+                for (Future<Void> f : futures) f.get();
+            } catch (Exception e) {
+                pool.shutdownNow();
+                GogCloudSaveManager.debug(ctx, dlgTag + " pool error: " + e);
+                cb.onError("DLC install failed: " + e.getMessage());
+                return;
+            }
+            for (String line : fileLog) GogCloudSaveManager.debug(ctx, dlgTag + " " + line);
+
+            if (cancelled.get()) { GogCloudSaveManager.debug(ctx, dlgTag + " cancelled"); return; }
+            if (anyFailed.get()) {
+                GogCloudSaveManager.debug(ctx, dlgTag + " FAILED — one or more chunks failed");
+                cb.onError("DLC install failed");
+                return;
+            }
+
+            // Full success only: write the installed marker + the written-file list (for uninstall).
+            markDlcInstalled(ctx, baseId, dlcProductId, new ArrayList<>(written));
+            GogCloudSaveManager.debug(ctx, dlgTag + " DONE files=" + written.size() + " marker written");
+            cb.onProgress("DLC installed!", 100);
+            cb.onComplete("");
+        } catch (Exception e) {
+            GogCloudSaveManager.debug(ctx, dlgTag + " EXCEPTION " + e);
+            cb.onError("DLC install error: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Records the per-DLC installed marker {@code gog_dlc_installed_<baseId>_<dlcProductId>=true}
+     * and the written-file list {@code gog_dlc_files_<baseId>_<dlcProductId>} (JSON array of
+     * install-dir-relative paths) — the latter enables a future per-DLC uninstall (P2).
+     */
+    private static void markDlcInstalled(Context ctx, String baseId, String dlcProductId,
+                                          List<String> writtenPaths) {
+        try {
+            JSONArray arr = new JSONArray();
+            for (String p : writtenPaths) arr.put(p);
+            ctx.getSharedPreferences("bh_gog_prefs", 0).edit()
+                    .putBoolean("gog_dlc_installed_" + baseId + "_" + dlcProductId, true)
+                    .putString("gog_dlc_files_" + baseId + "_" + dlcProductId, arr.toString())
+                    .apply();
+        } catch (Exception ignored) {}
     }
 
     // ─────────────────────────────────────────────────────────────────────────
