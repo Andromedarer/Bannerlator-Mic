@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.VideogameAsset
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -91,6 +92,7 @@ import com.winlator.star.ui.theme.WinlatorTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * Central Steam Save Manager — one screen listing every game that has cloud saves or a local
@@ -180,7 +182,8 @@ internal fun SaveManagerScreen(
     var statuses by remember { mutableStateOf<List<SaveStatus>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     // 0 = Steam (cloud+local, appId-keyed), 1 = Custom (local vault, non-Steam imports), 2 = Settings,
-    // 3 = Epic (Epic cloud saves via EpicCloudSaveManager + the EpicCloudSavePaths resolver).
+    // 3 = Epic (Epic cloud saves via EpicCloudSaveManager + the EpicCloudSavePaths resolver),
+    // 4 = GOG (GOG cloud saves via GogCloudSaveManager — manual save-folder pick, no auto resolver).
     // rememberSaveable so the active section survives process death (the manifest now also carries
     // orientation in configChanges, so rotation no longer recreates the Activity and drops it).
     var selectedTab by rememberSaveable { mutableStateOf(0) }
@@ -333,6 +336,7 @@ internal fun SaveManagerScreen(
             0 -> "Steam"
             1 -> "Custom"
             3 -> "Epic"
+            4 -> "GOG"
             else -> "Settings"
         }
 
@@ -347,6 +351,7 @@ internal fun SaveManagerScreen(
                             RailItem("Steam", Icons.Filled.VideogameAsset, selectedTab == 0, badge = needSync, onClick = { selectedTab = 0 }),
                             RailItem("Custom", Icons.Filled.Folder, selectedTab == 1) { selectedTab = 1 },
                             RailItem("Epic", Icons.Filled.Cloud, selectedTab == 3) { selectedTab = 3 },
+                            RailItem("GOG", Icons.Filled.Storefront, selectedTab == 4) { selectedTab = 4 },
                             RailItem("Settings", Icons.Filled.Settings, selectedTab == 2) { selectedTab = 2 },
                         ),
                     ),
@@ -450,6 +455,9 @@ internal fun SaveManagerScreen(
                   }
                   3 -> {
                     EpicSaveTab(modifier = Modifier.weight(1f), columns = cols)
+                  }
+                  4 -> {
+                    GogSaveTab(modifier = Modifier.weight(1f), columns = cols)
                   }
                   else -> {
                     SaveManagerSettingsSection(modifier = Modifier.weight(1f))
@@ -1101,6 +1109,222 @@ private fun EpicSaveRow(
                     Icon(
                         imageVector = Icons.Filled.CloudUpload,
                         contentDescription = "Upload to Epic Cloud",
+                        tint = if (actionsEnabled) MaterialTheme.colorScheme.primary else disabledTint,
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GOG tab — installed GOG games with cloud-save sync via GogCloudSaveManager. GOG has no auto
+// save-folder resolver like Epic's EpicCloudSavePaths (known gap #2): the folder is a manual pick
+// the user makes on the game's GOG detail page, persisted as `gog_save_dir_<gameId>` in bh_gog_prefs.
+// So this tab is deliberately thin — list the installed GOG library, show whether a save folder is
+// set, and offer manual Up / Down against whatever folder the user picked. No container resolution
+// (GOG stores an absolute folder path, not a container-relative save root) and no conflict logic.
+
+/** One row of the GOG save tab: an installed GOG game + its (optional) manual cloud-save folder. */
+private data class GogSaveStatus(
+    val gameId: String,
+    val name: String,
+    /** Absolute path of the user-picked save folder (`gog_save_dir_<gameId>`), or null if unset. */
+    val saveDir: String?,
+)
+
+/**
+ * Enumerate installed GOG games straight from `bh_gog_prefs` (UI-only; no new manager method). Walks
+ * the `gog_dir_<gameId>` keys and keeps only rows that are really installed ON DISK — resolved
+ * install dir present AND the recorded launch exe still exists — mirroring [GogLibrarySync.seed]'s
+ * disk-truth check so uninstalled/half-recorded games don't linger. Title comes from the games-screen
+ * cache ([GogLibrarySync.cachedDetail], gameId fallback); the save folder from `gog_save_dir_<gameId>`.
+ * Sorted needs-a-folder-first, then by name. BLOCKING — call off the main thread.
+ */
+private fun loadGogSaveStatuses(context: Context): List<GogSaveStatus> {
+    val prefs = context.getSharedPreferences("bh_gog_prefs", Context.MODE_PRIVATE)
+    val out = ArrayList<GogSaveStatus>()
+    for ((k, v) in prefs.all) {
+        if (!k.startsWith("gog_dir_")) continue
+        val gameId = k.substring("gog_dir_".length)
+        if (gameId.isEmpty()) continue
+        val dirName = (v as? String) ?: continue
+        if (dirName.isEmpty()) continue
+        val installPath = GogInstallPath.getInstallDir(context, dirName)
+        val exe = prefs.getString("gog_exe_$gameId", null)
+        if (!installPath.exists() || exe == null || !File(exe).exists()) continue
+        val name = GogLibrarySync.cachedDetail(context, gameId)?.title?.takeIf { it.isNotEmpty() } ?: gameId
+        val saveDir = prefs.getString("gog_save_dir_$gameId", null)?.takeIf { it.isNotEmpty() }
+        out.add(GogSaveStatus(gameId, name, saveDir))
+    }
+    out.sortWith(compareBy({ it.saveDir != null }, { it.name.lowercase() }))
+    return out
+}
+
+@Composable
+private fun GogSaveTab(modifier: Modifier = Modifier, columns: Int = 1) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    var rows by remember { mutableStateOf<List<GogSaveStatus>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    // Rows with an in-flight up/down (keyed by gameId).
+    var busyKeys by remember { mutableStateOf<Set<String>>(emptySet()) }
+
+    suspend fun reload() {
+        val fresh = withContext(Dispatchers.IO) { loadGogSaveStatuses(context) }
+        rows = fresh
+        loading = false
+    }
+    LaunchedEffect(Unit) { reload() }
+
+    // Drive the transport against the game's manual save folder. No container/auto-resolve step — GOG
+    // stores an absolute folder path, so a missing folder is a "set one first" prompt, not a resolve.
+    fun runSync(s: GogSaveStatus, up: Boolean) {
+        val key = s.gameId
+        if (key in busyKeys) return
+        val dir = s.saveDir
+        if (dir == null) {
+            Toast.makeText(context, "Set a save folder for \"${s.name}\" on its GOG detail page first.", Toast.LENGTH_LONG).show()
+            return
+        }
+        busyKeys = busyKeys + key
+        Toast.makeText(context, if (up) "Uploading \"${s.name}\" to GOG Cloud…" else "Downloading \"${s.name}\" from GOG Cloud…", Toast.LENGTH_SHORT).show()
+        val cb = object : GogCloudSaveManager.Callback {
+            override fun onStatus(message: String) { /* per-file progress omitted (mirrors Epic) */ }
+            override fun onDone(summary: String) {
+                scope.launch {
+                    Toast.makeText(context, summary, Toast.LENGTH_LONG).show()
+                    busyKeys = busyKeys - key
+                    reload()
+                }
+            }
+            override fun onError(message: String) {
+                scope.launch {
+                    Toast.makeText(context, "Error: $message", Toast.LENGTH_LONG).show()
+                    busyKeys = busyKeys - key
+                }
+            }
+        }
+        if (up) GogCloudSaveManager.uploadSaves(context, s.gameId, File(dir), cb)
+        else GogCloudSaveManager.downloadSaves(context, s.gameId, File(dir), cb)
+    }
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        when {
+            loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+            }
+            rows.isEmpty() -> Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+                Text(
+                    text = "No installed GOG games found.\nInstall a game from the GOG store, then sync its cloud saves here.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            else -> LazyVerticalGrid(
+                columns = GridCells.Fixed(columns),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                items(rows, key = { it.gameId }) { s ->
+                    GogSaveRow(
+                        status = s,
+                        busy = s.gameId in busyKeys,
+                        onUpload = { runSync(s, up = true) },
+                        onDownload = { runSync(s, up = false) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GogSaveRow(
+    status: GogSaveStatus,
+    busy: Boolean,
+    onUpload: () -> Unit,
+    onDownload: () -> Unit,
+) {
+    val hasFolder = status.saveDir != null
+    val actionsEnabled = !busy && hasFolder
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp))
+            .padding(start = 12.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
+    ) {
+        // No local poster for GOG rows — neutral game-asset placeholder (same as the Epic tab).
+        Box(
+            modifier = Modifier
+                .size(width = 44.dp, height = 60.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surface),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.VideogameAsset,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(22.dp),
+            )
+        }
+
+        Spacer(Modifier.width(12.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = status.name,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = status.saveDir?.let { "Folder: ${it.substringAfterLast('/')}" } ?: "No save folder set",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = if (hasFolder) "Manual sync — GOG Cloud"
+                       else "Set a save folder on this game's GOG detail page to sync.",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (hasFolder) MaterialTheme.colorScheme.onSurfaceVariant
+                        else MaterialTheme.colorScheme.primary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+
+        if (busy) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(22.dp),
+                color = MaterialTheme.colorScheme.primary,
+                strokeWidth = 2.dp,
+            )
+        } else {
+            // GOG surfaces "unsupported" only at transport time (CLOUD_SAVES_NOT_SUPPORTED), so unlike
+            // Epic there's no pre-checked cloud-off state — always show the buttons, disabled until a
+            // save folder is set.
+            val disabledTint = MaterialTheme.colorScheme.primary.copy(alpha = 0.38f)
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                IconButton(onClick = onDownload, enabled = actionsEnabled) {
+                    Icon(
+                        imageVector = Icons.Filled.CloudDownload,
+                        contentDescription = "Download from GOG Cloud",
+                        tint = if (actionsEnabled) MaterialTheme.colorScheme.primary else disabledTint,
+                    )
+                }
+                IconButton(onClick = onUpload, enabled = actionsEnabled) {
+                    Icon(
+                        imageVector = Icons.Filled.CloudUpload,
+                        contentDescription = "Upload to GOG Cloud",
                         tint = if (actionsEnabled) MaterialTheme.colorScheme.primary else disabledTint,
                     )
                 }
