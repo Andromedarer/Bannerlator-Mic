@@ -309,6 +309,15 @@ object GogRedistInstaller {
         if (!activity.isFinishing && !activity.isDestroyed) toast(activity, msg)
     }
 
-    private fun toast(ctx: Context, msg: String) =
-        Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
+    /**
+     * Activities that host redist install feedback implement this so messages render on the shared
+     * themed bar instead of a system Toast (which draws as an unreadable black box on this ROM,
+     * targetSDK 28). GogGameDetailActivity implements it; other callers fall back to Toast.
+     */
+    interface Host { fun onRedistMessage(msg: String) }
+
+    private fun toast(ctx: Context, msg: String) {
+        if (ctx is Host) ctx.onRedistMessage(msg)
+        else Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
+    }
 }
