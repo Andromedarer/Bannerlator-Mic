@@ -127,6 +127,8 @@ object EpicCloudSavePaths {
         val metadataChecked: Boolean,
         /** Last successful sync (epoch millis) from `epic_sync_timestamp_`, or 0 if never. */
         val lastSyncMillis: Long,
+        /** Cover art URL from the Epic library cache (artCover → artSquare), or null if none cached. */
+        val coverUrl: String?,
     )
 
     /**
@@ -163,6 +165,7 @@ object EpicCloudSavePaths {
                 metadataChecked = prefs.getBoolean("epic_cloud_checked_$an", false) ||
                     cloudSaveFolder(ctx, an) != null,
                 lastSyncMillis = parseIso8601Ms(prefs.getString("epic_sync_timestamp_$an", null)),
+                coverUrl = detail?.artCover?.takeIf { it.isNotBlank() },
             )
         }.sortedWith(compareBy({ !it.cloudSaveEnabled }, { it.name.lowercase() }))
     }

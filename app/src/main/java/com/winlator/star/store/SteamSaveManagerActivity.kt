@@ -72,6 +72,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.winlator.star.container.Container
 import com.winlator.star.container.ContainerManager
 import com.winlator.star.core.CustomSaveVault
@@ -172,6 +173,38 @@ internal fun SaveManagerScreen(
         context.startActivity(
             Intent(context, SteamGameDetailActivity::class.java)
                 .putExtra(SteamGameDetailActivity.EXTRA_APP_ID, appId),
+        )
+    }
+    // Epic/GOG rows open their own store detail page. Rebuild the same extras the store's
+    // openDetailScreen uses from the cached library metadata (cachedDetail — cheap prefs+JSON read);
+    // a cache miss (store never opened) still opens the page keyed by appName/gameId, just without the
+    // hydrated title/art (the detail Activities default every missing extra) — never crashes.
+    val onOpenEpic: (String) -> Unit = { appName ->
+        val d = EpicLibrarySync.cachedDetail(context, appName)
+        context.startActivity(
+            Intent(context, EpicGameDetailActivity::class.java).apply {
+                putExtra("app_name", appName)
+                putExtra("title", d?.title ?: "")
+                putExtra("description", d?.description ?: "")
+                putExtra("developer", d?.developer ?: "")
+                putExtra("art_cover", d?.artCover ?: "")
+                putExtra("namespace", d?.namespace ?: "")
+                putExtra("catalog_item_id", d?.catalogItemId ?: "")
+            },
+        )
+    }
+    val onOpenGog: (String) -> Unit = { gameId ->
+        val d = GogLibrarySync.cachedDetail(context, gameId)
+        context.startActivity(
+            Intent(context, GogGameDetailActivity::class.java).apply {
+                putExtra("game_id", gameId)
+                putExtra("title", d?.title ?: "")
+                putExtra("image_url", d?.imageUrl ?: "")
+                putExtra("description", d?.description ?: "")
+                putExtra("developer", d?.developer ?: "")
+                putExtra("category", d?.category ?: "")
+                putExtra("generation", d?.generation ?: 0)
+            },
         )
     }
     val scope = rememberCoroutineScope()
@@ -461,10 +494,10 @@ internal fun SaveManagerScreen(
                     CustomSaveTab(modifier = Modifier.weight(1f), columns = cols, onMessage = { resultBarMsg = it })
                   }
                   3 -> {
-                    EpicSaveTab(modifier = Modifier.weight(1f), columns = cols, onMessage = { resultBarMsg = it })
+                    EpicSaveTab(modifier = Modifier.weight(1f), columns = cols, onMessage = { resultBarMsg = it }, onOpen = onOpenEpic)
                   }
                   4 -> {
-                    GogSaveTab(modifier = Modifier.weight(1f), columns = cols, onMessage = { resultBarMsg = it })
+                    GogSaveTab(modifier = Modifier.weight(1f), columns = cols, onMessage = { resultBarMsg = it }, onOpen = onOpenGog)
                   }
                   else -> {
                     SaveManagerSettingsSection(modifier = Modifier.weight(1f))
@@ -922,7 +955,7 @@ private fun CustomSaveRow(
 // EpicCloudSavePaths resolver (auto save-folder resolution; no manual folder pick). Manual Up / Down
 // only for P1 — conflict resolution + auto-triggers are P2.
 @Composable
-private fun EpicSaveTab(modifier: Modifier = Modifier, columns: Int = 1, onMessage: (String) -> Unit = {}) {
+private fun EpicSaveTab(modifier: Modifier = Modifier, columns: Int = 1, onMessage: (String) -> Unit = {}, onOpen: (String) -> Unit = {}) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -1003,6 +1036,7 @@ private fun EpicSaveTab(modifier: Modifier = Modifier, columns: Int = 1, onMessa
                     EpicSaveRow(
                         status = s,
                         busy = s.appName in busyKeys,
+                        onOpen = { onOpen(s.appName) },
                         onUpload = { runSync(s, up = true) },
                         onDownload = { runSync(s, up = false) },
                     )
@@ -1016,6 +1050,7 @@ private fun EpicSaveTab(modifier: Modifier = Modifier, columns: Int = 1, onMessa
 private fun EpicSaveRow(
     status: EpicCloudSavePaths.EpicSaveStatus,
     busy: Boolean,
+    onOpen: () -> Unit,
     onUpload: () -> Unit,
     onDownload: () -> Unit,
 ) {
@@ -1029,10 +1064,13 @@ private fun EpicSaveRow(
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp))
+            // Tapping the card opens the Epic store detail page. The Up/Down IconButtons keep their own
+            // click handlers so they stay independently tappable (not swallowed by the card click).
+            .clickable(onClick = onOpen)
             .padding(start = 12.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
     ) {
-        // Epic art is a remote URL (no local bitmap like Custom / no appId poster like Steam), so use
-        // the neutral game-asset placeholder for P1 — cover rendering is a later polish.
+        // Real cover from the Epic library cache (artCover → artSquare); the neutral game-asset icon
+        // stays behind it as the placeholder/fallback so a missing or failed cover still renders.
         Box(
             modifier = Modifier
                 .size(width = 44.dp, height = 60.dp)
@@ -1046,6 +1084,14 @@ private fun EpicSaveRow(
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(22.dp),
             )
+            if (!status.coverUrl.isNullOrEmpty()) {
+                AsyncImage(
+                    model = status.coverUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         }
 
         Spacer(Modifier.width(12.dp))
@@ -1144,6 +1190,8 @@ private data class GogSaveStatus(
      * exact folder is resolved off-main lazily (may hit the network once).
      */
     val autoResolvable: Boolean,
+    /** Normalized cover URL from the GOG library cache ([GogLibrarySync.cachedDetail]), or null. */
+    val coverUrl: String?,
 )
 
 /**
@@ -1166,7 +1214,10 @@ private fun loadGogSaveStatuses(context: Context): List<GogSaveStatus> {
         val installPath = GogInstallPath.getInstallDir(context, dirName)
         val exe = prefs.getString("gog_exe_$gameId", null)
         if (!installPath.exists() || exe == null || !File(exe).exists()) continue
-        val name = GogLibrarySync.cachedDetail(context, gameId)?.title?.takeIf { it.isNotEmpty() } ?: gameId
+        // One cache lookup feeds both the title and the row's cover art (imageUrl already normalized).
+        val detail = GogLibrarySync.cachedDetail(context, gameId)
+        val name = detail?.title?.takeIf { it.isNotEmpty() } ?: gameId
+        val coverUrl = detail?.imageUrl?.takeIf { it.isNotEmpty() }
         val saveDir = prefs.getString("gog_save_dir_$gameId", null)?.takeIf { it.isNotEmpty() }
         // Cheap (no network): launch container + clientId presence decide whether auto-resolve is
         // possible. The actual folder is resolved lazily off-main (GogCloudSavePaths.resolve).
@@ -1178,6 +1229,7 @@ private fun loadGogSaveStatuses(context: Context): List<GogSaveStatus> {
             gameId, name, saveDir,
             containerLabel = container?.let { GogCloudSavePaths.containerLabel(it) },
             autoResolvable = autoResolvable,
+            coverUrl = coverUrl,
         ))
     }
     // Needs-attention first (can't sync at all: no manual folder AND not auto-resolvable), then by name.
@@ -1186,7 +1238,7 @@ private fun loadGogSaveStatuses(context: Context): List<GogSaveStatus> {
 }
 
 @Composable
-private fun GogSaveTab(modifier: Modifier = Modifier, columns: Int = 1, onMessage: (String) -> Unit = {}) {
+private fun GogSaveTab(modifier: Modifier = Modifier, columns: Int = 1, onMessage: (String) -> Unit = {}, onOpen: (String) -> Unit = {}) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -1273,6 +1325,7 @@ private fun GogSaveTab(modifier: Modifier = Modifier, columns: Int = 1, onMessag
                         status = s,
                         autoTail = autoTails[s.gameId],
                         busy = s.gameId in busyKeys,
+                        onOpen = { onOpen(s.gameId) },
                         onUpload = { runSync(s, up = true) },
                         onDownload = { runSync(s, up = false) },
                     )
@@ -1287,6 +1340,7 @@ private fun GogSaveRow(
     status: GogSaveStatus,
     autoTail: String?,
     busy: Boolean,
+    onOpen: () -> Unit,
     onUpload: () -> Unit,
     onDownload: () -> Unit,
 ) {
@@ -1301,9 +1355,13 @@ private fun GogSaveRow(
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp))
+            // Tapping the card opens the GOG store detail page. The Up/Down IconButtons keep their own
+            // click handlers so they stay independently tappable (not swallowed by the card click).
+            .clickable(onClick = onOpen)
             .padding(start = 12.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
     ) {
-        // No local poster for GOG rows — neutral game-asset placeholder (same as the Epic tab).
+        // Real cover from the GOG library cache; the neutral game-asset icon stays behind it as the
+        // placeholder/fallback so a missing or failed cover still renders (same idiom as the Epic tab).
         Box(
             modifier = Modifier
                 .size(width = 44.dp, height = 60.dp)
@@ -1317,6 +1375,14 @@ private fun GogSaveRow(
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(22.dp),
             )
+            if (!status.coverUrl.isNullOrEmpty()) {
+                AsyncImage(
+                    model = status.coverUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         }
 
         Spacer(Modifier.width(12.dp))
