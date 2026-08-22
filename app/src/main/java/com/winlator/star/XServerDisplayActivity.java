@@ -3985,8 +3985,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
             // Network op, so more headroom than the local copies (8s) — but still bounded so a stalled
             // upload never hangs game-exit. GOG saves are small (config + slot files), so this is ample.
-            if (!latch.await(15, TimeUnit.SECONDS))
-                Log.w("BH_SAVE_SYNC", "auto-upload GOG on exit timed out (15s) — proceeding with exit");
+            if (!latch.await(20, TimeUnit.SECONDS))
+                Log.w("BH_SAVE_SYNC", "auto-upload GOG on exit timed out (20s) — proceeding with exit");
         } catch (Throwable t) {
             Log.w("BH_SAVE_SYNC", "auto-upload GOG on exit wrapper errored", t);
         }
@@ -4052,8 +4052,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
             });
             // Bounded so a stalled/offline network never delays the launch indefinitely; on timeout we
             // launch with whatever local saves exist (newest-wins already protected them).
-            if (!latch.await(15, TimeUnit.SECONDS))
-                Log.w("BH_SAVE_SYNC", "auto-download GOG on launch timed out (15s) — launching with local saves");
+            if (!latch.await(20, TimeUnit.SECONDS))
+                Log.w("BH_SAVE_SYNC", "auto-download GOG on launch timed out (20s) — launching with local saves");
         } catch (Throwable t) {
             Log.w("BH_SAVE_SYNC", "auto-download GOG on launch wrapper errored", t);
         }
