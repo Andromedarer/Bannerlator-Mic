@@ -231,17 +231,39 @@ public final class GogCloudSaveManager {
         debug(ctx, "listCloudFiles response len=" + (body == null ? "null" : body.length()));
         List<CloudFile> result = new ArrayList<>();
         if (body == null || body.isEmpty()) return result;
-        JSONArray arr = new JSONArray(body);
-        for (int i = 0; i < arr.length(); i++) {
-            JSONObject obj = arr.optJSONObject(i);
-            if (obj == null) continue;
-            CloudFile cf = new CloudFile();
-            cf.name = obj.optString("name", "");
-            long lastMod = obj.optLong("last_modified", 0L);
-            // GOG returns seconds; convert to ms
-            cf.lastModifiedMs = lastMod > 1_000_000_000_000L ? lastMod : lastMod * 1000L;
-            if (!cf.name.isEmpty()) result.add(cf);
+        String trimmed = body.trim();
+        // GOG's cloudstorage list endpoint returns a PLAIN newline-delimited list of
+        // filenames (verified on-device), NOT JSON — e.g.
+        //     Elderborn_Slot_00.jurmum\naudio.cfg\ngraphics.cfg
+        // The old `new JSONArray(body)` threw JSONException on any non-empty cloud,
+        // which broke both upload dedup and download. Our own 404 fallback still hands
+        // back "[]"; tolerate that (and a defensive JSON-array shape) too.
+        if (trimmed.equals("[]")) return result;
+        if (trimmed.startsWith("[")) {
+            JSONArray arr = new JSONArray(trimmed);
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject obj = arr.optJSONObject(i);
+                if (obj == null) continue;
+                CloudFile cf = new CloudFile();
+                cf.name = obj.optString("name", "");
+                long lastMod = obj.optLong("last_modified", 0L);
+                cf.lastModifiedMs = lastMod > 1_000_000_000_000L ? lastMod : lastMod * 1000L;
+                if (!cf.name.isEmpty()) result.add(cf);
+            }
+        } else {
+            for (String line : trimmed.split("\\r?\\n")) {
+                String name = line.trim();
+                if (name.isEmpty()) continue;
+                CloudFile cf = new CloudFile();
+                cf.name = name;
+                // The listing carries no mtime; leave 0 so manual Upload always pushes
+                // (local wins) and Download always pulls (cloud wins). mtime-based
+                // newest-wins would need a per-file HEAD — deferred to the P2 conflict work.
+                cf.lastModifiedMs = 0L;
+                result.add(cf);
+            }
         }
+        debug(ctx, "listCloudFiles parsed " + result.size() + " file(s)");
         return result;
     }
 
