@@ -378,13 +378,25 @@ class GogGamesActivity : ComponentActivity() {
 
             var generation = 1
             try {
+                // Build list lives on content-system.gog.com, NOT api.gog.com (which
+                // returns the storefront HTML → parse fails → everything mislabelled gen1).
+                // Requesting generation=2 still returns gen1-only builds, so the true
+                // generation must be read from items[].generation (take the max), not
+                // merely "items exist → gen2".
                 val buildsJson = httpGet(
-                    "https://api.gog.com/products/$id/os/windows/builds?generation=2", token,
+                    "https://content-system.gog.com/products/$id/os/windows/builds?generation=2", token,
                 )
                 if (buildsJson != null) {
                     val bObj = JSONObject(buildsJson)
                     val bitems = bObj.optJSONArray("items")
-                    if (bitems != null && bitems.length() > 0) generation = 2
+                    if (bitems != null) {
+                        var maxGen = 0
+                        for (bi in 0 until bitems.length()) {
+                            val g = bitems.optJSONObject(bi)?.optInt("generation", 0) ?: 0
+                            if (g > maxGen) maxGen = g
+                        }
+                        if (maxGen > 0) generation = maxGen
+                    }
                 }
             } catch (_: Exception) {}
 
