@@ -127,6 +127,9 @@ class GogGameDetailActivity : ComponentActivity() {
     private var setExeVisible by mutableStateOf(false)
     private var uninstallVisible by mutableStateOf(false)
     private var copyVisible by mutableStateOf(false)
+    // gap#3: this gen2 game declared GOG redistributable dependencies (gog_deps_<gameId>), so the
+    // detail page shows a manual "Install prerequisites" action.
+    private var prereqsVisible by mutableStateOf(false)
     private var progressVisible by mutableStateOf(false)
     private var progressValue by mutableIntStateOf(0)
     private var progressLabel by mutableStateOf("")
@@ -252,7 +255,14 @@ class GogGameDetailActivity : ComponentActivity() {
                     onBack = { finish() },
                     onLaunch = {
                         val exe = prefs.getString("gog_exe_$gameId", null)
-                        if (exe != null) GogLaunchHelper.addToLauncher(this@GogGameDetailActivity, title, exe, imageUrl)
+                        // Add to the chosen container; the prereqs-aware path then offers to install the
+                        // game's required GOG redistributables (gap#3) into that same prefix.
+                        if (exe != null) GogLaunchHelper.addToLauncherWithPrereqs(
+                            this@GogGameDetailActivity, title, exe, imageUrl, gameId)
+                    },
+                    prereqsVisible = prereqsVisible,
+                    onInstallPrereqs = {
+                        GogRedistInstaller.promptContainerAndInstall(this@GogGameDetailActivity, gameId)
                     },
                     onInstall = { onInstallClicked() },
                     onSetExe = {
@@ -580,6 +590,8 @@ class GogGameDetailActivity : ComponentActivity() {
         setExeVisible = installed
         uninstallVisible = installed
         copyVisible = installed
+        // Offer the manual prereq install once the game is installed AND it declared GOG deps.
+        prereqsVisible = installed && GogRedistInstaller.hasPrereqs(this, gameId)
     }
 
     private fun doCheckUpdate() {
@@ -750,6 +762,7 @@ private fun GogGameDetailScreen(
     setExeVisible: Boolean,
     uninstallVisible: Boolean,
     copyVisible: Boolean,
+    prereqsVisible: Boolean,
     progressVisible: Boolean,
     progressValue: Int,
     progressLabel: String,
@@ -771,6 +784,7 @@ private fun GogGameDetailScreen(
     onSetExe: () -> Unit,
     onUninstall: () -> Unit,
     onCopy: () -> Unit,
+    onInstallPrereqs: () -> Unit,
     onCheckUpdate: () -> Unit,
     onVerifyRepair: () -> Unit,
     onUpdateNow: () -> Unit,
@@ -900,6 +914,22 @@ private fun GogGameDetailScreen(
                 onVerifyRepair = onVerifyRepair,
                 onUpdateNow = onUpdateNow,
             )
+        }
+
+        // Prerequisites (gap#3) — only when this gen2 game declared GOG redist dependencies.
+        if (prereqsVisible) {
+            StoreSection(title = "Prerequisites") {
+                StoreStatusText(
+                    "This game needs Microsoft runtimes (Visual C++, .NET, …). Install them into a " +
+                        "container's Wine prefix so the game can start. A brief setup window appears for each."
+                )
+                Spacer(Modifier.height(8.dp))
+                StoreActionButton(
+                    text = "Install prerequisites",
+                    onClick = onInstallPrereqs,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
 
         // DLC
