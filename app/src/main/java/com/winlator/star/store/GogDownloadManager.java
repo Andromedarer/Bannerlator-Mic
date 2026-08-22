@@ -269,6 +269,15 @@ public final class GogDownloadManager {
                 return "no depots in manifest; keys=" + manifest.keys().toString();
             dbg.append("installDir=").append(installDir).append(" depots=").append(depots.length()).append("\n");
 
+            // gap#3 (GOG redists / ISI): the build manifest carries the game's required GOG
+            // "dependencies" (repository redist ids, e.g. ["MSVC2017_x64"]) and a scriptInterpreter
+            // flag at the SAME level as depots. Persist them keyed by gameId so the redist installer
+            // (GogRedistInstaller) and a future ISI step can read them at add-to-container time. This
+            // is gen2-only — the gen1/installer paths are untouched.
+            persistDependencies(ctx, game.gameId,
+                    manifest.optJSONArray("dependencies"),
+                    manifest.optBoolean("scriptInterpreter", false), dbg);
+
             // Extract temp_executable from products[0] (primary exe hint)
             String tempExe = null;
             JSONArray products = manifest.optJSONArray("products");
@@ -389,7 +398,6 @@ public final class GogDownloadManager {
                 futures.add(pool.submit((Callable<Void>) () -> {
                     if (cancelled.get() || anyFailed.get()) return null;
                     File outFile = new File(installPath, df.relativePath);
-                    File tmpFile = new File(installPath, df.relativePath + ".bhtmp");
                     outFile.getParentFile().mkdirs();
 
                     // Resume / repair: skip only if the existing file passes size+MD5.
@@ -401,50 +409,19 @@ public final class GogDownloadManager {
                         return null;
                     }
 
-                    tmpFile.delete();
-                    long fileBytes = 0;
-                    boolean ok = true;
-                    try (FileOutputStream fos = new FileOutputStream(tmpFile)) {
-                        for (DepotFile.ChunkRef chunk : df.chunks) {
-                            if (cancelled.get()) return null;
-                            String chunkPath = buildCdnPath(chunk.hash);
-                            byte[] inflated = fetchChunkVerified(
-                                    cdnBaseRef, chunkPath, chunk, fSecureLinkUrl, token,
-                                    cdnRefreshCount, MAX_CDN_REFRESH, cancelled, fileLog2);
-                            if (inflated == null) { ok = false; break; }
-                            fileBytes += inflated.length;
-                            fos.write(inflated);
-                        }
-                    } catch (Exception e) {
-                        ok = false;
-                    }
-
-                    if (cancelled.get()) { tmpFile.delete(); return null; }
-
-                    // Whole-file integrity: size (from summed chunk sizes) + MD5 when present.
-                    if (ok && df.totalSize > 0 && tmpFile.length() != df.totalSize) {
-                        fileLog2.add("FILE size mismatch file=" + df.relativePath
-                                + " exp=" + df.totalSize + " got=" + tmpFile.length());
-                        ok = false;
-                    }
-                    if (ok && df.md5 != null && !df.md5.isEmpty()) {
-                        String actual = md5HexFile(tmpFile);
-                        if (actual == null || !actual.equalsIgnoreCase(df.md5)) {
-                            fileLog2.add("FILE md5 mismatch file=" + df.relativePath);
-                            ok = false;
-                        }
-                    }
-
+                    // Download + verify + assemble via the shared MD5-verified chunk path (also used
+                    // by the dependency-redist assembler). On success the whole file is size+MD5 clean.
+                    boolean ok = assembleDepotFile(
+                            df, outFile, cdnBaseRef, fSecureLinkUrl, token,
+                            cdnRefreshCount, MAX_CDN_REFRESH, cancelled, fileLog2);
+                    if (cancelled.get()) return null;
                     if (!ok) {
-                        tmpFile.delete();
                         fileLog2.add("FAIL file=" + df.relativePath);
                         Log.e(TAG, "Gen2 file failed integrity/download: " + df.relativePath);
                         anyFailed.set(true);
                         return null;
                     }
-
-                    if (outFile.exists()) outFile.delete();
-                    tmpFile.renameTo(outFile);
+                    long fileBytes = df.totalSize;
                     int done = doneCount.incrementAndGet();
                     long tb  = totalBytes.addAndGet(fileBytes);
                     int pct  = 15 + (int) ((done / (float) total) * 80);
@@ -927,8 +904,134 @@ public final class GogDownloadManager {
     }
 
     /** Builds the CDN path from a chunk hash: "ab/cd/abcdef..." */
-    private static String buildCdnPath(String hash) {
+    static String buildCdnPath(String hash) {
         return hash.substring(0, 2) + "/" + hash.substring(2, 4) + "/" + hash;
+    }
+
+    /**
+     * Persists a gen2 game's required GOG dependency ids + scriptInterpreter flag into
+     * {@code bh_gog_prefs} under {@code gog_deps_<gameId>} as
+     * {@code {"deps":[...],"scriptInterpreter":bool}}. Read by GogRedistInstaller at
+     * add-to-container time. Fail-soft: any error is logged and swallowed (never blocks a download).
+     */
+    private static void persistDependencies(Context ctx, String gameId,
+                                            JSONArray dependencies, boolean scriptInterpreter,
+                                            StringBuilder dbg) {
+        try {
+            JSONArray deps = dependencies != null ? dependencies : new JSONArray();
+            JSONObject rec = new JSONObject();
+            rec.put("deps", deps);
+            rec.put("scriptInterpreter", scriptInterpreter);
+            ctx.getSharedPreferences("bh_gog_prefs", 0).edit()
+                    .putString("gog_deps_" + gameId, rec.toString()).apply();
+            dbg.append("gog deps captured: ").append(deps.toString())
+               .append(" scriptInterpreter=").append(scriptInterpreter).append("\n");
+        } catch (Exception e) {
+            dbg.append("persistDependencies failed: ").append(e).append("\n");
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Shared gen2 chunk assembler (game files AND dependency redists)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Downloads every chunk of {@code df}, verifying each end-to-end
+     * (compressed size/MD5 → inflate → decompressed size/MD5) via {@link #fetchChunkVerified},
+     * assembles them into {@code outFile}, then verifies the whole-file size + MD5. Writes to a
+     * {@code .bhtmp} sibling and atomically renames on success. Returns true on a verified file.
+     *
+     * This is the single MD5-verified assembly path shared by the game-file download loop in
+     * {@link #runGen2} and the dependency-redist assembler {@link #assembleDependencyInstaller}
+     * — so redist integrity is guaranteed by exactly the same code as game files.
+     *
+     * For the unauthenticated dependency store pass {@code secureLinkUrl=null},
+     * {@code token=null}, {@code maxCdnRefresh=0} (there is no secure_link to refresh).
+     */
+    private static boolean assembleDepotFile(
+            DepotFile df, File outFile,
+            AtomicReference<String> cdnBaseRef, String secureLinkUrl, String token,
+            AtomicInteger cdnRefreshCount, int maxCdnRefresh, AtomicBoolean cancelled,
+            java.util.concurrent.ConcurrentLinkedQueue<String> log) {
+        File tmpFile = new File(outFile.getAbsolutePath() + ".bhtmp");
+        File parent = outFile.getParentFile();
+        if (parent != null) parent.mkdirs();
+        tmpFile.delete();
+        boolean ok = true;
+        try (FileOutputStream fos = new FileOutputStream(tmpFile)) {
+            for (DepotFile.ChunkRef chunk : df.chunks) {
+                if (cancelled.get()) { ok = false; break; }
+                String chunkPath = buildCdnPath(chunk.hash);
+                byte[] inflated = fetchChunkVerified(
+                        cdnBaseRef, chunkPath, chunk, secureLinkUrl, token,
+                        cdnRefreshCount, maxCdnRefresh, cancelled, log);
+                if (inflated == null) { ok = false; break; }
+                fos.write(inflated);
+            }
+        } catch (Exception e) {
+            ok = false;
+        }
+        if (!ok || cancelled.get()) { tmpFile.delete(); return false; }
+
+        if (df.totalSize > 0 && tmpFile.length() != df.totalSize) {
+            log.add("FILE size mismatch file=" + df.relativePath
+                    + " exp=" + df.totalSize + " got=" + tmpFile.length());
+            tmpFile.delete();
+            return false;
+        }
+        if (df.md5 != null && !df.md5.isEmpty()) {
+            String actual = md5HexFile(tmpFile);
+            if (actual == null || !actual.equalsIgnoreCase(df.md5)) {
+                log.add("FILE md5 mismatch file=" + df.relativePath);
+                tmpFile.delete();
+                return false;
+            }
+        }
+        if (outFile.exists()) outFile.delete();
+        return tmpFile.renameTo(outFile);
+    }
+
+    /**
+     * Assembles a GOG dependency (redist) installer from its depot manifest into {@code destDir},
+     * reusing the shared MD5-verified {@link #assembleDepotFile} chunk path against the
+     * unauthenticated dependency store (no secure_link). {@code depManifestJson} is the inflated
+     * per-dependency depot manifest; {@code storeBase} is
+     * {@code .../content-system/v2/dependencies/store}; {@code exeRelPath} is the repository entry's
+     * {@code executable.path} (e.g. {@code __redist/MSVC2017_x64/VC_redist.x64.exe}).
+     *
+     * Returns the assembled installer file (the entry's executable), or null on any failure.
+     * Called from GogRedistInstaller on a background thread.
+     */
+    public static File assembleDependencyInstaller(
+            String depManifestJson, String storeBase, File destDir, String exeRelPath,
+            AtomicBoolean cancelled,
+            java.util.concurrent.ConcurrentLinkedQueue<String> log) {
+        try {
+            List<DepotFile> files = new ArrayList<>();
+            parseDepotManifest(depManifestJson, files);
+            if (files.isEmpty()) { log.add("dep manifest had no depot files"); return null; }
+
+            AtomicReference<String> baseRef = new AtomicReference<>(storeBase);
+            AtomicInteger refresh = new AtomicInteger(0);
+
+            String wantTail = exeRelPath == null ? null
+                    : exeRelPath.replace("\\", "/").replaceFirst("^/+", "");
+            File exeOut = null;
+            for (DepotFile df : files) {
+                File outFile = new File(destDir, df.relativePath);
+                if (!assembleDepotFile(df, outFile, baseRef, null, null,
+                        refresh, 0, cancelled, log)) {
+                    log.add("dep chunk assembly failed for " + df.relativePath);
+                    return null;
+                }
+                if (wantTail != null && df.relativePath.endsWith(wantTail)) exeOut = outFile;
+                if (exeOut == null) exeOut = outFile; // fallback: first file
+            }
+            return exeOut;
+        } catch (Exception e) {
+            log.add("assembleDependencyInstaller exception: " + e);
+            return null;
+        }
     }
 
     /** Parses the secure_link JSON → CDN base URL (strips trailing /{path}). */
@@ -983,7 +1086,7 @@ public final class GogDownloadManager {
     }
 
     /** HTTP GET, returns response body string or null on failure. */
-    private static String httpGet(String url, String token) {
+    static String httpGet(String url, String token) {
         try {
             HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
             conn.setConnectTimeout(TIMEOUT);
@@ -1005,7 +1108,7 @@ public final class GogDownloadManager {
     }
 
     /** Fetches URL bytes, returns null on failure. */
-    private static byte[] fetchBytes(String url, String token) {
+    static byte[] fetchBytes(String url, String token) {
         return fetchBytesEx(url, token).body;
     }
 
@@ -1013,7 +1116,7 @@ public final class GogDownloadManager {
      * Detects gzip (0x1F 0x8B) or zlib (0x78 xx) and decompresses.
      * Falls back to raw UTF-8 string.
      */
-    private static String decompressBytes(byte[] data) {
+    static String decompressBytes(byte[] data) {
         if (data == null || data.length < 2) return null;
         try {
             int b0 = data[0] & 0xFF, b1 = data[1] & 0xFF;

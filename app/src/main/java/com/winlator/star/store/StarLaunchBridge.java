@@ -93,6 +93,15 @@ public final class StarLaunchBridge {
     }
 
     /**
+     * Fired on the main thread right after the user picks a container in {@link #addToLauncher},
+     * with the chosen container. Lets a store (GOG) hook post-add work — e.g. prompting to install
+     * the game's required redistributables into that just-chosen prefix.
+     */
+    public interface PostAddCallback {
+        void onAdded(Container container);
+    }
+
+    /**
      * Loads the Wine container list on a worker thread and delivers it on the
      * main thread. Never delivers null — failures deliver an empty list.
      * Used by the Compose add-to-shortcuts flow (Steam store).
@@ -137,6 +146,20 @@ public final class StarLaunchBridge {
                                      String exePath,
                                      String coverArtUrl,
                                      EpicMeta epic) {
+        addToLauncher(activity, gameName, exePath, coverArtUrl, epic, null);
+    }
+
+    /**
+     * As above, but invokes {@code postAdd} on the main thread with the chosen container right after
+     * the shortcut is written — the GOG redist trigger hooks here to offer prerequisite install into
+     * the just-chosen prefix. {@code postAdd} may be null.
+     */
+    public static void addToLauncher(Activity activity,
+                                     String gameName,
+                                     String exePath,
+                                     String coverArtUrl,
+                                     EpicMeta epic,
+                                     PostAddCallback postAdd) {
         Handler h = new Handler(Looper.getMainLooper());
         new Thread(() -> {
             try {
@@ -158,9 +181,11 @@ public final class StarLaunchBridge {
                 ArrayList<Container> finalContainers = containers;
                 h.post(() -> new AlertDialog.Builder(activity, R.style.StoreAlertDialogDark)
                         .setTitle("Add \"" + gameName + "\" to…")
-                        .setItems(names, (dialog, which) ->
-                                writeShortcut(activity, finalContainers.get(which),
-                                        gameName, exePath, coverArtUrl, epic))
+                        .setItems(names, (dialog, which) -> {
+                                Container chosen = finalContainers.get(which);
+                                writeShortcut(activity, chosen, gameName, exePath, coverArtUrl, epic);
+                                if (postAdd != null) postAdd.onAdded(chosen);
+                        })
                         .setNegativeButton("Cancel", null)
                         .show());
 
