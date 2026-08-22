@@ -5,7 +5,6 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.os.Bundle
 import android.text.format.DateUtils
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
@@ -194,6 +193,10 @@ internal fun SaveManagerScreen(
     // While busy it shows what the move is doing (from Callback.onStatus); on done/error it briefly
     // holds the summary/error, then the entry is removed and the row reverts to its last-synced line.
     val rowProgress = remember { mutableStateMapOf<Int, RowProgress>() }
+    // Readable status feedback for the cloud/backup tabs. System Toasts render as an unreadable black
+    // box on this ROM (targetSDK 28), so route messages through the shared outlined UninstallResultBar
+    // (same pattern as the store screens). Hoisted here so the bar floats over whichever tab is shown.
+    var resultBarMsg by remember { mutableStateOf<String?>(null) }
 
     // Instant load (sidecar + on-disk scan, no network) — off the main thread all the same.
     suspend fun reload() {
@@ -289,6 +292,9 @@ internal fun SaveManagerScreen(
     // warning strip below. (Custom rows load inside their own tab, so this is Steam scope only.)
     val needSync = statuses.count { it.state.needsAttention() }
 
+    // Root Box so the status bar can float as an overlay over whichever tab is showing (matches how
+    // the store screens place UninstallResultBar at their outermost container).
+    Box(modifier = Modifier.fillMaxSize()) {
     Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         // Header bar — mirrors the Steam Library header idiom (back + title).
         Row(
@@ -452,13 +458,13 @@ internal fun SaveManagerScreen(
                     }
                   }
                   1 -> {
-                    CustomSaveTab(modifier = Modifier.weight(1f), columns = cols)
+                    CustomSaveTab(modifier = Modifier.weight(1f), columns = cols, onMessage = { resultBarMsg = it })
                   }
                   3 -> {
-                    EpicSaveTab(modifier = Modifier.weight(1f), columns = cols)
+                    EpicSaveTab(modifier = Modifier.weight(1f), columns = cols, onMessage = { resultBarMsg = it })
                   }
                   4 -> {
-                    GogSaveTab(modifier = Modifier.weight(1f), columns = cols)
+                    GogSaveTab(modifier = Modifier.weight(1f), columns = cols, onMessage = { resultBarMsg = it })
                   }
                   else -> {
                     SaveManagerSettingsSection(modifier = Modifier.weight(1f))
@@ -466,6 +472,10 @@ internal fun SaveManagerScreen(
                 }
             }
         }
+    }
+        // Themed, auto-dismiss status feedback routed here from the cloud/backup tabs (replaces the
+        // unreadable system Toast). Floats over the active tab via the root Box.
+        resultBarMsg?.let { UninstallResultBar(it) { resultBarMsg = null } }
     }
 
 }
@@ -602,7 +612,7 @@ private fun SettingsToggleRow(
 // ─────────────────────────────────────────────────────────────────────────────
 // Custom tab — non-Steam imported games with their LOCAL vault status + Back up / Restore. No cloud.
 @Composable
-private fun CustomSaveTab(modifier: Modifier = Modifier, columns: Int = 1) {
+private fun CustomSaveTab(modifier: Modifier = Modifier, columns: Int = 1, onMessage: (String) -> Unit = {}) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -633,17 +643,15 @@ private fun CustomSaveTab(modifier: Modifier = Modifier, columns: Int = 1) {
     fun runBackup(s: CustomSaveVault.CustomGameStatus, layout: GameSaveBackup.BackupLayout) {
         val key = s.shortcut.file.path
         busyKeys = busyKeys + key
-        Toast.makeText(context, "Backing up saves for \"${s.name}\"…", Toast.LENGTH_SHORT).show()
+        onMessage("Backing up saves for \"${s.name}\"…")
         CustomSaveVault.manualBackup(context, s.shortcut.container, s.shortcut, layout) { r ->
             if (r.wholeContainer && r.ok) {
-                Toast.makeText(context, "No per-game saves detected — backed up the whole container.", Toast.LENGTH_LONG).show()
+                onMessage("No per-game saves detected — backed up the whole container.")
             }
-            Toast.makeText(
-                context,
+            onMessage(
                 if (r.ok) "Backed up ${r.fileCount} files → ${r.path?.substringAfterLast('/')}"
                 else "Backup failed: ${r.error ?: "unknown error"}",
-                Toast.LENGTH_LONG,
-            ).show()
+            )
             busyKeys = busyKeys - key
             scope.launch { reload() }
         }
@@ -652,14 +660,12 @@ private fun CustomSaveTab(modifier: Modifier = Modifier, columns: Int = 1) {
     fun runRestore(s: CustomSaveVault.CustomGameStatus, target: Container) {
         val key = s.shortcut.file.path
         busyKeys = busyKeys + key
-        Toast.makeText(context, "Restoring saves into \"${target.name}\"…", Toast.LENGTH_SHORT).show()
+        onMessage("Restoring saves into \"${target.name}\"…")
         CustomSaveVault.restoreLatest(context, s.shortcut, target) { r ->
-            Toast.makeText(
-                context,
+            onMessage(
                 if (r.ok) "Restored ${r.filesWritten} files to \"${target.name}\""
                 else "Restore failed: ${r.error ?: "unknown error"}",
-                Toast.LENGTH_LONG,
-            ).show()
+            )
             busyKeys = busyKeys - key
             scope.launch { reload() }
         }
@@ -669,14 +675,12 @@ private fun CustomSaveTab(modifier: Modifier = Modifier, columns: Int = 1) {
     fun runFileRestore(s: CustomSaveVault.CustomGameStatus, uri: Uri, target: Container) {
         val key = s.shortcut.file.path
         busyKeys = busyKeys + key
-        Toast.makeText(context, "Restoring saves into \"${target.name}\"…", Toast.LENGTH_SHORT).show()
+        onMessage("Restoring saves into \"${target.name}\"…")
         GameSaveBackup.restore(context, uri, target) { r ->
-            Toast.makeText(
-                context,
+            onMessage(
                 if (r.ok) "Restored ${r.filesWritten} files to \"${target.name}\""
                 else "Restore failed: ${r.error ?: "unknown error"}",
-                Toast.LENGTH_LONG,
-            ).show()
+            )
             busyKeys = busyKeys - key
             scope.launch { reload() }
         }
@@ -918,7 +922,7 @@ private fun CustomSaveRow(
 // EpicCloudSavePaths resolver (auto save-folder resolution; no manual folder pick). Manual Up / Down
 // only for P1 — conflict resolution + auto-triggers are P2.
 @Composable
-private fun EpicSaveTab(modifier: Modifier = Modifier, columns: Int = 1) {
+private fun EpicSaveTab(modifier: Modifier = Modifier, columns: Int = 1, onMessage: (String) -> Unit = {}) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -940,7 +944,7 @@ private fun EpicSaveTab(modifier: Modifier = Modifier, columns: Int = 1) {
         val key = s.appName
         if (key in busyKeys) return
         busyKeys = busyKeys + key
-        Toast.makeText(context, if (up) "Uploading \"${s.name}\" to Epic Cloud…" else "Downloading \"${s.name}\" from Epic Cloud…", Toast.LENGTH_SHORT).show()
+        onMessage(if (up) "Uploading \"${s.name}\" to Epic Cloud…" else "Downloading \"${s.name}\" from Epic Cloud…")
         scope.launch {
             val resolved = withContext(Dispatchers.IO) {
                 val installDir = EpicCloudSavePaths.installDir(context, s.appName)?.absolutePath
@@ -949,12 +953,12 @@ private fun EpicSaveTab(modifier: Modifier = Modifier, columns: Int = 1) {
             }
             val (container, dir) = resolved
             if (container == null) {
-                Toast.makeText(context, "Add \"${s.name}\" to a container first to sync.", Toast.LENGTH_LONG).show()
+                onMessage("Add \"${s.name}\" to a container first to sync.")
                 busyKeys = busyKeys - key
                 return@launch
             }
             if (dir == null) {
-                Toast.makeText(context, "Couldn't resolve a cloud-save folder for \"${s.name}\". Open the Epic store once to refresh its info.", Toast.LENGTH_LONG).show()
+                onMessage("Couldn't resolve a cloud-save folder for \"${s.name}\". Open the Epic store once to refresh its info.")
                 busyKeys = busyKeys - key
                 return@launch
             }
@@ -962,14 +966,14 @@ private fun EpicSaveTab(modifier: Modifier = Modifier, columns: Int = 1) {
                 override fun onStatus(message: String) { /* per-file progress omitted in P1 */ }
                 override fun onDone(summary: String) {
                     scope.launch {
-                        Toast.makeText(context, summary, Toast.LENGTH_LONG).show()
+                        onMessage(summary)
                         busyKeys = busyKeys - key
                         reload()
                     }
                 }
                 override fun onError(message: String) {
                     scope.launch {
-                        Toast.makeText(context, "Error: $message", Toast.LENGTH_LONG).show()
+                        onMessage("Error: $message")
                         busyKeys = busyKeys - key
                     }
                 }
@@ -1182,7 +1186,7 @@ private fun loadGogSaveStatuses(context: Context): List<GogSaveStatus> {
 }
 
 @Composable
-private fun GogSaveTab(modifier: Modifier = Modifier, columns: Int = 1) {
+private fun GogSaveTab(modifier: Modifier = Modifier, columns: Int = 1, onMessage: (String) -> Unit = {}) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -1216,19 +1220,19 @@ private fun GogSaveTab(modifier: Modifier = Modifier, columns: Int = 1) {
         val key = s.gameId
         if (key in busyKeys) return
         busyKeys = busyKeys + key
-        Toast.makeText(context, if (up) "Uploading \"${s.name}\" to GOG Cloud…" else "Downloading \"${s.name}\" from GOG Cloud…", Toast.LENGTH_SHORT).show()
+        onMessage(if (up) "Uploading \"${s.name}\" to GOG Cloud…" else "Downloading \"${s.name}\" from GOG Cloud…")
         val cb = object : GogCloudSaveManager.Callback {
             override fun onStatus(message: String) { /* per-file progress omitted (mirrors Epic) */ }
             override fun onDone(summary: String) {
                 scope.launch {
-                    Toast.makeText(context, summary, Toast.LENGTH_LONG).show()
+                    onMessage(summary)
                     busyKeys = busyKeys - key
                     reload()
                 }
             }
             override fun onError(message: String) {
                 scope.launch {
-                    Toast.makeText(context, "Error: $message", Toast.LENGTH_LONG).show()
+                    onMessage("Error: $message")
                     busyKeys = busyKeys - key
                 }
             }
@@ -1239,7 +1243,7 @@ private fun GogSaveTab(modifier: Modifier = Modifier, columns: Int = 1) {
                 s.saveDir?.let { File(it) } ?: GogCloudSavePaths.resolve(context, s.gameId).second
             }
             if (dir == null) {
-                Toast.makeText(context, "Couldn't resolve a save folder for \"${s.name}\". Add it to a container, or set one on its GOG detail page.", Toast.LENGTH_LONG).show()
+                onMessage("Couldn't resolve a save folder for \"${s.name}\". Add it to a container, or set one on its GOG detail page.")
                 busyKeys = busyKeys - key
                 return@launch
             }
