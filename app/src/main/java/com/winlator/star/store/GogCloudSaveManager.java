@@ -61,8 +61,13 @@ public final class GogCloudSaveManager {
                 cb.onStatus("Fetching cloud file list…");
                 List<CloudFile> cloudFiles = listCloudFiles(ctx, userId, clientId, token);
 
-                File[] localFiles = localFolder.listFiles();
-                if (localFiles == null || localFiles.length == 0) {
+                // Recursive walk: collect every file under localFolder (incl. subfolders
+                // like ELDERBORN's inputConfig/). The cloud key is the path RELATIVE to
+                // localFolder, with forward slashes — verified on-device that GOG accepts
+                // '/' in object keys (it normalises %2F<->/, listing returns literal '/').
+                List<File> localFiles = new ArrayList<>();
+                collectFiles(localFolder, localFiles);
+                if (localFiles.isEmpty()) {
                     cb.onDone("No local files to upload");
                     return;
                 }
@@ -70,29 +75,34 @@ public final class GogCloudSaveManager {
                 int uploaded = 0;
                 int skipped  = 0;
                 for (File local : localFiles) {
-                    if (!local.isFile()) continue;
-                    String name = local.getName();
+                    String key = relKey(localFolder, local);
                     long localModMs = local.lastModified();
-                    long cloudModMs = getCloudModifiedMs(cloudFiles, name);
+                    CloudFile cloud = findCloud(cloudFiles, key);
+                    // Real newest-wins: HEAD the cloud copy for its Last-Modified. Unknown
+                    // (no cloud copy, or HEAD failed) => -1 => push (safe fallback).
+                    long cloudModMs = (cloud == null) ? -1L
+                            : resolveCloudMtime(ctx, userId, clientId, token, cloud);
 
-                    if (cloudModMs >= localModMs) {
+                    if (cloudModMs >= 0 && cloudModMs >= localModMs) {
                         skipped++;
+                        debug(ctx, "upload skip (cloud newer/equal): " + key);
                         continue;
                     }
 
-                    cb.onStatus("Uploading: " + name);
+                    cb.onStatus("Uploading: " + key);
                     byte[] data = readFile(local);
-                    if (data == null) { cb.onError("Failed to read: " + name); return; }
+                    if (data == null) { cb.onError("Failed to read: " + key); return; }
 
-                    boolean ok = putFile(userId, clientId, token, name, data);
-                    if (!ok) { cb.onError("Upload failed for: " + name); return; }
+                    boolean ok = putFile(userId, clientId, token, key, data);
+                    if (!ok) { cb.onError("Upload failed for: " + key); return; }
                     uploaded++;
                 }
 
                 if (uploaded == 0 && skipped > 0) {
                     cb.onDone("Already up to date (" + skipped + " file" + (skipped == 1 ? "" : "s") + ")");
                 } else if (uploaded > 0) {
-                    cb.onDone("Uploaded " + uploaded + " file" + (uploaded == 1 ? "" : "s"));
+                    cb.onDone("Uploaded " + uploaded + " file" + (uploaded == 1 ? "" : "s")
+                            + (skipped > 0 ? ", skipped " + skipped : ""));
                 } else {
                     cb.onDone("No files to upload");
                 }
@@ -133,16 +143,40 @@ public final class GogCloudSaveManager {
                 if (!localFolder.exists()) localFolder.mkdirs();
 
                 int downloaded = 0;
+                int skipped    = 0;
                 for (CloudFile cf : cloudFiles) {
+                    // cf.name may be a subpath ("inputConfig/foo.cfg"); File resolves it
+                    // against localFolder as nested dirs.
+                    File dest = new File(localFolder, cf.name);
+
+                    // Symmetric newest-wins: don't clobber a newer-or-equal local save with
+                    // an older cloud one. Unknown cloud mtime (HEAD failed) => -1 => pull.
+                    if (dest.isFile()) {
+                        long cloudModMs = resolveCloudMtime(ctx, userId, clientId, token, cf);
+                        long localModMs = dest.lastModified();
+                        if (cloudModMs >= 0 && localModMs >= cloudModMs) {
+                            skipped++;
+                            debug(ctx, "download skip (local newer/equal): " + cf.name);
+                            continue;
+                        }
+                    }
+
                     cb.onStatus("Downloading: " + cf.name);
                     byte[] data = getFile(userId, clientId, token, cf.name);
                     if (data == null) { cb.onError("Download failed for: " + cf.name); return; }
-                    File dest = new File(localFolder, cf.name);
+                    // writeFile does NOT mkdirs — create parent dirs for subpath keys.
+                    File parent = dest.getParentFile();
+                    if (parent != null && !parent.exists()) parent.mkdirs();
                     writeFile(dest, data);
                     downloaded++;
                 }
 
-                cb.onDone("Downloaded " + downloaded + " file" + (downloaded == 1 ? "" : "s"));
+                if (downloaded == 0 && skipped > 0) {
+                    cb.onDone("Already up to date (" + skipped + " file" + (skipped == 1 ? "" : "s") + ")");
+                } else {
+                    cb.onDone("Downloaded " + downloaded + " file" + (downloaded == 1 ? "" : "s")
+                            + (skipped > 0 ? ", skipped " + skipped : ""));
+                }
 
             } catch (Exception e) {
                 Log.e(TAG, "downloadSaves failed", e);
@@ -219,7 +253,8 @@ public final class GogCloudSaveManager {
 
     private static class CloudFile {
         String name;
-        long lastModifiedMs; // epoch milliseconds
+        long lastModifiedMs;   // epoch milliseconds; 0 = unknown/not fetched
+        boolean mtimeFetched;  // true once a HEAD (or a listing with mtime) has resolved lastModifiedMs
     }
 
     private static List<CloudFile> listCloudFiles(Context ctx, String userId, String clientId, String token)
@@ -248,6 +283,7 @@ public final class GogCloudSaveManager {
                 cf.name = obj.optString("name", "");
                 long lastMod = obj.optLong("last_modified", 0L);
                 cf.lastModifiedMs = lastMod > 1_000_000_000_000L ? lastMod : lastMod * 1000L;
+                cf.mtimeFetched = cf.lastModifiedMs > 0L; // listing already carried a real mtime
                 if (!cf.name.isEmpty()) result.add(cf);
             }
         } else {
@@ -256,9 +292,9 @@ public final class GogCloudSaveManager {
                 if (name.isEmpty()) continue;
                 CloudFile cf = new CloudFile();
                 cf.name = name;
-                // The listing carries no mtime; leave 0 so manual Upload always pushes
-                // (local wins) and Download always pulls (cloud wins). mtime-based
-                // newest-wins would need a per-file HEAD — deferred to the P2 conflict work.
+                // The listing carries no mtime. Leave it unfetched (0/false) — newest-wins
+                // resolves it lazily via a per-file HEAD (resolveCloudMtime) only when a
+                // local counterpart exists, so an empty file set costs zero HEAD requests.
                 cf.lastModifiedMs = 0L;
                 result.add(cf);
             }
@@ -267,11 +303,92 @@ public final class GogCloudSaveManager {
         return result;
     }
 
-    private static long getCloudModifiedMs(List<CloudFile> cloudFiles, String name) {
-        for (CloudFile cf : cloudFiles) {
-            if (cf.name.equals(name)) return cf.lastModifiedMs;
+    /** Recursively collect every regular file under {@code dir} into {@code out}. */
+    private static void collectFiles(File dir, List<File> out) {
+        File[] kids = dir.listFiles();
+        if (kids == null) return;
+        for (File k : kids) {
+            if (k.isDirectory()) collectFiles(k, out);
+            else if (k.isFile()) out.add(k);
         }
-        return 0L;
+    }
+
+    /**
+     * Path of {@code file} relative to {@code root}, as a cloud object key: leading
+     * separators stripped and OS separators normalised to '/'. Falls back to the bare
+     * file name if {@code file} is somehow not under {@code root}.
+     */
+    private static String relKey(File root, File file) {
+        String rootPath = root.getAbsolutePath();
+        String filePath = file.getAbsolutePath();
+        String rel = filePath.startsWith(rootPath) ? filePath.substring(rootPath.length())
+                                                    : file.getName();
+        rel = rel.replace(File.separatorChar, '/');
+        while (rel.startsWith("/")) rel = rel.substring(1);
+        return rel.isEmpty() ? file.getName() : rel;
+    }
+
+    private static CloudFile findCloud(List<CloudFile> cloudFiles, String name) {
+        for (CloudFile cf : cloudFiles) {
+            if (cf.name.equals(name)) return cf;
+        }
+        return null;
+    }
+
+    /**
+     * Lazily resolves a cloud file's Last-Modified via a HEAD (cached on the CloudFile).
+     * Returns epoch milliseconds, or -1 if unknown (HEAD failed or header absent), in
+     * which case callers fall back to the safe push/pull behaviour for that file.
+     */
+    private static long resolveCloudMtime(Context ctx, String userId, String clientId,
+                                          String token, CloudFile cf) {
+        if (cf.mtimeFetched) return cf.lastModifiedMs > 0L ? cf.lastModifiedMs : -1L;
+        cf.mtimeFetched = true;
+        long ms = headModifiedMs(ctx, userId, clientId, token, cf.name);
+        cf.lastModifiedMs = ms > 0L ? ms : 0L;
+        return ms;
+    }
+
+    /**
+     * HEADs a cloud object and parses its Last-Modified header (RFC 1123, e.g.
+     * "Sat, 22 Aug 2026 17:11:23 GMT" — verified on-device). Returns epoch ms, or -1.
+     */
+    private static long headModifiedMs(Context ctx, String userId, String clientId,
+                                       String token, String filename) {
+        try {
+            String urlStr = BASE + userId + "/" + clientId + "/"
+                    + java.net.URLEncoder.encode(filename, "UTF-8");
+            HttpURLConnection conn = openConn(urlStr, "HEAD", token);
+            int code = conn.getResponseCode();
+            String lastMod = conn.getHeaderField("Last-Modified");
+            conn.disconnect();
+            if (code < 200 || code >= 300) {
+                debug(ctx, "HEAD http=" + code + " for " + filename);
+                return -1L;
+            }
+            if (lastMod == null || lastMod.isEmpty()) {
+                debug(ctx, "HEAD missing Last-Modified for " + filename);
+                return -1L;
+            }
+            long ms = parseHttpDate(lastMod);
+            if (ms < 0L) debug(ctx, "HEAD unparseable Last-Modified '" + lastMod + "' for " + filename);
+            return ms;
+        } catch (Exception e) {
+            debug(ctx, "headModifiedMs exception " + e.getClass().getSimpleName() + " for " + filename);
+            return -1L;
+        }
+    }
+
+    /** Parse an RFC 1123 HTTP date to epoch ms, or -1 on failure. */
+    private static long parseHttpDate(String s) {
+        try {
+            SimpleDateFormat fmt = new SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", Locale.US);
+            fmt.setTimeZone(java.util.TimeZone.getTimeZone("GMT"));
+            Date d = fmt.parse(s.trim());
+            return d != null ? d.getTime() : -1L;
+        } catch (Exception e) {
+            return -1L;
+        }
     }
 
     private static String getRequest(String urlStr, String token) throws Exception {
