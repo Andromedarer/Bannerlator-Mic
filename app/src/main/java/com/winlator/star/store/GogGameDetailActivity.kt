@@ -199,9 +199,19 @@ class GogGameDetailActivity : ComponentActivity() {
         checkUpdateEnabled = updatesInstalled
 
         cloudSaveDir = prefs.getString("gog_save_dir_$gameId", null)
-        cloudSaveDirText = cloudSaveDir?.let { shortenPath(it) } ?: "No save folder set"
-        cloudSaveDirColor = if (cloudSaveDir != null) 0xFFCCCCCC.toInt() else 0xFF555577.toInt()
-        cloudBtnsEnabled = cloudSaveDir != null
+        if (cloudSaveDir != null) {
+            // Explicit manual pick (Browse) — show it as the override.
+            cloudSaveDirText = shortenPath(cloudSaveDir!!)
+            cloudSaveDirColor = 0xFFCCCCCC.toInt()
+        } else {
+            // No manual pick — show the auto-resolved folder (GogCloudSavePaths), agreeing with the
+            // Save Manager GOG tab. Resolved off-main; label updates when ready.
+            cloudSaveDirText = "No save folder set"
+            cloudSaveDirColor = 0xFF555577.toInt()
+            refreshResolvedSaveDirLabel()
+        }
+        // Buttons stay enabled: the folder is resolved (manual or auto) at click time.
+        cloudBtnsEnabled = true
 
         refreshActionState()
         observeRegistry()
@@ -290,36 +300,8 @@ class GogGameDetailActivity : ComponentActivity() {
                         val intent = Intent(this@GogGameDetailActivity, FolderPickerActivity::class.java)
                         folderPickerLauncher.launch(intent)
                     },
-                    onUploadSaves = {
-                        val dir = prefs.getString("gog_save_dir_$gameId", null)
-                        if (dir == null) {
-                            resultBarMsg = "Set a save folder first"
-                            return@GogGameDetailScreen
-                        }
-                        cloudBtnsEnabled = false
-                        showCloudStatus("Preparing upload\u2026")
-                        GogCloudSaveManager.uploadSaves(this@GogGameDetailActivity, gameId, File(dir),
-                            object : GogCloudSaveManager.Callback {
-                                override fun onStatus(msg: String) { runOnUiThread { showCloudStatus(msg) } }
-                                override fun onDone(msg: String) { runOnUiThread { showCloudStatus(msg); cloudBtnsEnabled = true } }
-                                override fun onError(msg: String) { runOnUiThread { showCloudStatus("Error: $msg"); cloudBtnsEnabled = true } }
-                            })
-                    },
-                    onDownloadSaves = {
-                        val dir = prefs.getString("gog_save_dir_$gameId", null)
-                        if (dir == null) {
-                            resultBarMsg = "Set a save folder first"
-                            return@GogGameDetailScreen
-                        }
-                        cloudBtnsEnabled = false
-                        showCloudStatus("Preparing download\u2026")
-                        GogCloudSaveManager.downloadSaves(this@GogGameDetailActivity, gameId, File(dir),
-                            object : GogCloudSaveManager.Callback {
-                                override fun onStatus(msg: String) { runOnUiThread { showCloudStatus(msg) } }
-                                override fun onDone(msg: String) { runOnUiThread { showCloudStatus(msg); cloudBtnsEnabled = true } }
-                                override fun onError(msg: String) { runOnUiThread { showCloudStatus("Error: $msg"); cloudBtnsEnabled = true } }
-                            })
-                    },
+                    onUploadSaves = { cloudSync(up = true) },
+                    onDownloadSaves = { cloudSync(up = false) },
                 )
 
                 showExePicker?.let { state ->
@@ -681,6 +663,56 @@ class GogGameDetailActivity : ComponentActivity() {
     private fun showCloudStatus(msg: String) {
         cloudSaveStatusText = msg
         cloudSaveStatusVisible = true
+    }
+
+    /**
+     * Resolve this game's GOG save folder: a manual pick (Browse) wins as a user override; otherwise
+     * auto-resolve via [GogCloudSavePaths] (container match + cloud-storage location token-expand,
+     * same as the Save Manager GOG tab). Does file I/O + a possible remote-config fetch — MUST be
+     * called off the main thread.
+     */
+    private fun resolveGogSaveDir(): File? {
+        // Explicit manual pick (Browse) wins as a user override.
+        prefs.getString("gog_save_dir_$gameId", null)?.takeIf { it.isNotEmpty() }?.let { return File(it) }
+        val (_, dir) = GogCloudSavePaths.resolve(this, gameId)
+        return dir
+    }
+
+    /** Populate the Cloud Saves label from the auto-resolver (off-main) when no manual folder is set. */
+    private fun refreshResolvedSaveDirLabel() {
+        Thread {
+            val dir = resolveGogSaveDir()
+            runOnUiThread {
+                if (dir != null && cloudSaveDir == null) {
+                    cloudSaveDirText = "Auto: " + shortenPath(dir.absolutePath)
+                    cloudSaveDirColor = 0xFFCCCCCC.toInt()
+                }
+            }
+        }.start()
+    }
+
+    /** Resolve the save folder off-main (manual override or auto), then drive the transport. */
+    private fun cloudSync(up: Boolean) {
+        cloudBtnsEnabled = false
+        showCloudStatus("Resolving save folder…")
+        Thread {
+            val dir = resolveGogSaveDir()
+            if (dir == null) {
+                runOnUiThread {
+                    showCloudStatus("No save folder found for this game — add it to a container, or set one with Browse")
+                    cloudBtnsEnabled = true
+                }
+                return@Thread
+            }
+            runOnUiThread { showCloudStatus(if (up) "Preparing upload…" else "Preparing download…") }
+            val cb = object : GogCloudSaveManager.Callback {
+                override fun onStatus(msg: String) { runOnUiThread { showCloudStatus(msg) } }
+                override fun onDone(msg: String) { runOnUiThread { showCloudStatus(msg); cloudBtnsEnabled = true } }
+                override fun onError(msg: String) { runOnUiThread { showCloudStatus("Error: $msg"); cloudBtnsEnabled = true } }
+            }
+            if (up) GogCloudSaveManager.uploadSaves(this, gameId, dir, cb)
+            else GogCloudSaveManager.downloadSaves(this, gameId, dir, cb)
+        }.start()
     }
 
     private fun deleteDir(dir: File) {
