@@ -399,6 +399,19 @@ public final class GogCloudSaveManager {
     }
 
     /**
+     * Encode a cloud object key for use in a URL PATH. {@link java.net.URLEncoder} does FORM encoding,
+     * which maps space -> '+' — wrong for a path segment and actively corrupting: a save filename with
+     * spaces (e.g. ELDERBORN's "controllerMapSaveData controllerType …") gets stored under a '+'-mangled
+     * key, then downloads back as a SEPARATE '+'-named duplicate that never matches the space-named
+     * original, so it re-syncs every launch. In a path a space must be "%20". Real '+' characters are
+     * already emitted as "%2B" by URLEncoder, so the only '+' left to fix is the one it made from a
+     * space — replacing it with "%20" is safe. '/' stays "%2F" (GOG normalises %2F <-> '/').
+     */
+    private static String encodeKey(String name) throws Exception {
+        return java.net.URLEncoder.encode(name, "UTF-8").replace("+", "%20");
+    }
+
+    /**
      * Lazily resolves a cloud file's Last-Modified via a HEAD (cached on the CloudFile).
      * Returns epoch milliseconds, or -1 if unknown (HEAD failed or header absent), in
      * which case callers fall back to the safe push/pull behaviour for that file.
@@ -420,7 +433,7 @@ public final class GogCloudSaveManager {
                                        String token, String filename) {
         try {
             String urlStr = BASE + userId + "/" + clientId + "/"
-                    + java.net.URLEncoder.encode(filename, "UTF-8");
+                    + encodeKey(filename);
             HttpURLConnection conn = openConn(urlStr, "HEAD", token);
             int code = conn.getResponseCode();
             String lastMod = conn.getHeaderField("Last-Modified");
@@ -479,7 +492,7 @@ public final class GogCloudSaveManager {
      */
     private static byte[] getFile(String userId, String clientId, String token, String filename,
                                   long[] outMtime) throws Exception {
-        String urlStr = BASE + userId + "/" + clientId + "/" + java.net.URLEncoder.encode(filename, "UTF-8");
+        String urlStr = BASE + userId + "/" + clientId + "/" + encodeKey(filename);
         HttpURLConnection conn = openConn(urlStr, "GET", token);
         int code = conn.getResponseCode();
         if (code < 200 || code >= 300) {
@@ -498,7 +511,7 @@ public final class GogCloudSaveManager {
     private static boolean putFile(String userId, String clientId, String token,
                                     String filename, byte[] data) {
         try {
-            String urlStr = BASE + userId + "/" + clientId + "/" + java.net.URLEncoder.encode(filename, "UTF-8");
+            String urlStr = BASE + userId + "/" + clientId + "/" + encodeKey(filename);
             HttpURLConnection conn = openConn(urlStr, "PUT", token);
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/octet-stream");
