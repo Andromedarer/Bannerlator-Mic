@@ -110,6 +110,20 @@ public final class GogCloudSaveManager {
                                 debug(ctx, "upload skip (cloud newer/equal): " + key);
                                 return;
                             }
+                            // Local is newer by TIME, but the game may have just re-touched the file
+                            // without changing its bytes (ELDERBORN rewrites its input-config files every
+                            // launch). Compare CONTENT: if the local MD5 matches the cloud's ETag, skip the
+                            // upload and realign the local mtime to the cloud's so the cheap time check
+                            // skips it next run (no MD5 needed) — an unchanged-content exit uploads nothing.
+                            if (cloud != null && cloud.etag != null) {
+                                String localMd5 = md5(local);
+                                if (localMd5 != null && localMd5.equalsIgnoreCase(cloud.etag)) {
+                                    if (cloud.lastModifiedMs > 0) local.setLastModified(cloud.lastModifiedMs);
+                                    skipped.incrementAndGet();
+                                    debug(ctx, "upload skip (content identical): " + key);
+                                    return;
+                                }
+                            }
                             byte[] data = readFile(local);
                             if (data == null) { firstError.compareAndSet(null, "Failed to read: " + key); return; }
                             if (!putFile(fUserId, fClientId, fToken, key, data)) {
@@ -119,7 +133,7 @@ public final class GogCloudSaveManager {
                             // the next launch's newest-wins treats them as equal and SKIPS (rather than
                             // re-downloading this exact save, since the server stamps the object a few
                             // seconds after the local file was written). One cheap HEAD, parallelized.
-                            long cm = headModifiedMs(ctx, fUserId, fClientId, fToken, key);
+                            long cm = headModifiedMs(ctx, fUserId, fClientId, fToken, key, null);
                             if (cm > 0) local.setLastModified(cm);
                             uploaded.incrementAndGet();
                         } catch (Exception e) {
@@ -207,6 +221,17 @@ public final class GogCloudSaveManager {
                                     skipped.incrementAndGet();
                                     debug(ctx, "download skip (local newer/equal): " + cf.name);
                                     return;
+                                }
+                                // Cloud is newer by TIME, but if the bytes are identical (local MD5 == cloud
+                                // ETag) skip the pull and realign local mtime to the cloud's.
+                                if (cf.etag != null) {
+                                    String localMd5 = md5(dest);
+                                    if (localMd5 != null && localMd5.equalsIgnoreCase(cf.etag)) {
+                                        if (cloudModMs > 0) dest.setLastModified(cloudModMs);
+                                        skipped.incrementAndGet();
+                                        debug(ctx, "download skip (content identical): " + cf.name);
+                                        return;
+                                    }
                                 }
                             }
                             long[] cloudMt = new long[]{-1L};
@@ -318,6 +343,7 @@ public final class GogCloudSaveManager {
         String name;
         long lastModifiedMs;   // epoch milliseconds; 0 = unknown/not fetched
         boolean mtimeFetched;  // true once a HEAD (or a listing with mtime) has resolved lastModifiedMs
+        String etag;           // cloud object's ETag == MD5 of its content (verified on-device); null if unknown
     }
 
     private static List<CloudFile> listCloudFiles(Context ctx, String userId, String clientId, String token)
@@ -420,8 +446,10 @@ public final class GogCloudSaveManager {
                                           String token, CloudFile cf) {
         if (cf.mtimeFetched) return cf.lastModifiedMs > 0L ? cf.lastModifiedMs : -1L;
         cf.mtimeFetched = true;
-        long ms = headModifiedMs(ctx, userId, clientId, token, cf.name);
+        String[] et = new String[1];
+        long ms = headModifiedMs(ctx, userId, clientId, token, cf.name, et);
         cf.lastModifiedMs = ms > 0L ? ms : 0L;
+        if (et[0] != null) cf.etag = et[0];   // cached content hash for the newest-content skip
         return ms;
     }
 
@@ -430,14 +458,18 @@ public final class GogCloudSaveManager {
      * "Sat, 22 Aug 2026 17:11:23 GMT" — verified on-device). Returns epoch ms, or -1.
      */
     private static long headModifiedMs(Context ctx, String userId, String clientId,
-                                       String token, String filename) {
+                                       String token, String filename, String[] outEtag) {
         try {
             String urlStr = BASE + userId + "/" + clientId + "/"
                     + encodeKey(filename);
             HttpURLConnection conn = openConn(urlStr, "HEAD", token);
             int code = conn.getResponseCode();
             String lastMod = conn.getHeaderField("Last-Modified");
+            String etag = conn.getHeaderField("ETag");
             conn.disconnect();
+            // GOG's ETag is the content MD5 (verified on-device), no weak-validator prefix; strip any quotes.
+            if (outEtag != null) outEtag[0] = (etag != null && !etag.isEmpty())
+                    ? etag.replace("\"", "").trim() : null;
             if (code < 200 || code >= 300) {
                 debug(ctx, "HEAD http=" + code + " for " + filename);
                 return -1L;
@@ -452,6 +484,22 @@ public final class GogCloudSaveManager {
         } catch (Exception e) {
             debug(ctx, "headModifiedMs exception " + e.getClass().getSimpleName() + " for " + filename);
             return -1L;
+        }
+    }
+
+    /** Lowercase hex MD5 of a local file (to compare against a cloud object's ETag), or null on failure. */
+    private static String md5(File f) {
+        try (FileInputStream fis = new FileInputStream(f)) {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("MD5");
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = fis.read(buf)) != -1) md.update(buf, 0, n);
+            byte[] d = md.digest();
+            StringBuilder sb = new StringBuilder(d.length * 2);
+            for (byte b : d) sb.append(String.format("%02x", b & 0xff));
+            return sb.toString();
+        } catch (Exception e) {
+            return null;
         }
     }
 
