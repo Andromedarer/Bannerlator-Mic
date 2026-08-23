@@ -3970,6 +3970,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                         }
                         @Override public void onDone(String summary) {
                             Log.i("BH_SAVE_SYNC", "auto-upload GOG on exit (" + gameId + "): " + summary);
+                            try { if (preloaderDialog != null) preloaderDialog.hint(summary); } catch (Throwable ignored) {}
                             latch.countDown();
                         }
                         @Override public void onError(String message) {
@@ -3985,10 +3986,80 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
             // Network op, so more headroom than the local copies (8s) — but still bounded so a stalled
             // upload never hangs game-exit. GOG saves are small (config + slot files), so this is ample.
-            if (!latch.await(15, TimeUnit.SECONDS))
-                Log.w("BH_SAVE_SYNC", "auto-upload GOG on exit timed out (15s) — proceeding with exit");
+            if (!latch.await(20, TimeUnit.SECONDS))
+                Log.w("BH_SAVE_SYNC", "auto-upload GOG on exit timed out (20s) — proceeding with exit");
         } catch (Throwable t) {
             Log.w("BH_SAVE_SYNC", "auto-upload GOG on exit wrapper errored", t);
+        }
+    }
+
+    /**
+     * Before the guest boots, pull a GOG-library game's saves DOWN from GOG cloud (cloud → local) so
+     * the game starts with the latest progress — the Galaxy-parity download-on-launch trigger, paired
+     * with {@link #autoUploadGogSavesBlocking()}. Called from {@link #setupXEnvironment()} on the launch
+     * WORKER thread immediately before {@code startEnvironmentComponents()}, so blocking here is safe
+     * (the UI thread is free, the launch preloader keeps animating) and naturally GATES the guest start
+     * until the pull completes or its bound elapses.
+     *
+     * Best-effort + fully guarded: no-op for non-GOG games / when the toggle is off / when the game
+     * can't be reverse-mapped or has no resolvable save dir (missing container / no cloud support).
+     * Offline or a slow network just times out (bounded) and the game launches with its local saves —
+     * a pre-launch download must NEVER block or fail a launch. Safe by construction: the transport's
+     * newest-wins ({@link GogCloudSaveManager#downloadSaves}) SKIPS any file whose local copy is
+     * newer-or-equal, so a save made offline since the last upload is never overwritten by an older
+     * cloud copy.
+     */
+    private void autoDownloadGogSavesBlocking() {
+        try {
+            final Shortcut sc = shortcut;
+            final Container ctn = container;
+            if (sc == null || sc.path == null || ctn == null) return;
+            if (!isGogShortcut()) return;
+
+            SharedPreferences savePrefs = getSharedPreferences("save_manager_prefs", MODE_PRIVATE);
+            if (!savePrefs.getBoolean("auto_download_gog_on_launch", true)) return;
+
+            final Context appCtx = getApplicationContext();
+            final String gameId = GogCloudSavePaths.INSTANCE.gameIdForExecPath(appCtx, sc.path);
+            if (gameId == null) {
+                Log.i("BH_SAVE_SYNC", "auto-download GOG: no gameId for " + sc.path + " — skip");
+                return;
+            }
+
+            // Resolve the save dir inside the RUNNING container's prefix. We're already on the launch
+            // worker thread, so this (network on a cloud-location cache-miss) is safely off-main.
+            File dir = GogCloudSavePaths.INSTANCE.resolveSaveDirectory(appCtx, gameId, ctn);
+            if (dir == null) {
+                Log.i("BH_SAVE_SYNC", "auto-download GOG (" + gameId + "): no resolvable save dir — skip");
+                return;
+            }
+
+            preloaderDialog.hint(getString(R.string.downloading_on_launch));
+            final CountDownLatch latch = new CountDownLatch(1);
+            // downloadSaves runs on its OWN worker thread; the latch is released by its callback.
+            GogCloudSaveManager.downloadSaves(appCtx, gameId, dir, new GogCloudSaveManager.Callback() {
+                @Override public void onStatus(String message) {
+                    // Show live download progress on the launch overlay's reassurance line.
+                    try { if (preloaderDialog != null) preloaderDialog.hint(message); } catch (Throwable ignored) {}
+                }
+                @Override public void onDone(String summary) {
+                    Log.i("BH_SAVE_SYNC", "auto-download GOG on launch (" + gameId + "): " + summary);
+                    // Show the outcome (e.g. "Already up to date (13 files)" / "Downloaded N") so a skip
+                    // reads as up-to-date, not a silent "was it downloading?".
+                    try { if (preloaderDialog != null) preloaderDialog.hint(summary); } catch (Throwable ignored) {}
+                    latch.countDown();
+                }
+                @Override public void onError(String message) {
+                    Log.w("BH_SAVE_SYNC", "auto-download GOG on launch failed (" + gameId + "): " + message);
+                    latch.countDown();
+                }
+            });
+            // Bounded so a stalled/offline network never delays the launch indefinitely; on timeout we
+            // launch with whatever local saves exist (newest-wins already protected them).
+            if (!latch.await(20, TimeUnit.SECONDS))
+                Log.w("BH_SAVE_SYNC", "auto-download GOG on launch timed out (20s) — launching with local saves");
+        } catch (Throwable t) {
+            Log.w("BH_SAVE_SYNC", "auto-download GOG on launch wrapper errored", t);
         }
     }
 
@@ -4714,6 +4785,15 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // startEnvironmentComponents below, so this must sit here — after the path is known and
         // before the guest starts reading the rings.
         winHandler.preAssignConnectedControllers();
+
+        // Pre-launch: pull the freshest GOG cloud saves INTO the prefix before the guest boots, so the
+        // game reads current progress (Galaxy-parity download-on-launch). We're on the launch worker
+        // thread here (not main), so this can block briefly — which naturally GATES the guest start
+        // below until the pull finishes. Bounded + best-effort: offline / slow / no-cloud-support just
+        // logs and launches with local saves; newest-wins ensures a newer LOCAL save is never
+        // overwritten by an older cloud copy (e.g. a save made offline since the last upload). No-op
+        // for non-GOG games and when the download toggle is off.
+        autoDownloadGogSavesBlocking();
 
         // Start all environment components (XServer, Audio, Wine, etc.)
         preloaderDialog.step(4, "Launching Windows…");

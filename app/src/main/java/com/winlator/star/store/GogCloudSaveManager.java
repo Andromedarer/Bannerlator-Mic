@@ -19,6 +19,11 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * GOG Cloud Save upload/download manager.
@@ -37,6 +42,10 @@ public final class GogCloudSaveManager {
     private static final String TAG = "BH_GOG_CLOUD";
     private static final String BASE = "https://cloudstorage.gog.com/v1/";
     private static final int TIMEOUT = 30_000;
+    // Save sync is round-trip-bound (many small files, one HEAD+PUT/GET each), so it runs the per-file
+    // work across a small pool instead of sequentially — a ~20-file set that took >15s one-at-a-time
+    // finishes in a few seconds. Kept modest so a big save set can't open dozens of sockets at once.
+    private static final int SYNC_PARALLELISM = 6;
 
     public interface Callback {
         void onStatus(String message);
@@ -72,37 +81,66 @@ public final class GogCloudSaveManager {
                     return;
                 }
 
-                int uploaded = 0;
-                int skipped  = 0;
+                // Parallel per-file upload (see SYNC_PARALLELISM). Each file is independent: newest-wins
+                // HEAD + PUT if the local copy is newer. Counters are atomic; the first failure is
+                // captured and short-circuits the rest. Progress is reported as a friendly count, not a
+                // per-file path (some save/input filenames are very long).
+                final String fUserId = userId, fClientId = clientId, fToken = token;
+                final List<CloudFile> fCloud = cloudFiles;
+                final int total = localFiles.size();
+                final AtomicInteger uploaded = new AtomicInteger();
+                final AtomicInteger skipped  = new AtomicInteger();
+                final AtomicInteger completed = new AtomicInteger();
+                final AtomicReference<String> firstError = new AtomicReference<>();
+
+                ExecutorService pool = Executors.newFixedThreadPool(Math.min(SYNC_PARALLELISM, total));
                 for (File local : localFiles) {
-                    String key = relKey(localFolder, local);
-                    long localModMs = local.lastModified();
-                    CloudFile cloud = findCloud(cloudFiles, key);
-                    // Real newest-wins: HEAD the cloud copy for its Last-Modified. Unknown
-                    // (no cloud copy, or HEAD failed) => -1 => push (safe fallback).
-                    long cloudModMs = (cloud == null) ? -1L
-                            : resolveCloudMtime(ctx, userId, clientId, token, cloud);
-
-                    if (cloudModMs >= 0 && cloudModMs >= localModMs) {
-                        skipped++;
-                        debug(ctx, "upload skip (cloud newer/equal): " + key);
-                        continue;
-                    }
-
-                    cb.onStatus("Uploading: " + key);
-                    byte[] data = readFile(local);
-                    if (data == null) { cb.onError("Failed to read: " + key); return; }
-
-                    boolean ok = putFile(userId, clientId, token, key, data);
-                    if (!ok) { cb.onError("Upload failed for: " + key); return; }
-                    uploaded++;
+                    pool.execute(() -> {
+                        try {
+                            if (firstError.get() != null) return;   // a sibling already failed — bail
+                            String key = relKey(localFolder, local);
+                            long localModMs = local.lastModified();
+                            CloudFile cloud = findCloud(fCloud, key);
+                            // Real newest-wins: HEAD the cloud copy for its Last-Modified. Unknown
+                            // (no cloud copy, or HEAD failed) => -1 => push (safe fallback).
+                            long cloudModMs = (cloud == null) ? -1L
+                                    : resolveCloudMtime(ctx, fUserId, fClientId, fToken, cloud);
+                            if (cloudModMs >= 0 && cloudModMs >= localModMs) {
+                                skipped.incrementAndGet();
+                                debug(ctx, "upload skip (cloud newer/equal): " + key);
+                                return;
+                            }
+                            byte[] data = readFile(local);
+                            if (data == null) { firstError.compareAndSet(null, "Failed to read: " + key); return; }
+                            if (!putFile(fUserId, fClientId, fToken, key, data)) {
+                                firstError.compareAndSet(null, "Upload failed for: " + key); return;
+                            }
+                            // Sync the local file's mtime to the cloud's freshly-assigned Last-Modified so
+                            // the next launch's newest-wins treats them as equal and SKIPS (rather than
+                            // re-downloading this exact save, since the server stamps the object a few
+                            // seconds after the local file was written). One cheap HEAD, parallelized.
+                            long cm = headModifiedMs(ctx, fUserId, fClientId, fToken, key);
+                            if (cm > 0) local.setLastModified(cm);
+                            uploaded.incrementAndGet();
+                        } catch (Exception e) {
+                            firstError.compareAndSet(null, e.getMessage());
+                        } finally {
+                            // Neutral verb: this fires per file completed whether it was uploaded OR
+                            // skipped (newest-wins), so it must not claim every file is "uploading".
+                            cb.onStatus("Backing up game saves… (" + completed.incrementAndGet() + "/" + total + ")");
+                        }
+                    });
                 }
+                pool.shutdown();
+                pool.awaitTermination(TIMEOUT / 1000 + 30, TimeUnit.SECONDS);
 
-                if (uploaded == 0 && skipped > 0) {
-                    cb.onDone("Already up to date (" + skipped + " file" + (skipped == 1 ? "" : "s") + ")");
-                } else if (uploaded > 0) {
-                    cb.onDone("Uploaded " + uploaded + " file" + (uploaded == 1 ? "" : "s")
-                            + (skipped > 0 ? ", skipped " + skipped : ""));
+                if (firstError.get() != null) { cb.onError("Upload error: " + firstError.get()); return; }
+                int up = uploaded.get(), sk = skipped.get();
+                if (up == 0 && sk > 0) {
+                    cb.onDone("Already up to date (" + sk + " file" + (sk == 1 ? "" : "s") + ")");
+                } else if (up > 0) {
+                    cb.onDone("Uploaded " + up + " file" + (up == 1 ? "" : "s")
+                            + (sk > 0 ? ", skipped " + sk : ""));
                 } else {
                     cb.onDone("No files to upload");
                 }
@@ -142,40 +180,65 @@ public final class GogCloudSaveManager {
 
                 if (!localFolder.exists()) localFolder.mkdirs();
 
-                int downloaded = 0;
-                int skipped    = 0;
+                // Parallel per-file download (see SYNC_PARALLELISM), mirroring the upload path. Each
+                // cloud file is independent: symmetric newest-wins skips a newer-or-equal local copy,
+                // else pull. Progress reported as a friendly count, not a per-file path.
+                final String fUserId = userId, fClientId = clientId, fToken = token;
+                final int total = cloudFiles.size();
+                final AtomicInteger downloaded = new AtomicInteger();
+                final AtomicInteger skipped    = new AtomicInteger();
+                final AtomicInteger completed  = new AtomicInteger();
+                final AtomicReference<String> firstError = new AtomicReference<>();
+
+                ExecutorService pool = Executors.newFixedThreadPool(Math.min(SYNC_PARALLELISM, total));
                 for (CloudFile cf : cloudFiles) {
-                    // cf.name may be a subpath ("inputConfig/foo.cfg"); File resolves it
-                    // against localFolder as nested dirs.
-                    File dest = new File(localFolder, cf.name);
-
-                    // Symmetric newest-wins: don't clobber a newer-or-equal local save with
-                    // an older cloud one. Unknown cloud mtime (HEAD failed) => -1 => pull.
-                    if (dest.isFile()) {
-                        long cloudModMs = resolveCloudMtime(ctx, userId, clientId, token, cf);
-                        long localModMs = dest.lastModified();
-                        if (cloudModMs >= 0 && localModMs >= cloudModMs) {
-                            skipped++;
-                            debug(ctx, "download skip (local newer/equal): " + cf.name);
-                            continue;
+                    pool.execute(() -> {
+                        try {
+                            if (firstError.get() != null) return;   // a sibling already failed — bail
+                            // cf.name may be a subpath ("inputConfig/foo.cfg"); File resolves it
+                            // against localFolder as nested dirs.
+                            File dest = new File(localFolder, cf.name);
+                            // Symmetric newest-wins: don't clobber a newer-or-equal local save with an
+                            // older cloud one. Unknown cloud mtime (HEAD failed) => -1 => pull.
+                            if (dest.isFile()) {
+                                long cloudModMs = resolveCloudMtime(ctx, fUserId, fClientId, fToken, cf);
+                                long localModMs = dest.lastModified();
+                                if (cloudModMs >= 0 && localModMs >= cloudModMs) {
+                                    skipped.incrementAndGet();
+                                    debug(ctx, "download skip (local newer/equal): " + cf.name);
+                                    return;
+                                }
+                            }
+                            long[] cloudMt = new long[]{-1L};
+                            byte[] data = getFile(fUserId, fClientId, fToken, cf.name, cloudMt);
+                            if (data == null) { firstError.compareAndSet(null, "Download failed for: " + cf.name); return; }
+                            // writeFile does NOT mkdirs — create parent dirs for subpath keys.
+                            File parent = dest.getParentFile();
+                            if (parent != null && !parent.exists()) parent.mkdirs();
+                            writeFile(dest, data);
+                            // Stamp the local file with the cloud's Last-Modified so that after this save is
+                            // later played + re-uploaded, the NEXT launch's newest-wins sees them as equal
+                            // and SKIPS — instead of re-pulling identical bytes every launch. Best-effort.
+                            if (cloudMt[0] > 0) dest.setLastModified(cloudMt[0]);
+                            downloaded.incrementAndGet();
+                        } catch (Exception e) {
+                            firstError.compareAndSet(null, e.getMessage());
+                        } finally {
+                            // Neutral verb: fires per file completed whether pulled OR skipped.
+                            cb.onStatus("Syncing game saves… (" + completed.incrementAndGet() + "/" + total + ")");
                         }
-                    }
-
-                    cb.onStatus("Downloading: " + cf.name);
-                    byte[] data = getFile(userId, clientId, token, cf.name);
-                    if (data == null) { cb.onError("Download failed for: " + cf.name); return; }
-                    // writeFile does NOT mkdirs — create parent dirs for subpath keys.
-                    File parent = dest.getParentFile();
-                    if (parent != null && !parent.exists()) parent.mkdirs();
-                    writeFile(dest, data);
-                    downloaded++;
+                    });
                 }
+                pool.shutdown();
+                pool.awaitTermination(TIMEOUT / 1000 + 30, TimeUnit.SECONDS);
 
-                if (downloaded == 0 && skipped > 0) {
-                    cb.onDone("Already up to date (" + skipped + " file" + (skipped == 1 ? "" : "s") + ")");
+                if (firstError.get() != null) { cb.onError("Download error: " + firstError.get()); return; }
+                int dl = downloaded.get(), sk = skipped.get();
+                if (dl == 0 && sk > 0) {
+                    cb.onDone("Already up to date (" + sk + " file" + (sk == 1 ? "" : "s") + ")");
                 } else {
-                    cb.onDone("Downloaded " + downloaded + " file" + (downloaded == 1 ? "" : "s")
-                            + (skipped > 0 ? ", skipped " + skipped : ""));
+                    cb.onDone("Downloaded " + dl + " file" + (dl == 1 ? "" : "s")
+                            + (sk > 0 ? ", skipped " + sk : ""));
                 }
 
             } catch (Exception e) {
@@ -336,6 +399,19 @@ public final class GogCloudSaveManager {
     }
 
     /**
+     * Encode a cloud object key for use in a URL PATH. {@link java.net.URLEncoder} does FORM encoding,
+     * which maps space -> '+' — wrong for a path segment and actively corrupting: a save filename with
+     * spaces (e.g. ELDERBORN's "controllerMapSaveData controllerType …") gets stored under a '+'-mangled
+     * key, then downloads back as a SEPARATE '+'-named duplicate that never matches the space-named
+     * original, so it re-syncs every launch. In a path a space must be "%20". Real '+' characters are
+     * already emitted as "%2B" by URLEncoder, so the only '+' left to fix is the one it made from a
+     * space — replacing it with "%20" is safe. '/' stays "%2F" (GOG normalises %2F <-> '/').
+     */
+    private static String encodeKey(String name) throws Exception {
+        return java.net.URLEncoder.encode(name, "UTF-8").replace("+", "%20");
+    }
+
+    /**
      * Lazily resolves a cloud file's Last-Modified via a HEAD (cached on the CloudFile).
      * Returns epoch milliseconds, or -1 if unknown (HEAD failed or header absent), in
      * which case callers fall back to the safe push/pull behaviour for that file.
@@ -357,7 +433,7 @@ public final class GogCloudSaveManager {
                                        String token, String filename) {
         try {
             String urlStr = BASE + userId + "/" + clientId + "/"
-                    + java.net.URLEncoder.encode(filename, "UTF-8");
+                    + encodeKey(filename);
             HttpURLConnection conn = openConn(urlStr, "HEAD", token);
             int code = conn.getResponseCode();
             String lastMod = conn.getHeaderField("Last-Modified");
@@ -409,14 +485,23 @@ public final class GogCloudSaveManager {
         return body;
     }
 
-    private static byte[] getFile(String userId, String clientId, String token, String filename)
-            throws Exception {
-        String urlStr = BASE + userId + "/" + clientId + "/" + java.net.URLEncoder.encode(filename, "UTF-8");
+    /**
+     * GETs a cloud object. If {@code outMtime} is non-null, its [0] is set to the response's
+     * Last-Modified epoch-ms (or -1 if absent/unparseable) so the caller can stamp the local file with
+     * the cloud mtime — keeping the two in lockstep for newest-wins.
+     */
+    private static byte[] getFile(String userId, String clientId, String token, String filename,
+                                  long[] outMtime) throws Exception {
+        String urlStr = BASE + userId + "/" + clientId + "/" + encodeKey(filename);
         HttpURLConnection conn = openConn(urlStr, "GET", token);
         int code = conn.getResponseCode();
         if (code < 200 || code >= 300) {
             conn.disconnect();
             throw new Exception("HTTP " + code + " for " + filename);
+        }
+        if (outMtime != null) {
+            String lm = conn.getHeaderField("Last-Modified");
+            outMtime[0] = (lm != null && !lm.isEmpty()) ? parseHttpDate(lm) : -1L;
         }
         byte[] data = readBytes(conn.getInputStream());
         conn.disconnect();
@@ -426,7 +511,7 @@ public final class GogCloudSaveManager {
     private static boolean putFile(String userId, String clientId, String token,
                                     String filename, byte[] data) {
         try {
-            String urlStr = BASE + userId + "/" + clientId + "/" + java.net.URLEncoder.encode(filename, "UTF-8");
+            String urlStr = BASE + userId + "/" + clientId + "/" + encodeKey(filename);
             HttpURLConnection conn = openConn(urlStr, "PUT", token);
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/octet-stream");
